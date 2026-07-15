@@ -1,0 +1,22 @@
+# Tor onion-service config for the VPS. Append to /etc/tor/torrc (or drop in
+# /etc/tor/torrc.d/), then: systemctl enable --now tor && systemctl reload tor
+#
+# This publishes the SAME .onion you already use, IF you migrate the existing key. On the VPS:
+#
+#   sudo install -d -m 700 -o debian-tor -g debian-tor /var/lib/tor/nightdrop   # (user is 'toranon' on Fedora)
+#   # copy the 3 files from ~/.local/share/nightdrop-website-onion/hs/ on your laptop:
+#   #   hs_ed25519_secret_key  hs_ed25519_public_key  hostname
+#   sudo scp/rsync them into /var/lib/tor/nightdrop/ then:
+#   sudo chown -R debian-tor:debian-tor /var/lib/tor/nightdrop
+#   sudo chmod 700 /var/lib/tor/nightdrop
+#
+# The secret key is the identity of your .onion — move it over an encrypted channel (scp), never
+# commit it, and delete stray copies afterward. Without it, tor generates a NEW address.
+
+HiddenServiceDir /var/lib/tor/nightdrop
+HiddenServiceVersion 3
+# Serve the onion from nginx's localhost-only onion vhost (deploy/nginx-nightdrop.conf).
+HiddenServicePort 80 127.0.0.1:8080
+
+# Hosting an onion service is a Tor *client* publishing a descriptor — it is not a relay or exit,
+# so no bandwidth is carried for the network and no special provider permission is needed.

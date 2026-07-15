@@ -1,0 +1,8 @@
+# Night Drop — https://nightdrop.app
+# The site is a small public marketing/features site; everything here is meant to be
+# found, including /.well-known/security.txt (RFC 9116) and /pgp.txt.
+
+User-agent: *
+Allow: /
+
+Sitemap: https://nightdrop.app/sitemap.xml

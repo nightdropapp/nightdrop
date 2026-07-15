@@ -1,0 +1,79 @@
+# F-Droid build recipe for Night Drop — reference copy of the metadata that goes into
+# https://gitlab.com/fdroid/fdroiddata under metadata/app.nightdrop.yml
+#
+# This app is a Flutter UI over a cross-compiled Rust core (libnightdrop.so, built by cargokit
+# through the NDK), so the recipe must provision BOTH Flutter and Rust and build them
+# deterministically. Reproducibility is proven locally (see ../docs/reproducible-builds.md): with
+# the pinned toolchains + the remap RUSTFLAGS below, every entry in the release APK is byte-for-byte
+# identical across clean builds — only the RSA signature block differs, which F-Droid re-creates.
+#
+# FILL IN before submitting (placeholders marked TODO):
+#   - Repo / SourceCode / IssueTracker URLs (no git remote is configured yet).
+#   - The release tag + commit for each Builds entry.
+#   - A STABLE production relay .onion for GHOST_RELAY (baked at build time). The value below is the
+#     current dev relay; a real release must bake a long-lived, independently-hosted relay onion,
+#     and bump the versionCode whenever it changes.
+
+Categories:
+  - Internet
+  - Security
+License: AGPL-3.0-or-later
+AuthorName: Night Drop
+SourceCode: https://TODO/nightdrop           # TODO: public repo URL
+IssueTracker: https://TODO/nightdrop/issues  # TODO
+# Donate: (privacy-coin addresses live in config/app_config.json)
+
+# The localized store listing (title, summary, full description, changelogs) is maintained under
+# fastlane/metadata/android/en-US/ in the source repo and pulled automatically by F-Droid; the
+# Summary/Description below are a reference copy and can be dropped once fastlane is picked up.
+AutoName: Night Drop
+Summary: Anonymous, end-to-end encrypted 1:1 chat over Tor
+Description: |-
+    Night Drop is a privacy-first 1:1 messenger. Anonymous identities only (no phone number,
+    email, or account), Signal Double Ratchet end-to-end encryption, peer-to-peer over Tor with
+    an untrusted store-and-forward relay for offline delivery, and local-first message storage.
+
+    Any relay only ever holds opaque, already-encrypted blobs under unlinkable handles — no keys,
+    no plaintext, no identities, no logs.
+
+RepoType: git
+Repo: https://TODO/nightdrop.git             # TODO
+
+Builds:
+  - versionName: 0.1.0
+    versionCode: 1
+    commit: v0.1.0                            # TODO: tag this release
+    subdir: app
+    # F-Droid provides the NDK and a rust toolchain; the exact rustc comes from rust-toolchain.toml
+    # (pinned 1.96.0). Pin the same NDK we verified.
+    ndk: r28b                                 # NDK 28.2.x (verify the exact F-Droid label)
+    rust: stable                              # rust-toolchain.toml pins the concrete 1.96.0
+    sudo:
+      # Install the EXACT Flutter SDK we build with (framework revision ee80f08bbf = 3.44.6), so the
+      # AOT snapshot is reproducible. Pin to the tag, not a moving channel.
+      - git clone --depth 1 --branch 3.44.6 https://github.com/flutter/flutter.git /opt/flutter
+      - /opt/flutter/bin/flutter --version
+    prebuild:
+      # Android Rust targets for the ABIs we ship.
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+    build:
+      - export PATH="/opt/flutter/bin:$PATH"
+      - export CARGO_HOME="${CARGO_HOME:-$HOME/.cargo}"
+      # Reproducibility: strip the machine-specific build dir + cargo registry paths from the Rust
+      # core so libnightdrop.so is path-independent. cargokit honours env RUSTFLAGS.
+      - export RUSTFLAGS="--remap-path-prefix=$$(cd ../ && pwd)=. --remap-path-prefix=$$CARGO_HOME=/cargo"
+      - flutter pub get
+      - flutter build apk --release
+          --dart-define=GHOST_TOR=1
+          --dart-define=GHOST_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
+    output: build/app/outputs/flutter-apk/app-release.apk
+
+# Verifiable reproducible build: F-Droid rebuilds from source and confirms it matches the
+# developer-signed APK (everything but the signature, which F-Droid copies via apksigcopier).
+# SHA-256 of the release keystore's signing cert (from `apksigner verify --print-certs`).
+AllowedAPKSigningKeys: d08b8e6408aff4f43556c05b819fef25afdd6912be7a678b0552468a4582c0ac
+
+AutoUpdateMode: Version v%v
+UpdateCheckMode: Tags
+CurrentVersion: 0.1.0
+CurrentVersionCode: 1

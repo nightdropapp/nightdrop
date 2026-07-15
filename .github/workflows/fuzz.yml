@@ -1,0 +1,110 @@
+# Fuzzing the security core (see core/fuzz/README.md). Two levels:
+#
+#   * build   — on every PR/push touching core/, compile all fuzz targets and replay the
+#               committed seed corpus. Fast regression gate that the harness still matches
+#               the core's public API and the seeds are valid. No mutation.
+#   * campaign — weekly (and on demand) coverage-guided run of each target, with the corpus
+#               cached between runs so it accumulates over time (a real campaign, not a cold
+#               start). A crash fails the job and uploads the reproducer.
+#
+# Fuzzing needs nightly + cargo-fuzz (libFuzzer). Both are set up per-run here; nothing is
+# required on a normal checkout.
+
+name: Fuzz
+
+on:
+  pull_request:
+    paths: ['core/**']
+  push:
+    branches: [main, master]
+    paths: ['core/**']
+  schedule:
+    # Mondays 05:17 UTC — off the hour to avoid the scheduler rush.
+    - cron: '17 5 * * 1'
+  workflow_dispatch:
+    inputs:
+      duration:
+        description: 'Seconds to fuzz each target'
+        required: false
+        default: '300'
+
+concurrency:
+  group: fuzz-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Fast gate: the targets must compile against the current core, and every committed seed
+  # must load without crashing (-runs=0 = load + replay, no mutation).
+  build:
+    name: Build targets + replay seeds
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core/fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+      - name: Build all fuzz targets
+        run: cargo +nightly fuzz build
+      - name: Replay seed corpus (no mutation)
+        run: |
+          for t in wire_decode relay_handle_line directory_from_wire; do
+            echo "::group::replay $t"
+            cargo +nightly fuzz run "$t" "fuzz/seeds/$t" -- -runs=0
+            echo "::endgroup::"
+          done
+
+  # Coverage-guided campaign. Skipped on PRs (costly); runs weekly and on manual dispatch.
+  campaign:
+    name: Fuzz ${{ matrix.target }}
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: core
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [wire_decode, relay_handle_line, directory_from_wire]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: core/fuzz
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-fuzz
+
+      # Persist the corpus between runs so coverage accumulates. A unique key per run saves a
+      # fresh snapshot; restore-keys pulls the most recent prior corpus for this target.
+      - name: Restore corpus
+        uses: actions/cache@v4
+        with:
+          path: core/fuzz/corpus/${{ matrix.target }}
+          key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: fuzz-corpus-${{ matrix.target }}-
+
+      - name: Fuzz
+        run: |
+          mkdir -p "fuzz/corpus/${{ matrix.target }}"
+          DUR="${{ github.event.inputs.duration || '300' }}"
+          # Seeds are passed alongside the (cached) corpus; new finds land in the corpus dir.
+          cargo +nightly fuzz run "${{ matrix.target }}" \
+            "fuzz/corpus/${{ matrix.target }}" "fuzz/seeds/${{ matrix.target }}" \
+            -- -max_total_time="$DUR" -rss_limit_mb=4096
+
+      # A crash writes fuzz/artifacts/<target>/crash-*; keep it so the failure is reproducible.
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: core/fuzz/artifacts/${{ matrix.target }}/
+          if-no-files-found: ignore

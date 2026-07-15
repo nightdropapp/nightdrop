@@ -1,0 +1,20 @@
+flutter_launcher_icons:
+  image_path: "assets/icons/app_icon.png"
+  android: true
+  # Adaptive icon: IconKitchen's safe-zoned foreground layer over the logo's dark navy
+  # backdrop, so the launcher's circle/squircle mask never crops the outer ring.
+  adaptive_icon_background: "#252A38"
+  adaptive_icon_foreground: "assets/icons/adaptive_foreground.png"
+  ios: true
+  # iOS forbids alpha in App Store icons; flatten just in case.
+  remove_alpha_ios: true
+  macos:
+    generate: true
+    image_path: "assets/icons/app_icon.png"
+  windows:
+    generate: true
+    image_path: "assets/icons/app_icon.png"
+    icon_size: 256
+  linux:
+    generate: true
+    image_path: "assets/icons/app_icon.png"

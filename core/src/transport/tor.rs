@@ -1,0 +1,584 @@
+//! Embedded Tor transport via [arti](https://gitlab.torproject.org/tpo/core/arti)
+//! (`ARCHITECTURE.md` §6), behind the `tor` feature. It implements the synchronous
+//! [`Transport`] trait by running an async arti client + onion service on a background
+//! tokio runtime and bridging inbound frames over a channel — async stays isolated here.
+//!
+//! * **Address**: our `.onion` (the onion service hides the *caller*, so peers learn our
+//!   reply address from the `Hello` frame, not from the transport).
+//! * **Inbound**: launch an onion service; for each rendezvous stream, read one
+//!   length-prefixed frame and hand it to the core.
+//! * **Outbound**: dial the peer's `.onion` and write one length-prefixed frame.
+//!
+//! NOTE: bootstrapping a real Tor circuit needs the network and takes time, so this path
+//! is not exercised by the unit tests; it is compiled under `--features tor`.
+
+use std::collections::HashMap;
+use std::str::FromStr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use anyhow::Context as _;
+use arti_client::config::pt::TransportConfigBuilder;
+use arti_client::config::{BridgeConfigBuilder, PtTransportName, TorClientConfigBuilder};
+use arti_client::{DataStream, TorClient, TorClientConfig};
+use futures::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, StreamExt};
+use safelog::DisplayRedacted as _;
+use tokio::runtime::Runtime;
+use tor_cell::relaycell::msg::Connected;
+use tor_config_path::CfgPath;
+use tor_hscrypto::pk::HsId;
+use tor_hsservice::config::restricted_discovery::DirectoryKeyProviderBuilder;
+use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder};
+use tor_hsservice::{handle_rend_requests, HsNickname, RunningOnionService};
+use tor_keymgr::KeystoreSelector;
+use tor_rtcompat::PreferredRuntime;
+
+use crate::transport::{client_auth, Address, Transport};
+use crate::Result;
+
+/// The virtual port our onion service exposes (peers dial `<onion>:GHOST_PORT`).
+const GHOST_PORT: u16 = 9001;
+
+/// The virtual port the relay's onion service is dialed on (it accepts any rendezvous stream).
+const RELAY_PORT: u16 = 9001;
+
+/// Upper bound on the initial Tor bootstrap. Tor normally connects in well under a minute, but on a
+/// blocked/censored or dead network `create_bootstrapped` would otherwise wait indefinitely, leaving
+/// the app on a spinner with no way out. On timeout we return a clear error so the UI can offer a
+/// retry (and the user can configure bridges — see `docs/bridges.md`). Generous, to avoid failing a
+/// merely-slow first run.
+const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(120);
+
+/// Close a kept-warm outbound stream once it's been idle this long (privacy: don't hold a
+/// continuously-observable connection longer than needed; per-peer, so contacts stay
+/// circuit-isolated by arti's per-`.onion` routing).
+const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Outbound streams we hold open per peer to avoid re-dialing the onion for every frame.
+type OutStreams = Arc<Mutex<HashMap<Address, (DataStream, Instant)>>>;
+
+/// A [`Transport`] backed by an embedded Tor client + onion service.
+pub struct TorTransport {
+    onion: Address,
+    runtime: Arc<Runtime>,
+    client: Arc<TorClient<PreferredRuntime>>,
+    inbound: Mutex<Receiver<(Address, Vec<u8>)>>,
+    /// Warm outbound streams, one per peer `.onion` (reused across frames, idle-closed).
+    out_streams: OutStreams,
+    running: Arc<AtomicBool>,
+    /// Directory of authorized-client keys backing onion client authorization (restricted
+    /// discovery, #22). The node writes/removes `<nickname>.auth` files here as contacts are
+    /// added/deleted (see [`client_auth`]); arti watches it. `None` = client auth not in use.
+    auth_dir: Option<String>,
+    // Keep the running service alive for the lifetime of the transport.
+    _service: Arc<RunningOnionService>,
+}
+
+impl Drop for TorTransport {
+    fn drop(&mut self) {
+        self.running.store(false, Ordering::Relaxed);
+    }
+}
+
+impl TorTransport {
+    /// Bootstrap Tor, launch our onion service, and start accepting inbound frames.
+    /// Blocking; can take a while on first run (descriptor publication).
+    ///
+    /// `state_dir`, when set, is a writable base directory for arti's state + cache. It is
+    /// **required on Android** (the default `${ARTI_LOCAL_DATA}` does not resolve in the app
+    /// sandbox); on desktop, pass `None` to use arti's standard per-user locations.
+    pub fn bootstrap(
+        nickname: &str,
+        state_dir: Option<&str>,
+        client_auth_dir: Option<&str>,
+    ) -> Result<Self> {
+        // rustls 0.23 needs a process-default crypto provider before any TLS config is
+        // built; install ring once (ignore the error if another call already did).
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        let config = tor_config(state_dir)?;
+        let runtime = Arc::new(Runtime::new().context("tokio runtime")?);
+        let auth_dir = client_auth_dir.map(str::to_string);
+        let auth_dir_for_svc = auth_dir.clone();
+        let (onion, client, service, inbound_rx) = runtime.block_on(async {
+            // Bound the bootstrap so a blocked/dead network fails cleanly instead of hanging the
+            // app forever (the UI then offers a retry; bridges can help — docs/bridges.md).
+            let client =
+                tokio::time::timeout(BOOTSTRAP_TIMEOUT, TorClient::create_bootstrapped(config))
+                    .await
+                    .map_err(|_| {
+                        anyhow::anyhow!(
+                            "Tor didn't connect within {}s — check your connection and try again",
+                            BOOTSTRAP_TIMEOUT.as_secs()
+                        )
+                    })?
+                    .context("bootstrap Tor")?;
+
+            let nickname: HsNickname = nickname.parse().context("onion service nickname")?;
+            let svc_config = onion_service_config(nickname, auth_dir_for_svc.as_deref())?;
+            let (service, rend_requests) = client
+                .launch_onion_service(svc_config)
+                .context("launch onion service")?
+                .context("onion service did not start")?;
+            let onion = service
+                .onion_address()
+                .context("onion service has no address yet")?
+                .display_unredacted()
+                .to_string();
+
+            // Accept rendezvous streams; a kept-warm stream carries MANY length-prefixed
+            // frames, so read in a loop until the peer closes it.
+            let (tx, rx) = channel::<(Address, Vec<u8>)>();
+            let mut streams = handle_rend_requests(rend_requests);
+            tokio::spawn(async move {
+                while let Some(request) = streams.next().await {
+                    let tx = tx.clone();
+                    tokio::spawn(async move {
+                        if let Ok(mut stream) = request.accept(Connected::new_empty()).await {
+                            // The caller is anonymous at the transport layer; routing uses
+                            // the frame's own ids / advertised reply address.
+                            while let Ok(frame) = read_frame(&mut stream).await {
+                                let _ = tx.send((Address::new(), frame));
+                            }
+                        }
+                    });
+                }
+            });
+
+            Ok::<_, anyhow::Error>((onion, client, service, rx))
+        })?;
+
+        let out_streams: OutStreams = Arc::new(Mutex::new(HashMap::new()));
+        let running = Arc::new(AtomicBool::new(true));
+        spawn_idle_reaper(
+            Arc::clone(&runtime),
+            Arc::clone(&out_streams),
+            Arc::clone(&running),
+        );
+
+        Ok(Self {
+            onion,
+            runtime,
+            client,
+            inbound: Mutex::new(inbound_rx),
+            out_streams,
+            running,
+            auth_dir,
+            _service: service,
+        })
+    }
+
+    /// Generate (and store, in arti's keymgr) *our* client descriptor-encryption keypair for
+    /// connecting to peer `peer_onion`'s restricted onion, returning the **public** key string
+    /// (`descriptor:x25519:…`) to hand the peer during pairing so they can authorize us (#22).
+    /// arti uses the stored keypair automatically on future connects to that onion.
+    pub fn make_service_discovery_key(&self, peer_onion: &str) -> Result<String> {
+        let hsid = HsId::from_str(peer_onion).context("parse peer onion address")?;
+        let key = self
+            .client
+            .generate_service_discovery_key(KeystoreSelector::Primary, hsid)
+            .context("generate client service-discovery key")?;
+        Ok(key.to_string())
+    }
+
+    /// A [`RelayDialer`](crate::relay_client::RelayDialer) that round-trips one newline-JSON relay
+    /// request to `relay_onion` over this Tor client. Build it **before** the transport is moved
+    /// into the node (it captures clones of the arti client + runtime), then hand it to
+    /// `RelayClient::with_dialer`. This is how the relay is reached over Tor (§11.2).
+    pub fn make_relay_dialer(&self, relay_onion: String) -> crate::relay_client::RelayDialer {
+        let client = Arc::clone(&self.client);
+        let runtime = Arc::clone(&self.runtime);
+        Arc::new(move |request_line: &str| -> Result<String> {
+            let req = if request_line.ends_with('\n') {
+                request_line.to_string()
+            } else {
+                format!("{request_line}\n")
+            };
+            runtime.block_on(async {
+                let mut stream = client
+                    .connect((relay_onion.as_str(), RELAY_PORT))
+                    .await
+                    .with_context(|| format!("relay connect {relay_onion}"))?;
+                stream.write_all(req.as_bytes()).await?;
+                stream.flush().await?;
+                let mut reader = futures::io::BufReader::new(stream);
+                let mut line = String::new();
+                reader.read_line(&mut line).await?;
+                Ok(line)
+            })
+        })
+    }
+}
+
+/// Periodically close outbound streams that have been idle past [`IDLE_TIMEOUT`].
+fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, running: Arc<AtomicBool>) {
+    std::thread::spawn(move || {
+        while running.load(Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_secs(30));
+            let stale: Vec<DataStream> = {
+                let mut map = streams.lock().unwrap();
+                let now = Instant::now();
+                let keys: Vec<Address> = map
+                    .iter()
+                    .filter(|(_, (_, last))| now.duration_since(*last) > IDLE_TIMEOUT)
+                    .map(|(k, _)| k.clone())
+                    .collect();
+                keys.into_iter()
+                    .filter_map(|k| map.remove(&k).map(|(s, _)| s))
+                    .collect()
+            };
+            for mut s in stale {
+                let _ = runtime.block_on(async { s.close().await });
+            }
+        }
+    });
+}
+
+impl Transport for TorTransport {
+    fn address(&self) -> Address {
+        self.onion.clone()
+    }
+
+    /// True once the onion descriptor is published and the service is reachable (arti reports
+    /// `Running`/`DegradedReachable`). False during the ~1–3 min republish window after launch.
+    fn published(&self) -> bool {
+        self._service.status().state().is_fully_reachable()
+    }
+
+    /// Reach any relay `.onion` over this Tor client — lets the node fan out to a recipient's
+    /// chosen relay set (#17).
+    fn relay_dialer(&self, addr: &str) -> Option<crate::relay_client::RelayDialer> {
+        Some(self.make_relay_dialer(addr.to_string()))
+    }
+
+    /// Mint our client descriptor-encryption key for `peer_onion` (onion client auth, #22).
+    fn make_client_key(&self, peer_onion: &str) -> Option<Result<String>> {
+        Some(self.make_service_discovery_key(peer_onion))
+    }
+
+    /// Write a paired contact's client key into our watched authorized-keys directory, so arti
+    /// encrypts our onion descriptor to them (#22). No-op when no auth dir was configured.
+    fn authorize_client(&self, contact_id: &str, key: &str) -> Result<()> {
+        match self.auth_dir.as_deref() {
+            Some(dir) => client_auth::authorize(std::path::Path::new(dir), contact_id, key),
+            None => Ok(()),
+        }
+    }
+
+    /// Remove a contact's authorized-key file, revoking their reachability to our onion (#22).
+    fn revoke_client(&self, contact_id: &str) -> Result<()> {
+        match self.auth_dir.as_deref() {
+            Some(dir) => client_auth::revoke(std::path::Path::new(dir), contact_id),
+            None => Ok(()),
+        }
+    }
+
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        let client = Arc::clone(&self.client);
+        let peer = peer.to_string();
+        let frame = frame.to_vec();
+        // Reuse a warm stream to this peer if we have one; otherwise dial. On any write
+        // error the stream is stale — reconnect once. Keeping a per-peer stream (rather than
+        // dial-per-frame) avoids repeated rendezvous setup; arti still isolates different
+        // peers on different circuits by `.onion`.
+        let mut existing = self
+            .out_streams
+            .lock()
+            .unwrap()
+            .remove(&peer)
+            .map(|(s, _)| s);
+        let peer2 = peer.clone();
+        let stream = self.runtime.block_on(async move {
+            if let Some(mut s) = existing.take() {
+                if write_frame(&mut s, &frame).await.is_ok() && s.flush().await.is_ok() {
+                    return Ok::<DataStream, anyhow::Error>(s);
+                }
+                // stale (peer closed it / circuit gone): drop and reconnect.
+            }
+            let mut s = client
+                .connect((peer2.as_str(), GHOST_PORT))
+                .await
+                .context("dial peer onion")?;
+            write_frame(&mut s, &frame).await?;
+            s.flush().await?;
+            Ok(s)
+        })?;
+        self.out_streams
+            .lock()
+            .unwrap()
+            .insert(peer, (stream, Instant::now()));
+        Ok(())
+    }
+
+    fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
+        self.inbound.lock().unwrap().try_recv().ok()
+    }
+}
+
+/// Build the arti client config. With `state_dir` we point arti's state + cache at an
+/// explicit writable base (required on Android) and relax fs-mistrust's permission checks,
+/// since app-sandbox directories don't match arti's default ownership expectations.
+fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
+    match state_dir {
+        None => Ok(TorClientConfig::default()),
+        Some(base) => {
+            let state = format!("{base}/arti-state");
+            let cache = format!("{base}/arti-cache");
+            std::fs::create_dir_all(&state).ok();
+            std::fs::create_dir_all(&cache).ok();
+            let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
+            builder.storage().permissions().dangerously_trust_everyone();
+            apply_bridges(&mut builder, base);
+            // Register any pluggable transports (obfs4/snowflake) the user configured, so a bridge
+            // line that names such a transport has a binary to run it. Must come with the bridges:
+            // arti's config validation rejects a PT bridge that has no matching transport entry.
+            apply_transports(&mut builder, base);
+            builder.build().context("build Tor config")
+        }
+    }
+}
+
+/// Load optional Tor **bridges** from `<base>/bridges.txt` and add them to the config. Bridges are
+/// unlisted entry relays, so a client can still reach the Tor network where the public relays are
+/// IP-blocked — the censorship-resistance path (ARCHITECTURE.md §6). One bridge line per line;
+/// blank lines and `#` comments are ignored, and an optional leading `Bridge ` keyword (torrc
+/// style) is tolerated. Absent file → no bridges (today's behavior). A malformed line is skipped
+/// (logged to stderr, never fatal). Returns how many bridges were added.
+///
+/// Vanilla (direct) bridge lines — `ADDR:PORT FINGERPRINT [ED25519-ID]` — work as-is. A bridge line
+/// that names a pluggable transport — `obfs4 ADDR FINGERPRINT cert=… iat-mode=…`, `snowflake …` —
+/// also parses here; it additionally needs a matching entry in `transports.txt` (see
+/// [`apply_transports`]) pointing arti at the PT client binary.
+fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
+    let path = format!("{base}/bridges.txt");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return 0;
+    };
+    let mut added = 0usize;
+    for raw in contents.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let spec = line.strip_prefix("Bridge ").unwrap_or(line).trim();
+        match spec.parse::<BridgeConfigBuilder>() {
+            Ok(bridge) => {
+                builder.bridges().bridges().push(bridge);
+                added += 1;
+            }
+            // A bridge line is operator-supplied config, not message data, and carries no secret;
+            // surface the parse error so a typo is diagnosable instead of silently ignored.
+            Err(e) => eprintln!("nightdrop: skipping invalid bridge line: {e}"),
+        }
+    }
+    added
+}
+
+/// Register **pluggable transports** (obfs4/snowflake, ARCHITECTURE.md §6) from
+/// `<base>/transports.txt`, so a bridge whose line names such a transport has a client binary that
+/// can run it. This is the layer above plain bridges: where an ISP/firewall blocks even bridge IPs
+/// by deep-packet-inspecting for the Tor protocol, a PT disguises the traffic. arti manages the
+/// binary itself, launching it on demand (never at startup) when a channel actually needs it — so a
+/// stale/missing entry can't stall bootstrap unless a bridge truly depends on it.
+///
+/// Format — one transport per line; blank lines and `#` comments are ignored; an optional leading
+/// `Transport ` keyword is tolerated:
+///
+/// ```text
+/// # <protocols>            <path-to-client-binary>
+/// obfs4                    /usr/bin/lyrebird
+/// snowflake                /usr/bin/snowflake-client
+/// obfs4,meek_lite          /usr/bin/lyrebird          # one binary, several protocols
+/// ```
+///
+/// `<protocols>` is one transport name, or several comma-separated (a single binary can provide
+/// more than one). The rest of the line is the binary path (may contain spaces). Absent file → no
+/// transports (today's behavior). A malformed line is skipped (logged to stderr, never fatal).
+/// Returns how many transports were registered.
+fn apply_transports(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
+    let path = format!("{base}/transports.txt");
+    let Ok(contents) = std::fs::read_to_string(&path) else {
+        return 0;
+    };
+    let mut added = 0usize;
+    for raw in contents.lines() {
+        let line = raw.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let line = line.strip_prefix("Transport ").unwrap_or(line).trim();
+        // Split into "<protocols> <path>" at the first run of whitespace; the path keeps any
+        // internal spaces. A line with no path (just a name) is malformed.
+        let Some((protos_field, bin)) = line.split_once(char::is_whitespace) else {
+            eprintln!("nightdrop: skipping transport line with no binary path: {line}");
+            continue;
+        };
+        let bin = bin.trim();
+        // Crate's `Result` alias is single-arg (anyhow); name the std one for the two-arg form.
+        let protocols: std::result::Result<Vec<PtTransportName>, _> = protos_field
+            .split(',')
+            .map(|p| p.trim())
+            .filter(|p| !p.is_empty())
+            .map(|p| p.parse::<PtTransportName>())
+            .collect();
+        let protocols = match protocols {
+            Ok(ps) if !ps.is_empty() => ps,
+            Ok(_) => {
+                eprintln!("nightdrop: skipping transport line with no protocol: {line}");
+                continue;
+            }
+            Err(e) => {
+                eprintln!("nightdrop: skipping transport line with bad protocol name: {e}");
+                continue;
+            }
+        };
+        let mut transport = TransportConfigBuilder::default();
+        transport
+            .protocols(protocols)
+            .path(CfgPath::new_literal(std::path::Path::new(bin)))
+            // On demand, not at startup: only spawn the PT binary if a bridge actually needs it,
+            // so a missing/renamed binary can't fail Tor bootstrap for users who aren't using it.
+            .run_on_startup(false);
+        builder.bridges().transports().push(transport);
+        added += 1;
+    }
+    added
+}
+
+/// Build the onion-service config, enabling **restricted discovery** (onion client authorization,
+/// #22) when `client_auth_dir` is set and already holds ≥1 authorized-client key. An empty/absent
+/// dir yields a normal **public** onion (today's behavior); we never enable restriction with an
+/// empty authorized set, which would make the service unreachable by everyone. The directory is
+/// watched (`watch_configuration`), so keys added/removed after launch take effect without a relaunch.
+fn onion_service_config(
+    nickname: HsNickname,
+    client_auth_dir: Option<&str>,
+) -> Result<OnionServiceConfig> {
+    let mut builder = OnionServiceConfigBuilder::default();
+    builder.nickname(nickname);
+    if let Some(dir) = client_auth_dir {
+        if client_auth::authorized_count(std::path::Path::new(dir)) > 0 {
+            let mut provider = DirectoryKeyProviderBuilder::default();
+            provider
+                .path(CfgPath::new_literal(std::path::Path::new(dir)))
+                .permissions()
+                .dangerously_trust_everyone();
+            builder
+                .restricted_discovery()
+                .enabled(true)
+                .watch_configuration(true)
+                .key_dirs()
+                .access()
+                .push(provider);
+        }
+    }
+    builder.build().context("onion service config")
+}
+
+/// Write a `u32` big-endian length prefix followed by the frame bytes.
+async fn write_frame<W: AsyncWriteExt + Unpin>(w: &mut W, frame: &[u8]) -> Result<()> {
+    w.write_all(&(frame.len() as u32).to_be_bytes()).await?;
+    w.write_all(frame).await?;
+    Ok(())
+}
+
+/// Read one length-prefixed frame.
+async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Vec<u8>> {
+    let mut len = [0u8; 4];
+    r.read_exact(&mut len).await?;
+    let mut buf = vec![0u8; u32::from_be_bytes(len) as usize];
+    r.read_exact(&mut buf).await?;
+    Ok(buf)
+}
+
+#[cfg(test)]
+mod bridge_tests {
+    use super::*;
+
+    #[test]
+    fn apply_bridges_reads_valid_lines_and_skips_the_rest() {
+        let dir = std::env::temp_dir().join(format!(
+            "nd-bridges-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = dir.join("arti-state");
+        let cache = dir.join("arti-cache");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            dir.join("bridges.txt"),
+            concat!(
+                "# my bridges\n",
+                "\n",
+                "38.229.33.83:80 0BAC39417268B96B9F514E7F63FA6FBA1A788955\n",
+                "Bridge 38.229.33.84:443 0BAC39417268B96B9F514E7F63FA6FBA1A788955\n",
+                "this is not a bridge line\n",
+            ),
+        )
+        .unwrap();
+
+        let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
+        let added = apply_bridges(&mut builder, dir.to_str().unwrap());
+        assert_eq!(
+            added, 2,
+            "two valid lines added; comment/blank/junk skipped"
+        );
+
+        // Absent file → no bridges, no error.
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let mut b2 = TorClientConfigBuilder::from_directories(&state, &cache);
+        assert_eq!(apply_bridges(&mut b2, empty.to_str().unwrap()), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn apply_transports_reads_valid_lines_and_skips_the_rest() {
+        let dir = std::env::temp_dir().join(format!(
+            "nd-transports-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let state = dir.join("arti-state");
+        let cache = dir.join("arti-cache");
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(
+            dir.join("transports.txt"),
+            concat!(
+                "# my pluggable transports\n",
+                "\n",
+                "obfs4 /usr/bin/lyrebird\n",
+                "Transport snowflake /usr/bin/snowflake-client\n",
+                "obfs4,meek_lite /usr/bin/lyrebird\n",
+                "obfs4-no-path-here\n",  // no binary path → skipped
+                ", /usr/bin/whatever\n", // empty protocol list → skipped
+            ),
+        )
+        .unwrap();
+
+        let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
+        let added = apply_transports(&mut builder, dir.to_str().unwrap());
+        assert_eq!(
+            added, 3,
+            "three valid transport lines; comment/blank/no-path/no-protocol skipped"
+        );
+
+        // Absent file → no transports, no error.
+        let empty = dir.join("empty");
+        std::fs::create_dir_all(&empty).unwrap();
+        let mut b2 = TorClientConfigBuilder::from_directories(&state, &cache);
+        assert_eq!(apply_transports(&mut b2, empty.to_str().unwrap()), 0);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
