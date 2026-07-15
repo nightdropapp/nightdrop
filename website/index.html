@@ -75,8 +75,8 @@
   <script src="config.js"></script>
 </head>
 <body>
-  <header class="hero">
-    <nav>
+  <nav>
+    <div class="nav-inner">
       <span class="brand"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</span>
       <div class="nav-links">
         <a href="#features">Features</a>
@@ -85,7 +85,9 @@
         <a href="#donate">Donate</a>
         <a href="#download">Download</a>
       </div>
-    </nav>
+    </div>
+  </nav>
+  <header class="hero">
     <div class="hero-content">
       <h1 id="hero-headline">Sealed. Dropped. Delivered.</h1>
       <p class="tagline" id="hero-tagline">
@@ -97,7 +99,7 @@
         <a class="btn primary" href="#download">Get Night Drop</a>
         <a class="btn ghost" href="#features">See how it works</a>
       </div>
-      <p class="fineprint">Free and open. Peer-to-peer over Tor. Android · iOS · Windows · macOS · Linux.</p>
+      <p class="fineprint">Free and open. Peer-to-peer over Tor. Android · <!--iOS  ·-->Windows ·<!-- macOS ·--> Linux.</p>
     </div>
   </header>
 
@@ -201,7 +203,7 @@
         </article>
         <article class="card">
           <h3>💻 One app, every device</h3>
-          <p>Android, iOS, Windows, macOS, and Linux from one codebase — with the same
+          <p>Android, <!--iOS,--> Windows, <!--macOS,--> and Linux from one codebase — with the same
              Rust security core doing the cryptography on every platform.</p>
         </article>
       </div>
@@ -260,21 +262,21 @@
           <code class="addr">replace-with-your-XMR-address</code>
         </article>
       </div>
-      <p class="fineprint">Addresses are non-custodial and published as-is. Edit them in one
-        place — <code>config/app_config.json</code> — then run <code>make config</code>.</p>
+      <!--<p class="fineprint">Addresses are non-custodial and published as-is. Edit them in one
+        place — <code>config/app_config.json</code> — then run <code>make config</code>.</p>-->
     </section>
 
     <section id="download" class="section alt">
       <h2>Get Night Drop</h2>
       <p class="lead">One app, every device.</p>
       <div class="downloads" id="download-links">
-        <a class="btn ghost" href="#">iOS</a>
+        <!--<a class="btn ghost" href="#">iOS</a>-->
         <a class="btn ghost" href="#">Android</a>
         <a class="btn ghost" href="#">Windows</a>
-        <a class="btn ghost" href="#">macOS</a>
+        <!--a class="btn ghost" href="#">macOS</a>-->
         <a class="btn ghost" href="#">Linux</a>
       </div>
-      <p class="fineprint">Download links are placeholders until the first release.</p>
+      <!--<p class="fineprint">Download links are placeholders until the first release.</p>-->
     </section>
   </main>
 
@@ -327,13 +329,24 @@
       if (c.downloads) {
         var box = document.getElementById('download-links');
         if (box) {
-          var labels = { ios: 'iOS', android: 'Android', windows: 'Windows', macos: 'macOS', linux: 'Linux' };
+          var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
           box.innerHTML = Object.keys(labels).map(function (k) {
             var url = c.downloads[k];
             return '<a class="btn ghost" href="' + (url ? esc(url) : '#') + '">' + labels[k] + '</a>';
           }).join('');
         }
       }
+    })();
+  </script>
+
+  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
+  <script>
+    (function () {
+      var nav = document.querySelector('nav');
+      if (!nav) return;
+      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+      onScroll();
+      window.addEventListener('scroll', onScroll, { passive: true });
     })();
   </script>
 </body>

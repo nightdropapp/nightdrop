@@ -76,8 +76,8 @@
   </style>
 </head>
 <body>
-  <header class="hero" style="padding-bottom: 40px;">
-    <nav>
+  <nav>
+    <div class="nav-inner">
       <span class="brand"><a href="index.html" style="color:inherit;display:inline-flex;align-items:center;gap:8px;"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</a></span>
       <div class="nav-links">
         <a href="index.html#features">Features</a>
@@ -85,7 +85,9 @@
         <a href="limits.html">Honest limits</a>
         <a href="index.html#download">Download</a>
       </div>
-    </nav>
+    </div>
+  </nav>
+  <header class="hero" style="padding-bottom: 40px;">
     <div class="page-head">
       <h1>What we can't protect you from</h1>
       <p class="tagline">
@@ -263,6 +265,17 @@
         var e = document.getElementById('source-link');
         if (e) e.href = c.links.source;
       }
+    })();
+  </script>
+
+  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
+  <script>
+    (function () {
+      var nav = document.querySelector('nav');
+      if (!nav) return;
+      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+      onScroll();
+      window.addEventListener('scroll', onScroll, { passive: true });
     })();
   </script>
 </body>
