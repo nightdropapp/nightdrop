@@ -125,14 +125,15 @@ Current identity: **`app.nightdrop` / "Night Drop"**. For Android and Linux it i
 a **build-time variable** — a pre-release rename needs no source edit:
 
 ```sh
-GHOST_APP_ID=org.example.chat GHOST_APP_NAME="New Name" ./install-android-app.sh
-GHOST_APP_ID=org.example.chat flutter build linux
+GHOST_APP_ID=org.example.chat GHOST_APP_NAME="New Name" scripts/install-android-app.sh
+GHOST_APP_ID=org.example.chat scripts/install-desktop-app.sh
 ```
 
 Where it's wired:
 
-- `install-android-app.sh` exports `GHOST_APP_ID`/`GHOST_APP_NAME` as Gradle project
-  properties (`ORG_GRADLE_PROJECT_appId` / `..._appName`).
+- `scripts/install-android-app.sh` exports `GHOST_APP_ID`/`GHOST_APP_NAME` as Gradle project
+  properties (`ORG_GRADLE_PROJECT_appId` / `..._appName`); `scripts/install-desktop-app.sh`
+  exports `GHOST_APP_ID` for the Linux CMake.
 - `app/android/app/build.gradle.kts` reads `appId`/`appName` with the defaults, and
   fills the `${appName}` placeholder in `AndroidManifest.xml`. The Kotlin `namespace`
   (and `MainActivity.kt`'s package, `app.nightdrop`) is intentionally **fixed** —
@@ -149,18 +150,23 @@ alongside the old one (no upgrade, no data migration) — uninstall the old id m
 
 ---
 
-## 8. Shell scripts (repo root)
+## 8. Shell scripts (`scripts/`)
 
 | Script | Purpose |
 |---|---|
-| `run-ghost-tor.sh` | desktop app in Tor mode, relay onion baked in via `--dart-define`: dev run (default), `--detach` (background dev run; the saved PID is the *flutter tool's*, closing the window is the reliable stop), `--build` (compile the release bundle), `--build --launch` |
-| `install-android-app.sh` | build + install + launch the APK (Tor + relay baked in) on a connected device; honors `GHOST_APP_ID`/`GHOST_APP_NAME`; `--release`, `--build-only`, `--install-only`, `--wireless IP PORT` |
-| `adb-wireless.sh` | adb-over-WiFi helper |
-| `nightdrop_relay.sh` | run the relay with the dev TUI dashboard |
-| `ghost_website.sh` | serve `website/` locally — **loopback only by design**; keep it that way |
+| `scripts/install-desktop-app.sh` | build the Linux release bundle (Tor + relay baked in via `--dart-define`) and install it as a desktop app (`.desktop` entry + hicolor icons + `~/.local/bin/nightdrop`); `--no-build`, `--run`, `--uninstall`; honors `GHOST_APP_ID`/`GHOST_APP_NAME` |
+| `scripts/install-android-app.sh` | build + install + launch the APK (Tor + relay baked in) on a connected device; honors `GHOST_APP_ID`/`GHOST_APP_NAME`; `--release`, `--build-only`, `--install-only`, `--wireless IP PORT` |
+| `scripts/onion-website.sh` | serve `website/` behind a Tor v3 onion service (stable `.onion` via persisted state) |
+| `scripts/install-onion-service.sh` | install the onion-website as a systemd user service (starts on boot) |
+| `scripts/setup-pluggable-transports.sh` | write `transports.txt` for obfs4/snowflake bridges |
+| `scripts/deploy-vps.sh` | rsync `website/` to the VPS + reload nginx |
 
-All are location-independent (they derive the repo root from their own path) and
-overridable via `FLUTTER_HOME`, `PROJECT_ROOT`, `ADB`, `ANDROID_SDK`. After editing,
+Quick local previews are one-liners in `README.md` (relay dev TUI: `NIGHTDROP_RELAY_TUI=1
+cargo run -p nightdrop_relay`; website: `python3 -m http.server --bind 127.0.0.1 --directory
+website 8000` — **loopback only by design**). Dev desktop runs use `make app-run`.
+
+All build/install scripts are location-independent (they derive the repo root from their own
+path) and overridable via `FLUTTER_HOME`, `PROJECT_ROOT`, `ADB`, `ANDROID_SDK`. After editing,
 at minimum run `bash -n <script>`; use shellcheck if available. Watch the `set -e` +
 `grep` trap: a grep that matches nothing exits 1 and kills the script — append
 `|| true` when an empty result is a valid outcome.
@@ -290,7 +296,8 @@ at minimum run `bash -n <script>`; use shellcheck if available. Watch the `set -
    `relay-state/` (`NIGHTDROP_RELAY_STATE`) — **losing that directory changes the relay
    address**, and the address is baked into Android builds via
    `--dart-define=GHOST_RELAY=...`, so treat `relay-state/` as production state.
-7. Website: `./ghost_website.sh` to preview; deploy the static `website/` dir.
+7. Website: `python3 -m http.server --bind 127.0.0.1 --directory website 8000` to preview;
+   deploy the static `website/` dir.
 8. Sanity-pass the invariants in `CLAUDE.md` against your diff — no server-side
    keys/logs, local-first storage, 24h cap + warning banner, Tor by default,
    authorization before first message, backups user-owned.

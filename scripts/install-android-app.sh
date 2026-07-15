@@ -14,7 +14,8 @@ NC='\033[0m' # No Color
 
 # Configuration (customizable via environment variables)
 FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")" && pwd)}"
+# This script lives in scripts/; the repo root is its parent.
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ADB="${ADB:-}"
 # The single device serial install/launch target (resolved by select_device). Seed it from
 # --device or the standard ANDROID_SERIAL env var so an explicit choice always wins.

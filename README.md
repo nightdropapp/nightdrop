@@ -4,11 +4,9 @@ A privacy-first **1:1** messenger: anonymous identities, end-to-end encryption w
 only sender and receiver can read messages, P2P over Tor, and **local-first** storage.
 No accounts, no server-side keys, no logs.
 
-See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design and threat model,
-[`CLAUDE.md`](CLAUDE.md) for the invariants that must never be violated,
+See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design and threat model, and
 [`MAINTENANCE.md`](MAINTENANCE.md) for how to update, verify, and release the app
-(toolchain, dependency upgrades, rename variables, release checklist), and
-[`TODO.md`](TODO.md) for the prioritized work list.
+(toolchain, dependency upgrades, rename variables, release checklist).
 
 ## Status
 
@@ -77,6 +75,7 @@ core/           Rust security core: api, node, wire, identity, crypto, pake, tra
                 (+ transport/tor behind `tor`), relay_client, storage.
 relay/          Minimal server binary: rendezvous mailbox + 24h store-and-forward.
 website/        Static marketing/features site.
+scripts/        Build/install + deploy helpers (desktop, Android, onion service, VPS).
 ```
 
 ## Prerequisites
@@ -113,6 +112,24 @@ make bootstrap     # flutter create (adds android/ios/windows/linux/macos) + pub
 make app-run       # cd app && flutter run
 ```
 
+## Local dev helpers
+
+Run the **relay** locally (dev TUI dashboard; its `.onion` persists across restarts via
+`relay-state/`, see [`ARCHITECTURE.md`](ARCHITECTURE.md) §11.9):
+
+```sh
+NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay    # or: make relay-run
+```
+
+Preview the **website** locally (loopback only — don't expose the dev server to the LAN):
+
+```sh
+python3 -m http.server --bind 127.0.0.1 --directory website 8000
+```
+
+Build/install helpers (Linux desktop + Android installers, onion service, VPS deploy) live
+in [`scripts/`](scripts/); each is self-documenting via `--help`.
+
 ## Regenerating the bridge
 
 The bridge is already generated and committed (`core/src/frb_generated.rs`,
@@ -129,4 +146,5 @@ The app depends only on the abstract `NightdropCore` (`app/lib/src/core/nightdro
 
 All security-critical logic (keys, Double Ratchet, PAKE, Tor, at-rest crypto) lives in
 the Rust `core/` — never in Dart. Prefer audited crates (`vodozemac`, `arti`, a vetted
-PAKE) over hand-rolled cryptography. See `CLAUDE.md` for the full invariant list.
+PAKE) over hand-rolled cryptography. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full
+design, threat model, and non-negotiable invariants.

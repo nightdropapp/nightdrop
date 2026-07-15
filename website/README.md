@@ -5,7 +5,7 @@ A static marketing/features site for Night Drop. No build step or framework — 
 
 ```sh
 # Preview locally (from the repo root; binds to 127.0.0.1 only)
-./ghost_website.sh
+python3 -m http.server --bind 127.0.0.1 --directory website 8000
 # then open http://localhost:8000
 ```
 

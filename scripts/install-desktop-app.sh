@@ -14,18 +14,24 @@
 #     satisfies gtk_window_set_icon_name(APPLICATION_ID) in the runner.
 #
 # Usage:
-#   ./install-desktop-app.sh              # build release bundle, then install entry + icons
-#   ./install-desktop-app.sh --no-build   # install using the existing build/ bundle
-#   ./install-desktop-app.sh --run        # ...and launch it afterwards
-#   ./install-desktop-app.sh --uninstall  # remove the installed app, entry, and icons
+#   scripts/install-desktop-app.sh              # build release bundle, then install entry + icons
+#   scripts/install-desktop-app.sh --no-build   # install using the existing build/ bundle
+#   scripts/install-desktop-app.sh --run        # ...and launch it afterwards
+#   scripts/install-desktop-app.sh --uninstall  # remove the installed app, entry, and icons
 
 set -euo pipefail
 
-PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")" && pwd)}"
+# This script lives in scripts/; the repo root is its parent.
+PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
+APP_DIR="$PROJECT_ROOT/app"
 APP_ID="${GHOST_APP_ID:-app.nightdrop}"       # Wayland app_id / .desktop basename / icon name
 APP_NAME="${GHOST_APP_NAME:-Night Drop}"      # launcher display name
-BUNDLE_SRC="$PROJECT_ROOT/app/build/linux/x64/release/bundle"
-PKG_DIR="$PROJECT_ROOT/app/linux/packaging"   # holds the icon master ($APP_ID.png)
+# The Linux CMake reads GHOST_APP_ID for the desktop application id; export both so a
+# rename is picked up at build time (mirrors install-android-app.sh).
+export GHOST_APP_ID="$APP_ID" GHOST_APP_NAME="$APP_NAME"
+BUNDLE_SRC="$APP_DIR/build/linux/x64/release/bundle"
+PKG_DIR="$APP_DIR/linux/packaging"            # holds the icon master ($APP_ID.png)
 
 # Per-user install locations (no sudo). XDG-correct.
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
@@ -67,9 +73,21 @@ uninstall() {
 [ "$ACTION" = uninstall ] && uninstall
 
 # 1. Build the release bundle (Tor + relay baked in) unless told to reuse it.
+#    GHOST_TOR enables the embedded Tor transport; GHOST_RELAY (the relay's .onion, from
+#    relay-state/onion) enables rendezvous short codes + offline store-and-forward. Both are
+#    baked in as compile-time --dart-define values, so the bundle needs no runtime env.
 if [ "$DO_BUILD" -eq 1 ]; then
-  info "Building release bundle (run-ghost-tor.sh --build)…"
-  "$PROJECT_ROOT/run-ghost-tor.sh" --build
+  [ -x "$FLUTTER_HOME/bin/flutter" ] || { err "Flutter not found at $FLUTTER_HOME/bin/flutter (set FLUTTER_HOME)"; exit 1; }
+  DART_DEFINES=(--dart-define=GHOST_TOR=1)
+  if [ -f "$PROJECT_ROOT/relay-state/onion" ]; then
+    RELAY_ADDR="$(cat "$PROJECT_ROOT/relay-state/onion")"
+    DART_DEFINES+=("--dart-define=GHOST_RELAY=$RELAY_ADDR")
+    ok "relay baked in for store-and-forward: $RELAY_ADDR"
+  else
+    info "relay not found (relay-state/onion) — P2P only, no store-and-forward"
+  fi
+  info "Building release bundle…"
+  ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" && flutter build linux --release "${DART_DEFINES[@]}" )
 fi
 [ -x "$BUNDLE_SRC/ghost_chat" ] || { err "bundle not found at $BUNDLE_SRC (run without --no-build)"; exit 1; }
 

@@ -9,13 +9,13 @@ Complete guide to build and deploy Night Drop on Desktop (Linux) and Mobile (And
 ### Desktop (Tor Mode + Relay)
 ```bash
 cd ~/ghost-chat
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 ### Android (Tor Mode + Relay)
 ```bash
 cd ~/ghost-chat
-./install-android-app.sh
+scripts/install-android-app.sh
 ```
 
 ---
@@ -45,7 +45,7 @@ sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
 #### 1. Tor Mode + Relay Fallback (RECOMMENDED)
 ```bash
 cd ~/ghost-chat
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 **Features:**
@@ -59,11 +59,13 @@ cd ~/ghost-chat
 **Subsequent Runs:** 5-10 seconds (cached state)
 
 **What It Does:**
-1. Auto-detects relay address from `relay-state/onion`
-2. Sets `GHOST_RELAY` environment variable
-3. Builds Rust core (`libnightdrop.so`)
-4. Launches Flutter app in Tor mode
-5. App shows QR code for pairing
+1. Auto-detects the relay address from `relay-state/onion`
+2. Bakes `GHOST_TOR` + `GHOST_RELAY` into the build via `--dart-define`
+3. Builds the Rust core (`libnightdrop.so`) + the Flutter release bundle
+4. Installs the desktop app (`.desktop` entry, icons, `~/.local/bin/nightdrop`) and launches it
+5. App shows a QR code for pairing
+
+For quick dev iteration without installing, use `make app-run` (see Manual Build below).
 
 #### 2. Manual Build
 ```bash
@@ -88,8 +90,8 @@ $FLUTTER_HOME/bin/flutter run -d linux --dart-define=GHOST_TOR=1
 #### 3. Release Build (Optimized)
 ```bash
 cd ~/ghost-chat
-./run-ghost-tor.sh --build            # compiles the release bundle (Tor + relay baked in)
-./run-ghost-tor.sh --build --launch   # ...and launches it
+scripts/install-desktop-app.sh          # builds + installs the desktop app (Tor + relay baked in)
+scripts/install-desktop-app.sh --run    # ...and launches it afterwards
 # Manual equivalent:
 #   cd app && flutter build linux --release \
 #     --dart-define=GHOST_TOR=1 --dart-define="GHOST_RELAY=$(cat ../relay-state/onion)"
@@ -137,7 +139,7 @@ which adb                      # If in PATH
 adb tcpip 5555
 
 # Connect wirelessly
-./adb-wireless.sh 192.168.88.26 33603
+scripts/install-android-app.sh --wireless 192.168.X.X 5555
 
 # Disconnect USB (stays connected via WiFi)
 ```
@@ -147,7 +149,7 @@ adb tcpip 5555
 #### Automatic (Recommended)
 ```bash
 cd ~/ghost-chat
-./install-android-app.sh
+scripts/install-android-app.sh
 ```
 
 **What It Does:**
@@ -161,13 +163,13 @@ cd ~/ghost-chat
 
 #### Build-Only (Skip Install)
 ```bash
-./install-android-app.sh --build-only
+scripts/install-android-app.sh --build-only
 # APK output: app/build/app/outputs/flutter-apk/app-debug.apk
 ```
 
 #### Install Existing APK
 ```bash
-./install-android-app.sh --install-only
+scripts/install-android-app.sh --install-only
 ```
 
 #### Manual Build with Relay
@@ -190,7 +192,7 @@ adb shell monkey -p app.nightdrop -c android.intent.category.LAUNCHER 1
 
 #### List Connected Devices
 ```bash
-./install-android-app.sh --list-devices
+scripts/install-android-app.sh --list-devices
 ```
 
 ---
@@ -239,7 +241,7 @@ Recipient comes online
 export GHOST_RELAY=$(cat relay-state/onion)
 
 # App reads: Platform.environment['GHOST_RELAY']
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 #### Android: Build-Time Configuration
@@ -257,13 +259,13 @@ flutter build apk --debug --dart-define=GHOST_RELAY=...
 
 **Desktop:**
 ```bash
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 # Look for: "✓ Relay configured for store-and-forward: ..."
 ```
 
 **Android:**
 ```bash
-./install-android-app.sh
+scripts/install-android-app.sh
 # Look for: "Relay configured for store-and-forward: ..."
 ```
 
@@ -276,7 +278,7 @@ flutter build apk --debug --dart-define=GHOST_RELAY=...
 cd ~/ghost-chat
 
 # Start relay (if not already running)
-./nightdrop_relay.sh
+NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
 
 # Verify relay is up
 sleep 2
@@ -288,7 +290,7 @@ cat relay-state/onion
 ```bash
 # Terminal 1
 cd ~/ghost-chat
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 
 # Wait for app window to open
 # Look for QR code display
@@ -301,10 +303,10 @@ cd ~/ghost-chat
 cd ~/ghost-chat
 
 # Connect phone (USB or WiFi)
-./adb-wireless.sh 192.168.88.26 33603  # If WiFi
+scripts/install-android-app.sh --wireless 192.168.X.X 5555  # If WiFi
 
 # Build, install, and launch
-./install-android-app.sh
+scripts/install-android-app.sh
 
 # Wait for app to launch on phone
 # Phone is now ready to pair
@@ -377,11 +379,11 @@ make core-test && make app-test
 ### Android Compilation Only
 ```bash
 # Just build APK
-./install-android-app.sh --build-only
+scripts/install-android-app.sh --build-only
 
 # Rebuild (clear cache first)
 cd app && flutter clean && flutter pub get
-./install-android-app.sh --build-only
+scripts/install-android-app.sh --build-only
 
 # Build without relay (P2P only)
 cd app
@@ -398,8 +400,8 @@ export PROJECT_ROOT=~/ghost-chat
 export ADB=~/android-sdk/platform-tools/adb
 
 # Rebuild apps
-./run-ghost-tor.sh
-./install-android-app.sh
+scripts/install-desktop-app.sh --run
+scripts/install-android-app.sh
 ```
 
 ---
@@ -412,7 +414,7 @@ export ADB=~/android-sdk/platform-tools/adb
 rm -rf ~/.local/share/app.nightdrop/arti-state/
 
 # Run again - generates new .onion
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 ### Uninstall Android App
@@ -434,7 +436,7 @@ cargo clean
 
 # Rebuild from scratch
 make core-build
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 ---
@@ -443,11 +445,9 @@ make core-build
 
 | File | Purpose |
 |------|---------|
-| `run-ghost-tor.sh` | Desktop launcher (auto-configures relay) |
-| `install-android-app.sh` | Android builder (auto-configures relay) |
-| `adb-wireless.sh` | WiFi phone connector |
-| `nightdrop_relay.sh` | Relay server launcher |
-| `Makefile` | Build commands (core-build, tests, etc.) |
+| `scripts/install-desktop-app.sh` | Build + install the Linux desktop app (relay auto-configured); `--run`, `--no-build`, `--uninstall` |
+| `scripts/install-android-app.sh` | Build + install the APK (relay auto-configured); `--wireless IP PORT`, `--build-only`, `--install-only` |
+| `Makefile` | Build commands (`core-build`, `app-run`, `relay-run`, tests, etc.) |
 | `relay-state/onion` | Relay .onion address |
 | `app/lib/src/core/rust_nightdrop_core.dart` | Transport config (Tor, Demo, Networked) |
 | `core/src/api.rs` | FFI API surface |
@@ -462,20 +462,20 @@ make core-build
 ```bash
 export FLUTTER_HOME=~/flutter
 export PATH=$FLUTTER_HOME/bin:$PATH
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 **"libnightdrop.so not found"**
 ```bash
 make core-build
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 **"GTK libraries not found"**
 ```bash
 sudo apt-get install libgtk-3-dev
 flutter clean
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 **"Relay configured for store-and-forward" not showing**
@@ -487,7 +487,7 @@ ps aux | grep relay
 ls -la ~/ghost-chat/relay-state/onion
 
 # Restart script
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 ### Android Issues
@@ -495,7 +495,7 @@ ls -la ~/ghost-chat/relay-state/onion
 **"adb command not found"**
 ```bash
 export ADB=~/android-sdk/platform-tools/adb
-./install-android-app.sh
+scripts/install-android-app.sh
 ```
 
 **"No Android devices found"**
@@ -505,7 +505,7 @@ adb devices -l
 
 # WiFi: Run adb tcpip first
 adb tcpip 5555
-./adb-wireless.sh 192.168.X.X 5555
+scripts/install-android-app.sh --wireless 192.168.X.X 5555
 ```
 
 **"Build fails"**
@@ -514,7 +514,7 @@ cd ~/ghost-chat/app
 flutter clean
 flutter pub get
 cd ..
-./install-android-app.sh --build-only
+scripts/install-android-app.sh --build-only
 ```
 
 **"Installation fails"**
@@ -523,7 +523,7 @@ cd ..
 adb uninstall app.nightdrop
 
 # Reinstall
-./install-android-app.sh --install-only
+scripts/install-android-app.sh --install-only
 ```
 
 ---
@@ -560,11 +560,11 @@ adb uninstall app.nightdrop
 
 | Task | Command | Time |
 |------|---------|------|
-| Start desktop | `./run-ghost-tor.sh` | 1-2 min |
-| Start desktop (background) | `./run-ghost-tor.sh --detach` | 1-2 min |
-| Build Android | `./install-android-app.sh` | 3-5 min |
-| Build Android (no install) | `./install-android-app.sh --build-only` | 3-5 min |
-| Connect phone WiFi | `./adb-wireless.sh 192.168.X.X` | 5 sec |
+| Install + run desktop | `scripts/install-desktop-app.sh --run` | 1-2 min |
+| Dev run desktop (no install) | `make app-run` | 1-2 min |
+| Build Android | `scripts/install-android-app.sh` | 3-5 min |
+| Build Android (no install) | `scripts/install-android-app.sh --build-only` | 3-5 min |
+| Connect phone WiFi | `scripts/install-android-app.sh --wireless 192.168.X.X 5555` | 5 sec |
 | Run tests | `make core-test && make app-test` | 5-10 min |
 | Release build | `flutter build linux --release` | 5-10 min |
 | Hot reload | Press 'r' in terminal | <1 sec |
@@ -576,7 +576,7 @@ adb uninstall app.nightdrop
 ### Quick Development Cycle
 ```bash
 # Terminal 1: Run desktop
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 
 # Terminal 2: Edit code
 nano app/lib/src/main.dart
@@ -588,10 +588,10 @@ nano app/lib/src/main.dart
 ### Rebuild Android with New Relay
 ```bash
 # Old relay stopped? Start new one
-./nightdrop_relay.sh
+NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
 
 # Update Android APK with new relay
-./install-android-app.sh --build-only
+scripts/install-android-app.sh --build-only
 
 # Uninstall old app
 adb uninstall app.nightdrop
@@ -603,11 +603,11 @@ adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
 ### Skip Desktop Tor Bootstrap
 ```bash
 # First run: 30-60 seconds
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 
 # Subsequent runs: 5-10 seconds (state cached)
 # Just run again, faster now
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 ```
 
 ### Run Without Relay (P2P Only)
@@ -634,11 +634,11 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 cd ~/ghost-chat
 
 # Start desktop (background)
-./run-ghost-tor.sh --detach &
+scripts/install-desktop-app.sh --run &
 DESKTOP_PID=$!
 
 # Build and deploy Android
-./install-android-app.sh
+scripts/install-android-app.sh
 
 # Wait for desktop to start
 sleep 5
@@ -674,13 +674,13 @@ echo "Pair with QR code from desktop app"
 # Everything in one place
 
 # 1. Start relay (if needed)
-./nightdrop_relay.sh
+NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
 
 # 2. Build & run desktop
-./run-ghost-tor.sh
+scripts/install-desktop-app.sh --run
 
 # 3. Build & install Android  
-./install-android-app.sh
+scripts/install-android-app.sh
 
 # 4. Monitor logs
 tail -f /tmp/ghost-chat-tor.log
