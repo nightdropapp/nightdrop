@@ -916,3 +916,53 @@ fn media_round_trips_e2e_and_is_sealed_at_rest() {
     std::fs::remove_dir_all(format!("{}-a", dir.display())).ok();
     std::fs::remove_dir_all(format!("{}-b", dir.display())).ok();
 }
+
+/// Pairing the SAME two identities twice — e.g. once in each direction — must not break messaging.
+/// Both sides have to adopt the newest session; before the fix the re-pair left one side encrypting
+/// with a session the other had discarded, so messages silently failed to decrypt (the "sent but
+/// not received" double-pair bug).
+#[test]
+fn double_pairing_the_same_contact_keeps_messaging_working_both_ways() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+
+    // Pairing 1: Bob joins Alice.
+    let alice_bundle = alice.publish_bundle();
+    let alice_on_bob = bob.connect_with_bundle("alice", &alice_bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_on_alice = alice.contacts()[0].id.clone();
+
+    bob.send(&alice_on_bob, "one").unwrap();
+    alice.pump().unwrap();
+    assert_eq!(alice.messages(&bob_on_alice).last().unwrap().text, "one");
+
+    // Pairing 2 (the double-pair): Alice now joins Bob — the reverse direction, same identities.
+    let bob_bundle = bob.publish_bundle();
+    alice.connect_with_bundle("bob", &bob_bundle).unwrap();
+    bob.pump().unwrap(); // Bob adopts Alice's new session in place (open re-key).
+
+    // Messaging must still work BOTH ways on the (now single, re-keyed) session.
+    bob.send(&alice_on_bob, "two from bob").unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.messages(&bob_on_alice).last().unwrap().text,
+        "two from bob",
+        "bob -> alice after the double-pair"
+    );
+
+    alice.send(&bob_on_alice, "two from alice").unwrap();
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.messages(&alice_on_bob).last().unwrap().text,
+        "two from alice",
+        "alice -> bob after the double-pair"
+    );
+
+    // Still one contact per identity, and the re-pair warned to re-verify.
+    assert_eq!(alice.contacts().len(), 1);
+    assert!(bob
+        .messages(&alice_on_bob)
+        .iter()
+        .any(|m| m.system && m.text.to_lowercase().contains("re-paired")));
+}

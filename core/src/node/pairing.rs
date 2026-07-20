@@ -94,33 +94,51 @@ impl Node {
         crate::diag!("pair: Hello away — the peer should now show a chat request");
 
         let contact_id = bundle.identity_key.clone();
-        self.chats.insert(
-            contact_id.clone(),
-            Chat {
-                contact: Contact {
-                    id: contact_id.clone(),
-                    their_name: DEFAULT_NAME.to_string(),
-                    my_name: DEFAULT_NAME.to_string(),
-                    remote_storage: false,
-                    disappearing_secs: 0,
-                    backed_up: false,
-                    peer_backed_up: false,
-                    verified: false,
-                    peer_relays: Vec::new(),
+        if let Some(chat) = self.chats.get_mut(&contact_id) {
+            // Re-pairing an existing contact — the same person again, or the reverse direction of a
+            // pairing already in place. Adopt the NEW session so both ends match (otherwise this
+            // side would encrypt with a session the peer no longer holds, and messages would fail
+            // to decrypt), but keep the conversation history. A new session invalidates any earlier
+            // safety-number check, so drop `verified` and warn.
+            chat.session = session;
+            chat.peer_address = peer_address.to_string();
+            chat.authorized = true;
+            chat.closed = false;
+            chat.contact.verified = false;
+            chat.history.push(ChatMessage::system(
+                "🔑 Re-paired with a new secure session. Compare the safety number again if you \
+                 want to confirm who this is."
+                    .to_string(),
+            ));
+        } else {
+            self.chats.insert(
+                contact_id.clone(),
+                Chat {
+                    contact: Contact {
+                        id: contact_id.clone(),
+                        their_name: DEFAULT_NAME.to_string(),
+                        my_name: DEFAULT_NAME.to_string(),
+                        remote_storage: false,
+                        disappearing_secs: 0,
+                        backed_up: false,
+                        peer_backed_up: false,
+                        verified: false,
+                        peer_relays: Vec::new(),
+                        remote_storage_healthy: true,
+                    },
+                    peer_address: peer_address.to_string(),
+                    session,
+                    history: Vec::new(),
+                    authorized: true, // we initiated this chat
+                    // The joiner already knows the chat is live (no approval to wait on); the
+                    // code is tracked on the inviter side for the approval echo.
+                    code: None,
+                    closed: false,
+                    relay_receipts: HashMap::new(),
                     remote_storage_healthy: true,
                 },
-                peer_address: peer_address.to_string(),
-                session,
-                history: Vec::new(),
-                authorized: true, // we initiated this chat
-                // The joiner already knows the chat is live (no approval to wait on); the
-                // code is tracked on the inviter side for the approval echo.
-                code: None,
-                closed: false,
-                relay_receipts: HashMap::new(),
-                remote_storage_healthy: true,
-            },
-        );
+            );
+        }
         // Onion client auth (#22): hand the inviter our client key for their onion so they can
         // authorize us to reach their (possibly restricted) descriptor. No-op off Tor.
         self.announce_client_key(&contact_id, peer_address);

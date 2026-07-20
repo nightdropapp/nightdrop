@@ -35,10 +35,23 @@ impl Node {
                 // chat that existed and was closed is a known contact re-establishing a brand-new
                 // secure session, after which any earlier safety-number verification no longer holds.
                 let prior = self.chats.get(&contact_id);
-                let is_repair = prior.map(|c| c.closed).unwrap_or(false);
                 let was_verified = prior.map(|c| c.contact.verified).unwrap_or(false);
-                let revive = prior.map(|c| c.closed).unwrap_or(true);
-                if revive {
+                // A Hello lands in one of three states: a brand-new contact, a re-pair of a chat we
+                // deleted (closed), or a re-pair of a chat that's still OPEN (the peer paired again,
+                // or the reverse direction of an existing pairing). All but the first are re-pairs
+                // and must **adopt the new session** — the sender just built a fresh one and will
+                // only encrypt with that, so keeping the old one would silently break decryption
+                // (the double-pair bug). New/closed start clean; an open re-key keeps its history.
+                let is_repair = prior.is_some();
+                let open_rekey = prior.map(|c| !c.closed).unwrap_or(false);
+                if open_rekey {
+                    if let Some(chat) = self.chats.get_mut(&contact_id) {
+                        chat.session = accepted.session;
+                        chat.peer_address = peer_address.clone();
+                        chat.closed = false;
+                        chat.contact.verified = false; // new session invalidates prior verification
+                    }
+                } else {
                     self.chats.insert(
                         contact_id.clone(),
                         Chat {
