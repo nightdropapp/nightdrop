@@ -200,6 +200,16 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String couldNotRestoreBackupFailed(String error) {
+    return 'Could not restore backup. ($error)';
+  }
+
+  @override
+  String couldNotRestoreServerFailed(String error) {
+    return 'Could not restore from server. ($error)';
+  }
+
+  @override
   String couldNotRestoreServer(String error) {
     return 'Could not restore from server — check the password. ($error)';
   }

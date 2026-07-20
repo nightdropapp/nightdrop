@@ -47,6 +47,15 @@ pub trait Transport: Send + Sync {
         true
     }
 
+    /// Whether `send` completes instantly and locally, so it's safe to run inline while the core
+    /// lock is held. True for the in-memory transport (tests/demo); false for any real network
+    /// transport, where a dial can block for seconds. A `false` here lets the node deliver
+    /// **off the hot path**: it stores the message immediately and hands delivery to the
+    /// background poller, so composing a message never blocks the UI on a Tor round-trip (§6).
+    fn is_synchronous(&self) -> bool {
+        false
+    }
+
     /// Build a relay round-trip dialer for an **arbitrary** relay address, if this transport can
     /// reach relays by address over its anonymized path (Tor does). Returns `None` for transports
     /// that don't (tests/TCP), so the node falls back to a direct [`RelayClient::new`]. This is
@@ -76,6 +85,40 @@ pub trait Transport: Send + Sync {
     /// client auth isn't configured.
     fn revoke_client(&self, _contact_id: &str) -> Result<()> {
         Ok(())
+    }
+}
+
+/// The inert transport a node is left with after [`crate::node::Node::close_transport`]: it
+/// reaches no one. Its purpose is to let the *real* transport be dropped — and with it the OS
+/// resources it holds — while the node itself stays alive and readable. For Tor that resource
+/// is arti's on-disk state lock, which only one instance may hold per state directory (§6).
+/// The old address is kept so the UI can still display who we were.
+pub struct ClosedTransport {
+    address: Address,
+}
+
+impl ClosedTransport {
+    pub fn new(address: Address) -> Self {
+        Self { address }
+    }
+}
+
+impl Transport for ClosedTransport {
+    fn address(&self) -> Address {
+        self.address.clone()
+    }
+
+    fn send(&self, _peer: &str, _frame: &[u8]) -> Result<()> {
+        anyhow::bail!("transport is closed")
+    }
+
+    fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
+        None
+    }
+
+    /// Never reachable — a closed transport publishes nothing.
+    fn published(&self) -> bool {
+        false
     }
 }
 
@@ -125,6 +168,12 @@ pub struct MemoryTransport {
 impl Transport for MemoryTransport {
     fn address(&self) -> Address {
         self.address.clone()
+    }
+
+    /// In-memory delivery is a channel send — instant and non-blocking, so the node delivers
+    /// inline and tests see synchronous send/receive without running a poller.
+    fn is_synchronous(&self) -> bool {
+        true
     }
 
     fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {

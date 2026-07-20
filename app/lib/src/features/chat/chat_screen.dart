@@ -120,7 +120,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final text = _input.text;
     if (text.trim().isEmpty) return;
     try {
-      await GhostScope.of(context).sendMessage(widget.contactId, text);
+      await NightdropScope.of(context).sendMessage(widget.contactId, text);
       // Only clear the draft once the core has accepted it — a failed send keeps your text.
       _input.clear();
       _scrollToEnd();
@@ -146,7 +146,8 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _attachMedia() async {
     final l10n = AppLocalizations.of(context)!;
     final result = await FilePicker.pickFiles(
-      type: FileType.media, // images + videos; we read large files from the path
+      type:
+          FileType.media, // images + videos; we read large files from the path
     );
     final picked = result?.files.single;
     final path = picked?.path;
@@ -215,7 +216,7 @@ class _ChatScreenState extends State<ChatScreen> {
       List<int> bytes, String mime, String kind, List<int> thumb) async {
     final l10n = AppLocalizations.of(context)!;
     try {
-      await GhostScope.of(context)
+      await NightdropScope.of(context)
           .sendMedia(widget.contactId, bytes, mime, kind, thumb);
       _scrollToEnd();
     } catch (e) {
@@ -253,7 +254,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
     if (confirmed != true || !mounted) return;
-    await GhostScope.of(context).deleteChat(widget.contactId);
+    await NightdropScope.of(context).deleteChat(widget.contactId);
     if (mounted) Navigator.of(context).pop(); // back to the chat list
   }
 
@@ -277,7 +278,6 @@ class _ChatScreenState extends State<ChatScreen> {
       Future.delayed(const Duration(milliseconds: 800), () => toBottom());
     });
   }
-
 
   /// Edit one of our own messages (long-press on an eligible bubble). The core enforces
   /// the same rule as [Message.canEdit]; errors (e.g. window just closed) surface as a
@@ -312,7 +312,7 @@ class _ChatScreenState extends State<ChatScreen> {
     final trimmed = newText.trim();
     if (trimmed.isEmpty || trimmed == message.text) return;
     try {
-      await GhostScope.of(context)
+      await NightdropScope.of(context)
           .editMessage(widget.contactId, message.msgId, trimmed);
     } catch (e) {
       _toast(l10n.couldNotEdit(e.toString()));
@@ -373,7 +373,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (confirm != true || !mounted) return;
     try {
-      await GhostScope.of(context)
+      await NightdropScope.of(context)
           .unsendMessage(widget.contactId, message.msgId);
     } catch (e) {
       _toast(l10n.couldNotDelete(e.toString()));
@@ -406,7 +406,7 @@ class _ChatScreenState extends State<ChatScreen> {
       ),
     );
     if (name != null && mounted) {
-      GhostScope.of(context).setMyNameInChat(widget.contactId, name);
+      NightdropScope.of(context).setMyNameInChat(widget.contactId, name);
     }
   }
 
@@ -444,7 +444,7 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     if (secs == null || !mounted || secs == contact.disappearingSecs) return;
     try {
-      await GhostScope.of(context).setDisappearing(widget.contactId, secs);
+      await NightdropScope.of(context).setDisappearing(widget.contactId, secs);
     } catch (e) {
       _toast(l10n.couldNotSetTimer(e.toString()));
     }
@@ -452,7 +452,7 @@ class _ChatScreenState extends State<ChatScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     final l10n = AppLocalizations.of(context)!;
     return ListenableBuilder(
       listenable: core,
@@ -614,7 +614,8 @@ class _ChatScreenState extends State<ChatScreen> {
                                   senderName: m.fromMe
                                       ? contact.myName
                                       : contact.theirName,
-                                  // Long-press own recent/queued text for edit / delete.
+                                  // Right-click (desktop) or long-press (mobile) own recent/
+                                  // queued text to edit or unsend it.
                                   onLongPress: m.canEdit
                                       ? () => _showMessageMenu(m)
                                       : null,
@@ -709,7 +710,8 @@ class _UnverifiedBanner extends StatelessWidget {
               Expanded(
                 child: Text(
                   AppLocalizations.of(context)!.unverifiedBannerBody,
-                  style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
+                  style:
+                      TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
                 ),
               ),
               const SizedBox(width: 8),
@@ -785,7 +787,8 @@ class _AwaitingApprovalBanner extends StatelessWidget {
           Expanded(
             child: Text(
               AppLocalizations.of(context)!.awaitingApprovalBanner,
-              style: TextStyle(color: scheme.onTertiaryContainer, fontSize: 12.5),
+              style:
+                  TextStyle(color: scheme.onTertiaryContainer, fontSize: 12.5),
             ),
           ),
         ],
@@ -1073,7 +1076,7 @@ class _MediaContent extends StatelessWidget {
   Future<Uint8List> _bytes(BuildContext context) {
     final local = message.localBytes;
     if (local != null) return Future.value(Uint8List.fromList(local));
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     return MediaCache.bytes.putIfAbsent(
       message.mediaId,
       () async => Uint8List.fromList(await core.mediaBytes(message.mediaId)),
@@ -1083,7 +1086,7 @@ class _MediaContent extends StatelessWidget {
   /// Decrypt the attachment to a temp file once; subsequent calls reuse the same future,
   /// so a video pre-warmed when its bubble scrolled into view opens near-instantly on tap.
   Future<String> _fileFuture(BuildContext context) {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     final ext = message.mime.split('/').last;
     return MediaCache.files.putIfAbsent(
       message.mediaId,
@@ -1104,8 +1107,8 @@ class _MediaContent extends StatelessWidget {
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(l10n.couldNotOpen(e.toString()))));
+        ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(l10n.couldNotOpen(e.toString()))));
       }
     }
   }
@@ -1124,7 +1127,7 @@ class _MediaContent extends StatelessWidget {
     final local = message.localBytes;
     if (local != null) return Future.value(Uint8List.fromList(local));
     if (message.thumbId.isEmpty) return null;
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     return MediaCache.bytes.putIfAbsent(
       'thumb:${message.thumbId}',
       () async => Uint8List.fromList(await core.mediaBytes(message.thumbId)),
@@ -1200,7 +1203,9 @@ class _MediaContent extends StatelessWidget {
     final arrived = message.mediaId.isNotEmpty;
     final status = message.sending
         ? l10n.mediaStatusSending
-        : (message.receiving ? l10n.mediaStatusIncoming : l10n.mediaStatusTapToPlay);
+        : (message.receiving
+            ? l10n.mediaStatusIncoming
+            : l10n.mediaStatusTapToPlay);
     final thumbFuture = message.isVideo ? _thumbBytes(context) : null;
     // Pre-warm: start decrypting to a temp file now (the bubble is in view) so the system
     // player launches almost immediately when tapped.
@@ -1419,8 +1424,8 @@ class _Composer extends StatelessWidget {
                 decoration: InputDecoration(
                   hintText: l10n.messageHint,
                   border: const OutlineInputBorder(),
-                  contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 ),
               ),
             ),

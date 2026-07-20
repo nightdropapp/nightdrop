@@ -10,9 +10,9 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/src/app.dart';
-import 'package:ghost_chat/src/core/rust_nightdrop_core.dart';
-import 'package:ghost_chat/src/rust/frb_generated.dart';
+import 'package:night_drop/src/app.dart';
+import 'package:night_drop/src/core/rust_nightdrop_core.dart';
+import 'package:night_drop/src/rust/frb_generated.dart';
 import 'package:integration_test/integration_test.dart';
 
 void main() {
@@ -28,7 +28,7 @@ void main() {
   });
 
   testWidgets('onboarding -> create identity -> approve invite -> chat', (tester) async {
-    await tester.pumpWidget(GhostApp(core: RustNightdropCore()));
+    await tester.pumpWidget(NightdropApp(core: RustNightdropCore()));
     await tester.pumpAndSettle();
 
     // Onboarding -> create the anonymous identity.
@@ -47,10 +47,10 @@ void main() {
     expect(find.text('Chat request'), findsOneWidget);
     await tester.tap(find.byTooltip('Approve'));
     await tester.pumpAndSettle();
-    expect(find.text('Ghosty'), findsWidgets);
+    expect(find.text('Anon'), findsWidgets);
 
     // Open the chat and send a message; the peer echoes it back.
-    await tester.tap(find.text('Ghosty').first);
+    await tester.tap(find.text('Anon').first);
     await tester.pumpAndSettle();
     await tester.enterText(find.byType(TextField).last, 'hello there');
     await tester.testTextInput.receiveAction(TextInputAction.send);
@@ -59,4 +59,3 @@ void main() {
     expect(find.text('(echo) hello there'), findsOneWidget);
   });
 }
-

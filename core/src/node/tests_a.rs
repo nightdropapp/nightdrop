@@ -86,7 +86,7 @@ fn unsend_after_restart_recalls_the_queued_blob() {
 
     // "Restart" Alice: persist to disk, drop, restore onto a fresh endpoint, reattach the relay.
     // The in-memory receipt is gone; only the persisted one can drive the recall now.
-    let path = std::env::temp_dir().join(format!("ghost-unsend-{}.bin", std::process::id()));
+    let path = std::env::temp_dir().join(format!("nightdrop-unsend-{}.bin", std::process::id()));
     let path = path.to_str().unwrap().to_string();
     storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
     drop(alice);
@@ -96,15 +96,9 @@ fn unsend_after_restart_recalls_the_queued_blob() {
 
     // Unsend after the restart. The persisted receipt lets us recall the still-queued blob.
     alice2.unsend_message(&bob_contact, &msg_id).unwrap();
-    assert_eq!(
-        alice2
-            .messages(&bob_contact)
-            .into_iter()
-            .next_back()
-            .unwrap()
-            .kind,
-        "deleted",
-        "our own copy becomes a tombstone"
+    assert!(
+        alice2.messages(&bob_contact).is_empty(),
+        "a recalled held message leaves no local tombstone, even after a restart"
     );
 
     // Bob comes back and drains his mailbox: the message was recalled, so he receives NOTHING —
@@ -144,7 +138,7 @@ fn state_survives_a_restart_via_encrypted_storage() {
     let bob_id_before = bob.identity_id();
 
     // Persist Bob to an encrypted file, then drop him.
-    let path = std::env::temp_dir().join(format!("ghost-test-{}.bin", std::process::id()));
+    let path = std::env::temp_dir().join(format!("nightdrop-test-{}.bin", std::process::id()));
     let path = path.to_str().unwrap().to_string();
     storage::save_to_file(&path, &key, &bob.export(&key)).unwrap();
     drop(bob);
@@ -814,7 +808,8 @@ fn pending_delete_signal_persists_across_a_restart() {
     alice.delete_chat(&bob_contact).unwrap();
 
     // "Restart" Alice before the retry runs: persist to disk, drop, restore on a fresh endpoint.
-    let path = std::env::temp_dir().join(format!("ghost-pendingctl-{}.bin", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("nightdrop-pendingctl-{}.bin", std::process::id()));
     let path = path.to_str().unwrap().to_string();
     storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
     drop(alice);
@@ -840,7 +835,7 @@ fn approval_signal_reaches_the_joiner() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice"))); // recipient
     alice.set_require_authorization(true);
-    alice.set_last_invite_code("7-ghost-river-ember".to_string());
+    alice.set_last_invite_code("7-cedar-river-ember".to_string());
     let mut bob = Node::new(Box::new(net.endpoint("bob"))); // joiner
 
     let bundle = alice.publish_bundle();
@@ -888,7 +883,7 @@ fn approving_twice_does_not_resend_approval() {
 #[test]
 fn media_round_trips_e2e_and_is_sealed_at_rest() {
     let key: StoreKey = [9u8; 32];
-    let dir = std::env::temp_dir().join(format!("ghost-media-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("nightdrop-media-test-{}", std::process::id()));
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
@@ -920,4 +915,54 @@ fn media_round_trips_e2e_and_is_sealed_at_rest() {
 
     std::fs::remove_dir_all(format!("{}-a", dir.display())).ok();
     std::fs::remove_dir_all(format!("{}-b", dir.display())).ok();
+}
+
+/// Pairing the SAME two identities twice — e.g. once in each direction — must not break messaging.
+/// Both sides have to adopt the newest session; before the fix the re-pair left one side encrypting
+/// with a session the other had discarded, so messages silently failed to decrypt (the "sent but
+/// not received" double-pair bug).
+#[test]
+fn double_pairing_the_same_contact_keeps_messaging_working_both_ways() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+
+    // Pairing 1: Bob joins Alice.
+    let alice_bundle = alice.publish_bundle();
+    let alice_on_bob = bob.connect_with_bundle("alice", &alice_bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_on_alice = alice.contacts()[0].id.clone();
+
+    bob.send(&alice_on_bob, "one").unwrap();
+    alice.pump().unwrap();
+    assert_eq!(alice.messages(&bob_on_alice).last().unwrap().text, "one");
+
+    // Pairing 2 (the double-pair): Alice now joins Bob — the reverse direction, same identities.
+    let bob_bundle = bob.publish_bundle();
+    alice.connect_with_bundle("bob", &bob_bundle).unwrap();
+    bob.pump().unwrap(); // Bob adopts Alice's new session in place (open re-key).
+
+    // Messaging must still work BOTH ways on the (now single, re-keyed) session.
+    bob.send(&alice_on_bob, "two from bob").unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.messages(&bob_on_alice).last().unwrap().text,
+        "two from bob",
+        "bob -> alice after the double-pair"
+    );
+
+    alice.send(&bob_on_alice, "two from alice").unwrap();
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.messages(&alice_on_bob).last().unwrap().text,
+        "two from alice",
+        "alice -> bob after the double-pair"
+    );
+
+    // Still one contact per identity, and the re-pair warned to re-verify.
+    assert_eq!(alice.contacts().len(), 1);
+    assert!(bob
+        .messages(&alice_on_bob)
+        .iter()
+        .any(|m| m.system && m.text.to_lowercase().contains("re-paired")));
 }

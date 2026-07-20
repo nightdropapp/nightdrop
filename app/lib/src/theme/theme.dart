@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// Night Drop's dark, low-key theme.
-ThemeData ghostTheme() {
+ThemeData nightdropTheme() {
   final scheme = ColorScheme.fromSeed(
     seedColor: const Color(0xFF7C83FD),
     brightness: Brightness.dark,

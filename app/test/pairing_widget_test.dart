@@ -1,11 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/l10n/app_localizations.dart';
-import 'package:ghost_chat/src/app.dart';
-import 'package:ghost_chat/src/core/mock_nightdrop_core.dart';
-import 'package:ghost_chat/src/core/models.dart';
-import 'package:ghost_chat/src/features/chat/chat_screen.dart';
-import 'package:ghost_chat/src/features/pairing/scan_screen.dart';
+import 'package:night_drop/l10n/app_localizations.dart';
+import 'package:night_drop/src/app.dart';
+import 'package:night_drop/src/core/mock_nightdrop_core.dart';
+import 'package:night_drop/src/core/models.dart';
+import 'package:night_drop/src/features/chat/chat_screen.dart';
+import 'package:night_drop/src/features/pairing/scan_screen.dart';
 
 void main() {
   // On a desktop/test host there is no camera backend (canScanQr == false). The scanner must
@@ -35,11 +35,11 @@ void main() {
     late final Contact contact;
     await tester.runAsync(() async {
       await core.createIdentity();
-      contact = await core.joinWithShortCode('4-ghost-lantern-river');
+      contact = await core.joinWithShortCode('4-cedar-lantern-river');
     });
 
     await tester.pumpWidget(
-      GhostScope(
+      NightdropScope(
         core: core,
         child: MaterialApp(
           localizationsDelegates: AppLocalizations.localizationsDelegates,

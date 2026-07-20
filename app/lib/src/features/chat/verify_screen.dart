@@ -32,7 +32,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
   }
 
   Future<void> _load() async {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     try {
       final number = await core.safetyNumber(widget.contactId);
       final qr = await core.safetyQr(widget.contactId);
@@ -54,7 +54,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
   }
 
   Future<void> _scanToVerify() async {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     final l10n = AppLocalizations.of(context)!;
     final scanned = await Navigator.of(context).push<String>(
       MaterialPageRoute<String>(
@@ -78,7 +78,7 @@ class _VerifyScreenState extends State<VerifyScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       appBar: AppBar(title: Text(l10n.verifyTitle(widget.name))),

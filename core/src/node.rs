@@ -224,7 +224,9 @@ fn queue_on_relays(
 
 /// Recall every still-queued copy named by `receipts` — reconstructing each [`RelayClient`] from its
 /// `relay_addr` (so this works after a restart, when no live client is held) and deleting the blob by
-/// its `delete_token`. Returns whether **any** copy was successfully recalled. A free fn (not a
+/// its `delete_token`. Returns true only when **every** recorded copy was recalled.  A partial
+/// recall is not enough to call an edit/delete invisible: a sibling relay may still deliver the
+/// original, so callers must send the normal E2E edit/unsend frame in that case. A free fn (not a
 /// method) so callers keep disjoint field borrows while `self.chats` is borrowed (#17).
 fn recall_receipts(
     transport: &dyn Transport,
@@ -233,22 +235,28 @@ fn recall_receipts(
     receipts: &[QueuedReceipt],
 ) -> bool {
     let handle = mailbox_handle(contact_id);
-    let mut recalled_any = false;
+    if receipts.is_empty() {
+        return false;
+    }
+    let mut all_recalled = true;
     for r in receipts {
         let relay = match &r.relay_addr {
             None => primary.clone(),
             Some(addr) => Some(build_relay(transport, addr)),
         };
-        let Some(relay) = relay else { continue };
+        let Some(relay) = relay else {
+            all_recalled = false;
+            continue;
+        };
         let receipt = crate::relay_client::PostReceipt {
             msg_id: r.msg_id.clone(),
             delete_token: r.delete_token.clone(),
         };
-        if relay.recall(&handle, &receipt).unwrap_or(false) {
-            recalled_any = true;
+        if !relay.recall(&handle, &receipt).unwrap_or(false) {
+            all_recalled = false;
         }
     }
-    recalled_any
+    all_recalled
 }
 
 /// Mark this chat's relay-"queued" outgoing messages as "delivered" — called when the peer is
@@ -387,6 +395,13 @@ pub struct Node {
     /// the retry (the message stays "queued" in history), and the common case — app kept open
     /// through the ~warm-up window — recovers on its own.
     pending_relay: Vec<PendingRelaySend>,
+    /// Messages composed while a **non-synchronous** transport (Tor) is in use: [`Node::send`]
+    /// seals + stores them "queued" and defers the network here so composing never blocks the UI
+    /// on a dial. The poller drains this via [`flush_pending_sends`](Self::flush_pending_sends),
+    /// attempting direct-peer delivery with relay fallback. In-memory only, and drained on the very
+    /// next poll tick (~80 ms), so a restart in that window just leaves the message "queued" — the
+    /// same recovery profile as [`pending_relay`](Self::pending_relay).
+    pending_sends: Vec<PendingRelaySend>,
     /// Authenticated `Closed` signals (chat deletes, §11.6) that reached neither the peer nor any
     /// relay when the chat was torn down (arti still cold, or the relay briefly unreachable). Unlike
     /// [`pending_relay`](Self::pending_relay) these are **chat-independent** — the chat is already
@@ -473,6 +488,7 @@ impl Node {
             seen_relay_blobs: std::collections::HashSet::new(),
             relay_reachable: std::collections::HashMap::new(),
             pending_relay: Vec::new(),
+            pending_sends: Vec::new(),
             pending_control: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
@@ -514,7 +530,7 @@ impl Node {
         }
         // §1.4: sweep any decrypted-media scratch left by a previous run (a crash between
         // decrypt-to-file and cleanup) — plaintext must not outlive the process that wrote it.
-        let scratch = std::path::Path::new(&dir).with_file_name("ghost-open");
+        let scratch = std::path::Path::new(&dir).with_file_name("nightdrop-open");
         let _ = std::fs::remove_dir_all(&scratch);
         self.media_store = Some((dir, key));
     }
@@ -558,7 +574,7 @@ impl Node {
     /// the duplicate (§5).
     pub fn authorize(&mut self, contact_id: &str, accept: bool) -> Result<()> {
         if !accept {
-            devlog!("[ghost] authorize: declining request {contact_id}");
+            devlog!("[nightdrop] authorize: declining request {contact_id}");
             self.chats.remove(contact_id);
             return Ok(());
         }
@@ -576,7 +592,7 @@ impl Node {
         // Idempotent: a second approval (e.g. an impatient double-tap while the Approved
         // signal is still going out over Tor) must NOT send another Approved frame.
         if already_authorized {
-            devlog!("[ghost] authorize: {contact_id} already approved; skipping resend");
+            devlog!("[nightdrop] authorize: {contact_id} already approved; skipping resend");
             return Ok(());
         }
         // Reject a re-used code: if another *authorized* chat already uses it, tell the
@@ -588,7 +604,7 @@ impl Node {
                 .any(|(id, c)| id != contact_id && c.authorized && c.code.as_deref() == Some(code));
             if already_used {
                 devlog!(
-                    "[ghost] authorize: code '{code}' already in use by an active chat; \
+                    "[nightdrop] authorize: code '{code}' already in use by an active chat; \
                      refusing {contact_id} and signalling CodeInUse"
                 );
                 let from = self.identity_key();
@@ -609,7 +625,7 @@ impl Node {
         }
         let from = self.identity_key();
         let code = code.unwrap_or_default();
-        devlog!("[ghost] authorize: approved {contact_id}; sending approval (code='{code}')");
+        devlog!("[nightdrop] authorize: approved {contact_id}; sending approval (code='{code}')");
         self.deliver(&peer_address, contact_id, &Frame::Approved { from, code })?;
         Ok(())
     }
@@ -621,7 +637,7 @@ impl Node {
         if !self.chats.contains_key(contact_id) {
             anyhow::bail!("unknown contact");
         }
-        devlog!("[ghost] delete_chat: tearing down {contact_id}, signalling peer");
+        devlog!("[nightdrop] delete_chat: tearing down {contact_id}, signalling peer");
         // Authenticated Closed so the peer can trust it's really us tearing the chat down. Deliver
         // it RELAY-FIRST (store-and-forward), like logout (§11.6): after a delete the peer is usually
         // reachable only via the relay — they may be offline, or (commonly) their onion is
@@ -795,6 +811,10 @@ impl Node {
     fn deliver(&self, peer_address: &str, recipient_ik: &str, frame: &Frame) -> Result<()> {
         let bytes = wire::encode(frame);
         if self.transport.send(peer_address, &bytes).is_err() {
+            // The direct onion dial failed. Expected while their descriptor is (re)publishing, but
+            // also what a *restricted* onion looks like to a peer it hasn't authorized yet (#22) —
+            // in which case the relay is the only way in until our ClientKey reaches them.
+            crate::diag!("deliver: direct dial failed — falling back to the relay");
             // Fan out to the recipient's relay set (primary + their advertised extras, #17).
             let peer_relays = self
                 .chats
@@ -807,7 +827,15 @@ impl Node {
                 &peer_relays,
                 recipient_ik,
                 &bytes,
-            )?;
+            )
+            .inspect_err(|_| {
+                crate::diag!(
+                    "deliver: relay fallback ALSO failed ({} peer relay(s) known) — the frame is \
+                     lost and the peer will never see it",
+                    peer_relays.len()
+                );
+            })?;
+            crate::diag!("deliver: queued on the relay for the peer to drain");
         }
         Ok(())
     }
@@ -848,6 +876,21 @@ impl Node {
     #[allow(dead_code)]
     pub fn set_relay(&mut self, relay: RelayClient) {
         self.relay = Some(relay);
+    }
+
+    /// Tear down the network side: swap the live transport for an inert [`ClosedTransport`] and
+    /// drop the primary relay, so everything they hold is released. Identity and chats survive,
+    /// but the node can no longer send or receive.
+    ///
+    /// This exists for Tor: arti holds an **exclusive on-disk lock** on its state directory, so a
+    /// second instance over the same `state_dir` cannot start while the first is alive. Restoring
+    /// a backup builds a whole new node, so the old one must be closed first or the new one fails
+    /// to launch its onion service (§6). The relay is dropped too — its dialer holds a clone of
+    /// the same arti client, and the lock is only released once *every* handle is gone.
+    pub fn close_transport(&mut self) {
+        let address = self.transport.address();
+        self.transport = Box::new(crate::transport::ClosedTransport::new(address));
+        self.relay = None;
     }
 
     /// Set the **extra** relay addresses that also host our mailbox (#17) — advertised to
@@ -1087,6 +1130,32 @@ const RDV_INVITER: &str = "i";
 const RENDEZVOUS_TTL: Duration = Duration::from_secs(600);
 const RENDEZVOUS_POLL: Duration = Duration::from_millis(500);
 
+/// How long the joiner keeps trying to get its opener onto *some* relay before giving up, and how
+/// long it waits between rounds. A flaky Tor path can take many circuit attempts to reach the
+/// relay's onion (the relay may take dozens to publish its own descriptor), so one failed round is
+/// not "unreachable" — only a full window of failures is.
+#[cfg(not(test))]
+const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_secs(45);
+#[cfg(test)]
+const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_millis(300);
+const POST_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How often the joiner re-posts its opener while waiting for an answer.
+///
+/// The inviter **drains** the joiner leg ([`RelayClient::take`]) before it has posted its answer,
+/// so anything that goes wrong in between — the answer failing to post, the inviter being
+/// backgrounded or killed mid-handshake — consumes the opener for good. Without a re-post the
+/// joiner would then poll out its whole timeout waiting for an answer that can never come, and
+/// the user would need a fresh code. Re-posting makes the handshake self-healing: an inviter that
+/// comes back finds an opener waiting. Re-sending the same `msg_j`/KEM public is safe — both are
+/// public handshake values, and the joiner keeps one SPAKE2 state, so whichever answer lands
+/// completes it.
+#[cfg(not(test))]
+const RENDEZVOUS_REPOST: Duration = Duration::from_secs(20);
+/// Tests drive the same path against a real relay; keep them quick.
+#[cfg(test)]
+const RENDEZVOUS_REPOST: Duration = Duration::from_millis(200);
+
 /// The rendezvous mailbox handle for one leg of a slot (§5c). The slot is non-secret; all
 /// security rides on the SPAKE2 secret words, never on the handle.
 fn rendezvous_handle(slot: &str, leg: &str) -> String {
@@ -1158,21 +1227,67 @@ pub fn run_join_handshake(
     // answer, so the handshake completes over whichever relay the two of us share — no single
     // relay is a pairing chokepoint. At least one post must land (else we can't be answered).
     let joiner_handle = rendezvous_handle(slot, RDV_JOINER);
-    let mut posted = false;
-    for relay in relays {
-        posted |= relay.post(&joiner_handle, &opener, RENDEZVOUS_TTL).is_ok();
+    // Get the opener onto at least one relay before we start polling for an answer. On a flaky
+    // network a single attempt often fails to build a circuit to the relay's onion — the relay
+    // itself may take dozens of circuit tries to publish its descriptor — so retry with backoff
+    // for a bounded window rather than giving up after one round. Bailing immediately was the
+    // "could not reach any relay" people hit on a slow Tor path even when the relay was healthy.
+    let post_deadline = Instant::now() + POST_ESTABLISH_TIMEOUT;
+    let mut posted = 0usize;
+    let mut attempt = 0usize;
+    while posted == 0 {
+        attempt += 1;
+        for relay in relays {
+            match relay.post(&joiner_handle, &opener, RENDEZVOUS_TTL) {
+                Ok(_) => posted += 1,
+                // Transport-level cause (dial failed / timed out / relay rejected) — names why a
+                // round came back 0, which `opener posted to 0/N` alone can't.
+                Err(e) => crate::diag!("join: post attempt {attempt} to a relay FAILED: {e:#}"),
+            }
+        }
+        if posted > 0 {
+            break;
+        }
+        if Instant::now() >= post_deadline {
+            crate::diag!(
+                "join: gave up posting the opener after {attempt} attempt(s) / {}s — no relay \
+                 reachable",
+                POST_ESTABLISH_TIMEOUT.as_secs()
+            );
+            anyhow::bail!("could not reach any relay to start pairing — check your connection");
+        }
+        std::thread::sleep(POST_RETRY_INTERVAL);
     }
-    if !posted {
-        anyhow::bail!("could not reach any relay to start pairing — check your connection");
-    }
+    crate::diag!(
+        "join: opener posted to {posted}/{} relays (attempt {attempt})",
+        relays.len()
+    );
 
     let inviter_handle = rendezvous_handle(slot, RDV_INVITER);
     let deadline = Instant::now() + timeout;
+    let mut last_post = Instant::now();
+    let mut reposts = 0usize;
     loop {
         if Instant::now() >= deadline {
+            crate::diag!(
+                "join: TIMED OUT after {}s with no answer ({reposts} re-posts) — the inviter \
+                 never answered our opener",
+                timeout.as_secs()
+            );
             anyhow::bail!("timed out waiting for the other device — ask for a fresh code");
         }
         std::thread::sleep(RENDEZVOUS_POLL);
+        // Keep an opener available to the inviter for as long as we're waiting (see
+        // `RENDEZVOUS_REPOST`): the inviter's read is destructive, so the one we posted up front
+        // may already have been consumed without an answer ever being posted back.
+        if last_post.elapsed() >= RENDEZVOUS_REPOST {
+            for relay in relays {
+                let _ = relay.post(&joiner_handle, &opener, RENDEZVOUS_TTL);
+            }
+            last_post = Instant::now();
+            reposts += 1;
+            crate::diag!("join: re-posted opener (#{reposts}) — still no answer");
+        }
         // Gather answers from every relay; a single relay being down must not abort the poll.
         let answer = relays
             .iter()
@@ -1182,9 +1297,11 @@ pub fn run_join_handshake(
         let Some((msg_i, kem_ct, sealed)) = answer else {
             continue; // no well-formed answer on any relay yet
         };
-        let key = bouncer
-            .finish(&msg_i)
-            .map_err(|_| anyhow::anyhow!("pairing handshake failed"))?;
+        crate::diag!("join: got the inviter's answer — completing SPAKE2");
+        let key = bouncer.finish(&msg_i).map_err(|_| {
+            crate::diag!("join: SPAKE2 finish FAILED on the inviter's answer");
+            anyhow::anyhow!("pairing handshake failed")
+        })?;
         // Hybrid seal key = KDF(SPAKE2 secret ‖ ML-KEM secret). A wrong code (SPAKE2) *or* a forged
         // ciphertext (ML-KEM) yields a different key ⇒ `open` fails ⇒ "wrong short code".
         let kem_ss = kem
@@ -1200,7 +1317,7 @@ pub fn run_join_handshake(
 /// The relay handle a server backup is stored under. Derived from the password with a
 /// fixed salt, so the user needs only their recovery password to both locate and decrypt.
 fn backup_handle(password: &str) -> Result<String> {
-    let key = crate::storage::derive_key(password, b"ghost-backup-handle")?;
+    let key = crate::storage::derive_key(password, b"nightdrop-backup-handle")?;
     Ok(format!("bkp:{}", base64_handle(&key[..16])))
 }
 

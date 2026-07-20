@@ -6,7 +6,7 @@
 library;
 
 /// Default per-chat display name for both parties (ARCHITECTURE.md §4).
-const String kDefaultName = 'Ghosty';
+const String kDefaultName = 'Anon';
 
 /// A compact, readable form of a long base64 identity id for display (e.g. in chat headers
 /// and request tiles). Full ids remain available via "view identity" surfaces.
@@ -71,7 +71,7 @@ class Contact {
 
   final String id;
 
-  /// The other party's display name in this chat (default "Ghosty").
+  /// The other party's display name in this chat (default "Anon").
   String theirName;
 
   /// Your own display name in this chat — you can rename yourself per-chat (§4).

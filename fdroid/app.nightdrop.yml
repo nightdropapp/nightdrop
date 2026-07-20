@@ -10,7 +10,7 @@
 # FILL IN before submitting (placeholders marked TODO):
 #   - Repo / SourceCode / IssueTracker URLs (no git remote is configured yet).
 #   - The release tag + commit for each Builds entry.
-#   - A STABLE production relay .onion for GHOST_RELAY (baked at build time). The value below is the
+#   - A STABLE production relay .onion for NIGHTDROP_RELAY (baked at build time). The value below is the
 #     current dev relay; a real release must bake a long-lived, independently-hosted relay onion,
 #     and bump the versionCode whenever it changes.
 
@@ -64,8 +64,8 @@ Builds:
       - export RUSTFLAGS="--remap-path-prefix=$$(cd ../ && pwd)=. --remap-path-prefix=$$CARGO_HOME=/cargo"
       - flutter pub get
       - flutter build apk --release
-          --dart-define=GHOST_TOR=1
-          --dart-define=GHOST_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
+          --dart-define=NIGHTDROP_TOR=1
+          --dart-define=NIGHTDROP_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
     output: build/app/outputs/flutter-apk/app-release.apk
 
 # Verifiable reproducible build: F-Droid rebuilds from source and confirms it matches the

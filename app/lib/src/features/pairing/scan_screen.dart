@@ -14,7 +14,7 @@ bool get canScanQr => Platform.isAndroid || Platform.isIOS;
 
 /// Returns true if [raw] is a pre-authorized Night Drop pairing payload (§5a):
 /// `nightdrop://pair?addr=...&ik=...&otk=...`.
-bool isGhostInvite(String raw) {
+bool isNightdropInvite(String raw) {
   final uri = Uri.tryParse(raw);
   return uri != null &&
       uri.scheme == 'nightdrop' &&
@@ -29,7 +29,7 @@ bool looksLikeShortCode(String raw) => _shortCodePattern.hasMatch(raw.trim());
 
 /// A QR payload we can act on: either a pre-authorized invite or a short code.
 bool isScannablePairing(String raw) =>
-    isGhostInvite(raw) || looksLikeShortCode(raw);
+    isNightdropInvite(raw) || looksLikeShortCode(raw);
 
 /// Camera QR scanner. Pops with the scanned payload string. By default it only accepts a valid
 /// Night Drop invite (pairing); pass [raw] to accept **any** QR text (used by verify-by-QR, whose

@@ -17,5 +17,5 @@ Future<void> main() async {
   // Load the Rust security core (flutter_rust_bridge). The native lib is built and
   // bundled by the platform build (see README "Wiring the Rust core").
   await RustLib.init();
-  runApp(GhostApp(core: RustNightdropCore()));
+  runApp(NightdropApp(core: RustNightdropCore()));
 }

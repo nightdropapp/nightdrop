@@ -50,7 +50,7 @@ class MockNightdropCore extends NightdropCore {
   @override
   Future<void> createIdentity() async {
     await _fakeWork();
-    _identity = Identity(id: 'ghost:${_token(10)}');
+    _identity = Identity(id: 'nightdrop:${_token(10)}');
     notifyListeners();
   }
 
@@ -61,7 +61,7 @@ class MockNightdropCore extends NightdropCore {
     final slot = _rng.nextInt(99) + 1;
     final code = '$slot-${_word()}-${_word()}-${_word()}';
     // Simulate a peer joining via this invite -> a pending request to approve.
-    _requests.add(Contact(id: 'ghost:${_token(10)}'));
+    _requests.add(Contact(id: 'nightdrop:${_token(10)}'));
     notifyListeners();
     return PairingInvite(
         shortCode: code, qrPayload: 'nightdrop://pair?b=${_token(24)}');
@@ -143,14 +143,14 @@ class MockNightdropCore extends NightdropCore {
   @override
   Future<void> importBackup(String path, String password) async {
     await _fakeWork();
-    _identity = Identity(id: 'ghost:${_token(10)}');
+    _identity = Identity(id: 'nightdrop:${_token(10)}');
     notifyListeners();
   }
 
   @override
   Future<void> importServerBackup(String password) async {
     await _fakeWork();
-    _identity = Identity(id: 'ghost:${_token(10)}');
+    _identity = Identity(id: 'nightdrop:${_token(10)}');
     notifyListeners();
   }
 
@@ -188,9 +188,9 @@ class MockNightdropCore extends NightdropCore {
   Future<Contact> joinWithShortCode(String code) async {
     await _fakeWork();
     if (code.trim().isEmpty) {
-      throw const FormatException('Enter a code like 4-ghost-lantern-river');
+      throw const FormatException('Enter a code like 4-cedar-lantern-river');
     }
-    final contact = Contact(id: 'ghost:${_token(10)}');
+    final contact = Contact(id: 'nightdrop:${_token(10)}');
     _contacts.add(contact);
     notifyListeners();
     return contact;
@@ -330,7 +330,7 @@ class MockNightdropCore extends NightdropCore {
 
   String _word() {
     const words = [
-      'ghost',
+      'cedar',
       'lantern',
       'river',
       'ember',

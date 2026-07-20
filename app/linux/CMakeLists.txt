@@ -4,14 +4,14 @@ project(runner LANGUAGES CXX)
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "ghost_chat")
+set(BINARY_NAME "night_drop")
 # The unique GTK application identifier for this application. See:
 # https://wiki.gnome.org/HowDoI/ChooseApplicationID
-# App id, overridable at build time (`GHOST_APP_ID=... flutter build linux`) so a
-# pre-release rename needs no source edit. Keep in sync with GHOST_APP_ID in
+# App id, overridable at build time (`NIGHTDROP_APP_ID=... flutter build linux`) so a
+# pre-release rename needs no source edit. Keep in sync with NIGHTDROP_APP_ID in
 # install-android-app.sh (Android reads it via gradle properties instead).
-if(DEFINED ENV{GHOST_APP_ID} AND NOT "$ENV{GHOST_APP_ID}" STREQUAL "")
-  set(APPLICATION_ID "$ENV{GHOST_APP_ID}")
+if(DEFINED ENV{NIGHTDROP_APP_ID} AND NOT "$ENV{NIGHTDROP_APP_ID}" STREQUAL "")
+  set(APPLICATION_ID "$ENV{NIGHTDROP_APP_ID}")
 else()
   set(APPLICATION_ID "app.nightdrop")
 endif()

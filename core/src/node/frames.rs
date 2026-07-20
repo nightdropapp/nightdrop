@@ -18,6 +18,7 @@ impl Node {
                 address,
                 message,
             } => {
+                crate::diag!("pair: inbound Hello — a peer is requesting a chat");
                 let olm = message.to_olm()?;
                 let accepted = crypto::accept_inbound(&mut self.identity, &identity_key, &olm)?;
                 let contact_id = identity_key;
@@ -34,10 +35,23 @@ impl Node {
                 // chat that existed and was closed is a known contact re-establishing a brand-new
                 // secure session, after which any earlier safety-number verification no longer holds.
                 let prior = self.chats.get(&contact_id);
-                let is_repair = prior.map(|c| c.closed).unwrap_or(false);
                 let was_verified = prior.map(|c| c.contact.verified).unwrap_or(false);
-                let revive = prior.map(|c| c.closed).unwrap_or(true);
-                if revive {
+                // A Hello lands in one of three states: a brand-new contact, a re-pair of a chat we
+                // deleted (closed), or a re-pair of a chat that's still OPEN (the peer paired again,
+                // or the reverse direction of an existing pairing). All but the first are re-pairs
+                // and must **adopt the new session** — the sender just built a fresh one and will
+                // only encrypt with that, so keeping the old one would silently break decryption
+                // (the double-pair bug). New/closed start clean; an open re-key keeps its history.
+                let is_repair = prior.is_some();
+                let open_rekey = prior.map(|c| !c.closed).unwrap_or(false);
+                if open_rekey {
+                    if let Some(chat) = self.chats.get_mut(&contact_id) {
+                        chat.session = accepted.session;
+                        chat.peer_address = peer_address.clone();
+                        chat.closed = false;
+                        chat.contact.verified = false; // new session invalidates prior verification
+                    }
+                } else {
                     self.chats.insert(
                         contact_id.clone(),
                         Chat {
@@ -233,7 +247,7 @@ impl Node {
             Frame::Approved { from, code } => {
                 // The inviter approved our request: drop the "waiting to be accepted" notice and
                 // surface an approval confirmation (itself cleared on the first received message).
-                devlog!("[ghost] received approval from {from} (code='{code}')");
+                devlog!("[nightdrop] received approval from {from} (code='{code}')");
                 if self.chats.contains_key(&from) {
                     self.clear_system_notices(&from, &["await_approval"]);
                     if let Some(chat) = self.chats.get_mut(&from) {
@@ -249,7 +263,7 @@ impl Node {
             }
             Frame::CodeInUse { from, code } => {
                 // The code we joined with was already spent: warn and close our side.
-                devlog!("[ghost] code '{code}' reported already used by {from}");
+                devlog!("[nightdrop] code '{code}' reported already used by {from}");
                 if let Some(chat) = self.chats.get_mut(&from) {
                     chat.closed = true;
                     chat.history.push(ChatMessage::system(
@@ -269,7 +283,7 @@ impl Node {
                 }
                 // Keep the conversation visible but mark it closed and leave a notice; the user
                 // creates a new chat to continue.
-                devlog!("[ghost] peer {from} deleted the chat");
+                devlog!("[nightdrop] peer {from} deleted the chat");
                 if let Some(chat) = self.chats.get_mut(&from) {
                     chat.closed = true;
                     chat.history.push(ChatMessage::system(
@@ -333,7 +347,7 @@ impl Node {
                     name.trim().to_string()
                 };
                 devlog!(
-                    "[ghost] peer {from} is now known as '{}'",
+                    "[nightdrop] peer {from} is now known as '{}'",
                     chat.contact.their_name
                 );
                 // Report a change so the poller refreshes (and persists) the UI.
@@ -363,7 +377,7 @@ impl Node {
                     ));
                     new_address
                 };
-                devlog!("[ghost] peer {from} announced a new address");
+                devlog!("[nightdrop] peer {from} announced a new address");
                 // Onion client auth (#22): our old client key was for their old onion — mint a fresh
                 // one for the new onion and send it so they re-authorize us and we stay reachable.
                 self.announce_client_key(&from, &new_address);
@@ -390,7 +404,7 @@ impl Node {
                     return Ok(None);
                 }
                 chat.contact.peer_relays = relays;
-                devlog!("[ghost] peer {from} announced a new relay set");
+                devlog!("[nightdrop] peer {from} announced a new relay set");
                 Ok(Some((from, String::new())))
             }
             Frame::ClientKey { from, client_key } => {
@@ -435,7 +449,7 @@ impl Node {
                         thumb_id,
                     ));
                 }
-                devlog!("[ghost] incoming {size}-byte attachment from {from}");
+                devlog!("[nightdrop] incoming {size}-byte attachment from {from}");
                 Ok(Some((from, String::new())))
             }
             Frame::Media { from, message } => {
@@ -475,7 +489,7 @@ impl Node {
                         ));
                     }
                 }
-                devlog!("[ghost] received {size}-byte attachment from {from}");
+                devlog!("[nightdrop] received {size}-byte attachment from {from}");
                 Ok(Some((from, String::new())))
             }
             // Short-code SPAKE2 runs over the rendezvous mailbox before any transport session

@@ -12,6 +12,7 @@ mod node;
 mod frb_generated;
 
 pub mod crypto;
+pub mod diag;
 pub mod directory;
 pub mod identity;
 pub mod pake;
@@ -26,4 +27,4 @@ pub mod wire;
 pub type Result<T> = anyhow::Result<T>;
 
 /// Default per-chat display name for both parties (`ARCHITECTURE.md` §4).
-pub const DEFAULT_NAME: &str = "Ghosty";
+pub const DEFAULT_NAME: &str = "Anon";

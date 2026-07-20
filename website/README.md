@@ -46,7 +46,7 @@ app. After editing, run:
 make config
 ```
 
-That regenerates `website/config.js` (a `window.GHOST_CONFIG = {…}` snapshot) and
+That regenerates `website/config.js` (a `window.NIGHTDROP_CONFIG = {…}` snapshot) and
 `app/assets/app_config.json`. `index.html` loads `config.js` and fills in the
 addresses/copy/links; if `config.js` is missing it falls back to the static placeholders in
 the HTML, so the page still renders.

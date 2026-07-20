@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/src/core/nightdrop_core.dart';
+import 'package:night_drop/src/core/nightdrop_core.dart';
 
 // The Rust bridge surfaces core failures as an `AnyhowException` whose `toString()` is
 // `AnyhowException(<message>)`; the tests pass strings shaped the same way (a String's

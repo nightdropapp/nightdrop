@@ -8,13 +8,13 @@ Complete guide to build and deploy Night Drop on Desktop (Linux) and Mobile (And
 
 ### Desktop (Tor Mode + Relay)
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 scripts/install-desktop-app.sh --run
 ```
 
 ### Android (Tor Mode + Relay)
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 scripts/install-android-app.sh
 ```
 
@@ -44,7 +44,7 @@ sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
 
 #### 1. Tor Mode + Relay Fallback (RECOMMENDED)
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 scripts/install-desktop-app.sh --run
 ```
 
@@ -60,7 +60,7 @@ scripts/install-desktop-app.sh --run
 
 **What It Does:**
 1. Auto-detects the relay address from `relay-state/onion`
-2. Bakes `GHOST_TOR` + `GHOST_RELAY` into the build via `--dart-define`
+2. Bakes `NIGHTDROP_TOR` + `NIGHTDROP_RELAY` into the build via `--dart-define`
 3. Builds the Rust core (`libnightdrop.so`) + the Flutter release bundle
 4. Installs the desktop app (`.desktop` entry, icons, `~/.local/bin/nightdrop`) and launches it
 5. App shows a QR code for pairing
@@ -70,13 +70,13 @@ For quick dev iteration without installing, use `make app-run` (see Manual Build
 #### 2. Manual Build
 ```bash
 # Get relay address
-RELAY_ADDR=$(cat ~/ghost-chat/relay-state/onion)
+RELAY_ADDR=$(cat ~/night-drop/relay-state/onion)
 
 # Set environment
 export FLUTTER_HOME=~/flutter
-export PROJECT_ROOT=~/ghost-chat
-export GHOST_TOR=1
-export GHOST_RELAY="$RELAY_ADDR"
+export PROJECT_ROOT=~/night-drop
+export NIGHTDROP_TOR=1
+export NIGHTDROP_RELAY="$RELAY_ADDR"
 
 # Build Rust core first
 cd $PROJECT_ROOT
@@ -84,24 +84,24 @@ make core-build
 
 # Run app
 cd $PROJECT_ROOT/app
-$FLUTTER_HOME/bin/flutter run -d linux --dart-define=GHOST_TOR=1
+$FLUTTER_HOME/bin/flutter run -d linux --dart-define=NIGHTDROP_TOR=1
 ```
 
 #### 3. Release Build (Optimized)
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 scripts/install-desktop-app.sh          # builds + installs the desktop app (Tor + relay baked in)
 scripts/install-desktop-app.sh --run    # ...and launches it afterwards
 # Manual equivalent:
 #   cd app && flutter build linux --release \
-#     --dart-define=GHOST_TOR=1 --dart-define="GHOST_RELAY=$(cat ../relay-state/onion)"
+#     --dart-define=NIGHTDROP_TOR=1 --dart-define="NIGHTDROP_RELAY=$(cat ../relay-state/onion)"
 ```
 
 **Output:** ~80-120 MB standalone binary
 
 #### 4. Demo Mode (Local Testing)
 ```bash
-cd ~/ghost-chat/app
+cd ~/night-drop/app
 ~/flutter/bin/flutter run -d linux
 ```
 
@@ -148,14 +148,14 @@ scripts/install-android-app.sh --wireless 192.168.X.X 5555
 
 #### Automatic (Recommended)
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 scripts/install-android-app.sh
 ```
 
 **What It Does:**
 1. ✅ Validates adb and device
 2. ✅ Detects relay address
-3. ✅ Builds APK with relay configured (`--dart-define=GHOST_RELAY=...`)
+3. ✅ Builds APK with relay configured (`--dart-define=NIGHTDROP_RELAY=...`)
 4. ✅ Installs on connected device
 5. ✅ Auto-launches Night Drop
 
@@ -175,13 +175,13 @@ scripts/install-android-app.sh --install-only
 #### Manual Build with Relay
 ```bash
 # Get relay address
-RELAY_ADDR=$(cat ~/ghost-chat/relay-state/onion)
+RELAY_ADDR=$(cat ~/night-drop/relay-state/onion)
 
 # Build with relay embedded (compile-time constant)
-cd ~/ghost-chat/app
+cd ~/night-drop/app
 ~/flutter/bin/flutter build apk --debug \
-  --dart-define=GHOST_TOR=1 \
-  --dart-define="GHOST_RELAY=$RELAY_ADDR"
+  --dart-define=NIGHTDROP_TOR=1 \
+  --dart-define="NIGHTDROP_RELAY=$RELAY_ADDR"
 
 # Install
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
@@ -238,19 +238,19 @@ Recipient comes online
 #### Desktop: Runtime Configuration
 ```bash
 # Set before running
-export GHOST_RELAY=$(cat relay-state/onion)
+export NIGHTDROP_RELAY=$(cat relay-state/onion)
 
-# App reads: Platform.environment['GHOST_RELAY']
+# App reads: Platform.environment['NIGHTDROP_RELAY']
 scripts/install-desktop-app.sh --run
 ```
 
 #### Android: Build-Time Configuration
 ```bash
 # Embedded in APK during build
---dart-define=GHOST_RELAY=$(cat relay-state/onion)
+--dart-define=NIGHTDROP_RELAY=$(cat relay-state/onion)
 
-# App reads: String.fromEnvironment('GHOST_RELAY')
-flutter build apk --debug --dart-define=GHOST_RELAY=...
+# App reads: String.fromEnvironment('NIGHTDROP_RELAY')
+flutter build apk --debug --dart-define=NIGHTDROP_RELAY=...
 ```
 
 **Why Different?** Android is sandboxed; runtime env vars inaccessible. Values must be baked in at build time.
@@ -275,7 +275,7 @@ scripts/install-android-app.sh
 
 ### Step 1: Start Relay Server
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 
 # Start relay (if not already running)
 NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
@@ -289,7 +289,7 @@ cat relay-state/onion
 ### Step 2: Build & Run Desktop
 ```bash
 # Terminal 1
-cd ~/ghost-chat
+cd ~/night-drop
 scripts/install-desktop-app.sh --run
 
 # Wait for app window to open
@@ -300,7 +300,7 @@ scripts/install-desktop-app.sh --run
 ### Step 3: Build & Deploy Android
 ```bash
 # Terminal 2
-cd ~/ghost-chat
+cd ~/night-drop
 
 # Connect phone (USB or WiFi)
 scripts/install-android-app.sh --wireless 192.168.X.X 5555  # If WiFi
@@ -388,7 +388,7 @@ scripts/install-android-app.sh --build-only
 # Build without relay (P2P only)
 cd app
 ~/flutter/bin/flutter build apk --debug \
-  --dart-define=GHOST_TOR=1
+  --dart-define=NIGHTDROP_TOR=1
 ```
 
 ### Environment Variables (Optional)
@@ -396,7 +396,7 @@ cd app
 Set these if tools aren't in PATH:
 ```bash
 export FLUTTER_HOME=~/flutter
-export PROJECT_ROOT=~/ghost-chat
+export PROJECT_ROOT=~/night-drop
 export ADB=~/android-sdk/platform-tools/adb
 
 # Rebuild apps
@@ -424,7 +424,7 @@ adb uninstall app.nightdrop
 
 ### Clear All Build Artifacts
 ```bash
-cd ~/ghost-chat
+cd ~/night-drop
 
 # Flutter
 cd app
@@ -484,7 +484,7 @@ scripts/install-desktop-app.sh --run
 ps aux | grep relay
 
 # Check relay state file
-ls -la ~/ghost-chat/relay-state/onion
+ls -la ~/night-drop/relay-state/onion
 
 # Restart script
 scripts/install-desktop-app.sh --run
@@ -510,7 +510,7 @@ scripts/install-android-app.sh --wireless 192.168.X.X 5555
 
 **"Build fails"**
 ```bash
-cd ~/ghost-chat/app
+cd ~/night-drop/app
 flutter clean
 flutter pub get
 cd ..
@@ -614,12 +614,12 @@ scripts/install-desktop-app.sh --run
 ```bash
 # Desktop (no relay config needed)
 cd app
-~/flutter/bin/flutter run -d linux --dart-define=GHOST_TOR=1
+~/flutter/bin/flutter run -d linux --dart-define=NIGHTDROP_TOR=1
 
 # Android (build without relay)
 cd app
 ~/flutter/bin/flutter build apk --debug \
-  --dart-define=GHOST_TOR=1
+  --dart-define=NIGHTDROP_TOR=1
 adb install -r build/app/outputs/flutter-apk/app-debug.apk
 ```
 
@@ -631,7 +631,7 @@ adb install -r build/app/outputs/flutter-apk/app-debug.apk
 #!/bin/bash
 # Deploy both platforms in parallel
 
-cd ~/ghost-chat
+cd ~/night-drop
 
 # Start desktop (background)
 scripts/install-desktop-app.sh --run &
@@ -683,7 +683,7 @@ scripts/install-desktop-app.sh --run
 scripts/install-android-app.sh
 
 # 4. Monitor logs
-tail -f /tmp/ghost-chat-tor.log
+tail -f /tmp/night-drop-tor.log
 tail -f /tmp/relay-*.log
 
 # 5. See relay activity

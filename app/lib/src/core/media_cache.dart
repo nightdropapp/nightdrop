@@ -16,7 +16,7 @@ class MediaCache {
   static final Map<String, Future<String>> files = {};
 
   /// Drop every cached decrypt and delete the plaintext temp files written by
-  /// `mediaToFile` (the Rust core names them `ghost-media-<id>.<ext>` in the OS temp
+  /// `mediaToFile` (the Rust core names them `nightdrop-media-<id>.<ext>` in the OS temp
   /// dir). Best-effort: a file the OS already reclaimed, or one held open by an external
   /// player, is skipped silently.
   static Future<void> wipe() async {
@@ -25,7 +25,7 @@ class MediaCache {
     try {
       await for (final entry in Directory.systemTemp.list()) {
         if (entry is File &&
-            entry.uri.pathSegments.last.startsWith('ghost-media-')) {
+            entry.uri.pathSegments.last.startsWith('nightdrop-media-')) {
           try {
             await entry.delete();
           } catch (_) {}

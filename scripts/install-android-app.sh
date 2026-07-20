@@ -17,6 +17,8 @@ FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
 # This script lives in scripts/; the repo root is its parent.
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ADB="${ADB:-}"
+# Opt-in field diagnostics (--diag). Off by default: a normal build stays silent.
+DIAG="${NIGHTDROP_DIAG:-0}"
 # The single device serial install/launch target (resolved by select_device). Seed it from
 # --device or the standard ANDROID_SERIAL env var so an explicit choice always wins.
 TARGET_SERIAL="${ANDROID_SERIAL:-}"
@@ -25,14 +27,14 @@ TARGET_SERIAL="${ANDROID_SERIAL:-}"
 ANDROID_SDK="${ANDROID_SDK:-${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}}"
 
 # App identity — override these to rename the app before a full release, e.g.:
-#   GHOST_APP_ID=org.example.chat GHOST_APP_NAME="My Chat" ./install-android-app.sh
-# NOTE: a different GHOST_APP_ID is a different app to Android — it installs alongside
+#   NIGHTDROP_APP_ID=org.example.chat NIGHTDROP_APP_NAME="My Chat" ./install-android-app.sh
+# NOTE: a different NIGHTDROP_APP_ID is a different app to Android — it installs alongside
 # the old one instead of upgrading it (uninstall the old id manually).
-GHOST_APP_ID="${GHOST_APP_ID:-app.nightdrop}"
-GHOST_APP_NAME="${GHOST_APP_NAME:-Night Drop}"
+NIGHTDROP_APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"
+NIGHTDROP_APP_NAME="${NIGHTDROP_APP_NAME:-Night Drop}"
 # Gradle picks these up as project properties (build.gradle.kts reads appId/appName).
-export ORG_GRADLE_PROJECT_appId="$GHOST_APP_ID"
-export ORG_GRADLE_PROJECT_appName="$GHOST_APP_NAME"
+export ORG_GRADLE_PROJECT_appId="$NIGHTDROP_APP_ID"
+export ORG_GRADLE_PROJECT_appName="$NIGHTDROP_APP_NAME"
 
 # Functions
 log_info() {
@@ -312,10 +314,14 @@ build_apk() {
 
     # Tor mode + relay are compile-time --dart-define values: Android apps can't read
     # runtime env vars, so the relay's .onion must be baked into the APK.
-    local defines=(--dart-define=GHOST_TOR=1)
+    local defines=(--dart-define=NIGHTDROP_TOR=1)
+    if [ "${DIAG:-0}" = 1 ]; then
+        defines+=(--dart-define=NIGHTDROP_DIAG=1)
+        log_success "Diagnostics ON — protocol outcomes to logcat (tag nd-diag); no keys/codes/addresses"
+    fi
     if [ -f "$PROJECT_ROOT/relay-state/onion" ]; then
         RELAY_ADDR=$(cat "$PROJECT_ROOT/relay-state/onion")
-        defines+=("--dart-define=GHOST_RELAY=$RELAY_ADDR")
+        defines+=("--dart-define=NIGHTDROP_RELAY=$RELAY_ADDR")
         log_success "Relay baked in for store-and-forward: $RELAY_ADDR"
     else
         log_warn "Relay not found (relay-state/onion) - P2P only, no store-and-forward"
@@ -373,7 +379,7 @@ launch_app() {
     log_info "Launching Night Drop..."
     local -a tgt=()
     [ -n "$TARGET_SERIAL" ] && tgt=(-s "$TARGET_SERIAL")
-    if "$ADB" "${tgt[@]}" shell monkey -p "$GHOST_APP_ID" -c android.intent.category.LAUNCHER 1 2>/dev/null; then
+    if "$ADB" "${tgt[@]}" shell monkey -p "$NIGHTDROP_APP_ID" -c android.intent.category.LAUNCHER 1 2>/dev/null; then
         log_success "App launched"
         return 0
     else
@@ -401,6 +407,8 @@ OPTIONS
   --device SERIAL     Install to this exact device serial (from --list-devices). Needed only
                       when several DIFFERENT devices are attached; a single phone showing up
                       over multiple transports (wireless debugging) is auto-resolved.
+  --diag              Build with opt-in pairing/transport diagnostics (logcat tag `nd-diag`).
+                      Protocol outcomes only — never keys, codes, onion addresses, or names.
   --build-only        Build APK without installing
   --install-only      Install existing APK (skip build)
   --list-devices      Show connected devices
@@ -412,10 +420,10 @@ ENVIRONMENT VARIABLES
   ADB                 adb command path (auto-detected if not set)
   ANDROID_SERIAL      Device serial to install to (same as --device; standard adb env var)
   ANDROID_SDK         Android SDK path (default: ~/Android/sdk)
-  GHOST_APP_ID        Android applicationId (default: app.nightdrop).
+  NIGHTDROP_APP_ID        Android applicationId (default: app.nightdrop).
                       Change to rename the app identity before a full release.
                       A new id installs ALONGSIDE the old app, not over it.
-  GHOST_APP_NAME      Launcher display name (default: Night Drop)
+  NIGHTDROP_APP_NAME      Launcher display name (default: Night Drop)
 
 EXAMPLES
   # Build and install
@@ -425,10 +433,10 @@ EXAMPLES
   ./install-android-app.sh --release
 
   # Connect wireless first
-  ./install-android-app.sh --wireless 192.168.88.26 33603
+  ./install-android-app.sh --wireless 192.168.xx.xx 33603
 
   # Force a specific device (only needed with multiple DIFFERENT devices attached)
-  ./install-android-app.sh --device 10.0.0.49:37193
+  ./install-android-app.sh --device 192.168.xx.xx:33603
 
   # Build only (skip install)
   ./install-android-app.sh --build-only
@@ -453,6 +461,7 @@ main() {
     while [ $# -gt 0 ]; do
         case "$1" in
             --release) BUILD_MODE="release" ;;
+            --diag) DIAG=1 ;;
             --device)
                 if [ -z "${2:-}" ]; then
                     log_error "--device needs a serial (see: $0 --list-devices)"
@@ -500,7 +509,7 @@ main() {
             setup_adb || exit 1
             check_device || exit 1
             select_device || exit 1
-            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/app-$BUILD_MODE.apk"
+            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/nightdrop-$BUILD_MODE.apk"
             install_apk || exit 1
             exit 0
             ;;

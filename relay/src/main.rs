@@ -24,7 +24,7 @@ mod tui;
 use std::path::Path;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use arti_client::config::TorClientConfigBuilder;
@@ -97,6 +97,12 @@ fn main() -> anyhow::Result<()> {
     let core = Arc::new(base.with_directory(directory));
     let start = Instant::now();
 
+    // If prior runs kept ending unreachable, plain restarts aren't helping — the guard set is
+    // wedged. Reset it before bootstrapping so this start picks fresh entry guards (§6).
+    if read_unhealthy(&state_dir) >= UNHEALTHY_RESET_THRESHOLD {
+        reset_tor_guards(&state_dir);
+    }
+
     let config = tor_config(&state_dir)?;
     let runtime = Runtime::new().context("tokio runtime")?;
     runtime.block_on(async move {
@@ -124,6 +130,48 @@ fn main() -> anyhow::Result<()> {
 
         // Write the address to `<state>/onion` so dev tooling can read it without scraping logs.
         let _ = std::fs::write(format!("{state_dir}/onion"), &onion);
+
+        // Self-healing watchdog. arti keeps this process alive even when its descriptor publisher
+        // or introduction points wedge (observed after multi-day uptime: the process runs, the
+        // onion goes dark, clients get "could not reach relay"). `Restart=always` can't recover
+        // that — nothing crashed. So we watch the service's own reachability and exit when it has
+        // been unreachable long enough to warrant a fresh start; systemd then restarts us, which
+        // re-establishes intro points and republishes the descriptor. A brief unreachable window
+        // is normal during startup and intro-point rotation, so we only act on a sustained outage.
+        {
+            let watched = Arc::clone(&service);
+            let sd = state_dir.clone();
+            tokio::spawn(async move {
+                let mut unreachable_since: Option<Instant> = None;
+                let mut cleared = false;
+                loop {
+                    tokio::time::sleep(WATCHDOG_INTERVAL).await;
+                    if watched.status().state().is_fully_reachable() {
+                        unreachable_since = None;
+                        // Reachable: clear the escalation counter once, so a *later* independent
+                        // outage starts its own plain-restart-then-guard-reset sequence from zero.
+                        if !cleared {
+                            write_unhealthy(&sd, 0);
+                            cleared = true;
+                        }
+                        continue;
+                    }
+                    let since = *unreachable_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= WATCHDOG_MAX_UNREACHABLE {
+                        // Record this unhealthy cycle so the next start can escalate to a guard
+                        // reset if plain restarts keep failing, then exit for systemd to restart us.
+                        let n = read_unhealthy(&sd) + 1;
+                        write_unhealthy(&sd, n);
+                        eprintln!(
+                            "nightdrop-relay: onion unreachable for {}s (unhealthy cycle {n}) — \
+                             exiting for a fresh restart (systemd Restart=always)",
+                            since.elapsed().as_secs()
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
         if tui {
             // Hand the terminal to the dashboard on its own thread; the accept loop keeps the
             // main thread.
@@ -292,9 +340,59 @@ fn auth_dir() -> String {
 /// we never restrict with an empty set (that would make the relay unreachable by everyone). The
 /// directory is watched, so authorizing/revoking after launch takes effect without a relaunch.
 /// Mirrors `nightdrop::transport::tor::onion_service_config` (kept in sync by construction).
+/// Introduction points for the relay's onion. arti defaults to 3; the relay is always-on
+/// infrastructure whose reachability everyone depends on, so it runs more — losing a couple of
+/// intro points (relay churn, transient failures) then still leaves the service reachable instead
+/// of dark. Well under arti's max of 20.
+const RELAY_INTRO_POINTS: u8 = 6;
+
+/// How often the self-healing watchdog samples the onion's reachability.
+const WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
+/// How long the onion may stay unreachable before the watchdog exits for a fresh restart. Long
+/// enough to ride out normal startup bootstrapping (~1–3 min) and intro-point rotation without a
+/// spurious restart; short enough that a real wedge self-corrects in minutes, not days.
+const WATCHDOG_MAX_UNREACHABLE: Duration = Duration::from_secs(8 * 60);
+
+/// Consecutive unhealthy (sustained-unreachable) restart cycles after which the guard state is
+/// reset on the next start. The first restart is plain — it re-establishes introduction points and
+/// republishes the descriptor, which fixes an intro-point wedge and keeps arti's entry guards
+/// sticky (a privacy property). Only if that doesn't restore reachability do we escalate to a guard
+/// reset, since the remaining cause is a wedged guard set (guards churned out of the network — a
+/// plain restart reuses them, so it can't recover; this is exactly the state that had to be cleared
+/// by hand). So: plain restart, then guard reset.
+const UNHEALTHY_RESET_THRESHOLD: u32 = 2;
+
+/// The escalation counter: consecutive unhealthy restart cycles, persisted so it survives the exit.
+fn unhealthy_marker(state_dir: &str) -> std::path::PathBuf {
+    Path::new(state_dir).join("unhealthy-restarts")
+}
+fn read_unhealthy(state_dir: &str) -> u32 {
+    std::fs::read_to_string(unhealthy_marker(state_dir))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+fn write_unhealthy(state_dir: &str, n: u32) {
+    let _ = std::fs::write(unhealthy_marker(state_dir), n.to_string());
+}
+
+/// Delete arti's entry-guard + circuit-timing state — but NOT the onion keystore, so the stable
+/// `.onion` address is preserved. The next bootstrap then picks fresh entry guards, recovering from
+/// a wedged guard set that a plain restart (which reuses the same guards) cannot.
+fn reset_tor_guards(state_dir: &str) {
+    let dir = Path::new(state_dir).join("arti-state").join("state");
+    for f in ["guards.json", "circuit_timeouts.json"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+    eprintln!(
+        "nightdrop-relay: reset entry-guard state (onion identity kept) to recover reachability"
+    );
+}
+
 fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<OnionServiceConfig> {
     let mut builder = OnionServiceConfigBuilder::default();
     builder.nickname(nickname);
+    builder.num_intro_points(RELAY_INTRO_POINTS);
     if nightdrop::transport::client_auth::authorized_count(Path::new(auth_dir)) > 0 {
         let mut provider = DirectoryKeyProviderBuilder::default();
         provider

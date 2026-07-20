@@ -196,6 +196,10 @@ pub fn seal(key: &StoreKey, plaintext: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Decrypt a blob produced by [`seal`]. Fails on a wrong key or corruption.
+///
+/// The "decrypt failed" wording is a **contract with the app**: it is how the UI tells a genuine
+/// wrong-password/damaged-file failure apart from an unrelated one (Tor, network, disk) and so
+/// decides whether blaming the password is honest. See `app/lib/src/core/backup_errors.dart`.
 pub fn open(key: &StoreKey, blob: &[u8]) -> Result<Vec<u8>> {
     if blob.len() < NONCE_LEN {
         anyhow::bail!("blob too short");
@@ -286,7 +290,7 @@ mod tests {
     #[test]
     fn save_to_file_is_atomic_round_trips_and_leaves_no_temp() {
         let key = [5u8; 32];
-        let dir = std::env::temp_dir().join(format!("ghost-atomic-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nightdrop-atomic-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state.bin");
         let path = path.to_str().unwrap().to_string();

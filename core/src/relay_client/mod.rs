@@ -33,9 +33,6 @@ use crate::Result;
 
 /// How often the reaper sweeps expired blobs.
 const REAP_INTERVAL: Duration = Duration::from_secs(60);
-/// How often the (opt-in) persistence flusher writes the queue to disk when it has changed.
-/// Bounds worst-case loss on a crash to this window while coalescing bursts of posts.
-const FLUSH_INTERVAL: Duration = Duration::from_secs(3);
 
 /// Wall-clock time in unix seconds (for persistable blob expiry — `Instant` is monotonic and
 /// cannot survive a restart).
@@ -323,7 +320,7 @@ struct PersistedStore {
 }
 
 /// Serialize the live store and write it atomically (`tmp` + rename) to `path`.
-fn save_store(inner: &StoreInner, path: &Path) {
+fn save_store(inner: &StoreInner, path: &Path) -> bool {
     let mut persisted = PersistedStore::default();
     for (handle, queue) in &inner.map {
         if queue.is_empty() {
@@ -343,12 +340,24 @@ fn save_store(inner: &StoreInner, path: &Path) {
         );
     }
     let Ok(json) = serde_json::to_vec(&persisted) else {
-        return;
+        return false;
     };
-    let tmp = path.with_extension("tmp");
-    if std::fs::write(&tmp, &json).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
+    // The relay binary creates its state directory during Tor setup, but queue persistence is
+    // constructed first. Make the queue path self-sufficient so the first post cannot be lost
+    // merely because that setup has not completed yet.
+    if let Some(parent) = path.parent() {
+        if std::fs::create_dir_all(parent).is_err() {
+            return false;
+        }
     }
+    let tmp = path.with_extension("tmp");
+    let Ok(mut file) = std::fs::File::create(&tmp) else {
+        return false;
+    };
+    if file.write_all(&json).is_err() || file.sync_all().is_err() {
+        return false;
+    }
+    std::fs::rename(&tmp, path).is_ok()
 }
 
 /// Load a persisted store, dropping anything already past its wall-clock expiry and rebuilding
@@ -389,16 +398,14 @@ fn load_store(path: &Path) -> StoreInner {
     inner
 }
 
-/// Periodically write the store to `path` when it has changed (see [`FLUSH_INTERVAL`]).
-fn spawn_flusher(store: Store, path: PathBuf) {
-    std::thread::spawn(move || loop {
-        std::thread::sleep(FLUSH_INTERVAL);
-        let mut inner = store.lock().unwrap();
-        if inner.dirty {
-            inner.dirty = false;
-            save_store(&inner, &path); // small, local write; the store lock is briefly held
-        }
-    });
+/// Flush a changed queue atomically. This is called at the end of every mutating relay request,
+/// rather than on a timer: once `post` reports success the opaque mailbox is crash-recoverable.
+fn flush_store(store: &Store, path: &Path) {
+    let mut inner = store.lock().unwrap();
+    if inner.dirty {
+        // Retain dirty on an I/O failure so the next relay operation retries persistence.
+        inner.dirty = !save_store(&inner, path);
+    }
 }
 
 /// A per-mailbox snapshot for the dev dashboard (TUI). Metadata only — never blob bytes.
@@ -420,6 +427,8 @@ pub struct RelayCore {
     /// The operator-signed relay directory this relay serves (one-line JSON), if any. Loaded from
     /// the state dir by the binary; served verbatim on `GetDirectory` (clients verify the signature).
     directory: Option<String>,
+    /// Where to durably store the mailbox, if persistence was requested.
+    persist_path: Option<PathBuf>,
 }
 
 impl RelayCore {
@@ -438,6 +447,7 @@ impl RelayCore {
             logger,
             limits,
             directory: None,
+            persist_path: None,
         }
     }
 
@@ -460,12 +470,12 @@ impl RelayCore {
     ) -> Self {
         let store: Store = Arc::new(Mutex::new(load_store(&persist_path)));
         spawn_reaper(Arc::clone(&store), logger.clone());
-        spawn_flusher(Arc::clone(&store), persist_path);
         Self {
             store,
             logger,
             limits,
             directory: None,
+            persist_path: Some(persist_path),
         }
     }
 
@@ -482,6 +492,9 @@ impl RelayCore {
                     process(rl.req, &self.store, &self.limits, self.directory.as_deref());
                 if let Some(logger) = &self.logger {
                     logger(event);
+                }
+                if let Some(path) = &self.persist_path {
+                    flush_store(&self.store, path);
                 }
                 response
             }
@@ -1188,6 +1201,46 @@ mod tests {
             loaded.total_bytes, 9,
             "byte total counts only the live blob"
         );
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("tmp"));
+    }
+
+    #[test]
+    fn persistent_relay_flushes_before_acknowledging_a_post() {
+        // Simulate a process dying immediately after `post` returns: no flusher interval may
+        // stand between a successful reply and the mailbox reaching queue.json.
+        let path = std::env::temp_dir().join(format!(
+            "nd-relay-immediate-persist-{}-{}.json",
+            std::process::id(),
+            now_unix()
+        ));
+        let core = RelayCore::with_persistence(None, RelayLimits::default(), path.clone());
+        let post = serde_json::to_string(&RequestLineRef {
+            v: RELAY_VERSION,
+            req: &Request::Post {
+                handle: "mbx:crash-recovery".into(),
+                blob: B64.encode(b"survive-now"),
+                ttl_secs: 60,
+            },
+        })
+        .unwrap();
+        let response: ResponseLine = serde_json::from_str(&core.handle_line(&post)).unwrap();
+        assert!(response.resp.ok);
+        assert!(path.exists(), "queue is written before post succeeds");
+
+        // A fresh core is the recovery path after the simulated crash.
+        drop(core);
+        let recovered = RelayCore::with_persistence(None, RelayLimits::default(), path.clone());
+        let peek = serde_json::to_string(&RequestLineRef {
+            v: RELAY_VERSION,
+            req: &Request::Peek {
+                handle: "mbx:crash-recovery".into(),
+            },
+        })
+        .unwrap();
+        let response: ResponseLine = serde_json::from_str(&recovered.handle_line(&peek)).unwrap();
+        assert_eq!(response.resp.count, 1, "mail survives immediate restart");
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("tmp"));
