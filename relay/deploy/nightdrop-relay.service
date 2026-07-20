@@ -25,6 +25,12 @@ Type=simple
 ExecStart=/usr/local/bin/nightdrop-relay
 Restart=always
 RestartSec=5
+# Self-healing has two layers. Primary: the relay watches its own onion reachability and exits if
+# it stays dark (arti can keep the process alive while the descriptor publisher wedges, which
+# Restart=always alone never recovers). Backstop: cycle the process at most weekly so any slow
+# degradation the watchdog doesn't catch still refreshes without anyone intervening. Restart is
+# ~1–3 min of downtime while intro points re-establish; store-and-forward clients just retry.
+RuntimeMaxSec=1w
 
 # Stable-onion state dir. StateDirectory creates/owns %S/nightdrop-relay (=/var/lib/nightdrop-relay
 # for a system unit) as the dynamic user; the binary reads NIGHTDROP_RELAY_STATE.

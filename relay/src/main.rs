@@ -24,7 +24,7 @@ mod tui;
 use std::path::Path;
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::Context as _;
 use arti_client::config::TorClientConfigBuilder;
@@ -124,6 +124,36 @@ fn main() -> anyhow::Result<()> {
 
         // Write the address to `<state>/onion` so dev tooling can read it without scraping logs.
         let _ = std::fs::write(format!("{state_dir}/onion"), &onion);
+
+        // Self-healing watchdog. arti keeps this process alive even when its descriptor publisher
+        // or introduction points wedge (observed after multi-day uptime: the process runs, the
+        // onion goes dark, clients get "could not reach relay"). `Restart=always` can't recover
+        // that — nothing crashed. So we watch the service's own reachability and exit when it has
+        // been unreachable long enough to warrant a fresh start; systemd then restarts us, which
+        // re-establishes intro points and republishes the descriptor. A brief unreachable window
+        // is normal during startup and intro-point rotation, so we only act on a sustained outage.
+        {
+            let watched = Arc::clone(&service);
+            tokio::spawn(async move {
+                let mut unreachable_since: Option<Instant> = None;
+                loop {
+                    tokio::time::sleep(WATCHDOG_INTERVAL).await;
+                    if watched.status().state().is_fully_reachable() {
+                        unreachable_since = None;
+                        continue;
+                    }
+                    let since = *unreachable_since.get_or_insert_with(Instant::now);
+                    if since.elapsed() >= WATCHDOG_MAX_UNREACHABLE {
+                        eprintln!(
+                            "nightdrop-relay: onion unreachable for {}s — exiting for a fresh \
+                             restart (systemd Restart=always)",
+                            since.elapsed().as_secs()
+                        );
+                        std::process::exit(1);
+                    }
+                }
+            });
+        }
         if tui {
             // Hand the terminal to the dashboard on its own thread; the accept loop keeps the
             // main thread.
@@ -292,9 +322,23 @@ fn auth_dir() -> String {
 /// we never restrict with an empty set (that would make the relay unreachable by everyone). The
 /// directory is watched, so authorizing/revoking after launch takes effect without a relaunch.
 /// Mirrors `nightdrop::transport::tor::onion_service_config` (kept in sync by construction).
+/// Introduction points for the relay's onion. arti defaults to 3; the relay is always-on
+/// infrastructure whose reachability everyone depends on, so it runs more — losing a couple of
+/// intro points (relay churn, transient failures) then still leaves the service reachable instead
+/// of dark. Well under arti's max of 20.
+const RELAY_INTRO_POINTS: u8 = 6;
+
+/// How often the self-healing watchdog samples the onion's reachability.
+const WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
+/// How long the onion may stay unreachable before the watchdog exits for a fresh restart. Long
+/// enough to ride out normal startup bootstrapping (~1–3 min) and intro-point rotation without a
+/// spurious restart; short enough that a real wedge self-corrects in minutes, not days.
+const WATCHDOG_MAX_UNREACHABLE: Duration = Duration::from_secs(8 * 60);
+
 fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<OnionServiceConfig> {
     let mut builder = OnionServiceConfigBuilder::default();
     builder.nickname(nickname);
+    builder.num_intro_points(RELAY_INTRO_POINTS);
     if nightdrop::transport::client_auth::authorized_count(Path::new(auth_dir)) > 0 {
         let mut provider = DirectoryKeyProviderBuilder::default();
         provider

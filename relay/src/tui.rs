@@ -59,7 +59,7 @@ pub fn run_tui(onion: String, core: Arc<RelayCore>, rx: Receiver<RelayEvent>, st
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" Ghost Relay (dev) — opaque blobs only, no identities "),
+                    .title(" Night Drop Relay (dev) — opaque blobs only, no identities "),
             );
             f.render_widget(header, rows[0]);
 
