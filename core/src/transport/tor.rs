@@ -38,8 +38,8 @@ use tor_rtcompat::PreferredRuntime;
 use crate::transport::{client_auth, Address, Transport};
 use crate::Result;
 
-/// The virtual port our onion service exposes (peers dial `<onion>:GHOST_PORT`).
-const GHOST_PORT: u16 = 9001;
+/// The virtual port our onion service exposes (peers dial `<onion>:NIGHTDROP_PORT`).
+const NIGHTDROP_PORT: u16 = 9001;
 
 /// The virtual port the relay's onion service is dialed on (it accepts any rendezvous stream).
 const RELAY_PORT: u16 = 9001;
@@ -55,6 +55,18 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(120);
 /// continuously-observable connection longer than needed; per-peer, so contacts stay
 /// circuit-isolated by arti's per-`.onion` routing).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// Cap a single **direct peer** dial. `send` runs while the core lock is held, so an unbounded
+/// dial to an offline peer would freeze every other UI call (and the poller) for as long as arti
+/// keeps retrying — up to minutes with a high `HS_CONNECT_ATTEMPTS`. An online peer connects well
+/// within this; a slow/offline one fails fast so `send` falls back to the relay (or defers the
+/// retry to the poller) instead of blocking. The message is never lost — only delivery is deferred.
+const PEER_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
+
+/// Cap a single **relay** connect. Bounds a hung dial without defeating persistence: the callers
+/// that need to punch through a flaky path (pairing's `run_join_handshake`, the relay-retry
+/// poller) loop over their own schedule, each iteration a fresh, individually-bounded attempt.
+const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Outbound streams we hold open per peer to avoid re-dialing the onion for every frame.
 type OutStreams = Arc<Mutex<HashMap<Address, (DataStream, Instant)>>>;
@@ -116,6 +128,18 @@ impl TorTransport {
                     .context("bootstrap Tor")?;
 
             let nickname: HsNickname = nickname.parse().context("onion service nickname")?;
+            // Whether our onion is restricted decides who can reach us at all: a peer we haven't
+            // authorized can't even fetch the descriptor, so a brand-new contact's Hello has to
+            // come via the relay (#22). Worth knowing when a chat request never arrives (#6).
+            let restricted = auth_dir_for_svc
+                .as_deref()
+                .map(|d| client_auth::authorized_count(std::path::Path::new(d)))
+                .unwrap_or(0);
+            crate::diag!(
+                "tor: launching onion service — restricted discovery {} ({restricted} authorized \
+                 client(s)); while restricted, unauthorized peers must reach us via the relay",
+                if restricted > 0 { "ON" } else { "off" }
+            );
             let svc_config = onion_service_config(nickname, auth_dir_for_svc.as_deref())?;
             let (service, rend_requests) = client
                 .launch_onion_service(svc_config)
@@ -196,10 +220,13 @@ impl TorTransport {
                 format!("{request_line}\n")
             };
             runtime.block_on(async {
-                let mut stream = client
-                    .connect((relay_onion.as_str(), RELAY_PORT))
-                    .await
-                    .with_context(|| format!("relay connect {relay_onion}"))?;
+                let mut stream = tokio::time::timeout(
+                    RELAY_DIAL_TIMEOUT,
+                    client.connect((relay_onion.as_str(), RELAY_PORT)),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
+                .with_context(|| format!("relay connect {relay_onion}"))?;
                 stream.write_all(req.as_bytes()).await?;
                 stream.flush().await?;
                 let mut reader = futures::io::BufReader::new(stream);
@@ -296,10 +323,13 @@ impl Transport for TorTransport {
                 }
                 // stale (peer closed it / circuit gone): drop and reconnect.
             }
-            let mut s = client
-                .connect((peer2.as_str(), GHOST_PORT))
-                .await
-                .context("dial peer onion")?;
+            let mut s = tokio::time::timeout(
+                PEER_DIAL_TIMEOUT,
+                client.connect((peer2.as_str(), NIGHTDROP_PORT)),
+            )
+            .await
+            .map_err(|_| anyhow::anyhow!("peer dial timed out"))?
+            .context("dial peer onion")?;
             write_frame(&mut s, &frame).await?;
             s.flush().await?;
             Ok(s)
@@ -319,9 +349,29 @@ impl Transport for TorTransport {
 /// Build the arti client config. With `state_dir` we point arti's state + cache at an
 /// explicit writable base (required on Android) and relax fs-mistrust's permission checks,
 /// since app-sandbox directories don't match arti's default ownership expectations.
+/// How many times the client will try to fetch an onion descriptor / build an intro+rendezvous
+/// circuit before giving up (arti defaults both to 6). On a slow or lossy path 6 is too few — the
+/// relay itself may take dozens of circuit tries just to *publish* — so a client that quits after
+/// 6 reports "could not reach any relay" against a perfectly healthy service. Raised well above the
+/// default; each attempt is still individually bounded, so the cost of the extra tries is only paid
+/// on a path that actually needs them.
+const HS_CONNECT_ATTEMPTS: u32 = 32;
+
+/// Apply settings shared by every Tor config we build (see [`HS_CONNECT_ATTEMPTS`]).
+fn apply_common_tuning(builder: &mut TorClientConfigBuilder) {
+    builder
+        .circuit_timing()
+        .hs_desc_fetch_attempts(HS_CONNECT_ATTEMPTS)
+        .hs_intro_rend_attempts(HS_CONNECT_ATTEMPTS);
+}
+
 fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
     match state_dir {
-        None => Ok(TorClientConfig::default()),
+        None => {
+            let mut builder = TorClientConfigBuilder::default();
+            apply_common_tuning(&mut builder);
+            builder.build().context("build Tor config")
+        }
         Some(base) => {
             let state = format!("{base}/arti-state");
             let cache = format!("{base}/arti-cache");
@@ -329,6 +379,7 @@ fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
             std::fs::create_dir_all(&cache).ok();
             let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
             builder.storage().permissions().dangerously_trust_everyone();
+            apply_common_tuning(&mut builder);
             apply_bridges(&mut builder, base);
             // Register any pluggable transports (obfs4/snowflake) the user configured, so a bridge
             // line that names such a transport has a binary to run it. Must come with the bridges:
@@ -457,6 +508,11 @@ fn onion_service_config(
 ) -> Result<OnionServiceConfig> {
     let mut builder = OnionServiceConfigBuilder::default();
     builder.nickname(nickname);
+    // One more introduction point than arti's default of 3: a device onion that loses an intro
+    // point (relay churn while the phone is backgrounded/roaming) stays reachable for pairing and
+    // first-contact Hellos instead of going briefly dark. Kept small — each IPT is a maintained
+    // circuit, and battery matters on mobile — so this trades a little upkeep for reachability.
+    builder.num_intro_points(4);
     if let Some(dir) = client_auth_dir {
         if client_auth::authorized_count(std::path::Path::new(dir)) > 0 {
             let mut provider = DirectoryKeyProviderBuilder::default();

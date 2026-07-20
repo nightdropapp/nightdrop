@@ -13,7 +13,7 @@ use spake2::{Ed25519Group, Identity, Password, Spake2};
 use crate::Result;
 
 /// Domain-separation context bound into every Night Drop PAKE run.
-pub const CONTEXT: &[u8] = b"ghost-chat/pake/v1";
+pub const CONTEXT: &[u8] = b"night-drop/pake/v1";
 
 /// In-progress PAKE state. Hold it only until [`finish`](Bouncer::finish); the secret
 /// words must not be persisted (the app passes them in transiently — see §5b/§7 wiping).
@@ -47,7 +47,7 @@ mod tests {
 
     #[test]
     fn matching_secret_yields_matching_key() {
-        let secret = b"4-ghost-lantern-river";
+        let secret = b"4-cedar-lantern-river";
         let (a, a_msg) = start(secret);
         let (b, b_msg) = start(secret);
         let ka = a.finish(&b_msg).unwrap();

@@ -266,16 +266,17 @@ impl Node {
         msg.edited = true;
 
         // Path 1: replace the still-queued relay blob(s) so the old text is never delivered.
-        // With fan-out (#17) we recall every copy; if any was still queued, re-post the new text
-        // to the whole recipient relay set.
+        // With fan-out (#17) we recall every copy. Only an all-copy recall can be replaced
+        // invisibly: if even one relay says "not found" it may already have delivered the old
+        // message, so fall through and send a normal E2E edit instead.
         if queued {
             let copies = chat.relay_receipts.remove(msg_id).unwrap_or_default();
             // Recall *every* fanned-out copy before re-posting the new text (each client is rebuilt
             // from its stored address, so this survives a restart). Must not short-circuit — a
             // `.any()` would strand the old text on the sibling relays (#17).
-            let recalled_any =
+            let recalled_all =
                 recall_receipts(self.transport.as_ref(), &self.relay, contact_id, &copies);
-            if recalled_any {
+            if recalled_all {
                 let message = crypto::encrypt(&mut chat.session, new_text.as_bytes());
                 let frame = Frame::Message {
                     from,
@@ -323,30 +324,36 @@ impl Node {
             anyhow::bail!("this chat was deleted");
         }
         let now = crate::api::now_secs();
-        let msg = chat
+        let msg_index = chat
             .history
             .iter_mut()
-            .find(|m| m.from_me && !m.system && m.kind == "text" && m.msg_id == msg_id)
+            .position(|m| m.from_me && !m.system && m.kind == "text" && m.msg_id == msg_id)
             .ok_or_else(|| anyhow::anyhow!("message not found or not deletable"))?;
+        let msg = &chat.history[msg_index];
         let queued = msg.delivery == "queued";
         let in_window = msg.at != 0 && now.saturating_sub(msg.at) <= EDIT_WINDOW.as_secs();
         if !queued && !in_window {
             anyhow::bail!("messages can only be unsent within 15 minutes of sending");
         }
-        make_tombstone(msg);
-
         // Path 1: recall every still-queued copy so the peer never receives the message (#17).
         if queued {
             let copies = chat.relay_receipts.remove(msg_id).unwrap_or_default();
             // Recall *every* fanned-out copy (#17), rebuilding each client from its stored address so
             // this still works after a restart. Must not short-circuit — a `.any()` would stop at the
             // first success and leave sibling relays holding the message.
-            let recalled_any =
+            let recalled_all =
                 recall_receipts(self.transport.as_ref(), &self.relay, contact_id, &copies);
-            if recalled_any {
+            if recalled_all {
+                // The recipient never received this held message. Remove it locally as well:
+                // a tombstone would leave evidence of a message that never existed for them.
+                chat.history.remove(msg_index);
                 return Ok(());
             }
         }
+
+        // The peer may already have the original (or a fanned-out copy remains), so preserve
+        // the conversation position locally and tell them to tombstone their copy too.
+        make_tombstone(&mut chat.history[msg_index]);
 
         // Path 2: the peer (may) have the original — tell them to delete it.
         let envelope = pack_unsend(msg_id);
@@ -438,7 +445,7 @@ impl Node {
 
         let delivered = self.transport.send(&peer_address, &media_bytes).is_ok();
         devlog!(
-            "[ghost] send_media: {} bytes ({kind}) to {peer_address} -> wire {} bytes, delivered={delivered}",
+            "[nightdrop] send_media: {} bytes ({kind}) to {peer_address} -> wire {} bytes, delivered={delivered}",
             data.len(),
             media_bytes.len(),
         );
@@ -538,7 +545,7 @@ impl Node {
     fn open_cache_dir(&self) -> Option<std::path::PathBuf> {
         self.media_store
             .as_ref()
-            .map(|(dir, _)| std::path::Path::new(dir).with_file_name("ghost-open"))
+            .map(|(dir, _)| std::path::Path::new(dir).with_file_name("nightdrop-open"))
     }
 
     /// Delete the decrypted-attachment scratch dir and everything in it (§1.4). Called at startup

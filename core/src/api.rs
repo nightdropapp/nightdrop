@@ -85,6 +85,15 @@ pub fn unsubscribe() {
     *EVENTS.lock().unwrap() = None;
 }
 
+/// Turn on opt-in operational diagnostics (`crate::diag`) — off unless a debugging build asks
+/// for it. These lines record protocol outcomes (which leg ran, how many relays answered), never
+/// identity keys, onion addresses, invite codes, or names; the identity-linked `devlog!` lines
+/// stay compiled out of release builds either way.
+pub fn set_diagnostics(enabled: bool) {
+    crate::diag::set_enabled(enabled);
+    crate::diag!("diagnostics enabled");
+}
+
 fn emit(kind: &str) {
     emit_chats(kind, Vec::new());
 }
@@ -127,7 +136,7 @@ pub struct ServerBackupInfo {
     pub expires_at_secs: u64,
 }
 
-/// A 1:1 conversation partner. Names default to "Ghosty" and are per-chat (§4).
+/// A 1:1 conversation partner. Names default to "Anon" and are per-chat (§4).
 #[derive(Clone, Debug)]
 pub struct Contact {
     pub id: String,
@@ -346,7 +355,7 @@ impl Inner {
         };
         let state = self.me.export(&key);
         if let Err(e) = crate::storage::save_to_file(&path, &key, &state) {
-            eprintln!("[ghost] persist: save to {path} failed: {e}");
+            eprintln!("[nightdrop] persist: save to {path} failed: {e}");
         }
         if let Some(p) = self.persist.as_mut() {
             p.last_write = std::time::Instant::now();
@@ -654,8 +663,8 @@ impl NightdropCore {
         if let Some((path, key)) = &persist {
             let dir = std::path::Path::new(path)
                 .parent()
-                .map(|p| p.join("ghost-media"))
-                .unwrap_or_else(|| std::path::PathBuf::from("ghost-media"));
+                .map(|p| p.join("nightdrop-media"))
+                .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
             me.set_media_store(dir.to_string_lossy().into_owned(), *key);
         }
         me.announce_address_if_changed();
@@ -698,7 +707,7 @@ impl NightdropCore {
         #[cfg(feature = "tor")]
         {
             let transport = crate::transport::tor::TorTransport::bootstrap(
-                "ghost",
+                "nightdrop",
                 state_dir.as_deref(),
                 // Authorized-client keys for onion client authorization (#22) live under the
                 // Tor state dir; empty/absent → a normal public onion.
@@ -738,8 +747,8 @@ impl NightdropCore {
             if let Some((path, key)) = &persist {
                 let dir = std::path::Path::new(path)
                     .parent()
-                    .map(|p| p.join("ghost-media"))
-                    .unwrap_or_else(|| std::path::PathBuf::from("ghost-media"));
+                    .map(|p| p.join("nightdrop-media"))
+                    .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
                 me.set_media_store(dir.to_string_lossy().into_owned(), *key);
             }
             // If our onion changed since last run (rebuilt keystore), tell contacts the new
@@ -792,7 +801,7 @@ impl NightdropCore {
                 Node::write_onion_keys(&state.onion_keys, sd)?;
             }
             let transport = crate::transport::tor::TorTransport::bootstrap(
-                "ghost",
+                "nightdrop",
                 state_dir.as_deref(),
                 // Authorized-client keys for onion client authorization (#22) live under the
                 // Tor state dir; empty/absent → a normal public onion.
@@ -817,8 +826,8 @@ impl NightdropCore {
             // Sealed-file media store beside the state file.
             let dir = std::path::Path::new(&persist_path)
                 .parent()
-                .map(|p| p.join("ghost-media"))
-                .unwrap_or_else(|| std::path::PathBuf::from("ghost-media"));
+                .map(|p| p.join("nightdrop-media"))
+                .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
             me.set_media_store(dir.to_string_lossy().into_owned(), key);
             let inner = Arc::new(Mutex::new(Inner {
                 me,
@@ -872,7 +881,7 @@ impl NightdropCore {
         #[cfg(feature = "tor")]
         {
             let transport = crate::transport::tor::TorTransport::bootstrap(
-                "ghost",
+                "nightdrop",
                 state_dir.as_deref(),
                 // Authorized-client keys for onion client authorization (#22) live under the
                 // Tor state dir; empty/absent → a normal public onion.
@@ -893,8 +902,8 @@ impl NightdropCore {
             let key = decode_store_key(&persist_key)?;
             let dir = std::path::Path::new(&persist_path)
                 .parent()
-                .map(|p| p.join("ghost-media"))
-                .unwrap_or_else(|| std::path::PathBuf::from("ghost-media"));
+                .map(|p| p.join("nightdrop-media"))
+                .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
             me.set_media_store(dir.to_string_lossy().into_owned(), key);
             // We came up on a new onion (see above) — announce it so contacts can still reach us.
             me.announce_address_if_changed();
@@ -920,6 +929,23 @@ impl NightdropCore {
                 "this build was compiled without Tor support (rebuild with --features tor)"
             )
         }
+    }
+
+    /// Stop the background poller and tear down the network side (see
+    /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
+    /// the core stays readable afterwards but can no longer send or receive.
+    ///
+    /// Call this before building a second core over the same `state_dir` — restoring a backup
+    /// does exactly that, and arti refuses to launch a second onion service while the first
+    /// instance still holds the lock. Dropping the core is **not** enough on its own: the poller
+    /// thread holds its own handle on the same state and only notices the stop flag on its next
+    /// tick (up to 2s later, backgrounded), so the lock would still be held when the new instance
+    /// tried to start. Tearing the transport down here makes the release synchronous.
+    pub fn shutdown(&self) {
+        if let Some(running) = &self.running {
+            running.store(false, Ordering::Relaxed);
+        }
+        self.lock().me.close_transport();
     }
 
     /// Acquire the inner lock, **recovering from poisoning** (§1.5.3). If some thread panicked
@@ -1516,7 +1542,7 @@ pub(crate) fn parse_invite(payload: &str) -> Result<(String, PreKeyBundle)> {
 }
 
 const WORDS: &[&str] = &[
-    "ghost", "lantern", "river", "ember", "willow", "cobalt", "harbor", "thistle", "quartz",
+    "cedar", "lantern", "river", "ember", "willow", "cobalt", "harbor", "thistle", "quartz",
     "meadow", "cinder", "aurora", "marble", "nimbus", "raven", "saffron",
 ];
 
@@ -1578,7 +1604,7 @@ mod tests {
     #[test]
     fn background_saves_coalesce_while_user_saves_write_immediately() {
         // §1.5.4: user-initiated saves write now; high-frequency background churn is debounced.
-        let dir = std::env::temp_dir().join(format!("ghost-154-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("nightdrop-154-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state").to_string_lossy().into_owned();
         let key: crate::storage::StoreKey = [3u8; 32];
@@ -1660,7 +1686,7 @@ mod tests {
         assert!(core.contacts().is_empty());
 
         let contact = core.open_chat(None).unwrap();
-        assert_eq!(contact.their_name, "Ghosty");
+        assert_eq!(contact.their_name, "Anon");
         assert_eq!(core.contacts().len(), 1);
 
         let history = core.send_message(&contact.id, "hello").unwrap();
@@ -1714,7 +1740,7 @@ mod tests {
 
         core.set_my_name(&contact.id, "   ").unwrap();
         let c = core.contacts().into_iter().next().unwrap();
-        assert_eq!(c.my_name, "Ghosty");
+        assert_eq!(c.my_name, "Anon");
     }
 
     #[test]

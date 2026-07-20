@@ -89,7 +89,9 @@ impl Node {
         // Relay-fallback the first-contact Hello: if the inviter's onion isn't reachable yet
         // (e.g. its descriptor is still republishing after a restart), queue it on the relay so
         // pairing completes when they next drain — instead of failing with a socket error.
+        crate::diag!("pair: sending first-contact Hello to the peer");
         self.deliver(peer_address, &bundle.identity_key, &frame)?;
+        crate::diag!("pair: Hello away — the peer should now show a chat request");
 
         let contact_id = bundle.identity_key.clone();
         self.chats.insert(
@@ -191,7 +193,15 @@ impl Node {
             return;
         }
         let now = Instant::now();
+        let before = self.pending_invites.len();
         self.pending_invites.retain(|p| p.expiry > now);
+        if self.pending_invites.len() != before {
+            crate::diag!(
+                "invite: {} of {before} staged invite(s) expired — a joiner using that code now \
+                 gets no answer",
+                before - self.pending_invites.len()
+            );
+        }
         // Snapshot the minimal data so we don't borrow `self` across the relay round-trips.
         let invites: Vec<(String, String, String, Duration)> = self
             .pending_invites
@@ -199,17 +209,41 @@ impl Node {
             .map(|p| (p.slot.clone(), p.secret.clone(), p.payload.clone(), p.ttl))
             .collect();
         for (slot, secret, payload, ttl) in invites {
+            // Both handles depend only on the slot, so compute them once per invite rather than
+            // rebuilding them for every relay and every opener inside the loops below.
+            let joiner_handle = rendezvous_handle(&slot, RDV_JOINER);
+            let inviter_handle = rendezvous_handle(&slot, RDV_INVITER);
             for relay in &relays {
-                let Ok(openers) = relay.take(&rendezvous_handle(&slot, RDV_JOINER)) else {
+                let Ok(openers) = relay.take(&joiner_handle) else {
                     continue;
                 };
+                if openers.is_empty() {
+                    continue; // nobody is trying this code right now — the common case
+                }
+                crate::diag!("invite: took {} opener(s) from a relay", openers.len());
                 for opener in openers {
-                    if let Ok(response) = build_invite_response(&secret, &payload, &opener) {
-                        // Post the answer to every relay so the joiner finds it wherever they poll.
-                        for out in &relays {
-                            let _ =
-                                out.post(&rendezvous_handle(&slot, RDV_INVITER), &response, ttl);
+                    match build_invite_response(&secret, &payload, &opener) {
+                        Ok(response) => {
+                            // Post the answer to every relay so the joiner finds it wherever they poll.
+                            let mut posted = 0usize;
+                            for out in &relays {
+                                if out.post(&inviter_handle, &response, ttl).is_ok() {
+                                    posted += 1;
+                                }
+                            }
+                            crate::diag!(
+                                "invite: answered an opener, posted to {posted}/{} relays{}",
+                                relays.len(),
+                                if posted == 0 {
+                                    " — ANSWER LOST, the opener is already consumed"
+                                } else {
+                                    ""
+                                }
+                            );
                         }
+                        // A malformed opener, or one for a different code (an attacker probing the
+                        // slot). Either way this one is now consumed.
+                        Err(_) => crate::diag!("invite: could not build a response for an opener"),
                     }
                 }
             }

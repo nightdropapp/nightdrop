@@ -79,6 +79,40 @@ pub trait Transport: Send + Sync {
     }
 }
 
+/// The inert transport a node is left with after [`crate::node::Node::close_transport`]: it
+/// reaches no one. Its purpose is to let the *real* transport be dropped — and with it the OS
+/// resources it holds — while the node itself stays alive and readable. For Tor that resource
+/// is arti's on-disk state lock, which only one instance may hold per state directory (§6).
+/// The old address is kept so the UI can still display who we were.
+pub struct ClosedTransport {
+    address: Address,
+}
+
+impl ClosedTransport {
+    pub fn new(address: Address) -> Self {
+        Self { address }
+    }
+}
+
+impl Transport for ClosedTransport {
+    fn address(&self) -> Address {
+        self.address.clone()
+    }
+
+    fn send(&self, _peer: &str, _frame: &[u8]) -> Result<()> {
+        anyhow::bail!("transport is closed")
+    }
+
+    fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
+        None
+    }
+
+    /// Never reachable — a closed transport publishes nothing.
+    fn published(&self) -> bool {
+        false
+    }
+}
+
 type Inbox = Sender<(Address, Vec<u8>)>;
 
 /// A shared in-memory network for tests: endpoints register by address and deliver frames

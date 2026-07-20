@@ -6,7 +6,7 @@ use crate::transport::MemoryNetwork;
 #[test]
 fn backup_bundles_media_and_restores_it_on_a_fresh_device() {
     let key: StoreKey = [9u8; 32];
-    let dir = std::env::temp_dir().join(format!("ghost-bkmedia-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("nightdrop-bkmedia-{}", std::process::id()));
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
@@ -54,12 +54,12 @@ fn backup_bundles_media_and_restores_it_on_a_fresh_device() {
 fn backup_bundles_the_onion_keystore_for_a_stable_address() {
     use std::fs;
     let net = MemoryNetwork::new();
-    let base = std::env::temp_dir().join(format!("ghost-onionbk-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("nightdrop-onionbk-{}", std::process::id()));
     let ks = base
         .join("arti-state")
         .join("keystore")
         .join("hss")
-        .join("ghost");
+        .join("nightdrop");
     fs::create_dir_all(&ks).unwrap();
     fs::write(
         ks.join("ks_hs_id.ed25519_expanded_private"),
@@ -77,13 +77,13 @@ fn backup_bundles_the_onion_keystore_for_a_stable_address() {
         !state.onion_keys.is_empty(),
         "backup carries the onion keystore"
     );
-    let dest = std::env::temp_dir().join(format!("ghost-onionrs-{}", std::process::id()));
+    let dest = std::env::temp_dir().join(format!("nightdrop-onionrs-{}", std::process::id()));
     Node::write_onion_keys(&state.onion_keys, &dest.to_string_lossy()).unwrap();
     let restored = fs::read(
         dest.join("arti-state")
             .join("keystore")
             .join("hss")
-            .join("ghost")
+            .join("nightdrop")
             .join("ks_hs_id.ed25519_expanded_private"),
     )
     .unwrap();
@@ -169,7 +169,7 @@ fn deleted_chat_stays_closed_across_restart_then_revives_on_repair() {
 
     // Persist + restore Bob: the deleted chat STAYS closed (no resurrection).
     let path = std::env::temp_dir()
-        .join(format!("ghost-closed-{}.bin", std::process::id()))
+        .join(format!("nightdrop-closed-{}.bin", std::process::id()))
         .to_string_lossy()
         .into_owned();
     storage::save_to_file(&path, &key, &bob.export(&key)).unwrap();
@@ -303,7 +303,10 @@ fn unsending_a_queued_message_recalls_it_so_the_peer_never_sees_it() {
     alice.send(&bob_contact, "recall me").unwrap();
     let msg_id = alice.messages(&bob_contact).last().unwrap().msg_id.clone();
     alice.unsend_message(&bob_contact, &msg_id).unwrap();
-    assert_eq!(alice.messages(&bob_contact).last().unwrap().kind, "deleted");
+    assert!(
+        alice.messages(&bob_contact).is_empty(),
+        "an unseen held message disappears locally rather than leaving a tombstone"
+    );
 
     // Bob drains the mailbox and finds nothing — the blob was recalled.
     let received = bob.poll_relay().unwrap();
@@ -535,7 +538,7 @@ fn interactive_spake2_seals_the_invite_only_to_the_right_code() {
     // relay could offline-attack is ever produced. The seal key is the §4.1 HYBRID of the
     // SPAKE2 secret and the ML-KEM secret the joiner ships in its opener.
     let payload = "nightdrop://pair?addr=abc.onion&ik=IKEY&otk=OTKEY";
-    let code = "7-ghost-river-ember";
+    let code = "7-cedar-river-ember";
 
     // Right code: joiner opener (SPAKE2 msg + ML-KEM pubkey) -> inviter response -> joiner finishes
     // SPAKE2, decapsulates, and opens under the hybrid key.
@@ -707,7 +710,7 @@ fn pairing_exchanges_onion_client_keys_and_delete_revokes_them() {
     use crate::transport::client_auth;
 
     // Fresh per-run auth dirs (no tempfile dev-dep).
-    let base = std::env::temp_dir().join(format!("ghost-nodeauth-{}", std::process::id()));
+    let base = std::env::temp_dir().join(format!("nightdrop-nodeauth-{}", std::process::id()));
     let alice_auth = base.join("alice");
     let bob_auth = base.join("bob");
     let _ = std::fs::remove_dir_all(&base);
@@ -757,8 +760,8 @@ fn media_to_file_writes_owner_only_plaintext_into_the_app_private_scratch() {
     // §1.4: decrypted attachments must land in an app-private, owner-only sibling of the sealed
     // store — never the world-readable system temp under a predictable name.
     let key: StoreKey = [7u8; 32];
-    let base = std::env::temp_dir().join(format!("ghost-14-{}", std::process::id()));
-    let media_dir = base.join("ghost-media");
+    let base = std::env::temp_dir().join(format!("nightdrop-14-{}", std::process::id()));
+    let media_dir = base.join("nightdrop-media");
     let net = MemoryNetwork::new();
     let mut node = Node::new(Box::new(net.endpoint("me")));
     node.set_media_store(media_dir.to_string_lossy().into_owned(), key);
@@ -767,13 +770,13 @@ fn media_to_file_writes_owner_only_plaintext_into_the_app_private_scratch() {
     let path = node.media_to_file(&id, "mp4").unwrap();
     let p = std::path::Path::new(&path);
 
-    // Lands in the app-private scratch (sibling `ghost-open`), keyed by the unguessable media id.
+    // Lands in the app-private scratch (sibling `nightdrop-open`), keyed by the unguessable media id.
     assert!(
-        p.starts_with(base.join("ghost-open")),
+        p.starts_with(base.join("nightdrop-open")),
         "decrypted media escaped the app-private scratch: {path}"
     );
     // The old predictable, world-readable system-temp path must NOT be used.
-    let legacy = std::env::temp_dir().join(format!("ghost-media-{id}.mp4"));
+    let legacy = std::env::temp_dir().join(format!("nightdrop-media-{id}.mp4"));
     assert!(
         !legacy.exists(),
         "still wrote to the shared temp dir: {legacy:?}"
@@ -809,7 +812,7 @@ fn short_code_pairing_survives_a_dead_primary_relay() {
     let dead = "127.0.0.1:1".to_string(); // nothing listening -> connect refused
     let net = MemoryNetwork::new();
     let slot = "42";
-    let secret = "ghost-lantern-river-ember";
+    let secret = "cedar-lantern-river-ember";
 
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     alice.set_relay(RelayClient::new(dead.clone()));
@@ -841,5 +844,126 @@ fn short_code_pairing_survives_a_dead_primary_relay() {
     assert!(
         payload.contains("addr=alice"),
         "joiner recovered the inviter's payload over the live fallback relay: {payload}"
+    );
+}
+
+/// A transport that reports when it is dropped, so a test can prove the *live* transport was
+/// released rather than merely stopped being used.
+struct DropWatched {
+    inner: crate::transport::MemoryTransport,
+    dropped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for DropWatched {
+    fn drop(&mut self) {
+        self.dropped
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl crate::transport::Transport for DropWatched {
+    fn address(&self) -> crate::transport::Address {
+        self.inner.address()
+    }
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        self.inner.send(peer, frame)
+    }
+    fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
+        self.inner.try_recv()
+    }
+}
+
+/// `close_transport` must actually **drop** the live transport and the relay, not just stop
+/// using them. Tor's on-disk state lock is released only when the last handle goes away, so a
+/// half-measure here reintroduces the bug where restoring a backup failed to launch its onion
+/// service with "State already locked" while the old core was still alive.
+#[test]
+fn close_transport_drops_the_live_transport_so_its_resources_are_released() {
+    use std::sync::atomic::Ordering;
+
+    let net = MemoryNetwork::new();
+    let dropped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let mut alice = Node::new(Box::new(DropWatched {
+        inner: net.endpoint("alice"),
+        dropped: std::sync::Arc::clone(&dropped),
+    }));
+    alice.set_relay(RelayClient::new("relay-addr"));
+
+    assert!(!dropped.load(Ordering::Relaxed), "live before close");
+
+    alice.close_transport();
+
+    assert!(
+        dropped.load(Ordering::Relaxed),
+        "the real transport must be dropped by close_transport — Tor's state lock is only \
+         released once every handle is gone"
+    );
+    // The address survives so the UI can still show who we were...
+    assert_eq!(alice.address(), "alice");
+    // ...but the node is inert: never reachable again.
+    assert!(
+        !alice.onion_published(),
+        "a closed transport publishes nothing"
+    );
+}
+
+/// The inviter's read of the joiner leg is **destructive**, so an opener can be consumed without
+/// an answer ever being posted back — the answer's post fails, or the inviter is backgrounded or
+/// killed mid-handshake. The joiner must not sit out its whole timeout waiting for a reply that
+/// can never arrive (TODO #7: "issues using the secret"); it re-posts, so an inviter that comes
+/// back still finds an opener and pairing completes.
+#[test]
+fn a_consumed_opener_does_not_strand_the_joiner() {
+    let live = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();
+    let net = MemoryNetwork::new();
+    let slot = "43";
+    let secret = "cedar-lantern-river-ember";
+
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_relay(RelayClient::new(live.clone()));
+    alice
+        .stage_short_code_invite(slot, secret, Duration::from_secs(60))
+        .unwrap();
+
+    let joiner_relays = {
+        let mut bob = Node::new(Box::new(net.endpoint("bob")));
+        bob.set_relay(RelayClient::new(live.clone()));
+        bob.rendezvous_relays()
+    };
+    let (slot_s, secret_s) = (slot.to_string(), secret.to_string());
+    let joiner = std::thread::spawn(move || {
+        run_join_handshake(&joiner_relays, &slot_s, &secret_s, Duration::from_secs(30))
+    });
+
+    // Stand in for the broken inviter: swallow the first opener and answer nothing at all.
+    let thief = RelayClient::new(live.clone());
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "joiner never posted an opener to steal"
+        );
+        let stolen = thief.take(&rendezvous_handle(slot, RDV_JOINER)).unwrap();
+        if !stolen.is_empty() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+
+    // Only now does a working inviter start answering. Pre-fix there was nothing left for it to
+    // answer, and the joiner ran out its timeout.
+    let payload = loop {
+        alice.service_pending_invites();
+        if joiner.is_finished() {
+            break joiner
+                .join()
+                .unwrap()
+                .expect("pairing recovered after a lost opener");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        payload.contains("addr=alice"),
+        "joiner recovered the inviter's payload after its first opener was consumed: {payload}"
     );
 }

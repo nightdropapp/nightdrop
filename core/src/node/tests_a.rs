@@ -86,7 +86,7 @@ fn unsend_after_restart_recalls_the_queued_blob() {
 
     // "Restart" Alice: persist to disk, drop, restore onto a fresh endpoint, reattach the relay.
     // The in-memory receipt is gone; only the persisted one can drive the recall now.
-    let path = std::env::temp_dir().join(format!("ghost-unsend-{}.bin", std::process::id()));
+    let path = std::env::temp_dir().join(format!("nightdrop-unsend-{}.bin", std::process::id()));
     let path = path.to_str().unwrap().to_string();
     storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
     drop(alice);
@@ -96,15 +96,9 @@ fn unsend_after_restart_recalls_the_queued_blob() {
 
     // Unsend after the restart. The persisted receipt lets us recall the still-queued blob.
     alice2.unsend_message(&bob_contact, &msg_id).unwrap();
-    assert_eq!(
-        alice2
-            .messages(&bob_contact)
-            .into_iter()
-            .next_back()
-            .unwrap()
-            .kind,
-        "deleted",
-        "our own copy becomes a tombstone"
+    assert!(
+        alice2.messages(&bob_contact).is_empty(),
+        "a recalled held message leaves no local tombstone, even after a restart"
     );
 
     // Bob comes back and drains his mailbox: the message was recalled, so he receives NOTHING —
@@ -144,7 +138,7 @@ fn state_survives_a_restart_via_encrypted_storage() {
     let bob_id_before = bob.identity_id();
 
     // Persist Bob to an encrypted file, then drop him.
-    let path = std::env::temp_dir().join(format!("ghost-test-{}.bin", std::process::id()));
+    let path = std::env::temp_dir().join(format!("nightdrop-test-{}.bin", std::process::id()));
     let path = path.to_str().unwrap().to_string();
     storage::save_to_file(&path, &key, &bob.export(&key)).unwrap();
     drop(bob);
@@ -814,7 +808,8 @@ fn pending_delete_signal_persists_across_a_restart() {
     alice.delete_chat(&bob_contact).unwrap();
 
     // "Restart" Alice before the retry runs: persist to disk, drop, restore on a fresh endpoint.
-    let path = std::env::temp_dir().join(format!("ghost-pendingctl-{}.bin", std::process::id()));
+    let path =
+        std::env::temp_dir().join(format!("nightdrop-pendingctl-{}.bin", std::process::id()));
     let path = path.to_str().unwrap().to_string();
     storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
     drop(alice);
@@ -840,7 +835,7 @@ fn approval_signal_reaches_the_joiner() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice"))); // recipient
     alice.set_require_authorization(true);
-    alice.set_last_invite_code("7-ghost-river-ember".to_string());
+    alice.set_last_invite_code("7-cedar-river-ember".to_string());
     let mut bob = Node::new(Box::new(net.endpoint("bob"))); // joiner
 
     let bundle = alice.publish_bundle();
@@ -888,7 +883,7 @@ fn approving_twice_does_not_resend_approval() {
 #[test]
 fn media_round_trips_e2e_and_is_sealed_at_rest() {
     let key: StoreKey = [9u8; 32];
-    let dir = std::env::temp_dir().join(format!("ghost-media-test-{}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("nightdrop-media-test-{}", std::process::id()));
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
