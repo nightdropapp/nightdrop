@@ -178,6 +178,13 @@ Dart only renders the string and toggles the flag. See `docs/design/key-verifica
   who with**: counts, outcomes, and which leg of a protocol ran — never keys, onion addresses,
   codes, slots, or names. It is off unless a build explicitly enables it (`NIGHTDROP_DIAG=1`, via
   `--diag` on the install scripts). Anything identity-linked belongs in `devlog!`.
+- **Sending never blocks on the network.** `send` advances the ratchet and stores the message
+  under the core lock (the ordered, security-critical step stays synchronous), but on a
+  non-synchronous transport (`Transport::is_synchronous()` — false for Tor, true for the in-memory
+  transport) it **defers the opaque-byte delivery** to the background poller instead of dialing
+  inline. Composing a message returns instantly with the message stored "queued"; the poller
+  attempts direct-peer delivery (relay fallback) on its next tick and flips the status. Only the
+  transport delivery moves off the hot path — the crypto boundary is unchanged.
 - **Network dials are time-bounded so the UI never hangs on them.** `send` runs while the core
   lock is held, so an unbounded dial to an offline peer would freeze every other FFI call and the
   poller for as long as arti retries (minutes, at a high `HS_CONNECT_ATTEMPTS`). Direct peer dials

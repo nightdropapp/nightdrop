@@ -967,3 +967,66 @@ fn a_consumed_opener_does_not_strand_the_joiner() {
         "joiner recovered the inviter's payload after its first opener was consumed: {payload}"
     );
 }
+
+/// A non-synchronous transport (stands in for Tor): delivery must be **deferred** to the poller,
+/// not done inline, so composing a message never blocks the UI on a dial. Wraps the in-memory
+/// transport but reports `is_synchronous() == false`.
+struct AsyncMemory(crate::transport::MemoryTransport);
+
+impl crate::transport::Transport for AsyncMemory {
+    fn address(&self) -> crate::transport::Address {
+        self.0.address()
+    }
+    fn is_synchronous(&self) -> bool {
+        false
+    }
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        self.0.send(peer, frame)
+    }
+    fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
+        self.0.try_recv()
+    }
+}
+
+#[test]
+fn a_non_synchronous_transport_defers_delivery_to_the_poller() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(AsyncMemory(net.endpoint("alice"))));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    // Send returns immediately having only sealed + stored the message — no delivery yet.
+    alice.send(&bob_contact, "deferred hi").unwrap();
+    let stored = alice.messages(&bob_contact);
+    assert_eq!(stored.last().unwrap().text, "deferred hi");
+    assert_eq!(
+        stored.last().unwrap().delivery,
+        "queued",
+        "a deferred send is stored queued, not yet sent"
+    );
+    bob.pump().unwrap();
+    assert!(
+        bob.messages(&alice_contact)
+            .iter()
+            .all(|m| m.text != "deferred hi"),
+        "the peer must NOT have the message before the poller delivers it"
+    );
+
+    // The poller runs: now it delivers, and the peer receives it.
+    let affected = alice.flush_pending_sends();
+    assert_eq!(affected, vec![bob_contact.clone()]);
+    assert_eq!(
+        alice.messages(&bob_contact).last().unwrap().delivery,
+        "sent",
+        "delivery flips the stored message to sent"
+    );
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.messages(&alice_contact).last().unwrap().text,
+        "deferred hi",
+        "the peer receives the message once the poller has delivered it"
+    );
+}

@@ -432,6 +432,15 @@ impl Inner {
                 }
             }
         }
+        // Deliver messages composed since the last tick (§6): `send` seals + stores them but
+        // defers the network on a non-synchronous transport so the UI never blocks. Run every tick
+        // (not just on the relay cadence) so an online peer gets the message promptly; each is
+        // attempted once here, then falls to the slower relay retry if the peer and relay are cold.
+        for id in self.me.flush_pending_sends() {
+            if !affected.contains(&id) {
+                affected.push(id);
+            }
+        }
         let mut messages_arrived = !affected.is_empty();
         if relay_due {
             // Inviter side of short-code pairing: answer any joiner's SPAKE2 opener (§5b).

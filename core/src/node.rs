@@ -395,6 +395,13 @@ pub struct Node {
     /// the retry (the message stays "queued" in history), and the common case — app kept open
     /// through the ~warm-up window — recovers on its own.
     pending_relay: Vec<PendingRelaySend>,
+    /// Messages composed while a **non-synchronous** transport (Tor) is in use: [`Node::send`]
+    /// seals + stores them "queued" and defers the network here so composing never blocks the UI
+    /// on a dial. The poller drains this via [`flush_pending_sends`](Self::flush_pending_sends),
+    /// attempting direct-peer delivery with relay fallback. In-memory only, and drained on the very
+    /// next poll tick (~80 ms), so a restart in that window just leaves the message "queued" — the
+    /// same recovery profile as [`pending_relay`](Self::pending_relay).
+    pending_sends: Vec<PendingRelaySend>,
     /// Authenticated `Closed` signals (chat deletes, §11.6) that reached neither the peer nor any
     /// relay when the chat was torn down (arti still cold, or the relay briefly unreachable). Unlike
     /// [`pending_relay`](Self::pending_relay) these are **chat-independent** — the chat is already
@@ -481,6 +488,7 @@ impl Node {
             seen_relay_blobs: std::collections::HashSet::new(),
             relay_reachable: std::collections::HashMap::new(),
             pending_relay: Vec::new(),
+            pending_sends: Vec::new(),
             pending_control: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,

@@ -18,6 +18,9 @@ impl Node {
         if chat.closed {
             anyhow::bail!("this chat was deleted; create a new one to keep talking");
         }
+        // Advance the ratchet and seal the frame under the lock — this is the ordered, security-
+        // critical step and must stay synchronous (per-message ratchet ordering). Store the message
+        // right away as "queued"; only the opaque-byte *delivery* below is what may defer.
         let msg_id = random_msg_id();
         let message = crypto::encrypt(&mut chat.session, text.as_bytes());
         let frame = Frame::Message {
@@ -26,65 +29,105 @@ impl Node {
             message: WireOlm::from_olm(&message),
         };
         let bytes = wire::encode(&frame);
-
-        let delivered = self.transport.send(&chat.peer_address, &bytes).is_ok();
-        // Store a sealed copy on the relay(s) (24h) when the peer is offline (fallback) OR when
-        // opt-in server storage is enabled (§6). Fans out to the recipient's whole relay set (#17).
-        let mut needs_relay_retry = false;
-        if !delivered || chat.contact.remote_storage {
-            // Fan out to the recipient's advertised relays (#17) plus our operator-provided shared
-            // discovered relays (§3.1), so a rotated/added shared relay carries delivery too.
-            let mut targets = chat.contact.peer_relays.clone();
-            for r in &self.discovered_relays {
-                if !targets.contains(r) {
-                    targets.push(r.clone());
-                }
-            }
-            let copies = queue_on_relays(
-                self.transport.as_ref(),
-                &self.relay,
-                &targets,
-                contact_id,
-                &bytes,
-            );
-            match copies {
-                Ok(copies) => {
-                    // Keep the receipts while the message is queued: an edit/unsend can then
-                    // recall every undelivered copy and replace it outright.
-                    if !delivered {
-                        chat.relay_receipts.insert(msg_id.clone(), copies);
-                    }
-                    // Server storage reached a relay (a copy exists) → banner stays "healthy".
-                    if chat.contact.remote_storage {
-                        chat.remote_storage_healthy = true;
-                    }
-                }
-                // Reached neither the peer NOR any relay (e.g. arti's Tor circuits were still
-                // cold): do NOT fail the send. Record it as queued and retry the relay from the
-                // poller (`flush_pending_relay`) — otherwise a message composed during Tor
-                // warm-up would silently never reach the peer.
-                Err(_) if !delivered => needs_relay_retry = true,
-                // Peer was reachable directly, but server storage is on and no relay accepted the
-                // copy: the message was delivered yet **not** stored server-side. Flag it so the
-                // UI can say so instead of implying a server copy exists.
-                Err(_) => chat.remote_storage_healthy = false,
-            }
-        }
-        if delivered {
-            flip_queued_delivered(&mut chat.history); // peer is reachable now
-        }
         let mut msg = ChatMessage::text(true, text.to_string(), msg_id.clone());
-        msg.delivery = if delivered { "sent" } else { "queued" }.to_string();
+        msg.delivery = "queued".to_string();
         chat.history.push(msg);
-        if needs_relay_retry {
-            // Chat borrow ends above; stash the sealed frame for a later relay retry.
-            self.pending_relay.push(PendingRelaySend {
+
+        if self.transport.is_synchronous() {
+            // In-memory/demo: delivery is instant, so do it inline and callers see a fully-resolved
+            // status on return (tests depend on this).
+            self.attempt_delivery(contact_id, &msg_id, &bytes);
+        } else {
+            // Real network: hand delivery to the background poller so composing a message never
+            // blocks on a Tor round-trip. The message is already stored as "queued"; the poller
+            // flips it to "sent"/"delivered" (or leaves it "queued" on the relay) when it runs.
+            self.pending_sends.push(PendingRelaySend {
                 contact_id: contact_id.to_string(),
                 msg_id,
                 bytes,
             });
         }
         Ok(())
+    }
+
+    /// Deliver an already-stored, already-sealed message (opaque bytes): directly to the peer, with
+    /// the relay set as offline fallback / server-storage copy (§6). Updates the stored message's
+    /// delivery status and relay receipts in place. Shared by the inline path (synchronous
+    /// transports) and the poller's deferred delivery ([`flush_pending_sends`]), so both take the
+    /// exact same code path. No-op if the chat was deleted before delivery ran.
+    pub(crate) fn attempt_delivery(&mut self, contact_id: &str, msg_id: &str, bytes: &[u8]) {
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return;
+        };
+        let delivered = self.transport.send(&chat.peer_address, bytes).is_ok();
+        // Store a sealed copy on the relay(s) (24h) when the peer is offline (fallback) OR when
+        // opt-in server storage is enabled (§6). Fans out to the recipient's whole relay set (#17).
+        let mut needs_relay_retry = false;
+        if !delivered || chat.contact.remote_storage {
+            let mut targets = chat.contact.peer_relays.clone();
+            for r in &self.discovered_relays {
+                if !targets.contains(r) {
+                    targets.push(r.clone());
+                }
+            }
+            match queue_on_relays(
+                self.transport.as_ref(),
+                &self.relay,
+                &targets,
+                contact_id,
+                bytes,
+            ) {
+                Ok(copies) => {
+                    // Keep the receipts while the message is queued: an edit/unsend can then
+                    // recall every undelivered copy and replace it outright.
+                    if !delivered {
+                        chat.relay_receipts.insert(msg_id.to_string(), copies);
+                    }
+                    // Server storage reached a relay (a copy exists) → banner stays "healthy".
+                    if chat.contact.remote_storage {
+                        chat.remote_storage_healthy = true;
+                    }
+                }
+                // Reached neither the peer NOR any relay (e.g. arti's Tor circuits were still cold):
+                // do NOT drop it. Retry the relay from the poller (`flush_pending_relay`).
+                Err(_) if !delivered => needs_relay_retry = true,
+                // Delivered directly, but server storage is on and no relay took the copy: flag it
+                // so the UI can say "not stored server-side" instead of implying a copy exists.
+                Err(_) => chat.remote_storage_healthy = false,
+            }
+        }
+        if delivered {
+            flip_queued_delivered(&mut chat.history); // peer is reachable now
+        }
+        // Set THIS message's authoritative status (the flip above may have moved it to "delivered").
+        if let Some(m) = chat
+            .history
+            .iter_mut()
+            .find(|m| m.from_me && m.msg_id == msg_id)
+        {
+            m.delivery = if delivered { "sent" } else { "queued" }.to_string();
+        }
+        if needs_relay_retry {
+            self.pending_relay.push(PendingRelaySend {
+                contact_id: contact_id.to_string(),
+                msg_id: msg_id.to_string(),
+                bytes: bytes.to_vec(),
+            });
+        }
+    }
+
+    /// Deliver messages composed while a **non-synchronous** transport was in use — `send` stored
+    /// them "queued" and deferred the network so the UI wasn't blocked. Run on the poll cadence;
+    /// each attempt also warms arti. Returns the contact ids whose messages changed status.
+    pub(crate) fn flush_pending_sends(&mut self) -> Vec<String> {
+        let mut affected = Vec::new();
+        for p in std::mem::take(&mut self.pending_sends) {
+            self.attempt_delivery(&p.contact_id, &p.msg_id, &p.bytes);
+            if !affected.contains(&p.contact_id) {
+                affected.push(p.contact_id);
+            }
+        }
+        affected
     }
 
     /// Retry queuing messages that reached neither the peer nor any relay when first sent (arti's

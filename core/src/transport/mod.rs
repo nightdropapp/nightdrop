@@ -47,6 +47,15 @@ pub trait Transport: Send + Sync {
         true
     }
 
+    /// Whether `send` completes instantly and locally, so it's safe to run inline while the core
+    /// lock is held. True for the in-memory transport (tests/demo); false for any real network
+    /// transport, where a dial can block for seconds. A `false` here lets the node deliver
+    /// **off the hot path**: it stores the message immediately and hands delivery to the
+    /// background poller, so composing a message never blocks the UI on a Tor round-trip (§6).
+    fn is_synchronous(&self) -> bool {
+        false
+    }
+
     /// Build a relay round-trip dialer for an **arbitrary** relay address, if this transport can
     /// reach relays by address over its anonymized path (Tor does). Returns `None` for transports
     /// that don't (tests/TCP), so the node falls back to a direct [`RelayClient::new`]. This is
@@ -159,6 +168,12 @@ pub struct MemoryTransport {
 impl Transport for MemoryTransport {
     fn address(&self) -> Address {
         self.address.clone()
+    }
+
+    /// In-memory delivery is a channel send — instant and non-blocking, so the node delivers
+    /// inline and tests see synchronous send/receive without running a poller.
+    fn is_synchronous(&self) -> bool {
+        true
     }
 
     fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
