@@ -1,4 +1,4 @@
-# Ghost Chat — common tasks. Requires the Flutter SDK and the Rust toolchain.
+# Night Drop — common tasks. Requires the Flutter SDK and the Rust toolchain.
 .PHONY: help app-get app-run app-test app-analyze core-build core-test relay-run fmt clippy bootstrap gen-bridge config
 
 help:
@@ -27,7 +27,7 @@ app-test:     config core-build ; cd app && flutter test
 config:
 	@mkdir -p app/assets website
 	@cp config/app_config.json app/assets/app_config.json
-	@printf '// GENERATED from config/app_config.json by `make config` — do not edit by hand.\nwindow.GHOST_CONFIG = %s;\n' "$$(cat config/app_config.json)" > website/config.js
+	@printf '// GENERATED from config/app_config.json by `make config` — do not edit by hand.\nwindow.NIGHTDROP_CONFIG = %s;\n' "$$(cat config/app_config.json)" > website/config.js
 	@echo "config: synced -> app/assets/app_config.json, website/config.js"
 app-analyze:  ; cd app && flutter analyze
 gen-bridge:   ; flutter_rust_bridge_codegen generate
@@ -41,5 +41,5 @@ clippy:       ; cargo clippy --all-targets
 # Generate the native platform shells (android/ios/windows/linux/macos) into app/
 # without clobbering the provided lib/ and pubspec.yaml, then fetch packages.
 bootstrap:
-	cd app && flutter create --project-name ghost_chat \
+	cd app && flutter create --project-name night_drop \
 		--platforms=android,ios,windows,linux,macos . && flutter pub get

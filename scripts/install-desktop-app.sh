@@ -17,6 +17,8 @@
 #   scripts/install-desktop-app.sh              # build release bundle, then install entry + icons
 #   scripts/install-desktop-app.sh --no-build   # install using the existing build/ bundle
 #   scripts/install-desktop-app.sh --run        # ...and launch it afterwards
+#   scripts/install-desktop-app.sh --diag       # build with opt-in pairing/transport diagnostics
+#                                               # (protocol outcomes only, never keys or codes)
 #   scripts/install-desktop-app.sh --uninstall  # remove the installed app, entry, and icons
 
 set -euo pipefail
@@ -25,11 +27,11 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
 APP_DIR="$PROJECT_ROOT/app"
-APP_ID="${GHOST_APP_ID:-app.nightdrop}"       # Wayland app_id / .desktop basename / icon name
-APP_NAME="${GHOST_APP_NAME:-Night Drop}"      # launcher display name
-# The Linux CMake reads GHOST_APP_ID for the desktop application id; export both so a
+APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"       # Wayland app_id / .desktop basename / icon name
+APP_NAME="${NIGHTDROP_APP_NAME:-Night Drop}"      # launcher display name
+# The Linux CMake reads NIGHTDROP_APP_ID for the desktop application id; export both so a
 # rename is picked up at build time (mirrors install-android-app.sh).
-export GHOST_APP_ID="$APP_ID" GHOST_APP_NAME="$APP_NAME"
+export NIGHTDROP_APP_ID="$APP_ID" NIGHTDROP_APP_NAME="$APP_NAME"
 BUNDLE_SRC="$APP_DIR/build/linux/x64/release/bundle"
 PKG_DIR="$APP_DIR/linux/packaging"            # holds the icon master ($APP_ID.png)
 
@@ -46,12 +48,15 @@ ok(){ echo -e "${GREEN}✓${NC} $1"; }
 warn(){ echo -e "${YELLOW}⚠${NC} $1"; }
 err(){ echo -e "${RED}✗${NC} $1" >&2; }
 
-DO_BUILD=1; DO_RUN=0; ACTION=install
+DO_BUILD=1; DO_RUN=0; ACTION=install; DIAG=0
 for a in "$@"; do case "$a" in
   --no-build) DO_BUILD=0 ;;
   --run) DO_RUN=1 ;;
+  --diag) DIAG=1 ;;
   --uninstall) ACTION=uninstall ;;
-  -h|--help) sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+  # Print the header block, stopping at the first non-comment line — a fixed line range silently
+  # starts printing shell code the moment the header grows.
+  -h|--help) awk 'NR>1 && !/^#/{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
   *) err "unknown option: $a"; exit 1 ;;
 esac; done
 
@@ -73,15 +78,19 @@ uninstall() {
 [ "$ACTION" = uninstall ] && uninstall
 
 # 1. Build the release bundle (Tor + relay baked in) unless told to reuse it.
-#    GHOST_TOR enables the embedded Tor transport; GHOST_RELAY (the relay's .onion, from
+#    NIGHTDROP_TOR enables the embedded Tor transport; NIGHTDROP_RELAY (the relay's .onion, from
 #    relay-state/onion) enables rendezvous short codes + offline store-and-forward. Both are
 #    baked in as compile-time --dart-define values, so the bundle needs no runtime env.
 if [ "$DO_BUILD" -eq 1 ]; then
   [ -x "$FLUTTER_HOME/bin/flutter" ] || { err "Flutter not found at $FLUTTER_HOME/bin/flutter (set FLUTTER_HOME)"; exit 1; }
-  DART_DEFINES=(--dart-define=GHOST_TOR=1)
+  DART_DEFINES=(--dart-define=NIGHTDROP_TOR=1)
+  if [ "$DIAG" = 1 ]; then
+    DART_DEFINES+=(--dart-define=NIGHTDROP_DIAG=1)
+    ok "diagnostics ON — protocol outcomes to stderr (no keys/codes/addresses)"
+  fi
   if [ -f "$PROJECT_ROOT/relay-state/onion" ]; then
     RELAY_ADDR="$(cat "$PROJECT_ROOT/relay-state/onion")"
-    DART_DEFINES+=("--dart-define=GHOST_RELAY=$RELAY_ADDR")
+    DART_DEFINES+=("--dart-define=NIGHTDROP_RELAY=$RELAY_ADDR")
     ok "relay baked in for store-and-forward: $RELAY_ADDR"
   else
     info "relay not found (relay-state/onion) — P2P only, no store-and-forward"
@@ -89,11 +98,11 @@ if [ "$DO_BUILD" -eq 1 ]; then
   info "Building release bundle…"
   ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" && flutter build linux --release "${DART_DEFINES[@]}" )
 fi
-[ -x "$BUNDLE_SRC/ghost_chat" ] || { err "bundle not found at $BUNDLE_SRC (run without --no-build)"; exit 1; }
+[ -x "$BUNDLE_SRC/night_drop" ] || { err "bundle not found at $BUNDLE_SRC (run without --no-build)"; exit 1; }
 
 # Guard: the Rust security core MUST be bundled. After a native-lib rename an incremental
 # Flutter build can silently drop libnightdrop.so from the bundle (seen during the 2026-07
-# ghost_core->nightdrop rename), leaving an app that crashes at FFI init. Fail loudly.
+# nightdrop_core->nightdrop rename), leaving an app that crashes at FFI init. Fail loudly.
 if [ ! -f "$BUNDLE_SRC/lib/libnightdrop.so" ]; then
   err "libnightdrop.so is missing from the bundle ($BUNDLE_SRC/lib/) — the Rust core wasn't bundled."
   err "Do a CLEAN build:  (cd app && flutter clean) && ./install-desktop-app.sh"
@@ -101,7 +110,7 @@ if [ ! -f "$BUNDLE_SRC/lib/libnightdrop.so" ]; then
 fi
 ok "core lib present: libnightdrop.so ($(du -h "$BUNDLE_SRC/lib/libnightdrop.so" | cut -f1))"
 
-# 2. Install the bundle to a stable location (keeps ghost_chat next to its lib/ + data/,
+# 2. Install the bundle to a stable location (keeps night_drop next to its lib/ + data/,
 #    which its $ORIGIN/lib RPATH and asset loader require).
 info "Installing bundle → $INSTALL_DIR"
 rm -rf "$INSTALL_DIR"; mkdir -p "$INSTALL_DIR"
@@ -122,7 +131,7 @@ ok "icons → $ICONS_DIR/*/apps/$APP_ID.png (16–512)"
 mkdir -p "$HOME/.local/bin"
 cat > "$HOME/.local/bin/nightdrop" <<EOF
 #!/bin/sh
-exec "$INSTALL_DIR/ghost_chat" "\$@"
+exec "$INSTALL_DIR/night_drop" "\$@"
 EOF
 chmod 755 "$HOME/.local/bin/nightdrop"
 ok "launcher → ~/.local/bin/nightdrop"
@@ -142,7 +151,7 @@ Version=1.0
 Name=$APP_NAME
 GenericName=Private Messenger
 Comment=Anonymous, end-to-end encrypted 1:1 chat over Tor
-Exec=$INSTALL_DIR/ghost_chat
+Exec=$INSTALL_DIR/night_drop
 Icon=$APP_ID
 Terminal=false
 StartupNotify=true
@@ -165,6 +174,6 @@ info "Session: ${XDG_SESSION_TYPE:-unknown} — icon binds via app_id/StartupWMC
 
 if [ "$DO_RUN" -eq 1 ]; then
   info "Launching…"
-  if command -v gtk-launch >/dev/null; then gtk-launch "$APP_ID"; else nohup "$INSTALL_DIR/ghost_chat" >/tmp/nightdrop-desktop.log 2>&1 & fi
+  if command -v gtk-launch >/dev/null; then gtk-launch "$APP_ID"; else nohup "$INSTALL_DIR/night_drop" >/tmp/nightdrop-desktop.log 2>&1 & fi
 fi
 exit 0

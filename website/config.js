@@ -1,5 +1,5 @@
 // GENERATED from config/app_config.json by `make config` — do not edit by hand.
-window.GHOST_CONFIG = {
+window.NIGHTDROP_CONFIG = {
   "app": {
     "name": "Night Drop",
     "headline": "Sealed. Dropped. Delivered.",
