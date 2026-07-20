@@ -32,6 +32,14 @@ concurrency:
   group: fuzz-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Pin the nightly toolchain and cargo-fuzz. `@nightly` (latest each run) means a nightly
+# regression in libFuzzer/cargo-fuzz support breaks fuzz CI out of nowhere, with nothing changed
+# in this repo — the likely cause of a sudden "all jobs failed". Bump these deliberately after
+# confirming a newer nightly + cargo-fuzz build the targets locally (`cargo +<toolchain> fuzz build`).
+env:
+  FUZZ_TOOLCHAIN: nightly-2026-07-14
+  CARGO_FUZZ_VERSION: 0.13.2
+
 jobs:
   # Fast gate: the targets must compile against the current core, and every committed seed
   # must load without crashing (-runs=0 = load + replay, no mutation).
@@ -43,20 +51,22 @@ jobs:
         working-directory: core
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core/fuzz
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-fuzz
+          tool: cargo-fuzz@${{ env.CARGO_FUZZ_VERSION }}
       - name: Build all fuzz targets
-        run: cargo +nightly fuzz build
+        run: cargo +${{ env.FUZZ_TOOLCHAIN }} fuzz build
       - name: Replay seed corpus (no mutation)
         run: |
           for t in wire_decode relay_handle_line directory_from_wire; do
             echo "::group::replay $t"
-            cargo +nightly fuzz run "$t" "fuzz/seeds/$t" -- -runs=0
+            cargo +${{ env.FUZZ_TOOLCHAIN }} fuzz run "$t" "fuzz/seeds/$t" -- -runs=0
             echo "::endgroup::"
           done
 
@@ -74,13 +84,15 @@ jobs:
         target: [wire_decode, relay_handle_line, directory_from_wire]
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@nightly
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.FUZZ_TOOLCHAIN }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: core/fuzz
       - uses: taiki-e/install-action@v2
         with:
-          tool: cargo-fuzz
+          tool: cargo-fuzz@${{ env.CARGO_FUZZ_VERSION }}
 
       # Persist the corpus between runs so coverage accumulates. A unique key per run saves a
       # fresh snapshot; restore-keys pulls the most recent prior corpus for this target.
@@ -96,7 +108,7 @@ jobs:
           mkdir -p "fuzz/corpus/${{ matrix.target }}"
           DUR="${{ github.event.inputs.duration || '300' }}"
           # Seeds are passed alongside the (cached) corpus; new finds land in the corpus dir.
-          cargo +nightly fuzz run "${{ matrix.target }}" \
+          cargo +${{ env.FUZZ_TOOLCHAIN }} fuzz run "${{ matrix.target }}" \
             "fuzz/corpus/${{ matrix.target }}" "fuzz/seeds/${{ matrix.target }}" \
             -- -max_total_time="$DUR" -rss_limit_mb=4096
 
