@@ -55,7 +55,7 @@ anonymity always stays with Tor.
 
 | # | Channel | Who controls it | Trust anchor | Good for |
 |---|---------|-----------------|--------------|----------|
-| 1 | **Baked-in default** | The app operator (build-time `--dart-define=GHOST_RELAY`) | Shipped in the app | The out-of-the-box shared relay |
+| 1 | **Baked-in default** | The app operator (build-time `--dart-define=NIGHTDROP_RELAY`) | Shipped in the app | The out-of-the-box shared relay |
 | 2 | **Signed directory** | The app operator (holds the directory key) | Ed25519 key baked into the app | Rotating / expanding the *public* default set without an app update |
 | 3 | **Your extra relays** (`my_relays`) | You, per-device | Announced in-band to your paired contacts | A relay for **you and the people you talk to** |
 | 4 | **A contact's relays** (`peer_relays`) | Your contact | Learned in-band from them | Reaching a contact via *their* relay |

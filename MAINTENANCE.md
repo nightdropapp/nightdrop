@@ -125,20 +125,20 @@ Current identity: **`app.nightdrop` / "Night Drop"**. For Android and Linux it i
 a **build-time variable** — a pre-release rename needs no source edit:
 
 ```sh
-GHOST_APP_ID=org.example.chat GHOST_APP_NAME="New Name" scripts/install-android-app.sh
-GHOST_APP_ID=org.example.chat scripts/install-desktop-app.sh
+NIGHTDROP_APP_ID=org.example.chat NIGHTDROP_APP_NAME="New Name" scripts/install-android-app.sh
+NIGHTDROP_APP_ID=org.example.chat scripts/install-desktop-app.sh
 ```
 
 Where it's wired:
 
-- `scripts/install-android-app.sh` exports `GHOST_APP_ID`/`GHOST_APP_NAME` as Gradle project
+- `scripts/install-android-app.sh` exports `NIGHTDROP_APP_ID`/`NIGHTDROP_APP_NAME` as Gradle project
   properties (`ORG_GRADLE_PROJECT_appId` / `..._appName`); `scripts/install-desktop-app.sh`
-  exports `GHOST_APP_ID` for the Linux CMake.
+  exports `NIGHTDROP_APP_ID` for the Linux CMake.
 - `app/android/app/build.gradle.kts` reads `appId`/`appName` with the defaults, and
   fills the `${appName}` placeholder in `AndroidManifest.xml`. The Kotlin `namespace`
   (and `MainActivity.kt`'s package, `app.nightdrop`) is intentionally **fixed** —
   it names code, not the shipped identity.
-- `app/linux/CMakeLists.txt` reads `GHOST_APP_ID` from the environment.
+- `app/linux/CMakeLists.txt` reads `NIGHTDROP_APP_ID` from the environment.
 - **iOS/macOS have no variable** — edit `PRODUCT_BUNDLE_IDENTIFIER` in
   `app/ios/Runner.xcodeproj/project.pbxproj` (Runner + RunnerTests, 3 configs each)
   and `app/macos/Runner/Configs/AppInfo.xcconfig`. Windows metadata lives in
@@ -154,8 +154,8 @@ alongside the old one (no upgrade, no data migration) — uninstall the old id m
 
 | Script | Purpose |
 |---|---|
-| `scripts/install-desktop-app.sh` | build the Linux release bundle (Tor + relay baked in via `--dart-define`) and install it as a desktop app (`.desktop` entry + hicolor icons + `~/.local/bin/nightdrop`); `--no-build`, `--run`, `--uninstall`; honors `GHOST_APP_ID`/`GHOST_APP_NAME` |
-| `scripts/install-android-app.sh` | build + install + launch the APK (Tor + relay baked in) on a connected device; honors `GHOST_APP_ID`/`GHOST_APP_NAME`; `--release`, `--build-only`, `--install-only`, `--wireless IP PORT` |
+| `scripts/install-desktop-app.sh` | build the Linux release bundle (Tor + relay baked in via `--dart-define`) and install it as a desktop app (`.desktop` entry + hicolor icons + `~/.local/bin/nightdrop`); `--no-build`, `--run`, `--uninstall`; honors `NIGHTDROP_APP_ID`/`NIGHTDROP_APP_NAME` |
+| `scripts/install-android-app.sh` | build + install + launch the APK (Tor + relay baked in) on a connected device; honors `NIGHTDROP_APP_ID`/`NIGHTDROP_APP_NAME`; `--release`, `--build-only`, `--install-only`, `--wireless IP PORT` |
 | `scripts/onion-website.sh` | serve `website/` behind a Tor v3 onion service (stable `.onion` via persisted state) |
 | `scripts/install-onion-service.sh` | install the onion-website as a systemd user service (starts on boot) |
 | `scripts/setup-pluggable-transports.sh` | write `transports.txt` for obfs4/snowflake bridges |
@@ -212,7 +212,7 @@ at minimum run `bash -n <script>`; use shellcheck if available. Watch the `set -
 - **Plaintext only at the UI edge.** If a change makes Dart touch key material,
   ratchet state, or unencrypted persistence, it's wrong — move it into `core/`.
 - **`MediaCache.wipe()` on logout** (`app/lib/src/core/media_cache.dart`): decrypted
-  attachments are memoized in RAM and decrypted videos land as `ghost-media-*` files
+  attachments are memoized in RAM and decrypted videos land as `nightdrop-media-*` files
   in the OS temp dir; logout must clear both. Anything new that writes decrypted
   bytes anywhere must be added to this wipe.
 - **`_Root` defers `core.start()` to a post-frame callback** (`app/lib/src/app.dart`):
@@ -272,7 +272,7 @@ at minimum run `bash -n <script>`; use shellcheck if available. Watch the `set -
   not `eprintln!`.
 - **The demo core** (`NightdropCore::new()`, in-process echo peer) is what non-Tor,
   non-networked launches use. It's for UI development; real two-device operation is
-  Tor mode (`GHOST_TOR=1`) or TCP networked mode (`GHOST_LISTEN`+`GHOST_RELAY`).
+  Tor mode (`NIGHTDROP_TOR=1`) or TCP networked mode (`NIGHTDROP_LISTEN`+`NIGHTDROP_RELAY`).
 
 ---
 
@@ -295,7 +295,7 @@ at minimum run `bash -n <script>`; use shellcheck if available. Watch the `set -
 6. Deploy the relay per `BUILD_AND_DEPLOY.md`. Its `.onion` is pinned by
    `relay-state/` (`NIGHTDROP_RELAY_STATE`) — **losing that directory changes the relay
    address**, and the address is baked into Android builds via
-   `--dart-define=GHOST_RELAY=...`, so treat `relay-state/` as production state.
+   `--dart-define=NIGHTDROP_RELAY=...`, so treat `relay-state/` as production state.
 7. Website: `python3 -m http.server --bind 127.0.0.1 --directory website 8000` to preview;
    deploy the static `website/` dir.
 8. Sanity-pass the invariants in `CLAUDE.md` against your diff — no server-side

@@ -50,7 +50,7 @@ raw key material or plaintext beyond what it must render.
 ## 3. Component Overview _(planned layout)_
 
 ```
-ghost-chat/
+night-drop/
 ├── app/                 # Flutter application (UI, navigation, platform shells)
 ├── core/                # Rust security core (compiled to a per-platform lib)
 │   ├── identity/        # keypair generation, anonymous identity, QR/short-code
@@ -73,7 +73,7 @@ high-level calls like `createIdentity`, `beginPairing`, `acceptPairing`,
 ## 4. Identity Model
 
 - An identity is a **long-term keypair** generated on-device. No registration.
-- Default display name is **"Ghosty"** for both parties. Each user may set a
+- Default display name is **"Anon"** for both parties. Each user may set a
   **per-chat** display name (their own name, scoped to that conversation).
 - Identities are **device-held**. Losing the device means losing the identity and
   history unless the optional encrypted backup (§7) is enabled.
@@ -98,7 +98,7 @@ The short code resolves to the peer via a **minimal, untrusted rendezvous mailbo
 structured like Magic Wormhole's — a non-secret slot plus secret words:
 
 ```
-   4-ghost-lantern-river
+   4-cedar-lantern-river
    ^ ^^^^^^^^^^^^^^^^^^^^
    |   PAKE secret words  → never sent to the server; feed SPAKE2 (the bouncer)
    mailbox slot (nameplate) → the rendezvous lookup key; not secret
@@ -171,6 +171,38 @@ Dart only renders the string and toggles the flag. See `docs/design/key-verifica
   `bridges.txt` plus a `transports.txt` mapping the transport to its client binary (arti
   `pt-client`, launched on demand). Bundling the PT binaries — especially on mobile — is the
   remaining follow-up. See `docs/bridges.md`.
+- **Diagnostics never carry identity.** Two logging channels, deliberately: `devlog!` prints
+  identity keys, invite codes, and decrypted names, so it is compiled out of release builds —
+  Android's logcat persists them for any `adb`-connected observer. `diag!` (`core/src/diag`) is
+  the opt-in field channel that *may* run in a release build, and so records **what happened, not
+  who with**: counts, outcomes, and which leg of a protocol ran — never keys, onion addresses,
+  codes, slots, or names. It is off unless a build explicitly enables it (`NIGHTDROP_DIAG=1`, via
+  `--diag` on the install scripts). Anything identity-linked belongs in `devlog!`.
+- **Network dials are time-bounded so the UI never hangs on them.** `send` runs while the core
+  lock is held, so an unbounded dial to an offline peer would freeze every other FFI call and the
+  poller for as long as arti retries (minutes, at a high `HS_CONNECT_ATTEMPTS`). Direct peer dials
+  are capped (`PEER_DIAL_TIMEOUT`) so an offline send fails fast to the relay fallback; relay dials
+  are capped (`RELAY_DIAL_TIMEOUT`) without defeating persistence, because the callers that must
+  punch through a flaky path (pairing, the relay-retry poller) loop over their own schedule with a
+  fresh bounded attempt each time. A capped send is never a lost message — only deferred delivery.
+- **The relay self-heals; it is not babysat.** arti can keep the relay process alive while its
+  descriptor publisher or introduction points wedge (seen after multi-day uptime: process up,
+  onion dark, clients get "could not reach relay") — so `Restart=always` alone never recovers it,
+  because nothing crashed. The relay therefore watches its **own** onion reachability
+  (`RunningOnionService::status`) and exits after a sustained outage so systemd restarts it fresh
+  (re-establishing intro points, republishing). A weekly `RuntimeMaxSec` backstops any slow
+  degradation the watchdog misses. The onion keystore is preserved across restarts, so the address
+  never changes. The relay runs **6 introduction points** (vs arti's default 3) and device onions
+  run **4**, so losing an intro point to relay churn leaves the service reachable instead of dark.
+- **One Tor instance per state dir.** arti takes an **exclusive on-disk lock** on its state
+  directory, so at most one core may be live at a time. Any path that replaces a running core
+  — restoring a backup, retrying a failed launch, creating a new identity after one — must call
+  `NightdropCore::shutdown()` first, which drops the transport *and* the relay (its dialer holds
+  a clone of the same arti client) and so releases the lock synchronously. Dropping the core is
+  not sufficient: the poller thread keeps the transport alive until its next tick, and across the
+  FFI boundary the Rust object is only freed by a Dart finalizer at an unpredictable time. Two
+  live instances fail with `State already locked`, which must never be reported to the user as a
+  bad password.
 - **Offline / space-saving path:** a **minimal relay** stores **E2E-encrypted blobs
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.
@@ -481,7 +513,7 @@ port-forwarding, or public IP** (Tor solves reachability; the old LAN/TCP pain i
 dial it **through their own Tor client** (`RelayClient` must dial via the Tor client, not plain
 TCP). Dev: run it on the dev box with a **persisted state dir so its `.onion` is stable** across
 restarts; its address goes in config (`config/app_config.json` `relay` field, overridable by
-`GHOST_RELAY`). Ships externally unchanged (drop on a VPS; same onion via its state dir).
+`NIGHTDROP_RELAY`). Ships externally unchanged (drop on a VPS; same onion via its state dir).
 
 All payloads are opaque E2E blobs; the relay learns no keys, no plaintext, no identity. Mailbox
 handle = an unlinkable derived key both peers can compute (per §5c style), never the
