@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/src/app.dart';
-import 'package:ghost_chat/src/core/mock_nightdrop_core.dart';
+import 'package:night_drop/src/app.dart';
+import 'package:night_drop/src/core/mock_nightdrop_core.dart';
 
 /// A core that reports a launch-time load failure (saved data exists but wouldn't open), so we can
 /// drive the _LoadErrorScreen path.
@@ -28,7 +28,7 @@ void main() {
   // recovery screen (not silently drop to onboarding, which would overwrite the file). Dismissing
   // it deliberately then continues to onboarding.
   testWidgets('load failure shows recovery screen, not silent onboarding', (tester) async {
-    await tester.pumpWidget(GhostApp(core: _LoadErrorCore()));
+    await tester.pumpWidget(NightdropApp(core: _LoadErrorCore()));
     await tester.pump(); // let _Root run start() in its post-frame callback
 
     expect(find.textContaining('open your saved'), findsOneWidget);

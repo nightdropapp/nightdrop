@@ -43,7 +43,7 @@ class NotificationService {
     try {
       const details = NotificationDetails(
         android: AndroidNotificationDetails(
-          'ghost_messages',
+          'nightdrop_messages',
           'Messages',
           channelDescription: 'New messages and chat requests',
           importance: Importance.high,

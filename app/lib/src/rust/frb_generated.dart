@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1505346677;
+  int get rustContentHash => 798194787;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -250,6 +250,8 @@ abstract class RustLibApi extends BaseApi {
       required String contactId,
       required bool verified});
 
+  Future<void> crateApiNightdropCoreShutdown({required NightdropCore that});
+
   Future<void> crateApiNightdropCoreUnsendMessage(
       {required NightdropCore that,
       required String contactId,
@@ -261,6 +263,8 @@ abstract class RustLibApi extends BaseApi {
       required String scanned});
 
   Future<String> crateApiRandomStoreKey();
+
+  Future<void> crateApiSetDiagnostics({required bool enabled});
 
   Stream<AppEvent> crateApiSubscribe();
 
@@ -1565,6 +1569,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiNightdropCoreShutdown({required NightdropCore that}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 44, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiNightdropCoreShutdownConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiNightdropCoreShutdownConstMeta =>
+      const TaskConstMeta(
+        debugName: "NightdropCore_shutdown",
+        argNames: ["that"],
+      );
+
+  @override
   Future<void> crateApiNightdropCoreUnsendMessage(
       {required NightdropCore that,
       required String contactId,
@@ -1577,7 +1607,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(msgId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 45, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1608,7 +1638,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(scanned, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
+            funcId: 46, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1632,7 +1662,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 46, port: port_);
+            funcId: 47, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1650,6 +1680,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSetDiagnostics({required bool enabled}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_bool(enabled, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 48, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiSetDiagnosticsConstMeta,
+      argValues: [enabled],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSetDiagnosticsConstMeta => const TaskConstMeta(
+        debugName: "set_diagnostics",
+        argNames: ["enabled"],
+      );
+
+  @override
   Stream<AppEvent> crateApiSubscribe() {
     final sink = RustStreamSink<AppEvent>();
     unawaited(handler.executeNormal(NormalTask(
@@ -1657,7 +1711,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_StreamSink_app_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 47, port: port_);
+            funcId: 49, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1681,7 +1735,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 48, port: port_);
+            funcId: 50, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2713,6 +2767,20 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
           {required String contactId, required bool verified}) =>
       RustLib.instance.api.crateApiNightdropCoreSetVerified(
           that: this, contactId: contactId, verified: verified);
+
+  /// Stop the background poller and tear down the network side (see
+  /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
+  /// the core stays readable afterwards but can no longer send or receive.
+  ///
+  /// Call this before building a second core over the same `state_dir` — restoring a backup
+  /// does exactly that, and arti refuses to launch a second onion service while the first
+  /// instance still holds the lock. Dropping the core is **not** enough on its own: the poller
+  /// thread holds its own handle on the same state and only notices the stop flag on its next
+  /// tick (up to 2s later, backgrounded), so the lock would still be held when the new instance
+  /// tried to start. Tearing the transport down here makes the release synchronous.
+  Future<void> shutdown() => RustLib.instance.api.crateApiNightdropCoreShutdown(
+        that: this,
+      );
 
   /// Unsend ("delete for both") one of our own messages (`msg_id` from [`ChatMessage`]).
   /// Same eligibility as [`edit_message`](Self::edit_message): within 15 minutes, or while

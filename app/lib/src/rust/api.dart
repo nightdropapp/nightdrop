@@ -18,6 +18,13 @@ Stream<AppEvent> subscribe() => RustLib.instance.api.crateApiSubscribe();
 /// Drop the event sink (closes the stream). Call on app/teardown so no port lingers.
 Future<void> unsubscribe() => RustLib.instance.api.crateApiUnsubscribe();
 
+/// Turn on opt-in operational diagnostics (`crate::diag`) — off unless a debugging build asks
+/// for it. These lines record protocol outcomes (which leg ran, how many relays answered), never
+/// identity keys, onion addresses, invite codes, or names; the identity-linked `devlog!` lines
+/// stay compiled out of release builds either way.
+Future<void> setDiagnostics({required bool enabled}) =>
+    RustLib.instance.api.crateApiSetDiagnostics(enabled: enabled);
+
 /// A fresh random 32-byte at-rest key (base64) for the persisted state file. Generated once
 /// per device, stored in the OS secure store on the Dart side, and passed back to
 /// [`new_tor`](NightdropCore::new_tor) on later launches to restore the saved state.
@@ -329,6 +336,18 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Set the contact's verified flag (after comparing the safety number by hand) and persist.
   Future<void> setVerified({required String contactId, required bool verified});
 
+  /// Stop the background poller and tear down the network side (see
+  /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
+  /// the core stays readable afterwards but can no longer send or receive.
+  ///
+  /// Call this before building a second core over the same `state_dir` — restoring a backup
+  /// does exactly that, and arti refuses to launch a second onion service while the first
+  /// instance still holds the lock. Dropping the core is **not** enough on its own: the poller
+  /// thread holds its own handle on the same state and only notices the stop flag on its next
+  /// tick (up to 2s later, backgrounded), so the lock would still be held when the new instance
+  /// tried to start. Tearing the transport down here makes the release synchronous.
+  Future<void> shutdown();
+
   /// Unsend ("delete for both") one of our own messages (`msg_id` from [`ChatMessage`]).
   /// Same eligibility as [`edit_message`](Self::edit_message): within 15 minutes, or while
   /// still queued (then the relay blob is recalled so the peer never receives it). The
@@ -472,7 +491,7 @@ class ChatMessage {
           at == other.at;
 }
 
-/// A 1:1 conversation partner. Names default to "Ghosty" and are per-chat (§4).
+/// A 1:1 conversation partner. Names default to "Anon" and are per-chat (§4).
 class Contact {
   final String id;
   final String theirName;

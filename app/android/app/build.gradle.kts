@@ -11,7 +11,7 @@ plugins {
 // e.g. before a full release rename:
 //   ORG_GRADLE_PROJECT_appId=org.example.newid \
 //   ORG_GRADLE_PROJECT_appName="New Name" flutter build apk
-// (install-android-app.sh exposes these as GHOST_APP_ID / GHOST_APP_NAME.)
+// (install-android-app.sh exposes these as NIGHTDROP_APP_ID / NIGHTDROP_APP_NAME.)
 // The Kotlin `namespace` below stays fixed — it names code, not the shipped identity.
 val appId = (project.findProperty("appId") as String?) ?: "app.nightdrop"
 val appName = (project.findProperty("appName") as String?) ?: "Night Drop"

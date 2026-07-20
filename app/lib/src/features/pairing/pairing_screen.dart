@@ -50,7 +50,7 @@ class _InviteTabState extends State<_InviteTab> {
     super.didChangeDependencies();
     if (_requested) return;
     _requested = true;
-    GhostScope.of(context).createInvite().then((inv) {
+    NightdropScope.of(context).createInvite().then((inv) {
       if (mounted) setState(() => _invite = inv);
     });
   }
@@ -158,7 +158,7 @@ class _JoinTabState extends State<_JoinTab> {
       _error = null;
     });
     try {
-      final contact = await GhostScope.of(context)
+      final contact = await NightdropScope.of(context)
           .joinWithShortCode(code ?? _controller.text);
       if (!mounted) return;
       Navigator.of(context).pushReplacement(
@@ -215,7 +215,7 @@ class _JoinTabState extends State<_JoinTab> {
                   autofocus: true,
                   decoration: InputDecoration(
                     labelText: l10n.shortCodeOrInviteLink,
-                    hintText: '4-ghost-lantern-river  or  nightdrop://pair?…',
+                    hintText: '4-cedar-lantern-river  or  nightdrop://pair?…',
                     border: const OutlineInputBorder(),
                     errorText: _error,
                   ),

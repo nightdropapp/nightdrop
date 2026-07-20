@@ -248,6 +248,20 @@
       "error": { "type": "String" }
     }
   },
+  "couldNotRestoreBackupFailed": "Could not restore backup. ({error})",
+  "@couldNotRestoreBackupFailed": {
+    "description": "Snackbar when a local backup restore fails for a reason that is NOT a bad password or damaged file (e.g. Tor could not start), so the message must not blame the password.",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
+  "couldNotRestoreServerFailed": "Could not restore from server. ({error})",
+  "@couldNotRestoreServerFailed": {
+    "description": "Snackbar when a server backup restore fails for a reason that is NOT a bad password (e.g. Tor could not start), so the message must not blame the password.",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
   "couldNotRestoreServer": "Could not restore from server — check the password. ({error})",
   "@couldNotRestoreServer": {
     "description": "Snackbar when a server backup restore fails.",

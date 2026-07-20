@@ -10,32 +10,32 @@ import 'features/home/home_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'theme/theme.dart';
 
-/// Exposes the [NightdropCore] to the widget tree. Read it with `GhostScope.of(context)`;
+/// Exposes the [NightdropCore] to the widget tree. Read it with `NightdropScope.of(context)`;
 /// widgets rebuild when the core notifies.
-class GhostScope extends InheritedNotifier<NightdropCore> {
-  const GhostScope({super.key, required NightdropCore core, required super.child})
+class NightdropScope extends InheritedNotifier<NightdropCore> {
+  const NightdropScope({super.key, required NightdropCore core, required super.child})
       : super(notifier: core);
 
   static NightdropCore of(BuildContext context) {
-    final scope = context.dependOnInheritedWidgetOfExactType<GhostScope>();
-    assert(scope?.notifier != null, 'GhostScope not found in the widget tree');
+    final scope = context.dependOnInheritedWidgetOfExactType<NightdropScope>();
+    assert(scope?.notifier != null, 'NightdropScope not found in the widget tree');
     return scope!.notifier!;
   }
 }
 
-class GhostApp extends StatelessWidget {
-  const GhostApp({super.key, required this.core});
+class NightdropApp extends StatelessWidget {
+  const NightdropApp({super.key, required this.core});
 
   final NightdropCore core;
 
   @override
   Widget build(BuildContext context) {
-    return GhostScope(
+    return NightdropScope(
       core: core,
       child: MaterialApp(
         onGenerateTitle: (context) => AppLocalizations.of(context)!.appTitle,
         debugShowCheckedModeBanner: false,
-        theme: ghostTheme(),
+        theme: nightdropTheme(),
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
         home: const _Root(),
@@ -72,7 +72,7 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final foreground = state == AppLifecycleState.resumed;
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     core.setLifecycle(foreground);
     // Opt-in Android foreground service (#13): keep the process alive in the background so the
     // poller's Tor `peek` keeps delivering notifications; stop it when back in the foreground.
@@ -91,13 +91,13 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     // Deferred past the first frame: start() can notify synchronously (the non-Tor path
     // has no await before its finally-notify), and notifying mid-build throws
     // "setState() or markNeedsBuild() called during build".
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     WidgetsBinding.instance.addPostFrameCallback((_) => core.start());
   }
 
   @override
   Widget build(BuildContext context) {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     return ListenableBuilder(
       listenable: core,
       builder: (context, _) {
@@ -186,7 +186,7 @@ class _LoadErrorScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final core = GhostScope.of(context);
+    final core = NightdropScope.of(context);
     final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       body: Center(

@@ -1,5 +1,5 @@
-name: ghost_chat
-description: "Ghost Chat — a privacy-first 1:1 messenger."
+name: night_drop
+description: "Night Drop — a privacy-first 1:1 messenger."
 publish_to: "none"
 version: 0.1.0+1
 
@@ -31,7 +31,7 @@ dependencies:
   nightdrop:
     path: rust_builder
   flutter_launcher_icons: ^0.14.4
-  flutter_foreground_task: ^9.2.2 # opt-in Android background-delivery foreground service (#13)
+  flutter_foreground_task: ^10.0.0 # opt-in Android background-delivery foreground service (#13)
   flutter_zxing: ^2.3.0 # on-device QR scanning for pairing (§5a); Apache-2.0 ZXing, no Google Play Services / ML Kit
   permission_handler: ^12.0.0 # runtime camera-permission request + open-settings for the scanner (no phone-home; see DEPENDENCIES.md)
 

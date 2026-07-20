@@ -1,10 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/src/app.dart';
-import 'package:ghost_chat/src/core/mock_nightdrop_core.dart';
+import 'package:night_drop/src/app.dart';
+import 'package:night_drop/src/core/mock_nightdrop_core.dart';
 
 void main() {
   testWidgets('onboarding -> create identity -> chat list', (tester) async {
-    await tester.pumpWidget(GhostApp(core: MockNightdropCore()));
+    await tester.pumpWidget(NightdropApp(core: MockNightdropCore()));
 
     // Onboarding is shown first.
     expect(find.text('Create my identity'), findsOneWidget);

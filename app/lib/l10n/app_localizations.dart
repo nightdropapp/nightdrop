@@ -424,6 +424,18 @@ abstract class AppLocalizations {
   /// **'Could not restore backup — check the password and file. ({error})'**
   String couldNotRestoreBackup(String error);
 
+  /// Snackbar when a local backup restore fails for a reason that is NOT a bad password or damaged file (e.g. Tor could not start), so the message must not blame the password.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not restore backup. ({error})'**
+  String couldNotRestoreBackupFailed(String error);
+
+  /// Snackbar when a server backup restore fails for a reason that is NOT a bad password (e.g. Tor could not start), so the message must not blame the password.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not restore from server. ({error})'**
+  String couldNotRestoreServerFailed(String error);
+
   /// Snackbar when a server backup restore fails.
   ///
   /// In en, this message translates to:

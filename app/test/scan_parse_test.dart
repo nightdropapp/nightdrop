@@ -1,25 +1,25 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/src/features/pairing/scan_screen.dart';
+import 'package:night_drop/src/features/pairing/scan_screen.dart';
 
 void main() {
   test('accepts a valid nightdrop pairing payload', () {
     expect(
-      isGhostInvite('nightdrop://pair?addr=abc.onion&ik=KEY&otk=OTK'),
+      isNightdropInvite('nightdrop://pair?addr=abc.onion&ik=KEY&otk=OTK'),
       isTrue,
     );
   });
 
   test('rejects non-invite QR contents', () {
-    expect(isGhostInvite('https://example.com'), isFalse);
-    expect(isGhostInvite('nightdrop://pair?addr=abc'), isFalse); // no ik
-    expect(isGhostInvite('not a uri at all %%%'), isFalse);
-    expect(isGhostInvite('nightdrop://other?ik=KEY'), isFalse);
-    expect(isGhostInvite(''), isFalse);
+    expect(isNightdropInvite('https://example.com'), isFalse);
+    expect(isNightdropInvite('nightdrop://pair?addr=abc'), isFalse); // no ik
+    expect(isNightdropInvite('not a uri at all %%%'), isFalse);
+    expect(isNightdropInvite('nightdrop://other?ik=KEY'), isFalse);
+    expect(isNightdropInvite(''), isFalse);
   });
 
   test('recognizes a short code QR (slot-secret-words)', () {
     expect(looksLikeShortCode('ab3xz9-cobalt-river-ember-quartz'), isTrue);
-    expect(looksLikeShortCode('7-ghost-lantern-river'), isTrue);
+    expect(looksLikeShortCode('7-cedar-lantern-river'), isTrue);
     expect(isScannablePairing('ab3xz9-cobalt-river-ember'), isTrue);
     // Not short codes: too few parts, wrong charset, URLs.
     expect(looksLikeShortCode('justoneword'), isFalse);
@@ -38,31 +38,31 @@ void main() {
 
     test('standard base64 key material (+ / =)', () {
       final p = '$onion&ik=aGVsbG8+d29ybGQ/Zm9v=&otk=YS9iK2M9ZA==';
-      expect(isGhostInvite(p), isTrue);
+      expect(isNightdropInvite(p), isTrue);
       expect(isScannablePairing(p), isTrue);
     });
 
     test('URL-safe base64 key material (- _)', () {
       final p = '$onion&ik=aGVsbG8-d29ybGRfZm9v&otk=YS1iX2NkZQ';
-      expect(isGhostInvite(p), isTrue);
+      expect(isNightdropInvite(p), isTrue);
       expect(isScannablePairing(p), isTrue);
     });
 
     test('uppercase/mixed-case key material still parses', () {
       final p = '$onion&ik=AbCdEfGh1234&otk=ZzYyXx';
-      expect(isGhostInvite(p), isTrue);
+      expect(isNightdropInvite(p), isTrue);
     });
 
     test('ik param present but empty is still structurally an invite', () {
       // The value is validated in the Rust core (parse_invite); the scanner filter only
       // needs the key present so it hands the payload on rather than ignoring the QR.
-      expect(isGhostInvite('$onion&ik='), isTrue);
+      expect(isNightdropInvite('$onion&ik='), isTrue);
     });
   });
 
   test('isScannablePairing accepts both invite URIs and short codes, rejects junk', () {
     expect(isScannablePairing('nightdrop://pair?addr=x.onion&ik=K'), isTrue);
-    expect(isScannablePairing('4-ghost-lantern-river'), isTrue);
+    expect(isScannablePairing('4-cedar-lantern-river'), isTrue);
     expect(isScannablePairing('https://example.com/qr'), isFalse);
     expect(isScannablePairing('hello world'), isFalse);
     expect(isScannablePairing(''), isFalse);

@@ -18,7 +18,7 @@ class BackupFiles {
         .replaceAll(':', '-')
         .split('.')
         .first;
-    return 'ghost-backup-$stamp.bin';
+    return 'nightdrop-backup-$stamp.bin';
   }
 
   static String? _desktopDir() {

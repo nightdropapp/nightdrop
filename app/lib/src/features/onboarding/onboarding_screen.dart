@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../app.dart';
+import '../../core/backup_errors.dart';
 import '../../core/backup_files.dart';
 import '../../core/nightdrop_core.dart';
 
@@ -60,7 +61,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _busy = true);
     _startProgress();
     try {
-      await GhostScope.of(context).createIdentity();
+      await NightdropScope.of(context).createIdentity();
       // _Root rebuilds to HomeScreen once an identity exists.
     } catch (e) {
       if (!mounted) return;
@@ -121,7 +122,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _busy = true);
     _startProgress();
     try {
-      await GhostScope.of(context).importBackup(path, password);
+      await NightdropScope.of(context).importBackup(path, password);
       // _Root rebuilds to HomeScreen once the restored identity exists.
     } catch (e) {
       if (!mounted) return;
@@ -129,7 +130,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(l10n.couldNotRestoreBackup(e.toString())),
+          // Only say "check the password" when the backup actually failed to decrypt.
+          content: Text(isBackupDecryptFailure(e)
+              ? l10n.couldNotRestoreBackup(e.toString())
+              : l10n.couldNotRestoreBackupFailed(e.toString())),
         ),
       );
     }
@@ -181,7 +185,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _busy = true);
     _startProgress();
     try {
-      await GhostScope.of(context).importServerBackup(password);
+      await NightdropScope.of(context).importServerBackup(password);
       // _Root rebuilds to HomeScreen once the restored identity exists.
     } catch (e) {
       if (!mounted) return;
@@ -189,7 +193,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       setState(() => _busy = false);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(l10n.couldNotRestoreServer(e.toString())),
+          // Only say "check the password" when the backup actually failed to decrypt.
+          content: Text(isBackupDecryptFailure(e)
+              ? l10n.couldNotRestoreServer(e.toString())
+              : l10n.couldNotRestoreServerFailed(e.toString())),
         ),
       );
     }

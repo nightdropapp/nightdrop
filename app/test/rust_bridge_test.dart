@@ -5,8 +5,8 @@ import 'dart:io';
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ghost_chat/src/core/rust_nightdrop_core.dart';
-import 'package:ghost_chat/src/rust/frb_generated.dart';
+import 'package:night_drop/src/core/rust_nightdrop_core.dart';
+import 'package:night_drop/src/rust/frb_generated.dart';
 
 /// Exercises the real Rust security core through the flutter_rust_bridge bindings by
 /// loading the built `libnightdrop.so` directly (no GUI / GTK needed). Run after
@@ -33,9 +33,9 @@ void main() {
     final core = RustNightdropCore();
     await core.createIdentity();
 
-    final contact = await core.joinWithShortCode('4-ghost-lantern-river');
+    final contact = await core.joinWithShortCode('4-cedar-lantern-river');
     expect(core.contacts, hasLength(1));
-    expect(contact.theirName, 'Ghosty');
+    expect(contact.theirName, 'Anon');
 
     await core.sendMessage(contact.id, 'hello');
     final messages = core.messagesFor(contact.id);

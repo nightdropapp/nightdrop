@@ -72,8 +72,8 @@ class RustNightdropCore extends NightdropCore {
   // flutter_secure_storage 10 dropped the EncryptedSharedPreferences backend (Jetpack
   // Security is deprecated); existing entries migrate automatically on first access.
   static const _secure = FlutterSecureStorage();
-  static const _kStoreKeyName = 'ghost_store_key';
-  static const _kStateFile = 'ghost-state.bin';
+  static const _kStoreKeyName = 'nightdrop_store_key';
+  static const _kStateFile = 'nightdrop-state.bin';
 
   Future<String> _stateFilePath() async =>
       '${(await getApplicationSupportDirectory()).path}/$_kStateFile';
@@ -83,6 +83,27 @@ class RustNightdropCore extends NightdropCore {
   /// known location lets a backup fold in the onion keystore so restore keeps the same `.onion`.
   Future<String?> _torStateDir() async =>
       (await getApplicationSupportDirectory()).path;
+
+  /// Release the current core before another is built over the same Tor state dir.
+  ///
+  /// arti takes an **exclusive on-disk lock** on that directory, so only one instance may live
+  /// at a time. Clearing `_core` is not enough: the Rust object is freed by a Dart finalizer at
+  /// an unpredictable time, and its poller thread keeps the transport alive regardless — so the
+  /// lock outlives the reference and the next bootstrap dies with "State already locked".
+  /// `shutdown()` releases it synchronously. No-op when there is no core.
+  Future<void> _closeCore() async {
+    await _events?.cancel();
+    _events = null;
+    final core = _core;
+    _core = null;
+    if (core == null) return;
+    try {
+      await core.shutdown();
+    } catch (_) {
+      // Best-effort: a core that won't shut down cleanly must not block the path replacing it.
+    }
+    core.dispose();
+  }
 
   @override
   void dispose() {
@@ -118,15 +139,19 @@ class RustNightdropCore extends NightdropCore {
   // --- Transport configuration -------------------------------------------------------
   //
   // Networked mode (real two-client comms over TCP + a shared relay) is what lets two
-  // physical devices talk. It is selected by GHOST_LISTEN + GHOST_RELAY, resolved from
+  // physical devices talk. It is selected by NIGHTDROP_LISTEN + NIGHTDROP_RELAY, resolved from
   // either a compile-time --dart-define (the only option on Android) or, on desktop, a
   // process env var. If neither is set we fall back to the in-process demo core.
-  // Tor mode (GHOST_TOR=1) is the production WAN path: each device bootstraps an embedded
+  // Tor mode (NIGHTDROP_TOR=1) is the production WAN path: each device bootstraps an embedded
   // Tor client and gets a reachable .onion, so peers pair (by QR — no relay needed) and
   // chat over any network including LTE. It takes precedence over TCP networked mode.
-  static const String _defineTor = String.fromEnvironment('GHOST_TOR');
-  static const String _defineListen = String.fromEnvironment('GHOST_LISTEN');
-  static const String _defineRelay = String.fromEnvironment('GHOST_RELAY');
+  static const String _defineTor = String.fromEnvironment('NIGHTDROP_TOR');
+  static const String _defineListen = String.fromEnvironment('NIGHTDROP_LISTEN');
+  static const String _defineRelay = String.fromEnvironment('NIGHTDROP_RELAY');
+  // Opt-in field diagnostics (NIGHTDROP_DIAG=1). Records protocol outcomes only — never keys,
+  // codes, onion addresses, or names — so it is safe to enable on a build you hand to someone
+  // for a repro. Off unless asked for; a normal release is silent.
+  static const String _defineDiag = String.fromEnvironment('NIGHTDROP_DIAG');
 
   static String? _config(String key, String define) {
     if (define.isNotEmpty) return define;
@@ -134,10 +159,15 @@ class RustNightdropCore extends NightdropCore {
     return (env != null && env.isNotEmpty) ? env : null;
   }
 
-  static String? get _listenAddr => _config('GHOST_LISTEN', _defineListen);
-  static String? get _relayAddr => _config('GHOST_RELAY', _defineRelay);
+  static String? get _listenAddr => _config('NIGHTDROP_LISTEN', _defineListen);
+  static String? get _relayAddr => _config('NIGHTDROP_RELAY', _defineRelay);
   static bool get _torEnabled {
-    final v = _config('GHOST_TOR', _defineTor)?.toLowerCase();
+    final v = _config('NIGHTDROP_TOR', _defineTor)?.toLowerCase();
+    return v == '1' || v == 'true' || v == 'yes';
+  }
+
+  static bool get _diagEnabled {
+    final v = _config('NIGHTDROP_DIAG', _defineDiag)?.toLowerCase();
     return v == '1' || v == 'true' || v == 'yes';
   }
 
@@ -164,8 +194,8 @@ class RustNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
-  static const _kBackedUp = 'ghost_backed_up';
-  static const _kBackupSnoozeUntil = 'ghost_backup_snooze_until';
+  static const _kBackedUp = 'nightdrop_backed_up';
+  static const _kBackupSnoozeUntil = 'nightdrop_backup_snooze_until';
 
   @override
   Future<bool> shouldSuggestBackup() async {
@@ -198,6 +228,13 @@ class RustNightdropCore extends NightdropCore {
     // Auto-restore a persisted identity on launch (Tor mode only). If a secure-store key and
     // a saved state file both exist, rebuild the same identity + chats; else fall through to
     // onboarding.
+    //
+    // Before anything else, so a failure in the launch path itself is on the record.
+    if (_diagEnabled) await rust.setDiagnostics(enabled: true);
+    // Close anything already running first: this runs again via `retryStart` after a failure,
+    // and a second bootstrap over the same (still-locked) Tor state dir would fail no matter
+    // how many times the user pressed "Try again".
+    await _closeCore();
     try {
       if (_torEnabled) {
         final key = await _secure.read(key: _kStoreKeyName);
@@ -219,7 +256,11 @@ class RustNightdropCore extends NightdropCore {
             _identity = Identity(id: id.id);
             await _refresh();
           } catch (e) {
-            _core = null;
+            // Tear the core down rather than just forgetting it: `newTor` may well have
+            // succeeded (arti bootstrapped, lock taken) and a *later* step thrown. Dropping the
+            // reference would strand that instance holding the lock, so every subsequent retry
+            // or backup restore would fail with "State already locked".
+            await _closeCore();
             _identity = null;
             // Distinguish a Tor-connection failure (data is fine — just retry) from an actual
             // unreadable/corrupt state (preserve the bytes before anything can overwrite them).
@@ -238,7 +279,7 @@ class RustNightdropCore extends NightdropCore {
     } catch (e) {
       // An error OUTSIDE the load of an existing file (e.g. reading the keystore, resolving the
       // state dir). No confirmed on-disk identity to protect here — fall back to onboarding.
-      _core = null;
+      await _closeCore();
       _identity = null;
     } finally {
       _booting = false;
@@ -261,6 +302,9 @@ class RustNightdropCore extends NightdropCore {
 
   @override
   Future<void> createIdentity() async {
+    // Reachable from the load-error screen ("set up new identity"), where a failed start may
+    // have left a core holding the Tor state lock.
+    await _closeCore();
     final listen = _listenAddr;
     final relay = _relayAddr;
     if (_torEnabled) {
@@ -413,6 +457,9 @@ class RustNightdropCore extends NightdropCore {
 
   @override
   Future<void> importBackup(String path, String password) async {
+    // Restoring builds a whole new core over the same Tor state dir, so whatever is running now
+    // has to go first — otherwise arti can't launch the restored identity's onion service.
+    await _closeCore();
     if (_torEnabled) {
       // Restore the backup onto Tor and persist it (so it survives future restarts too).
       final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
@@ -453,6 +500,8 @@ class RustNightdropCore extends NightdropCore {
     if (relay == null) {
       throw StateError('No relay configured — cannot restore from server.');
     }
+    // As in `importBackup`: release the Tor state lock before the restored core takes it.
+    await _closeCore();
     final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
     await _secure.write(key: _kStoreKeyName, value: key);
     _core = await rust.NightdropCore.restoreServerBackupTor(
@@ -518,14 +567,14 @@ class RustNightdropCore extends NightdropCore {
       notNotified = await core?.logout() ?? 0;
     } catch (_) {}
     // Decrypted media must not outlive the identity: drop the in-memory caches and delete
-    // the plaintext `ghost-media-*` temp files written for the system player.
+    // the plaintext `nightdrop-media-*` temp files written for the system player.
     unawaited(MediaCache.wipe());
     try {
       await _secure.delete(key: _kStoreKeyName);
       final support = (await getApplicationSupportDirectory()).path;
       final state = File('$support/$_kStateFile');
       if (state.existsSync()) state.deleteSync();
-      final media = Directory('$support/ghost-media');
+      final media = Directory('$support/nightdrop-media');
       if (media.existsSync()) media.deleteSync(recursive: true);
       if (Platform.isAndroid || Platform.isIOS) {
         final artiState = Directory('$support/arti-state');

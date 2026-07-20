@@ -19,7 +19,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 /// the poller pause even though the process lives; reliable delivery covers the backgrounded (not
 /// force-closed) case. This needs on-device validation.
 @pragma('vm:entry-point')
-void ghostBackgroundCallback() {
+void nightdropBackgroundCallback() {
   FlutterForegroundTask.setTaskHandler(_KeepAliveTaskHandler());
 }
 
@@ -51,7 +51,7 @@ class BackgroundDelivery {
       FlutterForegroundTask.initCommunicationPort();
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
-          channelId: 'ghost_background',
+          channelId: 'nightdrop_background',
           channelName: 'Background delivery',
           channelDescription:
               'Keeps Night Drop checking for messages over Tor while backgrounded.',
@@ -132,7 +132,7 @@ class BackgroundDelivery {
         serviceId: 424242,
         notificationTitle: 'Night Drop',
         notificationText: 'Watching for messages',
-        callback: ghostBackgroundCallback,
+        callback: nightdropBackgroundCallback,
       );
     } catch (_) {}
   }

@@ -92,9 +92,9 @@ BEGIN
             VALUE "CompanyName", "Night Drop" "\0"
             VALUE "FileDescription", "Night Drop" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "ghost_chat" "\0"
+            VALUE "InternalName", "night_drop" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 Night Drop. All rights reserved." "\0"
-            VALUE "OriginalFilename", "ghost_chat.exe" "\0"
+            VALUE "OriginalFilename", "night_drop.exe" "\0"
             VALUE "ProductName", "Night Drop" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
