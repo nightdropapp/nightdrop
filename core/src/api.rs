@@ -94,6 +94,22 @@ pub fn set_diagnostics(enabled: bool) {
     crate::diag!("diagnostics enabled");
 }
 
+/// Delete arti's entry-guard + circuit-timing state under `state_dir` — but NOT the onion keystore,
+/// so the device keeps its stable `.onion`. The next Tor bootstrap then picks fresh entry guards.
+/// This is the recovery for a **wedged guard set** (guards that have churned out of the network):
+/// a client stuck on them can neither publish its own onion nor reach the relay, and a plain
+/// re-bootstrap reuses the same guards, so it can't recover on its own (§6). Call this with the
+/// core shut down, then build a fresh core. No-op if the files are absent.
+pub fn reset_tor_guards(state_dir: String) {
+    let dir = std::path::Path::new(&state_dir)
+        .join("arti-state")
+        .join("state");
+    for f in ["guards.json", "circuit_timeouts.json"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+    crate::diag!("tor: reset entry-guard state (kept onion identity) to recover reachability");
+}
+
 fn emit(kind: &str) {
     emit_chats(kind, Vec::new());
 }

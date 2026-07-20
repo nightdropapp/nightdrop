@@ -97,6 +97,12 @@ fn main() -> anyhow::Result<()> {
     let core = Arc::new(base.with_directory(directory));
     let start = Instant::now();
 
+    // If prior runs kept ending unreachable, plain restarts aren't helping — the guard set is
+    // wedged. Reset it before bootstrapping so this start picks fresh entry guards (§6).
+    if read_unhealthy(&state_dir) >= UNHEALTHY_RESET_THRESHOLD {
+        reset_tor_guards(&state_dir);
+    }
+
     let config = tor_config(&state_dir)?;
     let runtime = Runtime::new().context("tokio runtime")?;
     runtime.block_on(async move {
@@ -134,19 +140,31 @@ fn main() -> anyhow::Result<()> {
         // is normal during startup and intro-point rotation, so we only act on a sustained outage.
         {
             let watched = Arc::clone(&service);
+            let sd = state_dir.clone();
             tokio::spawn(async move {
                 let mut unreachable_since: Option<Instant> = None;
+                let mut cleared = false;
                 loop {
                     tokio::time::sleep(WATCHDOG_INTERVAL).await;
                     if watched.status().state().is_fully_reachable() {
                         unreachable_since = None;
+                        // Reachable: clear the escalation counter once, so a *later* independent
+                        // outage starts its own plain-restart-then-guard-reset sequence from zero.
+                        if !cleared {
+                            write_unhealthy(&sd, 0);
+                            cleared = true;
+                        }
                         continue;
                     }
                     let since = *unreachable_since.get_or_insert_with(Instant::now);
                     if since.elapsed() >= WATCHDOG_MAX_UNREACHABLE {
+                        // Record this unhealthy cycle so the next start can escalate to a guard
+                        // reset if plain restarts keep failing, then exit for systemd to restart us.
+                        let n = read_unhealthy(&sd) + 1;
+                        write_unhealthy(&sd, n);
                         eprintln!(
-                            "nightdrop-relay: onion unreachable for {}s — exiting for a fresh \
-                             restart (systemd Restart=always)",
+                            "nightdrop-relay: onion unreachable for {}s (unhealthy cycle {n}) — \
+                             exiting for a fresh restart (systemd Restart=always)",
                             since.elapsed().as_secs()
                         );
                         std::process::exit(1);
@@ -334,6 +352,42 @@ const WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
 /// enough to ride out normal startup bootstrapping (~1–3 min) and intro-point rotation without a
 /// spurious restart; short enough that a real wedge self-corrects in minutes, not days.
 const WATCHDOG_MAX_UNREACHABLE: Duration = Duration::from_secs(8 * 60);
+
+/// Consecutive unhealthy (sustained-unreachable) restart cycles after which the guard state is
+/// reset on the next start. The first restart is plain — it re-establishes introduction points and
+/// republishes the descriptor, which fixes an intro-point wedge and keeps arti's entry guards
+/// sticky (a privacy property). Only if that doesn't restore reachability do we escalate to a guard
+/// reset, since the remaining cause is a wedged guard set (guards churned out of the network — a
+/// plain restart reuses them, so it can't recover; this is exactly the state that had to be cleared
+/// by hand). So: plain restart, then guard reset.
+const UNHEALTHY_RESET_THRESHOLD: u32 = 2;
+
+/// The escalation counter: consecutive unhealthy restart cycles, persisted so it survives the exit.
+fn unhealthy_marker(state_dir: &str) -> std::path::PathBuf {
+    Path::new(state_dir).join("unhealthy-restarts")
+}
+fn read_unhealthy(state_dir: &str) -> u32 {
+    std::fs::read_to_string(unhealthy_marker(state_dir))
+        .ok()
+        .and_then(|s| s.trim().parse().ok())
+        .unwrap_or(0)
+}
+fn write_unhealthy(state_dir: &str, n: u32) {
+    let _ = std::fs::write(unhealthy_marker(state_dir), n.to_string());
+}
+
+/// Delete arti's entry-guard + circuit-timing state — but NOT the onion keystore, so the stable
+/// `.onion` address is preserved. The next bootstrap then picks fresh entry guards, recovering from
+/// a wedged guard set that a plain restart (which reuses the same guards) cannot.
+fn reset_tor_guards(state_dir: &str) {
+    let dir = Path::new(state_dir).join("arti-state").join("state");
+    for f in ["guards.json", "circuit_timeouts.json"] {
+        let _ = std::fs::remove_file(dir.join(f));
+    }
+    eprintln!(
+        "nightdrop-relay: reset entry-guard state (onion identity kept) to recover reachability"
+    );
+}
 
 fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<OnionServiceConfig> {
     let mut builder = OnionServiceConfigBuilder::default();

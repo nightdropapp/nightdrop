@@ -105,6 +105,40 @@ class RustNightdropCore extends NightdropCore {
     core.dispose();
   }
 
+  /// Automatically recover from a wedged Tor entry-guard set — the in-app equivalent of deleting
+  /// `guards.json` by hand. If the onion hasn't published within [_guardHealTimeout], the guards
+  /// have almost certainly churned out of the network: the device can neither publish its onion nor
+  /// reach the relay, and a plain re-bootstrap reuses the same guards, so it can't recover. Reset
+  /// the guard state (keeping the .onion identity) and rebuild the core with fresh guards. Guarded
+  /// so it runs at most once per launch and only while the onion is genuinely unpublished — so it
+  /// can never disrupt a working session (a stuck onion means the app is non-functional anyway).
+  Future<void> _scheduleGuardHeal(String statePath, String key) async {
+    if (!_tor || _guardHealDone) return;
+    final core = _core;
+    await Future.delayed(_guardHealTimeout);
+    // Bail if anything changed meanwhile: already healed, no longer Tor, the core was replaced
+    // (logout/restore), or the onion published fine.
+    if (_guardHealDone || !_tor || !identical(_core, core) || core == null) return;
+    if (await onionReady()) return;
+    final stateDir = await _torStateDir();
+    if (stateDir == null) return; // no writable Tor state dir — nothing to reset
+    _guardHealDone = true;
+    await rust.resetTorGuards(stateDir: stateDir);
+    await _closeCore();
+    _core = await rust.NightdropCore.newTor(
+      stateDir: stateDir,
+      relayAddr: _relayAddr,
+      persistPath: statePath,
+      persistKey: key,
+    );
+    _tor = true;
+    _events = rust.subscribe().listen((e) => _refresh(e));
+    final id = await _core!.identity();
+    _identity = Identity(id: id.id);
+    await _refresh();
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _events?.cancel();
@@ -223,6 +257,12 @@ class RustNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
+  // If the onion hasn't published within this long, the entry-guard set is almost certainly wedged
+  // (a healthy publish finishes well under it) — the app then resets guards and rebuilds itself.
+  static const _guardHealTimeout = Duration(seconds: 150);
+  // At most one automatic guard-heal per launch, so a genuinely offline device can't loop.
+  bool _guardHealDone = false;
+
   @override
   Future<void> start() async {
     // Auto-restore a persisted identity on launch (Tor mode only). If a secure-store key and
@@ -231,6 +271,7 @@ class RustNightdropCore extends NightdropCore {
     //
     // Before anything else, so a failure in the launch path itself is on the record.
     if (_diagEnabled) await rust.setDiagnostics(enabled: true);
+    _guardHealDone = false;
     // Close anything already running first: this runs again via `retryStart` after a failure,
     // and a second bootstrap over the same (still-locked) Tor state dir would fail no matter
     // how many times the user pressed "Try again".
@@ -255,6 +296,7 @@ class RustNightdropCore extends NightdropCore {
             final id = await _core!.identity();
             _identity = Identity(id: id.id);
             await _refresh();
+            unawaited(_scheduleGuardHeal(statePath, key));
           } catch (e) {
             // Tear the core down rather than just forgetting it: `newTor` may well have
             // succeeded (arti bootstrapped, lock taken) and a *later* step thrown. Dropping the
@@ -305,6 +347,7 @@ class RustNightdropCore extends NightdropCore {
     // Reachable from the load-error screen ("set up new identity"), where a failed start may
     // have left a core holding the Tor state lock.
     await _closeCore();
+    _guardHealDone = false;
     final listen = _listenAddr;
     final relay = _relayAddr;
     if (_torEnabled) {
@@ -313,13 +356,15 @@ class RustNightdropCore extends NightdropCore {
       // persistence key (held in the OS secure store) makes the identity survive restarts.
       final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
       await _secure.write(key: _kStoreKeyName, value: key);
+      final statePath = await _stateFilePath();
       _core = await rust.NightdropCore.newTor(
         stateDir: await _torStateDir(),
         relayAddr: relay,
-        persistPath: await _stateFilePath(),
+        persistPath: statePath,
         persistKey: key,
       );
       _tor = true;
+      unawaited(_scheduleGuardHeal(statePath, key));
     } else if (listen != null && relay != null) {
       _core = await rust.NightdropCore.newNetworked(listenAddr: listen, relayAddr: relay);
       _networked = true;

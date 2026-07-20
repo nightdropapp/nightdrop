@@ -25,6 +25,15 @@ Future<void> unsubscribe() => RustLib.instance.api.crateApiUnsubscribe();
 Future<void> setDiagnostics({required bool enabled}) =>
     RustLib.instance.api.crateApiSetDiagnostics(enabled: enabled);
 
+/// Delete arti's entry-guard + circuit-timing state under `state_dir` — but NOT the onion keystore,
+/// so the device keeps its stable `.onion`. The next Tor bootstrap then picks fresh entry guards.
+/// This is the recovery for a **wedged guard set** (guards that have churned out of the network):
+/// a client stuck on them can neither publish its own onion nor reach the relay, and a plain
+/// re-bootstrap reuses the same guards, so it can't recover on its own (§6). Call this with the
+/// core shut down, then build a fresh core. No-op if the files are absent.
+Future<void> resetTorGuards({required String stateDir}) =>
+    RustLib.instance.api.crateApiResetTorGuards(stateDir: stateDir);
+
 /// A fresh random 32-byte at-rest key (base64) for the persisted state file. Generated once
 /// per device, stored in the OS secure store on the Dart side, and passed back to
 /// [`new_tor`](NightdropCore::new_tor) on later launches to restore the saved state.

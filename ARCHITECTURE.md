@@ -201,6 +201,18 @@ Dart only renders the string and toggles the flag. See `docs/design/key-verifica
   degradation the watchdog misses. The onion keystore is preserved across restarts, so the address
   never changes. The relay runs **6 introduction points** (vs arti's default 3) and device onions
   run **4**, so losing an intro point to relay churn leaves the service reachable instead of dark.
+- **Wedged entry guards self-recover, on both the relay and the app.** After weeks of a persistent
+  Tor state dir, arti's confirmed entry guards can churn out of the network; a client stuck on them
+  can neither publish its onion nor reach the relay, and a plain re-bootstrap reuses the same
+  guards, so it can't recover — this is the state that once had to be cleared by hand. Recovery is
+  to delete the guard/circuit state (`guards.json`, `circuit_timeouts.json`) while **keeping the
+  onion keystore** (stable `.onion`), so the next bootstrap picks fresh guards. The relay escalates
+  to this automatically: the watchdog counts consecutive unhealthy restarts and, after a plain
+  restart (which preserves guard stickiness and fixes intro-point wedges) fails to restore
+  reachability, resets guards on the next start. The app does the same in-process: if its onion
+  hasn't published within ~150 s (a healthy publish finishes well under that), it resets guards and
+  rebuilds the core with fresh ones — at most once per launch, and only while the onion is
+  unpublished, so a working session is never disrupted.
 - **One Tor instance per state dir.** arti takes an **exclusive on-disk lock** on its state
   directory, so at most one core may be live at a time. Any path that replaces a running core
   — restoring a backup, retrying a failed launch, creating a new identity after one — must call
