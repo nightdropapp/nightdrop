@@ -332,7 +332,8 @@
           var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
           box.innerHTML = Object.keys(labels).map(function (k) {
             var url = c.downloads[k];
-            return '<a class="btn ghost" href="' + (url ? esc(url) : '#') + '">' + labels[k] + '</a>';
+            var dl = url ? ' download' : '';
+            return '<a class="btn ghost"' + dl + ' href="' + (url ? esc(url) : '#') + '">' + labels[k] + '</a>';
           }).join('');
         }
       }
