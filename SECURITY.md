@@ -93,6 +93,16 @@ Night Drop deliberately uses audited primitives (`vodozemac`, `arti`, a vetted P
 keeps all key material in the Rust core. Reports of hand-rolled crypto, primitive misuse,
 nonce/key reuse, or ratchet/state-machine flaws are especially welcome.
 
+## Audit status
+
+**Night Drop has not yet had an independent, external security audit.** The cryptographic
+*primitives* it builds on are audited libraries, and the security-critical code is isolated in one
+Rust core with automated tests and fuzzing — but the *integration* (the pairing/PAKE protocol, the
+relay, at-rest storage, and the Dart↔Rust FFI boundary) has **not** been independently reviewed. An
+external audit is a prerequisite for treating Night Drop as battle-tested; when one is done we will
+publish it and any resulting fixes. Until then, treat the app as promising and improving, not
+proven — and this is exactly why the reports above are valuable.
+
 ## Verifying downloads
 
 Every release binary is signed with the Night Drop release key, so you can confirm a download
