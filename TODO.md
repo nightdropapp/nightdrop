@@ -1,3 +1,10 @@
+## Pre-publish
+
+- [ ] **External security audit** — before a wide public launch, get an independent audit of the
+      integration (pairing/PAKE, relay, at-rest storage, Dart↔Rust FFI). The primitives are audited
+      libraries, but the whole has not been reviewed. Publish the audit + fixes when done. Tracked
+      in SECURITY.md §Audit status, ARCHITECTURE.md §8, README, and website/limits.html.
+
 ## Fixed (2026-07-17) — verify on your next pass
 
 1. ~~Importing backup has been failing on mobile because it exceeded 120s~~

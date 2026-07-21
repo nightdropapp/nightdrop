@@ -394,6 +394,13 @@ open them, and only the user (7a) or the paired device (7b) ever holds it.
 
 ## 8. Threat Model (summary)
 
+> **Assurance status.** This threat model states what the design *intends* to protect against. It
+> has **not** been validated by an independent external security audit. The cryptographic
+> primitives are audited libraries and the security-critical code is isolated and fuzzed, but the
+> integration (pairing/PAKE, relay, at-rest storage, FFI) has not been independently reviewed — an
+> external audit is a prerequisite before relying on these guarantees in adversarial settings. See
+> `SECURITY.md` §Audit status.
+
 **Protect against**
 - Network observers / the relay operator reading message content → E2E + Tor.
 - The relay correlating who-talks-to-whom → minimized metadata, unlinkable handles,

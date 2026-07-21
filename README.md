@@ -148,3 +148,8 @@ All security-critical logic (keys, Double Ratchet, PAKE, Tor, at-rest crypto) li
 the Rust `core/` — never in Dart. Prefer audited crates (`vodozemac`, `arti`, a vetted
 PAKE) over hand-rolled cryptography. See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full
 design, threat model, and non-negotiable invariants.
+
+**No external audit yet.** Night Drop builds on audited cryptographic *libraries*, but the
+integration as a whole (pairing/PAKE, relay, at-rest storage, FFI boundary) has **not** had an
+independent security audit. See [`SECURITY.md`](SECURITY.md#audit-status) — treat the app as
+promising and improving, not battle-tested, until that's done.
