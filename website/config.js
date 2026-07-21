@@ -16,7 +16,7 @@ window.NIGHTDROP_CONFIG = {
   ],
   "downloads": {
     "ios": "",
-    "android": "",
+    "android": "applications/android/NightDrop.apk",
     "windows": "",
     "macos": "",
     "linux": "applications/linux/Night_Drop-x86_64.AppImage"
