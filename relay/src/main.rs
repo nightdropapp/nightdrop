@@ -22,9 +22,27 @@
 mod tui;
 
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+
+/// Most rendezvous streams served at once. Past this, new streams are refused (the client retries)
+/// so a connection flood can't exhaust file descriptors / memory by spawning unbounded tasks.
+const MAX_CONCURRENT_STREAMS: usize = 512;
+/// Per-connection request rate limit (token bucket): allow a short burst, then a sustained rate;
+/// a connection that exceeds it is closed. Bounds a single client's request flood — which, without
+/// this, drives the store/flush work — while leaving normal drain/pair traffic untouched.
+const REQ_BURST: f64 = 60.0;
+const REQ_RATE_PER_SEC: f64 = 30.0;
+
+/// Decrements the live-stream counter when a connection task ends (RAII).
+struct ConnGuard(Arc<AtomicUsize>);
+impl Drop for ConnGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
 
 use anyhow::Context as _;
 use arti_client::config::TorClientConfigBuilder;
@@ -200,11 +218,20 @@ fn main() -> anyhow::Result<()> {
             );
         }
 
-        // One task per rendezvous stream; each serves the newline-JSON relay protocol.
+        // One task per rendezvous stream; each serves the newline-JSON relay protocol. A bounded
+        // live-stream counter sheds load past MAX_CONCURRENT_STREAMS so a connection flood can't
+        // spawn unbounded tasks.
+        let active = Arc::new(AtomicUsize::new(0));
         let mut streams = handle_rend_requests(rend_requests);
         while let Some(request) = streams.next().await {
+            if active.fetch_add(1, Ordering::Relaxed) >= MAX_CONCURRENT_STREAMS {
+                active.fetch_sub(1, Ordering::Relaxed);
+                continue; // at capacity — drop the rendezvous; the client retries
+            }
             let core = Arc::clone(&core);
+            let guard = ConnGuard(Arc::clone(&active));
             tokio::spawn(async move {
+                let _guard = guard; // decrements the counter when this task ends
                 if let Ok(stream) = request.accept(Connected::new_empty()).await {
                     let _ = serve_stream(stream, core).await;
                 }
@@ -223,6 +250,10 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
     // Cap each request line so a hostile peer streaming endless bytes with no newline can't OOM the
     // relay before the storage limits apply (see RelayLimits::max_line_bytes).
     let max = core.max_line_bytes();
+    // Per-connection token bucket: a short burst, then a sustained rate; a client that floods past
+    // it gets closed. Throttles single-connection request floods without penalising normal traffic.
+    let mut tokens = REQ_BURST;
+    let mut last_refill = Instant::now();
     loop {
         match read_line_capped(&mut reader, max).await {
             Ok(None) => break, // clean EOF
@@ -231,6 +262,19 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
                 if line.is_empty() {
                     continue;
                 }
+                let now = Instant::now();
+                tokens = (tokens
+                    + now.duration_since(last_refill).as_secs_f64() * REQ_RATE_PER_SEC)
+                    .min(REQ_BURST);
+                last_refill = now;
+                if tokens < 1.0 {
+                    let _ = write
+                        .write_all(RelayCore::error_line("rate limit exceeded").as_bytes())
+                        .await;
+                    let _ = write.flush().await;
+                    break; // close the connection; a fresh one over Tor is costly for the flooder
+                }
+                tokens -= 1.0;
                 write.write_all(core.handle_line(line).as_bytes()).await?;
                 write.flush().await?;
             }
