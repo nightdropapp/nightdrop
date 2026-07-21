@@ -2,6 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <!-- No external resources: block any third-party script, style, font, image, or beacon —
+       nothing can track a visitor or exfiltrate. (frame-ancestors is ignored in a meta CSP; set
+       it plus X-Frame-Options as HTTP headers on the server for clickjacking protection.) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Night Drop — private messaging that leaves no trace</title>
   <meta name="description" content="Night Drop is a free, anonymous, end-to-end encrypted 1:1 messenger. No accounts, no server-side keys, no logs. Peer-to-peer over Tor, local-first storage." />
@@ -332,8 +336,11 @@
           var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
           box.innerHTML = Object.keys(labels).map(function (k) {
             var url = c.downloads[k];
-            var dl = url ? ' download' : '';
-            return '<a class="btn ghost"' + dl + ' href="' + (url ? esc(url) : '#') + '">' + labels[k] + '</a>';
+            // Only ever emit an http(s) download URL — never a javascript:/data: scheme, even if the
+            // config were tampered with. esc() handles characters; this guards the scheme.
+            var ok = url && /^https?:\/\//i.test(url);
+            var dl = ok ? ' download' : '';
+            return '<a class="btn ghost"' + dl + ' href="' + (ok ? esc(url) : '#') + '">' + labels[k] + '</a>';
           }).join('');
         }
       }

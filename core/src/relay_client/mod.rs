@@ -34,6 +34,21 @@ use crate::Result;
 /// How often the reaper sweeps expired blobs.
 const REAP_INTERVAL: Duration = Duration::from_secs(60);
 
+/// Minimum wall-clock time between disk flushes of the queue. A write that lands at least this long
+/// after the previous flush persists **immediately** (durability for normal traffic — a post is on
+/// disk before it's acked); writes bursting inside the window are **coalesced** into a single flush
+/// by the background flusher. Without this, a flood of posts to a large store forces one full
+/// rewrite per post — O(store) disk I/O per request (a DoS amplifier). Half a second keeps the
+/// crash-loss window tiny while capping flush frequency regardless of request rate.
+const FLUSH_MIN_INTERVAL: Duration = Duration::from_millis(500);
+
+/// Lock the store, **recovering from poisoning**: if a thread ever panicked while holding it, take
+/// the guard anyway (`into_inner`) rather than propagating the panic to every later request — one
+/// bad request must not brick the relay. Mirrors the core's `Inner::lock` (§1.5.3).
+fn lock(store: &Store) -> std::sync::MutexGuard<'_, StoreInner> {
+    store.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 /// Wall-clock time in unix seconds (for persistable blob expiry — `Instant` is monotonic and
 /// cannot survive a restart).
 fn now_unix() -> u64 {
@@ -286,6 +301,9 @@ struct StoreInner {
     /// Set on any mutation (post/drain/recall/reap); the flusher writes the queue to disk when
     /// set and clears it. Only meaningful when persistence is enabled.
     dirty: bool,
+    /// When the store was last written to disk. `None` = never, so the first write flushes at once.
+    /// Drives the [`FLUSH_MIN_INTERVAL`] rate limit.
+    last_flush: Option<Instant>,
 }
 
 impl StoreInner {
@@ -320,7 +338,9 @@ struct PersistedStore {
 }
 
 /// Serialize the live store and write it atomically (`tmp` + rename) to `path`.
-fn save_store(inner: &StoreInner, path: &Path) -> bool {
+/// Serialize the live store to JSON bytes. The caller holds the lock, so keep this cheap and free
+/// of I/O — the disk write happens off the lock (see [`do_flush`]).
+fn serialize_store(inner: &StoreInner) -> Option<Vec<u8>> {
     let mut persisted = PersistedStore::default();
     for (handle, queue) in &inner.map {
         if queue.is_empty() {
@@ -339,12 +359,14 @@ fn save_store(inner: &StoreInner, path: &Path) -> bool {
                 .collect(),
         );
     }
-    let Ok(json) = serde_json::to_vec(&persisted) else {
-        return false;
-    };
+    serde_json::to_vec(&persisted).ok()
+}
+
+/// Atomically write already-serialized bytes to `path` (tmp + fsync + rename). **No lock held**, so
+/// a large write never blocks request handling.
+fn write_store_bytes(json: &[u8], path: &Path) -> bool {
     // The relay binary creates its state directory during Tor setup, but queue persistence is
-    // constructed first. Make the queue path self-sufficient so the first post cannot be lost
-    // merely because that setup has not completed yet.
+    // constructed first. Make the queue path self-sufficient so the first post cannot be lost.
     if let Some(parent) = path.parent() {
         if std::fs::create_dir_all(parent).is_err() {
             return false;
@@ -354,7 +376,7 @@ fn save_store(inner: &StoreInner, path: &Path) -> bool {
     let Ok(mut file) = std::fs::File::create(&tmp) else {
         return false;
     };
-    if file.write_all(&json).is_err() || file.sync_all().is_err() {
+    if file.write_all(json).is_err() || file.sync_all().is_err() {
         return false;
     }
     std::fs::rename(&tmp, path).is_ok()
@@ -398,14 +420,45 @@ fn load_store(path: &Path) -> StoreInner {
     inner
 }
 
-/// Flush a changed queue atomically. This is called at the end of every mutating relay request,
-/// rather than on a timer: once `post` reports success the opaque mailbox is crash-recoverable.
-fn flush_store(store: &Store, path: &Path) {
-    let mut inner = store.lock().unwrap();
-    if inner.dirty {
-        // Retain dirty on an I/O failure so the next relay operation retries persistence.
-        inner.dirty = !save_store(&inner, path);
+/// Persist the store if it's dirty: serialize under the lock, then write to disk **off** the lock
+/// (so a large write never blocks request handling). With `respect_interval` (the per-request
+/// path), skip the inline write when the last flush was too recent — coalescing a burst into one
+/// write per [`FLUSH_MIN_INTERVAL`], which the background flusher then writes. The flusher calls
+/// with `respect_interval = false` so a deferred write always lands within one interval.
+fn do_flush(store: &Store, path: &Path, respect_interval: bool) {
+    let json = {
+        let mut inner = lock(store);
+        if !inner.dirty {
+            return;
+        }
+        if respect_interval {
+            if let Some(t) = inner.last_flush {
+                if t.elapsed() < FLUSH_MIN_INTERVAL {
+                    return; // coalesce; the background flusher will write it
+                }
+            }
+        }
+        let Some(json) = serialize_store(&inner) else {
+            return;
+        };
+        // Tentatively clear; a post arriving during the off-lock write re-sets it, so no update is
+        // lost. Re-set on write failure so the next attempt retries.
+        inner.dirty = false;
+        inner.last_flush = Some(Instant::now());
+        json
+    };
+    if !write_store_bytes(&json, path) {
+        lock(store).dirty = true;
     }
+}
+
+/// Background flusher: every [`FLUSH_MIN_INTERVAL`], write out any changes the per-request rate
+/// limiter deferred, so a coalesced burst is never unpersisted for longer than one interval.
+fn spawn_flusher(store: Store, path: PathBuf) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(FLUSH_MIN_INTERVAL);
+        do_flush(&store, &path, false);
+    });
 }
 
 /// A per-mailbox snapshot for the dev dashboard (TUI). Metadata only — never blob bytes.
@@ -470,6 +523,7 @@ impl RelayCore {
     ) -> Self {
         let store: Store = Arc::new(Mutex::new(load_store(&persist_path)));
         spawn_reaper(Arc::clone(&store), logger.clone());
+        spawn_flusher(Arc::clone(&store), persist_path.clone());
         Self {
             store,
             logger,
@@ -494,7 +548,7 @@ impl RelayCore {
                     logger(event);
                 }
                 if let Some(path) = &self.persist_path {
-                    flush_store(&self.store, path);
+                    do_flush(&self.store, path, true);
                 }
                 response
             }
@@ -529,7 +583,7 @@ impl RelayCore {
     /// A snapshot of non-empty mailboxes (metadata only) for the dev dashboard.
     pub fn snapshot(&self) -> Vec<MailboxStat> {
         let now = Instant::now();
-        let inner = self.store.lock().unwrap();
+        let inner = lock(&self.store);
         let mut out: Vec<MailboxStat> = inner
             .map
             .iter()
@@ -556,7 +610,7 @@ fn spawn_reaper(store: Store, logger: Option<RelayLogger>) {
     std::thread::spawn(move || loop {
         std::thread::sleep(REAP_INTERVAL);
         let now = Instant::now();
-        let mut inner = store.lock().unwrap();
+        let mut inner = lock(&store);
         let mut reaped: Vec<(String, usize, usize)> = Vec::new();
         let mut freed = 0usize;
         for (handle, queue) in inner.map.iter_mut() {
@@ -624,7 +678,7 @@ fn process(
         );
     }
     let now = Instant::now();
-    let mut inner = store.lock().unwrap();
+    let mut inner = lock(store);
     let depth_of = |inner: &StoreInner, h: &str| inner.map.get(h).map(|q| q.len()).unwrap_or(0);
     match request {
         Request::Post {
@@ -1182,7 +1236,7 @@ mod tests {
         );
         inner.total_bytes = 9 + 7;
 
-        save_store(&inner, &path);
+        write_store_bytes(&serialize_store(&inner).unwrap(), &path);
         let loaded = load_store(&path);
 
         assert_eq!(
@@ -1241,6 +1295,47 @@ mod tests {
         .unwrap();
         let response: ResponseLine = serde_json::from_str(&recovered.handle_line(&peek)).unwrap();
         assert_eq!(response.resp.count, 1, "mail survives immediate restart");
+
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("tmp"));
+    }
+
+    #[test]
+    fn coalesced_posts_are_not_lost_by_the_flush_rate_limiter() {
+        // A burst of posts within FLUSH_MIN_INTERVAL: the first flushes inline, the rest are
+        // deferred (rate-limited). None may be lost — the background flusher persists them within
+        // one interval. Guards the DoS fix against silently dropping mail under load.
+        let path = std::env::temp_dir().join(format!(
+            "nd-relay-coalesce-{}-{}.json",
+            std::process::id(),
+            now_unix()
+        ));
+        let core = RelayCore::with_persistence(None, RelayLimits::default(), path.clone());
+        for i in 0..5 {
+            let post = serde_json::to_string(&RequestLineRef {
+                v: RELAY_VERSION,
+                req: &Request::Post {
+                    handle: format!("mbx:burst-{i}"),
+                    blob: B64.encode(format!("blob-{i}").as_bytes()),
+                    ttl_secs: 60,
+                },
+            })
+            .unwrap();
+            assert!(
+                serde_json::from_str::<ResponseLine>(&core.handle_line(&post))
+                    .unwrap()
+                    .resp
+                    .ok
+            );
+        }
+        // Let the background flusher write the deferred posts.
+        std::thread::sleep(FLUSH_MIN_INTERVAL + Duration::from_millis(400));
+        let recovered = load_store(&path);
+        assert_eq!(
+            recovered.map.len(),
+            5,
+            "all coalesced posts persist, none dropped by the rate limiter"
+        );
 
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("tmp"));
