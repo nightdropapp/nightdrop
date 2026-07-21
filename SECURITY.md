@@ -92,3 +92,32 @@ If in doubt, ask first — we'd rather help you test safely than have you hold b
 Night Drop deliberately uses audited primitives (`vodozemac`, `arti`, a vetted PAKE) and
 keeps all key material in the Rust core. Reports of hand-rolled crypto, primitive misuse,
 nonce/key reuse, or ratchet/state-machine flaws are especially welcome.
+
+## Verifying downloads
+
+Every release binary is signed with the Night Drop release key, so you can confirm a download
+hasn't been altered.
+
+**Signing key** — `Night Drop Security <security@nightdrop.app>`
+Fingerprint: `079B A016 9201 A8AB 11F3  2385 884E ACB8 89D0 2002`
+The public key ships with each release as `nightdrop-signing-key.asc` (and is the same key used
+to sign the operator-signed relay directory).
+
+**Verify (Linux/macOS):**
+
+```sh
+# One-time: import the key and check its fingerprint against the value above.
+gpg --import nightdrop-signing-key.asc
+gpg --fingerprint security@nightdrop.app
+
+# Verify a specific download:
+gpg --verify Night_Drop-x86_64.AppImage.asc Night_Drop-x86_64.AppImage
+gpg --verify NightDrop.apk.asc NightDrop.apk
+
+# Or verify the whole release at once via the signed checksum manifest:
+gpg --verify SHA256SUMS.asc SHA256SUMS   # authenticity of the manifest
+sha256sum -c SHA256SUMS                  # integrity of each file against it
+```
+
+A `Good signature` line (from the fingerprint above) means the file is exactly what was released.
+The Android APK is additionally signed with the app release key, which Android verifies on install.
