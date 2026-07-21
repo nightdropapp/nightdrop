@@ -103,6 +103,28 @@ external audit is a prerequisite for treating Night Drop as battle-tested; when 
 publish it and any resulting fixes. Until then, treat the app as promising and improving, not
 proven — and this is exactly why the reports above are valuable.
 
+### Known hardening items for the auditor
+
+Defense-in-depth items we've already identified in the at-rest storage layer (none is a known
+vulnerability under the device-theft threat model, but each is worth an auditor's judgement):
+
+- **AEAD key separation.** The 32-byte store key is currently used both as the ChaCha20-Poly1305
+  seal key *and* as vodozemac's pickle-encryption key. The constructions are independent, but
+  deriving two purpose-separated sub-keys (HKDF, distinct `info`) would be the textbook-clean form.
+  Changing it is an at-rest-format change and needs a migration.
+- **Domain separation / associated data.** `storage::seal` binds no associated data, so the state
+  file and sibling sealed media files aren't cryptographically bound to their role. A local
+  attacker with *write* access could swap or roll back sealed files (all still the user's own data
+  — confusion/rollback, not disclosure). Binding each blob to its role via AAD closes it; also a
+  format change needing migration.
+- **Backup KDF parameters.** Backups use `Argon2id` at the crate default (~19 MiB, t=2). This is
+  safe *because backup passwords are randomly generated (~100 bits)*, so entropy — not KDF cost —
+  is the load-bearing defense. **Invariant to preserve:** never let a user choose their own
+  server-backup password, or the fixed-salt recovery handle becomes brute-forceable by the relay.
+- **Store-key zeroization.** *(Addressed.)* The long-lived at-rest key is now wiped on drop and the
+  transient decode/generate buffers are zeroized; a live-memory/cold-boot attacker still sees
+  plaintext history in RAM, so this is hygiene, not a fix for a disclosure bug.
+
 ## Verifying downloads
 
 Every release binary is signed with the Night Drop release key, so you can confirm a download
