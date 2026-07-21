@@ -122,6 +122,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get notVerified => 'Not verified';
 
   @override
+  String peerVerifiedNote(String name) {
+    return '$name marked this chat verified on their device. That’s only what they told you — compare the safety number yourself to be sure.';
+  }
+
+  @override
   String get cameraUnavailable =>
       'Camera scanning isn’t available on this device.\n\nOn the other device, tap “Copy invite link” and paste it here instead.';
 

@@ -50,6 +50,7 @@ impl Node {
                         chat.peer_address = peer_address.clone();
                         chat.closed = false;
                         chat.contact.verified = false; // new session invalidates prior verification
+                        chat.contact.peer_verified = false; // …as does the peer's prior signal
                     }
                 } else {
                     self.chats.insert(
@@ -64,6 +65,7 @@ impl Node {
                                 backed_up: false,
                                 peer_backed_up: false,
                                 verified: false,
+                                peer_verified: false,
                                 peer_relays: Vec::new(),
                                 remote_storage_healthy: true,
                             },
@@ -315,6 +317,38 @@ impl Node {
                     }
                 }
                 Ok(None)
+            }
+            Frame::Verified { from, message } => {
+                // Informational (§5b′): the peer told us *they* marked our safety number verified
+                // (or un-verified). The state rides in *which* marker decrypts on their session, so
+                // it's E2E-authenticated — a stranger can't forge it and a tampered flag can't lie.
+                // Decrypt ONCE (a ratchet decrypt spends a message key, so we can't try both
+                // markers with verify_control); branch on the plaintext. Crucially this only sets
+                // `peer_verified` for the UI — never our own `verified`, so a compromised peer can't
+                // fabricate a verified badge on our screen: each side still confirms independently.
+                let Some(chat) = self.chats.get_mut(&from) else {
+                    return Ok(None);
+                };
+                let Ok(olm) = message.to_olm() else {
+                    return Ok(None);
+                };
+                let peer_verified = match crypto::decrypt(&mut chat.session, &olm) {
+                    Ok(pt) if pt == MARK_VERIFIED => true,
+                    Ok(pt) if pt == MARK_UNVERIFIED => false,
+                    _ => return Ok(None), // forged, replayed, or spliced — ignore
+                };
+                if chat.contact.peer_verified == peer_verified {
+                    return Ok(None); // no change → no history spam
+                }
+                chat.contact.peer_verified = peer_verified;
+                let note = if peer_verified {
+                    "✅ The other person marked this chat's safety number verified. Compare it \
+                     yourself too to be sure — this is only what they told you."
+                } else {
+                    "⚠️ The other person cleared their verification of this chat's safety number."
+                };
+                chat.history.push(ChatMessage::system(note.to_string()));
+                Ok(Some((from, String::new())))
             }
             Frame::Ack { from, message } => {
                 // Silent delivery ack: the peer drained our relay-held messages → mark them

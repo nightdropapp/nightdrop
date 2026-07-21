@@ -123,6 +123,13 @@ pub enum Frame {
     /// to a fixed marker (`node::MARK_BACKEDUP`) on the session, so a stranger can't fake a "the
     /// other person is backing you up" scare or replay a stale one.
     BackedUp { from: String, message: WireOlm },
+    /// **Informational** safety-number verification signal (§5b′): the sender tells us they marked
+    /// (or unmarked) this chat verified. The UI reflects it as "the other person verified this
+    /// chat" but it **never** sets our own `verified` flag — each side confirms the number itself.
+    /// **E2E-authenticated**: `message` decrypts on the session to `node::MARK_VERIFIED` or
+    /// `MARK_UNVERIFIED`, and *which one* carries the state — so it can't be forged, replayed, or
+    /// have its state flipped in transit.
+    Verified { from: String, message: WireOlm },
     /// Silent **delivery ack** (§11.3): the receiver drained one or more of our messages from
     /// the relay, so flip their "Held for delivery" to "Delivered". `from` is the acking peer's
     /// identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
@@ -182,7 +189,7 @@ impl Frame {
 /// the frame with a clear error instead of misparsing it. See `TODO.md` #2.
 ///
 /// v2 added **length-prefixed, zero-padded framing** (see [`encode`]) and moved the
-/// control frames (`Closed`/`Ack`/`BackedUp`) behind the ratchet.
+/// control frames (`Closed`/`Ack`/`BackedUp`/`Verified`) behind the ratchet.
 pub const WIRE_VERSION: u8 = 2;
 
 /// Size buckets a frame is padded up to, so an observer of the (already encrypted) transport

@@ -1873,8 +1873,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Contact dco_decode_contact(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 10)
-      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    if (arr.length != 11)
+      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
     return Contact(
       id: dco_decode_String(arr[0]),
       theirName: dco_decode_String(arr[1]),
@@ -1884,8 +1884,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       backedUp: dco_decode_bool(arr[5]),
       peerBackedUp: dco_decode_bool(arr[6]),
       verified: dco_decode_bool(arr[7]),
-      peerRelays: dco_decode_list_String(arr[8]),
-      remoteStorageHealthy: dco_decode_bool(arr[9]),
+      peerVerified: dco_decode_bool(arr[8]),
+      peerRelays: dco_decode_list_String(arr[9]),
+      remoteStorageHealthy: dco_decode_bool(arr[10]),
     );
   }
 
@@ -2119,6 +2120,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_backedUp = sse_decode_bool(deserializer);
     final var_peerBackedUp = sse_decode_bool(deserializer);
     final var_verified = sse_decode_bool(deserializer);
+    final var_peerVerified = sse_decode_bool(deserializer);
     final var_peerRelays = sse_decode_list_String(deserializer);
     final var_remoteStorageHealthy = sse_decode_bool(deserializer);
     return Contact(
@@ -2130,6 +2132,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         backedUp: var_backedUp,
         peerBackedUp: var_peerBackedUp,
         verified: var_verified,
+        peerVerified: var_peerVerified,
         peerRelays: var_peerRelays,
         remoteStorageHealthy: var_remoteStorageHealthy);
   }
@@ -2378,6 +2381,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.backedUp, serializer);
     sse_encode_bool(self.peerBackedUp, serializer);
     sse_encode_bool(self.verified, serializer);
+    sse_encode_bool(self.peerVerified, serializer);
     sse_encode_list_String(self.peerRelays, serializer);
     sse_encode_bool(self.remoteStorageHealthy, serializer);
   }

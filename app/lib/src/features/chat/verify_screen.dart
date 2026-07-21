@@ -85,7 +85,9 @@ class _VerifyScreenState extends State<VerifyScreen> {
       body: ListenableBuilder(
         listenable: core,
         builder: (context, _) {
-          final verified = _contact(core)?.verified ?? false;
+          final contact = _contact(core);
+          final verified = contact?.verified ?? false;
+          final peerVerified = contact?.peerVerified ?? false;
           return ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -95,6 +97,10 @@ class _VerifyScreenState extends State<VerifyScreen> {
               ),
               const SizedBox(height: 20),
               _VerifiedChip(verified: verified),
+              if (peerVerified) ...[
+                const SizedBox(height: 12),
+                _PeerVerifiedBanner(name: widget.name),
+              ],
               const SizedBox(height: 20),
               SelectableText(
                 _number ?? '…',
@@ -145,6 +151,39 @@ class _VerifyScreenState extends State<VerifyScreen> {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+/// Informational banner: the peer signaled they verified the safety number. Deliberately worded
+/// so it never reads as "you are verified" — the peer's claim is only a hint; each side must still
+/// compare the number, so a compromised peer can't forge a verified state on this screen.
+class _PeerVerifiedBanner extends StatelessWidget {
+  const _PeerVerifiedBanner({required this.name});
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(Icons.info_outline, size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              AppLocalizations.of(context)!.peerVerifiedNote(name),
+              style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant),
+            ),
+          ),
+        ],
       ),
     );
   }

@@ -523,6 +523,12 @@ class Contact {
   /// (key-verification design). Per-identity-key, so a re-paired contact starts unverified.
   final bool verified;
 
+  /// Whether the **peer** told us *they* verified this chat's safety number — **informational
+  /// only**: the UI shows "the other person marked this verified", but it never sets our own
+  /// `verified`. Each side must still confirm the number itself, so a compromised device can't
+  /// forge a verified badge on the other. Resets on a re-pair (new session), like `verified`.
+  final bool peerVerified;
+
   /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
   /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
   final List<String> peerRelays;
@@ -542,6 +548,7 @@ class Contact {
     required this.backedUp,
     required this.peerBackedUp,
     required this.verified,
+    required this.peerVerified,
     required this.peerRelays,
     required this.remoteStorageHealthy,
   });
@@ -556,6 +563,7 @@ class Contact {
       backedUp.hashCode ^
       peerBackedUp.hashCode ^
       verified.hashCode ^
+      peerVerified.hashCode ^
       peerRelays.hashCode ^
       remoteStorageHealthy.hashCode;
 
@@ -572,6 +580,7 @@ class Contact {
           backedUp == other.backedUp &&
           peerBackedUp == other.peerBackedUp &&
           verified == other.verified &&
+          peerVerified == other.peerVerified &&
           peerRelays == other.peerRelays &&
           remoteStorageHealthy == other.remoteStorageHealthy;
 }

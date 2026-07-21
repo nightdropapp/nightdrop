@@ -143,6 +143,15 @@ mid-chat — a re-paired contact is a new, `unverified` contact, which is itself
 signal. All derivation is in `core/` (`Node::safety_number` / `safety_qr` / `verify_safety_qr`);
 Dart only renders the string and toggles the flag. See `docs/design/key-verification.md`.
 
+When one side toggles `verified`, `set_verified` also sends the peer an **authenticated
+`Frame::Verified` control frame** (state carried by *which* of `MARK_VERIFIED`/`MARK_UNVERIFIED`
+decrypts on the ratchet, so there's no tamperable plaintext flag). The receiver sets a separate
+`peer_verified` field and shows an **informational** note ("the other person marked this
+verified") — it **never** touches the receiver's own `verified`. This is deliberate: verification
+is not transitive, so a compromised peer can't forge a verified badge on the other's screen; each
+side must still compare the number itself. `peer_verified` is per-contact, persisted, and reset
+on a re-pair (new session) exactly like `verified`.
+
 ### 5c. The rendezvous mailbox
 - A **stateless meeting point** that allocates ephemeral slots and relays the short-TTL
   **SPAKE2 handshake messages** for each (a joiner leg and an inviter leg per slot),
@@ -301,8 +310,8 @@ Dart only renders the string and toggles the flag. See `docs/design/key-verifica
   2 KB → Bob receives 2 KB" size-correlation channel that onion routing alone leaves open. (Coarse
   buckets for media; timing/volume correlation is a separate, harder problem — see the transport
   alternatives note and the mixnet discussion.)
-- **Authenticated control plane:** the peer-state control signals `Closed`, `Ack`, and `BackedUp`
-  are **E2E-authenticated** — each carries an encrypted fixed marker on the ratchet, and the
+- **Authenticated control plane:** the peer-state control signals `Closed`, `Ack`, `BackedUp`, and
+  `Verified` are **E2E-authenticated** — each carries an encrypted fixed marker on the ratchet, and the
   receiver acts only if it decrypts to the expected value (`node::MARK_*`, `verify_control`). This
   closes a spoofing/replay gap: without it, anyone who knew your identity key could forge a
   "the other person deleted this chat" (`Closed`), a false delivery `Ack`, or a fake backup
@@ -431,7 +440,7 @@ here weakens the §-level invariants — it states their limits.
   the peer see a `.onion`, not an IP or location.
 - **Frame sizes** — wire v2 pads every frame to a fixed size, so an on-path observer
   learns nothing from length (not message size, not "typing vs. media").
-- **Control-plane authenticity** — `Closed`/`Ack`/`BackedUp`/`Approved` carry a
+- **Control-plane authenticity** — `Closed`/`Ack`/`BackedUp`/`Verified`/`Approved` carry a
   ratchet-encrypted marker, so they can't be spoofed or replayed by the relay.
 - **Onion reachability** — restricted discovery (#22) gates the onion descriptor to
   authorized contacts, so a stranger cannot even confirm a user's service is online.

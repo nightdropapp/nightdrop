@@ -65,6 +65,7 @@ class Contact {
     this.backedUp = false,
     this.peerBackedUp = false,
     this.verified = false,
+    this.peerVerified = false,
     this.peerRelays = const [],
     this.remoteStorageHealthy = true,
   });
@@ -99,6 +100,11 @@ class Contact {
   /// Whether the user has verified this contact's safety number out-of-band (key-verification).
   /// A re-paired (new-key) contact starts unverified.
   bool verified;
+
+  /// Whether the **peer** signaled that *they* verified this chat's safety number —
+  /// informational only. Shown as "the other person marked this verified"; it never implies
+  /// our own [verified]. Each side must still confirm the number itself. Resets on a re-pair.
+  bool peerVerified;
 
   /// The peer's advertised **extra** relay addresses (#17). We fan offline mail out to these
   /// in addition to the shared primary relay, so a message reaches them even if one relay is

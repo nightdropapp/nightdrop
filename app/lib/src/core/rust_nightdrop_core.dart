@@ -790,6 +790,7 @@ class RustNightdropCore extends NightdropCore {
         backedUp: c.backedUp,
         peerBackedUp: c.peerBackedUp,
         verified: c.verified,
+        peerVerified: c.peerVerified,
         peerRelays: c.peerRelays,
         remoteStorageHealthy: c.remoteStorageHealthy,
       );
