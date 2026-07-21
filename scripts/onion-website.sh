@@ -63,7 +63,15 @@ cleanup() {
 trap cleanup INT TERM EXIT
 
 echo "Serving $WEB on http://127.0.0.1:$PORT (localhost only) ..."
-python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WEB" >/dev/null 2>&1 &
+# Default: keep no logs (privacy). Opt in to request logging for a private visitor count by setting
+# NIGHTDROP_ONION_LOG=/path/to/log — then `scripts/stats.sh $NIGHTDROP_ONION_LOG` summarises visits.
+# Over Tor every request arrives from 127.0.0.1, so the log holds request counts, never client IPs.
+if [ -n "${NIGHTDROP_ONION_LOG:-}" ]; then
+  echo "  request logging ON → $NIGHTDROP_ONION_LOG (counts only; Tor gives no client identity)"
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WEB" >/dev/null 2>>"$NIGHTDROP_ONION_LOG" &
+else
+  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WEB" >/dev/null 2>&1 &
+fi
 web_pid=$!
 
 echo "Starting tor; publishing the onion descriptor can take ~30-60s ..."
