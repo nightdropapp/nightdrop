@@ -45,6 +45,10 @@ const SERVER_BACKUP_DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MARK_CLOSED: &[u8] = b"nightdrop/ctl/closed/v1";
 const MARK_ACK: &[u8] = b"nightdrop/ctl/ack/v1";
 const MARK_BACKEDUP: &[u8] = b"nightdrop/ctl/backedup/v1";
+/// Two markers for the safety-number verification signal (§5b′): the state is carried by *which*
+/// one the receiver's ratchet decrypts, so it's authenticated with no tamperable plaintext flag.
+const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
+const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
 
 /// Dev-only logging. Identity keys, invite codes, and decrypted display names must never
 /// reach release logs (Android's logcat persists them for any `adb`-connected observer);

@@ -49,6 +49,10 @@ pub struct PersistedChat {
     /// design). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]
     pub verified: bool,
+    /// Whether the **peer** signaled that *they* verified this chat's safety number — informational
+    /// only (never sets our own `verified`). `#[serde(default)]` keeps older state files loadable.
+    #[serde(default)]
+    pub peer_verified: bool,
     /// The peer's advertised extra relay addresses (#17). `#[serde(default)]` for forward-compat.
     #[serde(default)]
     pub peer_relays: Vec<String>,

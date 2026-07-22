@@ -474,6 +474,55 @@ fn full_backup_signals_the_peer_and_logout_respects_the_flag() {
 }
 
 #[test]
+fn verifying_signals_the_peer_informationally_without_auto_trust() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // Alice marks the safety number verified. Bob learns *she* did — but it must not flip Bob's
+    // own verified flag (informational only), and Alice's own peer_verified stays false.
+    alice.set_verified(&bob_contact, true);
+    bob.pump().unwrap();
+    assert!(alice.contacts()[0].verified);
+    assert!(!alice.contacts()[0].peer_verified);
+    assert!(
+        bob.contacts()[0].peer_verified,
+        "Bob sees that Alice verified"
+    );
+    assert!(
+        !bob.contacts()[0].verified,
+        "Bob is NOT auto-trusted — he must still verify himself"
+    );
+    assert!(
+        bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.system && m.text.contains("marked this chat's safety number verified")),
+        "Bob gets an informational note"
+    );
+
+    // Clearing verification propagates the same way, and doesn't spam a duplicate note.
+    alice.set_verified(&bob_contact, false);
+    bob.pump().unwrap();
+    assert!(!bob.contacts()[0].peer_verified);
+
+    // Re-pairing resets the peer_verified hint (a new session invalidates the old claim).
+    alice.set_verified(&bob_contact, true);
+    bob.pump().unwrap();
+    assert!(bob.contacts()[0].peer_verified);
+    let bundle2 = bob.publish_bundle();
+    alice.connect_with_bundle("bob", &bundle2).unwrap();
+    bob.pump().unwrap();
+    assert!(
+        !bob.contacts()[0].peer_verified,
+        "re-pair clears the peer's stale verification signal"
+    );
+}
+
+#[test]
 fn safety_number_matches_on_both_ends_and_verifies() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));

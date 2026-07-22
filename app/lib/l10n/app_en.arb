@@ -151,6 +151,13 @@
   "@notVerified": {
     "description": "Chip/badge label for an unverified contact."
   },
+  "peerVerifiedNote": "{name} marked this chat verified on their device. That’s only what they told you — compare the safety number yourself to be sure.",
+  "@peerVerifiedNote": {
+    "description": "Informational banner shown when the peer has signaled they verified the safety number. Must not imply we are verified.",
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
 
   "cameraUnavailable": "Camera scanning isn’t available on this device.\n\nOn the other device, tap “Copy invite link” and paste it here instead.",
   "@cameraUnavailable": {

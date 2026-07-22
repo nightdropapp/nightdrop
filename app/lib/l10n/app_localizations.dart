@@ -292,6 +292,12 @@ abstract class AppLocalizations {
   /// **'Not verified'**
   String get notVerified;
 
+  /// Informational banner shown when the peer has signaled they verified the safety number. Must not imply we are verified.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} marked this chat verified on their device. That’s only what they told you — compare the safety number yourself to be sure.'**
+  String peerVerifiedNote(String name);
+
   /// Shown on desktop where there is no camera backend for scanning.
   ///
   /// In en, this message translates to:

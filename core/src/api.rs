@@ -171,6 +171,11 @@ pub struct Contact {
     /// Whether the user has **verified the safety number** for this contact out-of-band
     /// (key-verification design). Per-identity-key, so a re-paired contact starts unverified.
     pub verified: bool,
+    /// Whether the **peer** told us *they* verified this chat's safety number — **informational
+    /// only**: the UI shows "the other person marked this verified", but it never sets our own
+    /// `verified`. Each side must still confirm the number itself, so a compromised device can't
+    /// forge a verified badge on the other. Resets on a re-pair (new session), like `verified`.
+    pub peer_verified: bool,
     /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
     /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
     pub peer_relays: Vec<String>,

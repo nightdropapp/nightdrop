@@ -62,8 +62,28 @@ impl Node {
     /// Persisted; because a contact is keyed by its identity key, a re-paired (new-key) contact
     /// starts unverified again — which is itself the "this is a new identity" signal.
     pub fn set_verified(&mut self, contact_id: &str, verified: bool) {
-        if let Some(chat) = self.chats.get_mut(contact_id) {
-            chat.contact.verified = verified;
+        let existed = match self.chats.get_mut(contact_id) {
+            Some(chat) => {
+                chat.contact.verified = verified;
+                true
+            }
+            None => false,
+        };
+        if !existed {
+            return;
+        }
+        // Tell the peer, informationally (§5b′): they'll see "the other person verified this chat"
+        // but their own `verified` flag is untouched. The state rides in which marker decrypts, so
+        // it's authenticated; a re-pair resets it on both ends. Best-effort with relay fallback.
+        let marker = if verified {
+            MARK_VERIFIED
+        } else {
+            MARK_UNVERIFIED
+        };
+        if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
+            Frame::Verified { from, message }
+        }) {
+            let _ = self.deliver(&addr, contact_id, &frame);
         }
     }
 
@@ -105,6 +125,7 @@ impl Node {
             chat.authorized = true;
             chat.closed = false;
             chat.contact.verified = false;
+            chat.contact.peer_verified = false;
             chat.history.push(ChatMessage::system(
                 "🔑 Re-paired with a new secure session. Compare the safety number again if you \
                  want to confirm who this is."
@@ -123,6 +144,7 @@ impl Node {
                         backed_up: false,
                         peer_backed_up: false,
                         verified: false,
+                        peer_verified: false,
                         peer_relays: Vec::new(),
                         remote_storage_healthy: true,
                     },

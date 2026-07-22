@@ -2728,6 +2728,7 @@ impl SseDecode for crate::api::Contact {
         let mut var_backedUp = <bool>::sse_decode(deserializer);
         let mut var_peerBackedUp = <bool>::sse_decode(deserializer);
         let mut var_verified = <bool>::sse_decode(deserializer);
+        let mut var_peerVerified = <bool>::sse_decode(deserializer);
         let mut var_peerRelays = <Vec<String>>::sse_decode(deserializer);
         let mut var_remoteStorageHealthy = <bool>::sse_decode(deserializer);
         return crate::api::Contact {
@@ -2739,6 +2740,7 @@ impl SseDecode for crate::api::Contact {
             backed_up: var_backedUp,
             peer_backed_up: var_peerBackedUp,
             verified: var_verified,
+            peer_verified: var_peerVerified,
             peer_relays: var_peerRelays,
             remote_storage_healthy: var_remoteStorageHealthy,
         };
@@ -3110,6 +3112,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::Contact {
             self.backed_up.into_into_dart().into_dart(),
             self.peer_backed_up.into_into_dart().into_dart(),
             self.verified.into_into_dart().into_dart(),
+            self.peer_verified.into_into_dart().into_dart(),
             self.peer_relays.into_into_dart().into_dart(),
             self.remote_storage_healthy.into_into_dart().into_dart(),
         ]
@@ -3269,6 +3272,7 @@ impl SseEncode for crate::api::Contact {
         <bool>::sse_encode(self.backed_up, serializer);
         <bool>::sse_encode(self.peer_backed_up, serializer);
         <bool>::sse_encode(self.verified, serializer);
+        <bool>::sse_encode(self.peer_verified, serializer);
         <Vec<String>>::sse_encode(self.peer_relays, serializer);
         <bool>::sse_encode(self.remote_storage_healthy, serializer);
     }
