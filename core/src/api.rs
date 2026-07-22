@@ -344,6 +344,11 @@ struct Inner {
 /// the poller flushes once the window elapses. New *messages* and roster changes bypass the debounce.
 struct Persist {
     path: String,
+    /// The at-rest key (from the OS keystore). Held for the process lifetime so the state file can
+    /// be re-sealed on every change; [zeroized on drop](Persist::drop) so it doesn't linger in freed
+    /// memory after logout/shutdown. (Transient by-value copies of this `Copy` array — e.g. the one
+    /// [`save`](Inner::save) hands to `save_to_file` — are short-lived stack values we can't all
+    /// wipe; this covers the long-lived holder, which is the meaningful exposure.)
     key: crate::storage::StoreKey,
     /// When we last actually wrote to disk (initialized in the past so the first save writes now).
     last_write: std::time::Instant,
@@ -359,6 +364,13 @@ impl Persist {
             last_write: std::time::Instant::now() - PERSIST_DEBOUNCE,
             pending: false,
         }
+    }
+}
+
+impl Drop for Persist {
+    fn drop(&mut self) {
+        use zeroize::Zeroize as _;
+        self.key.zeroize();
     }
 }
 
@@ -1469,21 +1481,27 @@ impl NightdropCore {
 /// [`new_tor`](NightdropCore::new_tor) on later launches to restore the saved state.
 pub fn random_store_key() -> String {
     use base64::Engine as _;
+    use zeroize::Zeroize as _;
     let mut key = [0u8; 32];
     rand::Rng::fill(&mut rand::thread_rng(), &mut key);
-    base64::engine::general_purpose::STANDARD.encode(key)
+    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+    key.zeroize(); // don't leave the raw key on the stack after it's been handed off as base64
+    encoded
 }
 
 /// Decode a base64 32-byte at-rest key.
 fn decode_store_key(b64: &str) -> Result<crate::storage::StoreKey> {
     use base64::Engine as _;
-    let bytes = base64::engine::general_purpose::STANDARD
+    use zeroize::Zeroize as _;
+    let mut bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
         .map_err(|e| anyhow::anyhow!("bad store key: {e}"))?;
-    bytes
+    let key = bytes
         .as_slice()
         .try_into()
-        .map_err(|_| anyhow::anyhow!("store key must be 32 bytes"))
+        .map_err(|_| anyhow::anyhow!("store key must be 32 bytes"));
+    bytes.zeroize(); // wipe the intermediate copy of the key material
+    key
 }
 
 /// Background poll loop (real mode): pump the transport often (cheap, local), hit the
@@ -1606,6 +1624,25 @@ fn random_secret_words() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn store_key_round_trips_and_rejects_bad_input() {
+        // The zeroization hardening must not change behavior: a generated key still decodes back to
+        // its 32 bytes, and malformed input is still rejected.
+        let b64 = random_store_key();
+        let key = decode_store_key(&b64).expect("a freshly generated key decodes");
+        assert_eq!(key.len(), 32);
+        assert_eq!(
+            decode_store_key(&b64).unwrap(),
+            key,
+            "decode is deterministic"
+        );
+        assert!(decode_store_key("not base64!!").is_err());
+        // Valid base64 but the wrong length (16 bytes) must be rejected.
+        use base64::Engine as _;
+        let short = base64::engine::general_purpose::STANDARD.encode([0u8; 16]);
+        assert!(decode_store_key(&short).is_err());
+    }
 
     #[test]
     fn a_poisoned_lock_is_recovered_not_fatal() {
