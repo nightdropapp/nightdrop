@@ -1,0 +1,3 @@
+First release.
+
+Anonymous 1:1 messaging with Signal Double Ratchet end-to-end encryption, peer-to-peer over embedded Tor, and an untrusted store-and-forward relay for offline delivery. QR and short-code (PAKE) pairing with authorization before the first message, safety-number verification, local-first storage with opt-in 24h server storage, disappearing messages, and user-owned encrypted backups.
