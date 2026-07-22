@@ -1,0 +1,13 @@
+Night Drop is a privacy-first 1:1 messenger. Like a night deposit box: every message is a sealed envelope, dropped for one person only, opened by no one in between.
+
+* Anonymous identities only — no phone number, no email, no account. Your identity is a keypair held on your device.
+* End-to-end encryption with the Signal Double Ratchet: only the sender and receiver can read a message.
+* Peer-to-peer over Tor by default. There is no clearnet path — the only network egress is the Tor network.
+* Local-first storage: messages live on your device. Optional server storage is opt-in, capped at 24 hours, and shows a persistent warning in the chat while active.
+* An untrusted store-and-forward relay carries offline delivery only. Any relay ever holds nothing but opaque, already-encrypted blobs under unlinkable handles — no keys, no plaintext, no identities, no logs.
+* Authorization before the first message: a stranger cannot message you until you approve them (scan a pre-authorized QR, or exchange a short code whose secret words block a man-in-the-middle).
+* Safety-number verification (scan or compare) to confirm no one is in the middle.
+* User-owned encrypted backups: the recovery password is generated on your device, shown once, and never sent to any server. Lose it and the backup is unrecoverable — by design.
+* No analytics, no crash reporters, no ad SDKs, no Google Play Services, and no third-party push service.
+
+Night Drop is free software (AGPL-3.0-or-later) and built to be reproducible: anyone can rebuild the release from source and confirm it matches, byte for byte.

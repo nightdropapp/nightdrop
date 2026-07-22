@@ -1,0 +1,11 @@
+# cargo-audit configuration. Advisories reviewed and accepted, with rationale — run `cargo audit`
+# from the repo root. Re-review on every dependency bump.
+[advisories]
+ignore = [
+  # RUSTSEC-2023-0071 — RSA "Marvin Attack": a timing side-channel in RSA PKCS#1 v1.5 decryption.
+  # Present ONLY transitively (arti-client -> tor-key-forge -> ssh-key-fork-arti -> rsa), pulled
+  # because arti's SSH-key keystore format *supports* RSA keys. Night Drop uses ed25519/x25519
+  # exclusively and never generates or decrypts an RSA key, so the vulnerable code path is never
+  # reached. No fixed upstream version exists. Re-evaluate if we ever handle RSA material.
+  "RUSTSEC-2023-0071",
+]

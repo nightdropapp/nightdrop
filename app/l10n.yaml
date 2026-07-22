@@ -1,0 +1,9 @@
+# gen-l10n config. Source .arb files live in lib/l10n/; the generated
+# AppLocalizations is emitted into the build (imported as
+# package:flutter_gen/gen_l10n/app_localizations.dart). English is the
+# template + only shipped locale for now; adding lib/l10n/app_<locale>.arb
+# is all a new translation needs.
+arb-dir: lib/l10n
+template-arb-file: app_en.arb
+output-localization-file: app_localizations.dart
+output-class: AppLocalizations

@@ -1,0 +1,1 @@
+Fixed: if the app couldn't read its saved encryption key at startup (for example, your system keyring/wallet was locked), it now shows a recovery screen with a Try Again option instead of silently starting a new identity — so your existing data is never overwritten.

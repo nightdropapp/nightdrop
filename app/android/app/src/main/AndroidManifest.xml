@@ -1,0 +1,90 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <!-- QR invite scanning (mobile_scanner, §5a). -->
+    <!-- Required for the embedded Tor transport (and all networking) in RELEASE builds. Flutter
+         only auto-injects INTERNET into the debug/profile manifests, so without this line release
+         APKs are denied every outbound socket (EPERM) and Tor can never bootstrap. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature
+        android:name="android.hardware.camera"
+        android:required="false"
+    />
+    <!-- New-message notifications (flutter_local_notifications, Android 13+). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Opt-in background delivery foreground service (flutter_foreground_task, §11.8 / #13):
+         keeps the process alive so the Tor peek keeps running while backgrounded. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- Strip permissions that transitive plugins merge in but Night Drop never uses. Keeping the
+         permission set minimal matters for a privacy-first app (and for the F-Droid listing). Each
+         is injected by a dependency, not by us; tools:node="remove" deletes it from the merged
+         manifest. Verified against app/lib usage:
+           - RECORD_AUDIO          (camera_android_camerax): camera is QR-scan only, no mic/voice.
+           - WRITE_EXTERNAL_STORAGE (camera_android_camerax): file saving uses file_picker+SAF.
+           - RECEIVE_BOOT_COMPLETED (flutter_foreground_task): we set autoRunOnBoot: false.
+           - READ_EXTERNAL_STORAGE / READ_MEDIA_{IMAGES,VIDEO,AUDIO} (open_filex): attaching uses
+             file_picker (SAF), opening hands the file to another app via intent — neither needs
+             this app to hold media-read perms. Confirmed by device test of attach/open flows. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" tools:node="remove" />
+
+    <application
+        android:label="${appName}"
+        android:name="${applicationName}"
+        android:icon="@mipmap/ic_launcher"
+    >
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTop"
+            android:taskAffinity=""
+            android:theme="@style/LaunchTheme"
+            android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
+            android:hardwareAccelerated="true"
+            android:windowSoftInputMode="adjustResize"
+        >
+            <!-- Specifies an Android theme to apply to this Activity as soon as
+                 the Android process has started. This theme is visible to the user
+                 while the Flutter UI initializes. After that, this theme continues
+                 to determine the Window background behind the Flutter UI. -->
+            <meta-data
+                android:name="io.flutter.embedding.android.NormalTheme"
+                android:resource="@style/NormalTheme"
+            />
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <!-- Don't delete the meta-data below.
+             This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
+        <meta-data android:name="flutterEmbedding" android:value="2" />
+        <!-- Background-delivery foreground service (flutter_foreground_task, #13). The typed
+             service (Android 14+) declares a data-sync foreground service — it keeps the Tor
+             peek alive; it never uploads anything to a server. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false"
+            android:stopWithTask="true" />
+    </application>
+    <!-- Required to query activities that can process text, see:
+         https://developer.android.com/training/package-visibility and
+         https://developer.android.com/reference/android/content/Intent#ACTION_PROCESS_TEXT.
+
+         In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.PROCESS_TEXT" />
+            <data android:mimeType="text/plain" />
+        </intent>
+    </queries>
+</manifest>

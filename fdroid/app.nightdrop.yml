@@ -1,0 +1,82 @@
+# F-Droid build recipe for Night Drop — reference copy of the metadata that lives at
+# metadata/app.nightdrop.yml in https://gitlab.com/fdroid/fdroiddata (MR !43625).
+#
+# This app is a Flutter UI over a cross-compiled Rust core (libnightdrop.so, built by cargokit
+# through the NDK), so the recipe provisions BOTH Flutter and Rust and builds them
+# deterministically. Reproducibility is proven locally (see ../docs/reproducible-builds.md): with
+# the pinned toolchains + the remap RUSTFLAGS below, every entry in the release APK is byte-for-byte
+# identical across clean builds — only the RSA signature block differs, which F-Droid re-creates.
+#
+# This mirrors the exact recipe that passes F-Droid CI (schema/lint/rewritemeta/build/check-apk/
+# checkupdates). Keep it in sync with the MR whenever either changes.
+#
+# The store listing (title/summary/description/changelogs) is NOT here — it lives under
+# fastlane/metadata/android/en-US/ in this repo and F-Droid pulls it automatically.
+
+Categories:
+  - Internet
+  - Security
+License: AGPL-3.0-or-later
+AuthorName: Night Drop
+SourceCode: https://github.com/nightdropapp/nightdrop
+IssueTracker: https://github.com/nightdropapp/nightdrop/issues
+
+RepoType: git
+Repo: https://github.com/nightdropapp/nightdrop.git
+
+Builds:
+  # Only the current release is built. 0.1.0–0.1.3 shipped without the Android INTERNET permission
+  # (they cannot connect); 0.1.4 embedded AGP's opaque "dependency metadata" APK signing block,
+  # which F-Droid's check-apk scanner rejects (fixed in 0.1.5 via android/app/build.gradle.kts's
+  # dependenciesInfo { includeInApk = false }). 0.1.6 strips 7 unused plugin-merged permissions
+  # (RECORD_AUDIO, storage/media reads+writes, RECEIVE_BOOT_COMPLETED) via tools:node="remove" in
+  # AndroidManifest.xml. Older versions are not offered on F-Droid.
+  - versionName: 0.1.6
+    versionCode: 7
+    commit: v0.1.6
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential
+      # Install the EXACT Flutter SDK we build with (framework revision ee80f08bbf = 3.44.6) so the
+      # AOT snapshot is reproducible. Pin to the tag, not a moving channel.
+      - git clone --depth 1 --branch 3.44.6 https://github.com/flutter/flutter.git
+        /opt/flutter
+      - /opt/flutter/bin/flutter --version
+      - chmod -R a+rwX /opt/flutter
+    output: build/app/outputs/flutter-apk/app-release.apk
+    # core/fuzz/seeds are binary fuzz corpora that trip the source scanner; not needed to build.
+    scandelete:
+      - core/fuzz/seeds
+    build:
+      - git config --global --add safe.directory '*'
+      # The buildserver has no rust; install the pinned toolchain (rust-toolchain.toml also pins 1.96.0).
+      - curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain
+        1.96.0 --profile minimal
+      - export PATH="/opt/flutter/bin:$HOME/.cargo/bin:$PATH"
+      - export CARGO_HOME="$HOME/.cargo"
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      # Reproducibility: strip machine-specific build dir + cargo registry paths from the Rust core
+      # so libnightdrop.so is path-independent. cargokit honours env RUSTFLAGS.
+      - export RUSTFLAGS="--remap-path-prefix=$(cd ../ && pwd)=. --remap-path-prefix=$CARGO_HOME=/cargo"
+      - flutter pub get
+      # The line wrap after NIGHTDROP_TOR=1 is required — fdroidserver re-wraps long lines and the
+      # metadata must already be in its canonical wrapped form.
+      - flutter build apk --release --dart-define=NIGHTDROP_TOR=1
+        --dart-define=NIGHTDROP_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
+    # Pin the NDK matching flutter.ndkVersion for Flutter 3.44.6 (28.2.13676358 = r28c), the one
+    # tested for reproducibility in docs/reproducible-builds.md. Keep in sync on a Flutter bump.
+    ndk: r28c
+
+# Verifiable reproducible build: F-Droid rebuilds from source and confirms it matches the
+# developer-signed APK (everything but the signature, which F-Droid copies via apksigcopier).
+# SHA-256 of the release keystore's signing cert (from `apksigner verify --print-certs`).
+AllowedAPKSigningKeys: d08b8e6408aff4f43556c05b819fef25afdd6912be7a678b0552468a4582c0ac
+
+AutoUpdateMode: Version
+# Flutter keeps the version in pubspec.yaml (version: X.Y.Z+CODE), not anywhere checkupdates'
+# default tag-scan looks, so point UpdateCheckData at app/pubspec.yaml to extract both numbers.
+UpdateCheckMode: Tags v\d+.\d+.\d+
+UpdateCheckData: app/pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
+CurrentVersion: 0.1.6
+CurrentVersionCode: 7
