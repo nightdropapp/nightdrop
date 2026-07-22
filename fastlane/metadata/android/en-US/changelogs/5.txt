@@ -1,0 +1,3 @@
+Critical fix: the Android app now actually connects. Earlier release builds were missing the INTERNET permission, so Tor could never start and identity creation timed out — this release restores network access.
+
+Also simplified the About screen to show just the app name, version, and license.

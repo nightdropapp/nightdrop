@@ -1,0 +1,5 @@
+Safety-number verification is now mutual: when the other person marks your chat verified, you see it too — shown as an informational note that never auto-trusts, so each side still confirms the number independently.
+
+Hardening: the at-rest storage key is now wiped from memory on logout/shutdown.
+
+Now licensed under AGPL-3.0-or-later.

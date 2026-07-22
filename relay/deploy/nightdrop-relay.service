@@ -1,0 +1,69 @@
+# Night Drop relay — production systemd unit (system-wide).
+#
+# Install with relay/deploy/install-relay.sh (which also builds the release binary
+# to /usr/local/bin/nightdrop-relay), or by hand:
+#   sudo install -m755 target/release/nightdrop-relay /usr/local/bin/nightdrop-relay
+#   sudo cp relay/deploy/nightdrop-relay.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now nightdrop-relay
+#
+# The onion address is derived from the key in the state dir and is STABLE across
+# restarts. With DynamicUser + StateDirectory the state lives in /var/lib/nightdrop-relay
+# and persists, so the address survives reboots and package upgrades. Back that dir up
+# to keep the address; delete it to rotate to a fresh onion.
+#
+# Production hygiene: neither NIGHTDROP_RELAY_DEV (flow-log) nor NIGHTDROP_RELAY_TUI (dashboard)
+# is set here — the relay keeps no logs and no persistent identity-linked metadata, by design.
+
+[Unit]
+Description=Night Drop relay (rendezvous mailbox + 24h store-and-forward, own Tor onion)
+Documentation=file:///usr/share/doc/nightdrop-relay/README.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/nightdrop-relay
+Restart=always
+RestartSec=5
+# Self-healing has two layers. Primary: the relay watches its own onion reachability and exits if
+# it stays dark (arti can keep the process alive while the descriptor publisher wedges, which
+# Restart=always alone never recovers). Backstop: cycle the process at most weekly so any slow
+# degradation the watchdog doesn't catch still refreshes without anyone intervening. Restart is
+# ~1–3 min of downtime while intro points re-establish; store-and-forward clients just retry.
+RuntimeMaxSec=1w
+
+# Stable-onion state dir. StateDirectory creates/owns %S/nightdrop-relay (=/var/lib/nightdrop-relay
+# for a system unit) as the dynamic user; the binary reads NIGHTDROP_RELAY_STATE.
+StateDirectory=nightdrop-relay
+Environment=NIGHTDROP_RELAY_STATE=%S/nightdrop-relay
+
+# The relay needs no privileges and writes only its state dir. DynamicUser gives it an
+# anonymous, transient UID and already implies ProtectSystem=strict, ProtectHome=read-only,
+# PrivateTmp, and a private /home; the rest below is defense-in-depth.
+DynamicUser=yes
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectClock=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+# Tor needs outbound IP sockets; AF_UNIX for internal plumbing. No AF_NETLINK/others.
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+
+[Install]
+WantedBy=multi-user.target

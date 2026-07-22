@@ -1,0 +1,52 @@
+# Local secrets & runtime state — NEVER commit.
+# relay-state/ holds the relay's arti keystore, i.e. its private onion identity keys.
+# The glob also catches relay-state.zip (an archived copy of that same keystore).
+/relay-state*
+# wallets/ holds wallet images containing a recovery MNEMONIC / seed phrase.
+/wallets/
+# Compiled release binaries served from the .onion mirror (APK/AppImage + signatures). Large,
+# deployed to the web host out of band, and published via GitHub Releases — never tracked in git.
+/website/applications/
+
+# Logs (e.g. relay.log)
+*.log
+
+# Rust
+/target/
+**/*.rs.bk
+# Cargo.lock IS committed (this is an application + relay binary + FFI cdylib): pinning the exact
+# dependency versions is what makes the F-Droid / release builds reproducible.
+
+# Flutter / Dart
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/**/build/
+app/.packages
+# app/pubspec.lock IS committed — F-Droid requires a lockfile next to pubspec.yaml for
+# reproducible dependency resolution.
+app/ios/Pods/
+app/ios/.symlinks/
+app/macos/Pods/
+app/.idea/
+app/android/.gradle/
+app/android/local.properties
+app/*/flutter/ephemeral/
+
+# Note: the flutter_rust_bridge output (app/lib/src/rust/, core/src/frb_generated.rs)
+# is generated but intentionally committed so the project builds without codegen.
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+# Stray local debug screenshot — not part of the project.
+/backup-file-error.png
+
+# Local Claude Code settings (machine-specific; contains local paths)
+.claude/
+
+# Project docs kept local-only (guidance + internal notes)
+CLAUDE.md
+notes/

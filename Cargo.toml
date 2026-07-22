@@ -1,0 +1,16 @@
+# Rust workspace for Night Drop's security core and the minimal relay server.
+# The Flutter app lives in app/ and is built separately with the Flutter toolchain.
+[workspace]
+resolver = "2"
+members = ["core", "relay"]
+
+[workspace.package]
+edition = "2021"
+license = "AGPL-3.0-or-later"
+# Bumped 1.75 -> 1.85 for the hybrid PQ pairing (§4.1): the vetted `ml-kem` (FIPS 203) crate
+# requires 1.85. No active users, so raising the toolchain floor is acceptable.
+rust-version = "1.85"
+
+# Build the security-critical core with overflow checks even in release.
+[profile.release]
+overflow-checks = true
