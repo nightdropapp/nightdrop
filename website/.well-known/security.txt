@@ -1,0 +1,27 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+# Night Drop security contact (RFC 9116). Serve this at:
+#   https://nightdrop.app/.well-known/security.txt
+#
+# This file is clearsigned with the Night Drop security PGP key
+# (fingerprint 079B A016 9201 A8AB 11F3 2385 884E ACB8 89D0 2002). Any edit
+# invalidates the signature — re-run the clearsign (see docs/security-txt.md)
+# and refresh Expires (keep it < 1 year out) on each update.
+#
+# Before this is live: point nightdrop.app at the site so this file, /pgp.txt,
+# and /SECURITY.md resolve, and make sure security@nightdrop.app is monitored.
+
+Contact: mailto:security@nightdrop.app
+Expires: 2027-06-14T00:00:00.000Z
+Encryption: https://nightdrop.app/pgp.txt
+Preferred-Languages: en
+Policy: https://nightdrop.app/SECURITY.md
+Canonical: https://nightdrop.app/.well-known/security.txt
+-----BEGIN PGP SIGNATURE-----
+
+iHUEARYKAB0WIQSJLRpLxj83zmteNC2aHJOpHZplqgUCalbyIAAKCRCaHJOpHZpl
+qizlAP46iK5nbMqlx3l9CXwn7sdzMw8LzhTJr/HZ44RvyDdJCQD/dvjkU/fyxWOV
+UcM+jCexh62cpaaHysovAQ7Sx/YcPAs=
+=neBR
+-----END PGP SIGNATURE-----

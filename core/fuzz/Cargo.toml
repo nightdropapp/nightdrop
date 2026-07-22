@@ -1,0 +1,42 @@
+# cargo-fuzz harness for the security core. Standalone workspace (the empty [workspace]
+# table below) so it doesn't join the parent members list. Run with a nightly toolchain:
+#   cargo install cargo-fuzz
+#   cargo +nightly fuzz run wire_decode        # (from core/)
+# See README.md.
+[package]
+name = "nightdrop-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[workspace]
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.nightdrop]
+path = ".."
+
+[[bin]]
+name = "wire_decode"
+path = "fuzz_targets/wire_decode.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "relay_handle_line"
+path = "fuzz_targets/relay_handle_line.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "directory_from_wire"
+path = "fuzz_targets/directory_from_wire.rs"
+test = false
+doc = false
+bench = false

@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <!-- No external resources: block any third-party script, style, font, image, or beacon —
+       nothing can track a visitor or exfiltrate. (frame-ancestors is ignored in a meta CSP; set
+       it plus X-Frame-Options as HTTP headers on the server for clickjacking protection.) -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Night Drop — What we can't protect you from</title>
+  <meta name="description" content="An honest account of Night Drop's limits: what our design protects, what is out of scope, and where the app is still being hardened. No overpromises." />
+  <link rel="canonical" href="https://nightdrop.app/limits.html" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#0e0f14" />
+  <meta name="color-scheme" content="dark" />
+
+  <meta property="og:title" content="Night Drop — What we can't protect you from" />
+  <meta property="og:description" content="Every privacy tool has limits. Here are ours, in plain language — so you can decide what to trust it with." />
+  <meta property="og:type" content="article" />
+  <meta property="og:url" content="https://nightdrop.app/limits.html" />
+  <meta property="og:site_name" content="Night Drop" />
+  <meta property="og:locale" content="en" />
+  <meta property="og:image" content="https://nightdrop.app/icon-512.png" />
+  <meta property="og:image:width" content="512" />
+  <meta property="og:image:height" content="512" />
+  <meta property="og:image:alt" content="Night Drop app icon" />
+
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Night Drop — What we can't protect you from" />
+  <meta name="twitter:description" content="Every privacy tool has limits. Here are ours, in plain language — so you can decide what to trust it with." />
+  <meta name="twitter:image" content="https://nightdrop.app/icon-512.png" />
+
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    "@id": "https://nightdrop.app/limits.html",
+    "url": "https://nightdrop.app/limits.html",
+    "name": "Night Drop — What we can't protect you from",
+    "description": "An honest account of Night Drop's limits: what our design protects, what is out of scope, and where the app is still being hardened.",
+    "inLanguage": "en",
+    "isPartOf": { "@id": "https://nightdrop.app/#website" }
+  }
+  </script>
+  <style>
+    /* Page-scoped accents (kept out of the shared stylesheet). */
+    .page-head { max-width: 760px; margin: 0 auto; padding: 60px 24px 0; text-align: center; }
+    .page-head h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 16px; }
+    .callout {
+      max-width: 820px;
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-left: 4px solid var(--accent);
+      border-radius: 12px;
+      padding: 20px 24px;
+    }
+    .callout.warn { border-left-color: #e0b341; }
+    .callout h3 { margin: 0 0 8px; }
+    .callout p { margin: 0; color: var(--muted); }
+    .card h3 .pill {
+      font-size: 0.7rem;
+      font-weight: 600;
+      color: var(--bg);
+      background: var(--accent-2);
+      border-radius: 999px;
+      padding: 2px 8px;
+      margin-left: 8px;
+      vertical-align: middle;
+    }
+    .card h3 .pill.scope { background: #e0b341; }
+    .backlink { display: inline-block; margin-top: 8px; color: var(--muted); }
+  </style>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <span class="brand"><a href="index.html" style="color:inherit;display:inline-flex;align-items:center;gap:8px;"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</a></span>
+      <div class="nav-links">
+        <a href="index.html#features">Features</a>
+        <a href="index.html#why">Why it's different</a>
+        <a href="limits.html">Honest limits</a>
+        <a href="index.html#download">Download</a>
+      </div>
+    </div>
+  </nav>
+  <header class="hero" style="padding-bottom: 40px;">
+    <div class="page-head">
+      <h1>What we can't protect you from</h1>
+      <p class="tagline">
+        Every privacy tool has limits. A tool that hides them isn't one you should trust.
+        Here are ours, in plain language — so you can decide what Night Drop is right for,
+        and what it isn't.
+      </p>
+    </div>
+  </header>
+
+  <main>
+    <section class="section">
+      <p class="lead">
+        Night Drop is built so that <strong>we</strong> can't read your messages, map who you
+        talk to, or hand over data we never keep. That part is structural — it holds even if
+        we're compelled. But no messenger can protect you from everything. The honest boundaries
+        below fall into three groups: things that are <strong>out of scope by design</strong>,
+        things <strong>only you</strong> can control, and where the app is still being
+        <strong>hardened</strong>.
+      </p>
+    </section>
+
+    <section class="section alt">
+      <h2>Out of scope — by design</h2>
+      <p class="lead">
+        These aren't bugs to be fixed; they're the edges of what any software of this kind can
+        promise. We'd rather say so than pretend otherwise.
+      </p>
+      <div class="grid">
+        <article class="card">
+          <h3>🦠 A compromised device <span class="pill scope">by design</span></h3>
+          <p>If malware or spyware with deep access is on your phone or computer, it can read
+             what you type and see on screen before Night Drop ever encrypts it. No app can
+             defend against a fully compromised device from inside that device. Keep your
+             device updated and uncompromised — that's the foundation everything else rests on.</p>
+        </article>
+        <article class="card">
+          <h3>🌐 An adversary who can defeat Tor itself <span class="pill scope">by design</span></h3>
+          <p>Night Drop routes over Tor to hide the network path. A powerful global observer who
+             can watch huge portions of the internet at once might, in theory, correlate traffic
+             timing and volume to link the two ends of a conversation. We pad message sizes to
+             blunt this, but defeating a global passive adversary is an open problem for Tor
+             itself, not something we can solve alone.</p>
+        </article>
+        <article class="card">
+          <h3>🔑 Losing your identity with no backup <span class="pill scope">by design</span></h3>
+          <p>Your identity lives only on your device — that's the anonymity guarantee. If you
+             lose the device and never made a backup, those chats are gone, and no one (including
+             us) can recover them. Night Drop offers optional encrypted backups so you can
+             <em>choose</em> recoverability; the default is that there's nothing to recover.</p>
+        </article>
+        <article class="card">
+          <h3>🕳️ The fact that you use Tor <span class="pill scope">by design</span></h3>
+          <p>Night Drop hides <em>what</em> you send and <em>who</em> you send it to. It doesn't
+             hide from your own network that you're using Tor at all. In places where using Tor
+             is itself risky, that's a separate consideration — bridges and pluggable transports
+             help, and are on our roadmap.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>Only you can control this</h2>
+      <p class="lead">
+        Some things are simply outside any app's reach, because they live on the other person's
+        side or in your own choices.
+      </p>
+      <div class="grid">
+        <article class="card">
+          <h3>🧑‍🤝‍🧑 The person you're talking to</h3>
+          <p>End-to-end encryption means only the two of you can read a message. It can't stop the
+             other person from taking a screenshot, keeping their own backup, or showing someone
+             their screen. When they turn on server storage or keep a backup of your chat, Night
+             Drop shows you a clear, persistent warning — because privacy you can't see isn't
+             privacy. But trust between two people is still between two people.</p>
+        </article>
+        <article class="card">
+          <h3>🗝️ Your backup password</h3>
+          <p>Encrypted backups are protected by a recovery password shown to you exactly once and
+             never stored anywhere. That's what keeps a backup safe from us and everyone else — and
+             it means <strong>if you lose the password, you lose the backup</strong>. We can't reset
+             it, because we never had it. Write it down somewhere safe.</p>
+        </article>
+        <article class="card">
+          <h3>👀 Someone watching over your shoulder</h3>
+          <p>Disappearing messages and delete-for-everyone remove content from both devices, but
+             they can't un-see what someone already read, photographed with another camera, or
+             remembered. Physical-world observation is always outside the software.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section alt">
+      <h2>Where we're still hardening</h2>
+      <p class="lead">
+        Night Drop is open source and built on audited cryptography libraries, but the app itself
+        is young. We'd rather you know exactly where it stands than trust a superlative.
+      </p>
+      <div class="callout warn">
+        <h3>Not yet independently audited</h3>
+        <p>The cryptography is built on well-reviewed libraries (the same Double Ratchet family
+           used by Signal, the Tor project's own Rust implementation, and vetted password and
+           encryption primitives), and the security-critical code is isolated in a single Rust
+           core. But the app as a whole has not yet had an independent security audit. Until it
+           has, we won't claim more than that — and we'll publish the audit and its fixes when it's
+           done. Treat Night Drop as promising and improving, not battle-tested.</p>
+      </div>
+      <div class="grid" style="margin-top: 28px;">
+        <article class="card">
+          <h3>🧪 Real-world Tor testing is ongoing <span class="pill">in progress</span></h3>
+          <p>The full messaging flow is verified end to end in automated tests, and the Tor path
+             has been exercised over the live network. Broad testing across many real devices,
+             networks, and conditions is still underway. Expect rough edges on flaky connections.</p>
+        </article>
+        <article class="card">
+          <h3>🛰️ Relay availability <span class="pill">in progress</span></h3>
+          <p>When both people are online, messages go directly, device to device. Offline delivery
+             and first-contact short codes lean on a relay that holds only sealed, unreadable blobs.
+             You can add extra relays or run your own, so no single one is a choke point — and
+             we're expanding the default set for resilience.</p>
+        </article>
+        <article class="card">
+          <h3>🎞️ Opening an attachment in another app <span class="pill">in progress</span></h3>
+          <p>Photos and videos are stored sealed on your device. To play a video in your phone's
+             built-in player, we briefly write a decrypted copy to an app-private, owner-only
+             folder — other apps can't read it — and wipe that folder on logout and on the next
+             launch. While the external player has the file open, and until that cleanup runs, a
+             decrypted copy exists on disk. Viewing an image in-app never writes plaintext out.</p>
+        </article>
+        <article class="card">
+          <h3>🔮 Long-horizon quantum computing <span class="pill">tracked</span></h3>
+          <p>The part of the encryption that protects message contents already has a strong margin
+             against future quantum computers. The initial key-agreement handshake is classical
+             today, like most messengers — there's no live threat, but a well-resourced adversary
+             could record traffic now to try to decrypt it years from now. Our plan for closing
+             that gap is documented publicly rather than glossed over.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section">
+      <h2>So what <em>can</em> you count on?</h2>
+      <div class="callout">
+        <p style="color: var(--text);">
+          Within those honest limits, Night Drop is designed so that <strong>we hold no key to
+          your messages, keep no logs, and store no account that could be seized or subpoenaed.</strong>
+          Any server only ever sees sealed, unreadable blobs under short-lived, unlinkable handles.
+          You have no phone number or email tied to your identity, you approve who can reach you,
+          and your history lives on your device by default. That's the deposit box: sealed,
+          dropped, and opened by no one in between.
+        </p>
+      </div>
+      <p class="lead" style="margin-top: 32px;">
+        Read the full design and threat model in the open — the
+        <a href="https://github.com/nightdropapp/nightdrop" id="source-link">source and documentation</a> spell out every
+        claim on this page, including these limits.
+      </p>
+      <p style="text-align:center;">
+        <a class="btn ghost" href="index.html">← Back to Night Drop</a>
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    <p><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop — free, anonymous, end-to-end encrypted. No accounts. No logs.</p>
+    <p class="muted">We tell you what we protect — and what we can't. <a href="limits.html">Honest limits</a></p>
+  </footer>
+
+  <!-- Point the "source and documentation" link at the real repo when config.js is present. -->
+  <script src="config.js"></script>
+  <script>
+    (function () {
+      var c = window.NIGHTDROP_CONFIG;
+      if (c && c.links && c.links.source) {
+        var e = document.getElementById('source-link');
+        if (e) e.href = c.links.source;
+      }
+    })();
+  </script>
+
+  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
+  <script>
+    (function () {
+      var nav = document.querySelector('nav');
+      if (!nav) return;
+      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+      onScroll();
+      window.addEventListener('scroll', onScroll, { passive: true });
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,76 @@
+[package]
+name = "nightdrop"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Night Drop security core: identity, ratchet, PAKE, transport, storage."
+
+# cdylib + staticlib so Flutter can link the core on every platform via FFI.
+# rlib so the relay/tests can depend on shared pieces if needed.
+[lib]
+crate-type = ["cdylib", "staticlib", "rlib"]
+
+# `frb_expand` is set by flutter_rust_bridge_codegen during macro expansion; declare it so
+# normal builds don't warn about an "unexpected cfg".
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(frb_expand)'] }
+
+[dependencies]
+anyhow = "1"
+vodozemac = "0.8"   # Olm/Megolm: X3DH + Double Ratchet (crypto/, identity/)
+spake2 = "0.4"      # PAKE bouncer for short codes (pake/)
+rand = "0.8"        # slot/secret-word generation (identity/)
+zeroize = "1"       # wipe key material / backup passwords from RAM
+base64 = "0.22"     # compact identity ids / wire encoding
+serde = { version = "1", features = ["derive"] } # wire/storage (de)serialization
+serde_json = "1"    # wire & at-rest encoding
+chacha20poly1305 = "0.10" # at-rest AEAD for the local store (storage/)
+argon2 = "0.5"      # password-based key derivation for encrypted backups (§7)
+sha2 = "0.10"       # unlinkable relay mailbox handles + relay envelope keys (§6/§11.2)
+ml-kem = { version = "0.3", features = ["getrandom"] } # ML-KEM-768 (FIPS 203): hybrid PQ pairing (§4.1)
+hkdf = "0.12"       # HKDF-SHA256 hybrid-secret combiner for the PQ pairing key (§4.1)
+ed25519-dalek = { version = "2", features = ["rand_core"] } # verify + sign the operator relay directory (§3.1)
+flutter_rust_bridge = "=2.12.0" # Dart <-> Rust bridge (must match the codegen version)
+
+# --- Tor transport (transport::tor), behind the `tor` feature (heavy; off by default) ---
+# Uses the **rustls** TLS backend (pure Rust) instead of native-tls, so the core
+# cross-compiles to Android without a system/vendored OpenSSL. rustls 0.23 needs a crypto
+# provider installed at process start (done in transport::tor) — we use ring.
+arti-client = { version = "0.43", default-features = false, features = [
+    "tokio", "rustls", "onion-service-client", "onion-service-service",
+    # Onion-service client authorization (restricted discovery, TODO #22). These pull arti's
+    # EXPERIMENTAL, semver-unstable API surface (`__is_experimental`) — pinned arti required.
+    "restricted-discovery", "experimental-api", "keymgr",
+    # Censorship resistance (§6): reach Tor where the public relays are IP-blocked.
+    # "bridge-client" = vanilla (direct) bridges; "pt-client" = obfs4/snowflake pluggable
+    # transports, which additionally need an external PT binary on the device (configured via
+    # transports.txt — see docs/bridges.md; arti launches the binary on demand).
+    "bridge-client", "pt-client",
+], optional = true }
+tor-rtcompat = { version = "0.43", features = ["tokio", "rustls"], optional = true }
+rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
+tor-hsservice = { version = "0.43", optional = true }
+tor-cell = { version = "0.43", optional = true }
+# Onion-service client authorization (restricted discovery, TODO #22): the config builders come
+# from tor-hsservice; these add the types arti-client doesn't re-export — HsId (parse a peer onion),
+# KeystoreSelector (client-key generation), and CfgPath (the authorized-keys directory path).
+tor-hscrypto = { version = "0.43", optional = true }
+tor-keymgr = { version = "0.43", optional = true }
+tor-config-path = { version = "0.43", optional = true }
+safelog = { version = "0.8", optional = true } # DisplayRedacted, to render the onion address
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "time"], optional = true }
+futures = { version = "0.3", optional = true }
+# arti's dir cache pulls rusqlite; bundle SQLite from source so we don't need a system
+# libsqlite3 (feature unifies across the dep graph).
+libsqlite3-sys = { version = "0.37", features = ["bundled"], optional = true }
+
+[features]
+# Enables the embedded Tor (arti) transport. Off by default so the core builds fast and
+# the bridge/tests don't pull the (large) arti dependency tree.
+tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell", "dep:safelog", "dep:tokio", "dep:futures", "dep:libsqlite3-sys", "dep:rustls", "dep:tor-hscrypto", "dep:tor-keymgr", "dep:tor-config-path"]
+
+[dev-dependencies]
+# Surfaces arti's client-side tracing in the #[ignore]d Tor tests when RUST_LOG is set
+# (circuit/HS-client diagnostics). Tests only — never linked into the shipped core.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

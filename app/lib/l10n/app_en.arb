@@ -1,0 +1,689 @@
+{
+  "@@locale": "en",
+
+  "appTitle": "Night Drop",
+  "@appTitle": {
+    "description": "The application name, shown as the window/app title."
+  },
+
+  "newChat": "New chat",
+  "@newChat": {
+    "description": "Title of the pairing screen where a user starts a new 1:1 chat."
+  },
+  "pairInvite": "Invite",
+  "@pairInvite": {
+    "description": "Tab label: show a QR / short code to invite someone."
+  },
+  "pairJoin": "Join",
+  "@pairJoin": {
+    "description": "Tab label: enter a short code / invite link to join."
+  },
+  "connect": "Connect",
+  "@connect": {
+    "description": "Button that starts the pairing handshake with the entered code."
+  },
+  "connecting": "Connecting…",
+  "@connecting": {
+    "description": "Overlay label shown while the pairing handshake runs."
+  },
+  "scanInviteQr": "Scan invite QR",
+  "@scanInviteQr": {
+    "description": "Button/screen title to open the camera and scan a pairing QR code."
+  },
+  "pasteInviteLink": "Paste invite link",
+  "@pasteInviteLink": {
+    "description": "Button that pairs using an invite link from the clipboard."
+  },
+  "shortCodeOrInviteLink": "Short code or invite link",
+  "@shortCodeOrInviteLink": {
+    "description": "Text field label for the pairing code / link input."
+  },
+  "clipboardEmpty": "Clipboard is empty — copy the invite link first.",
+  "@clipboardEmpty": {
+    "description": "Error shown when Paste invite link is tapped with an empty clipboard."
+  },
+  "inviteScanPreAuth": "Have them scan this QR (pre-authorized):",
+  "@inviteScanPreAuth": {
+    "description": "Instruction above a pre-authorized invite QR code."
+  },
+  "inviteScanOrCode": "Have them scan this QR — or enter the code below:",
+  "@inviteScanOrCode": {
+    "description": "Instruction above an invite QR that also has a short code."
+  },
+  "inviteLinkCopied": "Invite link copied",
+  "@inviteLinkCopied": {
+    "description": "Snackbar after copying the invite link to the clipboard."
+  },
+  "copyInviteLink": "Copy invite link",
+  "@copyInviteLink": {
+    "description": "Button to copy the invite link to the clipboard."
+  },
+  "cantScanHint": "Can’t scan? Send this link over a trusted channel; they paste it under Join.",
+  "@cantScanHint": {
+    "description": "Hint under the copy-invite-link button for camera-less pairing."
+  },
+  "orReadOutCode": "…or read out this code and your secret words:",
+  "@orReadOutCode": {
+    "description": "Heading above the short code + secret words on the invite screen."
+  },
+  "secretWordsExplanation": "The first number is just a meeting slot. The words are your shared secret — say them in person or over a trusted channel. They are never sent to any server, and they’re what stops an imposter.",
+  "@secretWordsExplanation": {
+    "description": "Explanation of the short code's slot vs. secret words."
+  },
+
+  "supportNightDrop": "Support Night Drop",
+  "@supportNightDrop": {
+    "description": "Title of the donations screen."
+  },
+  "copyAddress": "Copy address",
+  "@copyAddress": {
+    "description": "Button to copy a cryptocurrency donation address to the clipboard."
+  },
+  "addressCopied": "{ticker} address copied",
+  "@addressCopied": {
+    "description": "Snackbar confirming a donation address was copied.",
+    "placeholders": {
+      "ticker": { "type": "String", "example": "XMR" }
+    }
+  },
+  "donationQrLabel": "{name} donation address QR code",
+  "@donationQrLabel": {
+    "description": "Accessibility label for a donation-address QR code.",
+    "placeholders": {
+      "name": { "type": "String", "example": "Monero" }
+    }
+  },
+
+  "verifyTitle": "Verify {name}",
+  "@verifyTitle": {
+    "description": "Title of the safety-number verification screen.",
+    "placeholders": {
+      "name": { "type": "String", "example": "Alex" }
+    }
+  },
+  "verifyIntro": "Compare this safety number with {name} over a channel you trust (in person or a call). If both of you see the same number, no one is intercepting this chat. You can also scan their code, or show them yours.",
+  "@verifyIntro": {
+    "description": "Explanatory text at the top of the verification screen.",
+    "placeholders": {
+      "name": { "type": "String", "example": "Alex" }
+    }
+  },
+  "verifiedMatch": "Verified — the codes match.",
+  "@verifiedMatch": {
+    "description": "Snackbar shown when a scanned safety code matches."
+  },
+  "verifiedNoMatch": "No match — this is not {name}’s code.",
+  "@verifiedNoMatch": {
+    "description": "Snackbar shown when a scanned safety code does not match.",
+    "placeholders": {
+      "name": { "type": "String", "example": "Alex" }
+    }
+  },
+  "safetyQrLabel": "Safety number verification QR code",
+  "@safetyQrLabel": {
+    "description": "Accessibility label for the safety-number QR code."
+  },
+  "yourSafetyCodeHint": "Your safety code — let them scan it",
+  "@yourSafetyCodeHint": {
+    "description": "Caption under the user's own safety-number QR code."
+  },
+  "scanTheirCode": "Scan their code",
+  "@scanTheirCode": {
+    "description": "Button to scan the other person's safety code."
+  },
+  "scanTheirSafetyCode": "Scan their safety code",
+  "@scanTheirSafetyCode": {
+    "description": "Title of the scanner when scanning a safety code (not a pairing QR)."
+  },
+  "markAsUnverified": "Mark as unverified",
+  "@markAsUnverified": {
+    "description": "Button to clear the verified state of a contact."
+  },
+  "markAsVerified": "Mark as verified",
+  "@markAsVerified": {
+    "description": "Button to manually mark a contact as verified."
+  },
+  "verified": "Verified",
+  "@verified": {
+    "description": "Chip/badge label for a verified contact."
+  },
+  "notVerified": "Not verified",
+  "@notVerified": {
+    "description": "Chip/badge label for an unverified contact."
+  },
+  "peerVerifiedNote": "{name} marked this chat verified on their device. That’s only what they told you — compare the safety number yourself to be sure.",
+  "@peerVerifiedNote": {
+    "description": "Informational banner shown when the peer has signaled they verified the safety number. Must not imply we are verified.",
+    "placeholders": {
+      "name": { "type": "String" }
+    }
+  },
+
+  "cameraUnavailable": "Camera scanning isn’t available on this device.\n\nOn the other device, tap “Copy invite link” and paste it here instead.",
+  "@cameraUnavailable": {
+    "description": "Shown on desktop where there is no camera backend for scanning."
+  },
+  "cameraDidntStart": "The camera didn’t start.\n\nThis is usually temporary — another app may have just been using it. Try again.",
+  "@cameraDidntStart": {
+    "description": "Shown when the camera failed to start / stalled."
+  },
+  "retryCamera": "Retry camera",
+  "@retryCamera": {
+    "description": "Button to re-initialize the camera after a stalled start."
+  },
+  "cameraErrorFallback": "Still not working? Have them copy the invite link and paste it under Join.",
+  "@cameraErrorFallback": {
+    "description": "Fallback hint shown under the camera-error retry button."
+  },
+  "cameraPermissionPermanent": "Night Drop needs camera access to scan an invite QR, but it’s been turned off. Enable Camera for Night Drop in Settings.",
+  "@cameraPermissionPermanent": {
+    "description": "Shown when camera permission is permanently denied / restricted."
+  },
+  "cameraPermissionNeeded": "Night Drop needs camera access to scan an invite QR.",
+  "@cameraPermissionNeeded": {
+    "description": "Shown when camera permission has not yet been granted."
+  },
+  "openSettings": "Open settings",
+  "@openSettings": {
+    "description": "Button that opens system app settings to enable a permission."
+  },
+  "allowCamera": "Allow camera",
+  "@allowCamera": {
+    "description": "Button that re-requests the camera permission in-app."
+  },
+  "cameraPermissionFallback": "Prefer not to? Have them copy the invite link and paste it under Join.",
+  "@cameraPermissionFallback": {
+    "description": "Fallback hint shown under the camera-permission request."
+  },
+  "qrDetectedConnecting": "QR code detected — connecting…",
+  "@qrDetectedConnecting": {
+    "description": "Overlay label the instant a valid QR is decoded."
+  },
+  "pointCameraHint": "Point the camera at your contact’s invite QR.",
+  "@pointCameraHint": {
+    "description": "Hint overlaid on the live camera preview while scanning."
+  },
+
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "Generic Cancel button, used across dialogs."
+  },
+  "restore": "Restore",
+  "@restore": {
+    "description": "Confirm button in a restore-from-backup dialog."
+  },
+
+  "onboardingTagline": "Anonymous, end-to-end encrypted, no accounts.\nYour identity lives only on this device.",
+  "@onboardingTagline": {
+    "description": "Subtitle on the first-run onboarding screen."
+  },
+  "createMyIdentity": "Create my identity",
+  "@createMyIdentity": {
+    "description": "Primary button to generate a new anonymous identity."
+  },
+  "restoreFromBackupFile": "Restore from a backup file",
+  "@restoreFromBackupFile": {
+    "description": "Button to restore an identity from a local backup file."
+  },
+  "restoreFromBackup": "Restore from backup",
+  "@restoreFromBackup": {
+    "description": "Title of the restore-from-file dialog."
+  },
+  "restoreFromServerBackup": "Restore from server backup",
+  "@restoreFromServerBackup": {
+    "description": "Button/dialog title to restore from the opt-in server backup."
+  },
+  "recoveryPassword": "Recovery password",
+  "@recoveryPassword": {
+    "description": "Text-field label for the backup recovery password."
+  },
+  "enterRecoveryPasswordFor": "Enter the recovery password for:\n{path}",
+  "@enterRecoveryPasswordFor": {
+    "description": "Prompt above the password field when restoring a specific backup file.",
+    "placeholders": {
+      "path": { "type": "String", "example": "/home/me/nightdrop-backup.ndb" }
+    }
+  },
+  "enterServerRecoveryPassword": "Enter the recovery password you recorded when you enabled server backup. The encrypted copy is fetched from the server; only your password can open it.",
+  "@enterServerRecoveryPassword": {
+    "description": "Prompt when restoring from the server backup."
+  },
+  "couldNotRestoreBackup": "Could not restore backup — check the password and file. ({error})",
+  "@couldNotRestoreBackup": {
+    "description": "Snackbar when a local backup restore fails.",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
+  "couldNotRestoreBackupFailed": "Could not restore backup. ({error})",
+  "@couldNotRestoreBackupFailed": {
+    "description": "Snackbar when a local backup restore fails for a reason that is NOT a bad password or damaged file (e.g. Tor could not start), so the message must not blame the password.",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
+  "couldNotRestoreServerFailed": "Could not restore from server. ({error})",
+  "@couldNotRestoreServerFailed": {
+    "description": "Snackbar when a server backup restore fails for a reason that is NOT a bad password (e.g. Tor could not start), so the message must not blame the password.",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
+  "couldNotRestoreServer": "Could not restore from server — check the password. ({error})",
+  "@couldNotRestoreServer": {
+    "description": "Snackbar when a server backup restore fails.",
+    "placeholders": {
+      "error": { "type": "String" }
+    }
+  },
+  "stageGeneratingIdentity": "Generating your anonymous identity…",
+  "@stageGeneratingIdentity": { "description": "Bootstrap progress line." },
+  "stageConnectingTor": "Connecting to the Tor network…",
+  "@stageConnectingTor": { "description": "Bootstrap progress line." },
+  "stageBuildingCircuit": "Building a private circuit…",
+  "@stageBuildingCircuit": { "description": "Bootstrap progress line." },
+  "stagePublishingOnion": "Publishing your onion address…",
+  "@stagePublishingOnion": { "description": "Bootstrap progress line." },
+  "stageAlmostReady": "Almost ready — this can take up to a minute…",
+  "@stageAlmostReady": { "description": "Bootstrap progress line." },
+
+  "splashRestoringSession": "Restoring your secure session…",
+  "@splashRestoringSession": { "description": "Launch splash progress line." },
+  "splashReconnectingTor": "Reconnecting to the Tor network…",
+  "@splashReconnectingTor": { "description": "Launch splash progress line." },
+  "splashRebuildingCircuit": "Rebuilding your private circuit…",
+  "@splashRebuildingCircuit": { "description": "Launch splash progress line." },
+  "splashAlmostThere": "Almost there — this can take up to a minute…",
+  "@splashAlmostThere": { "description": "Launch splash progress line." },
+
+  "loadErrorTitle": "Couldn’t open your saved session",
+  "@loadErrorTitle": {
+    "description": "Title of the launch-time load-failure recovery screen."
+  },
+  "loadErrorBody": "Night Drop found data saved on this device but couldn’t open it — often this is just Tor not connecting yet, so trying again usually works. Your existing data is preserved and won’t be overwritten automatically.",
+  "@loadErrorBody": {
+    "description": "Body text of the load-failure recovery screen."
+  },
+  "tryAgain": "Try again",
+  "@tryAgain": {
+    "description": "Button to retry loading the saved session."
+  },
+  "setUpNewIdentity": "Set up a new identity or restore a backup",
+  "@setUpNewIdentity": {
+    "description": "Button to deliberately continue to onboarding after a load failure."
+  },
+  "loadErrorFootnote": "Setting up won’t delete the preserved copy of your old data.",
+  "@loadErrorFootnote": {
+    "description": "Reassurance under the set-up button on the load-failure screen."
+  },
+
+  "backupWhatTitle": "What to back up",
+  "@backupWhatTitle": { "description": "Header of the Lite/Full backup chooser." },
+  "backupWhatSubtitle": "Lite keeps you reachable without copying your messages.",
+  "@backupWhatSubtitle": { "description": "Subtitle under the backup chooser header." },
+  "backupLiteTitle": "Lite — identity & contacts only",
+  "@backupLiteTitle": { "description": "Lite backup option title." },
+  "backupLiteSubtitle": "No message history or media",
+  "@backupLiteSubtitle": { "description": "Lite backup option subtitle." },
+  "backupFullTitle": "Full — everything",
+  "@backupFullTitle": { "description": "Full backup option title." },
+  "backupFullSubtitle": "Includes message history and media",
+  "@backupFullSubtitle": { "description": "Full backup option subtitle." },
+
+  "passwordMismatch": "That doesn’t match. Check what you wrote down.",
+  "@passwordMismatch": { "description": "Error when the retyped recovery password is wrong." },
+  "yourRecoveryPassword": "Your recovery password",
+  "@yourRecoveryPassword": { "description": "Title of the reveal stage of the password dialog." },
+  "writtenItDown": "I’ve written it down",
+  "@writtenItDown": { "description": "Button advancing from reveal to confirm-by-retype." },
+  "confirmRecoveryPassword": "Confirm your recovery password",
+  "@confirmRecoveryPassword": { "description": "Title of the confirm stage of the password dialog." },
+  "typeItBack": "Type it back to make sure it’s saved correctly. There’s no way to recover it later if it’s wrong.",
+  "@typeItBack": { "description": "Instruction in the confirm-by-retype stage." },
+  "showItAgain": "Show it again",
+  "@showItAgain": { "description": "Button to flip back and re-read the password." },
+  "confirm": "Confirm",
+  "@confirm": { "description": "Confirm button in the password dialog." },
+
+  "preparingBackup": "Preparing backup…",
+  "@preparingBackup": { "description": "Loader message while deriving the backup key." },
+  "couldNotPrepareBackup": "Could not prepare backup: {error}",
+  "@couldNotPrepareBackup": {
+    "description": "Snackbar when backup preparation fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "backupIntroFile": "Write this down and keep it safe. It is shown only once and is the only way to restore this backup — we cannot recover it for you.",
+  "@backupIntroFile": { "description": "Intro shown above a freshly generated file-backup password." },
+  "backupSavedTo": "Backup saved to {path}",
+  "@backupSavedTo": {
+    "description": "Snackbar confirming where the backup file was written.",
+    "placeholders": { "path": { "type": "String" } }
+  },
+  "couldNotSaveBackup": "Could not save backup: {error}",
+  "@couldNotSaveBackup": {
+    "description": "Snackbar when writing the backup file fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "mergeChatBackupTitle": "Merge a chat backup",
+  "@mergeChatBackupTitle": { "description": "Title of the merge-a-chat-backup dialog." },
+  "merge": "Merge",
+  "@merge": { "description": "Confirm button in the merge-chat-backup dialog." },
+  "restoringBackup": "Restoring backup…",
+  "@restoringBackup": { "description": "Loader message while a backup is being merged." },
+  "mergedChatBackup": "Merged chat backup — {count, plural, =1{1 message added.} other{{count} messages added.}}",
+  "@mergedChatBackup": {
+    "description": "Snackbar confirming a merged chat backup and how many messages were added.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "couldNotMergeBackup": "Could not merge backup — check the password and file. ({error})",
+  "@couldNotMergeBackup": {
+    "description": "Snackbar when merging a chat backup fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "save": "Save",
+  "@save": { "description": "Generic Save button." },
+  "close": "Close",
+  "@close": { "description": "Generic Close button." },
+  "later": "Later",
+  "@later": { "description": "Button to snooze the backup reminder." },
+  "relaysShort": "Relays",
+  "@relaysShort": { "description": "Short button to open the relay editor from a banner." },
+  "decline": "Decline",
+  "@decline": { "description": "Tooltip to decline an incoming chat request." },
+  "approve": "Approve",
+  "@approve": { "description": "Tooltip to approve an incoming chat request." },
+  "enabled": "Enabled",
+  "@enabled": { "description": "Switch label for enabling a feature." },
+
+  "chats": "Chats",
+  "@chats": { "description": "Home screen (conversation list) title." },
+  "backUp": "Back up",
+  "@backUp": { "description": "Backup menu tooltip / backup-reminder action button." },
+  "saveBackupFile": "Save backup file",
+  "@saveBackupFile": { "description": "Backup menu: save a local backup file." },
+  "backUpToServer24h": "Back up to server (24h)",
+  "@backUpToServer24h": { "description": "Backup menu: opt-in server backup." },
+  "mergeChatBackupMenu": "Merge a chat backup…",
+  "@mergeChatBackupMenu": { "description": "Backup menu: merge a single-chat backup." },
+  "myIdentity": "My identity",
+  "@myIdentity": { "description": "Menu item / dialog title showing the device identity." },
+  "backgroundDeliveryMenu": "Background delivery…",
+  "@backgroundDeliveryMenu": { "description": "Menu item opening background-delivery settings." },
+  "myRelaysMenu": "My relays…",
+  "@myRelaysMenu": { "description": "Menu item opening the relay editor." },
+  "logoutDeleteMenu": "Log out / delete identity",
+  "@logoutDeleteMenu": { "description": "Menu item to log out and delete the identity." },
+  "noChatsYet": "No chats yet.\nTap “New chat” to pair by QR or short code.",
+  "@noChatsYet": { "description": "Empty-state text on the conversation list." },
+  "storedOnServer24h": "Stored on server (24h)",
+  "@storedOnServer24h": { "description": "Chat subtitle when remote storage is on." },
+  "storedOnThisDevice": "Stored on this device",
+  "@storedOnThisDevice": { "description": "Chat subtitle when messages are local-only." },
+
+  "publishingAddressTor": "Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.",
+  "@publishingAddressTor": { "description": "Banner while the onion descriptor is still publishing." },
+
+  "relayOfflineOne": "Your relay {names} looks offline. ",
+  "@relayOfflineOne": {
+    "description": "Relay-health banner when a single relay is unreachable (trailing space intentional).",
+    "placeholders": { "names": { "type": "String" } }
+  },
+  "relayOfflineMany": "Your relays {names} look offline. ",
+  "@relayOfflineMany": {
+    "description": "Relay-health banner when multiple relays are unreachable (trailing space intentional).",
+    "placeholders": { "names": { "type": "String" } }
+  },
+  "relayAdviceHasBackup": "Contacts can still reach you through your other relay for now.",
+  "@relayAdviceHasBackup": { "description": "Relay-health advice when a backup relay is still up." },
+  "relayAdviceNoBackup": "Add a backup relay so people can still reach you while it’s down.",
+  "@relayAdviceNoBackup": { "description": "Relay-health advice when no backup relay is up." },
+
+  "backupReminderBody": "Back up your identity so you don’t lose your chats. There’s no account to recover from — if you lose this device without a backup, it’s gone.",
+  "@backupReminderBody": { "description": "Body of the dismissible backup-reminder banner." },
+
+  "deleteThisChat": "Delete this chat?",
+  "@deleteThisChat": { "description": "Title of the delete-chat confirmation." },
+  "deleteChatBody": "This permanently deletes your conversation with {name}. {name} will be told the chat was deleted. To talk again you will both need to create a new chat.",
+  "@deleteChatBody": {
+    "description": "Body of the delete-chat confirmation.",
+    "placeholders": { "name": { "type": "String" } }
+  },
+  "deleteChat": "Delete chat",
+  "@deleteChat": { "description": "Confirm button that deletes a chat." },
+
+  "backgroundDelivery": "Background delivery",
+  "@backgroundDelivery": { "description": "Title of the background-delivery settings dialog." },
+  "backgroundDeliveryBody": "Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.",
+  "@backgroundDeliveryBody": { "description": "Explanation in the background-delivery dialog." },
+  "notificationPermissionRequired": "Notification permission is required for background delivery.",
+  "@notificationPermissionRequired": { "description": "Snackbar when notification permission is missing." },
+  "backgroundDeliveryOn": "Background delivery on",
+  "@backgroundDeliveryOn": { "description": "Snackbar confirming background delivery was enabled." },
+  "backgroundDeliveryOff": "Background delivery off",
+  "@backgroundDeliveryOff": { "description": "Snackbar confirming background delivery was disabled." },
+
+  "myRelays": "My relays",
+  "@myRelays": { "description": "Title of the relay editor dialog." },
+  "editRelaysBody": "Extra relays that also hold your mailbox. Contacts fan your offline mail out to these in addition to the shared default, so a message still reaches you if one relay is down or blocked. Relays only ever see opaque, end-to-end-encrypted blobs. One address per line.",
+  "@editRelaysBody": { "description": "Explanation in the relay editor dialog." },
+  "couldNotSaveRelays": "Could not save relays: {error}",
+  "@couldNotSaveRelays": {
+    "description": "Snackbar when saving relays fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "usingDefaultRelayOnly": "Using the default relay only",
+  "@usingDefaultRelayOnly": { "description": "Snackbar when the extra-relay list is cleared." },
+  "advertisingExtraRelays": "Advertising {count, plural, =1{1 extra relay} other{{count} extra relays}}",
+  "@advertisingExtraRelays": {
+    "description": "Snackbar confirming how many extra relays are advertised.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "backingUpToServer": "Backing up to server…",
+  "@backingUpToServer": { "description": "Loader while uploading a server backup." },
+  "couldNotBackUpToServer": "Could not back up to server: {error}",
+  "@couldNotBackUpToServer": {
+    "description": "Snackbar when a server backup fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "serverBackupIntro": "An encrypted copy is now stored on the server. Write this password down — it is shown only once, never leaves your device, and is the ONLY way to restore. We cannot recover it for you.",
+  "@serverBackupIntro": { "description": "Intro above the server-backup password." },
+  "serverBackupFooter": "The server copy is deleted at {expiry}. After that, only your recorded password + a local or file backup can restore this identity.",
+  "@serverBackupFooter": {
+    "description": "Footer noting when the server copy expires.",
+    "placeholders": { "expiry": { "type": "String" } }
+  },
+
+  "myIdentityBody": "This is your anonymous, device-held identity — no name, no account. Others see this id once you pair.",
+  "@myIdentityBody": { "description": "Explanation in the My identity dialog." },
+
+  "logoutTitle": "Log out & delete this identity?",
+  "@logoutTitle": { "description": "Title of the logout confirmation." },
+  "logoutBody": "This permanently erases your identity, all contacts, and all messages from this device. There is no undo.\n\n• The ONLY way back into these chats is restoring a backup — so make one first if you haven’t.\n• Everyone you chat with will have to pair with you again.\n\nContinue?",
+  "@logoutBody": { "description": "Body of the logout confirmation." },
+  "logoutDelete": "Log out & delete",
+  "@logoutDelete": { "description": "Confirm button for logout + delete." },
+  "logoutNotNotified": "{count, plural, =1{1 contact may not have been notified that this chat is gone.} other{{count} contacts may not have been notified that these chats are gone.}}",
+  "@logoutNotNotified": {
+    "description": "Snackbar after logout listing contacts that may not have been told.",
+    "placeholders": { "count": { "type": "int" } }
+  },
+
+  "chatRequest": "Chat request",
+  "@chatRequest": { "description": "Title of an incoming chat-request tile." },
+  "approvingOverTor": "Approving over Tor — this can take a few seconds…",
+  "@approvingOverTor": { "description": "Chat-request subtitle while approval is in flight." },
+  "requestFrom": "From {id}. Approve to start chatting.",
+  "@requestFrom": {
+    "description": "Chat-request subtitle showing the sender's short id.",
+    "placeholders": { "id": { "type": "String" } }
+  },
+  "couldNotApprove": "Could not approve: {error}",
+  "@couldNotApprove": {
+    "description": "Snackbar when approving a chat request fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "couldNotDecline": "Could not decline: {error}",
+  "@couldNotDecline": {
+    "description": "Snackbar when declining a chat request fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "delete": "Delete",
+  "@delete": { "description": "Generic Delete confirm button." },
+  "edit": "Edit",
+  "@edit": { "description": "Edit action in the message long-press menu." },
+  "verify": "Verify",
+  "@verify": { "description": "Short call-to-action to open safety-number verification." },
+  "video": "Video",
+  "@video": { "description": "Label for a video attachment tile." },
+  "file": "File",
+  "@file": { "description": "Label for a generic file attachment tile." },
+  "more": "More",
+  "@more": { "description": "Tooltip for the chat overflow menu." },
+
+  "couldntSendOffline": "Couldn’t send — they’re offline and no relay could hold the message. Check your relay settings and try again; your message is still here.",
+  "@couldntSendOffline": { "description": "Send failure when the peer is offline and no relay accepted the message." },
+  "couldntSend": "Couldn’t send: {error}",
+  "@couldntSend": {
+    "description": "Generic send-failure snackbar.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "fileTooLarge": "That file is {size} — the limit is {limit}.",
+  "@fileTooLarge": {
+    "description": "Snackbar when a picked attachment exceeds the size limit.",
+    "placeholders": {
+      "size": { "type": "String" },
+      "limit": { "type": "String" }
+    }
+  },
+  "nothingToPaste": "Nothing to paste.",
+  "@nothingToPaste": { "description": "Snackbar when Paste is tapped with an empty clipboard." },
+  "couldNotSendAttachment": "Could not send attachment: {error}",
+  "@couldNotSendAttachment": {
+    "description": "Snackbar when sending a media attachment fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "editMessageTitle": "Edit message",
+  "@editMessageTitle": { "description": "Title of the edit-message dialog." },
+  "couldNotEdit": "Could not edit: {error}",
+  "@couldNotEdit": {
+    "description": "Snackbar when editing a message fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "deleteForEveryone": "Delete for everyone",
+  "@deleteForEveryone": { "description": "Unsend action in the message long-press menu." },
+  "deleteForEveryoneTitle": "Delete for everyone?",
+  "@deleteForEveryoneTitle": { "description": "Title of the unsend confirmation." },
+  "unsendBody": "This removes the message from both devices. If it hasn’t been delivered yet, the other person never receives it.",
+  "@unsendBody": { "description": "Body of the unsend confirmation." },
+  "couldNotDelete": "Could not delete: {error}",
+  "@couldNotDelete": {
+    "description": "Snackbar when unsending a message fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "yourNameInChat": "Your name in this chat",
+  "@yourNameInChat": { "description": "Title of the rename-self dialog." },
+
+  "disappearingOff": "Off",
+  "@disappearingOff": { "description": "Disappearing-messages option: off." },
+  "disappearing1Hour": "1 hour",
+  "@disappearing1Hour": { "description": "Disappearing-messages option: 1 hour." },
+  "disappearing1Day": "1 day",
+  "@disappearing1Day": { "description": "Disappearing-messages option: 1 day." },
+  "disappearing1Week": "1 week",
+  "@disappearing1Week": { "description": "Disappearing-messages option: 1 week." },
+  "disappearingMessages": "Disappearing messages",
+  "@disappearingMessages": { "description": "Header of the disappearing-messages chooser." },
+  "disappearingSubtitle": "Delete messages on both devices after a set time.",
+  "@disappearingSubtitle": { "description": "Subtitle of the disappearing-messages chooser." },
+  "couldNotSetTimer": "Could not set timer: {error}",
+  "@couldNotSetTimer": {
+    "description": "Snackbar when setting the disappearing timer fails.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+
+  "verifySafetyNumber": "Verify safety number",
+  "@verifySafetyNumber": { "description": "Tooltip for the verify-safety-number app-bar action." },
+  "renameYourselfTooltip": "Rename yourself in this chat",
+  "@renameYourselfTooltip": { "description": "Tooltip for the rename-self app-bar action." },
+  "storedServerTooltipOn": "Stored on server (24h) — tap to disable",
+  "@storedServerTooltipOn": { "description": "Tooltip when server storage is on." },
+  "storedServerTooltipOff": "Stored on this device — tap to enable 24h server storage",
+  "@storedServerTooltipOff": { "description": "Tooltip when server storage is off." },
+  "disappearingTooltipOn": "Disappearing messages: {label} — tap to change",
+  "@disappearingTooltipOn": {
+    "description": "Tooltip when a disappearing timer is set.",
+    "placeholders": { "label": { "type": "String" } }
+  },
+  "disappearingTooltipOff": "Disappearing messages: off — tap to set",
+  "@disappearingTooltipOff": { "description": "Tooltip when no disappearing timer is set." },
+  "deleteThisChatTooltip": "Delete this chat",
+  "@deleteThisChatTooltip": { "description": "Tooltip for the delete-chat app-bar action." },
+  "backUpThisChat": "Back up this chat…",
+  "@backUpThisChat": { "description": "Overflow-menu item to back up a single chat." },
+
+  "sayHi": "Say hi 👻",
+  "@sayHi": { "description": "Empty-state text for a new chat with no messages." },
+
+  "remoteStorageBannerHealthy": "Messages in this chat are stored on the server (encrypted) for up to 24 hours so both devices use less space.",
+  "@remoteStorageBannerHealthy": { "description": "Remote-storage warning banner (healthy)." },
+  "remoteStorageBannerUnhealthy": "Server storage is on, but the relay couldn’t be reached — recent messages were delivered but not stored on the server. They’ll be stored again once a relay is reachable.",
+  "@remoteStorageBannerUnhealthy": { "description": "Remote-storage warning banner (relay unreachable)." },
+  "unverifiedBannerBody": "Not verified — confirm this contact’s safety number to be sure no one’s in the middle.",
+  "@unverifiedBannerBody": { "description": "Body of the unverified-chat nudge banner." },
+  "peerBackupBanner": "The other person keeps a backup of this chat, so your messages may persist in their backup.",
+  "@peerBackupBanner": { "description": "Transparency banner: the peer keeps a Full backup." },
+  "awaitingApprovalBanner": "Waiting for the other person to accept the chat. Messages you send won’t be delivered until they do.",
+  "@awaitingApprovalBanner": { "description": "Banner shown to the joiner until the chat is approved." },
+
+  "messageDeleted": "Message deleted",
+  "@messageDeleted": { "description": "Placeholder text for an unsent/tombstoned message." },
+  "editedTag": "edited",
+  "@editedTag": { "description": "Small tag marking an edited message." },
+  "deliveryHeld": "Held for delivery",
+  "@deliveryHeld": { "description": "Delivery status: queued on a relay." },
+  "deliveryExpired": "Not delivered (expired)",
+  "@deliveryExpired": { "description": "Delivery status: expired unread." },
+  "deliveryDelivered": "Delivered",
+  "@deliveryDelivered": { "description": "Delivery status: delivered." },
+
+  "imageUnavailable": "Image unavailable",
+  "@imageUnavailable": { "description": "Shown when an image attachment can't be decoded." },
+  "mediaImage": "Image • {size}",
+  "@mediaImage": {
+    "description": "Caption under an image attachment.",
+    "placeholders": { "size": { "type": "String" } }
+  },
+  "mediaImageSending": "Image • {size} • sending…",
+  "@mediaImageSending": {
+    "description": "Caption under an image attachment while it uploads.",
+    "placeholders": { "size": { "type": "String" } }
+  },
+  "couldNotOpenFile": "Could not open the file: {error}",
+  "@couldNotOpenFile": {
+    "description": "Snackbar when the system player can't open a file.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "couldNotOpen": "Could not open: {error}",
+  "@couldNotOpen": {
+    "description": "Snackbar when opening an attachment throws.",
+    "placeholders": { "error": { "type": "String" } }
+  },
+  "mediaStatusSending": "sending…",
+  "@mediaStatusSending": { "description": "Video tile status: uploading." },
+  "mediaStatusIncoming": "incoming…",
+  "@mediaStatusIncoming": { "description": "Video tile status: downloading." },
+  "mediaStatusTapToPlay": "tap to play",
+  "@mediaStatusTapToPlay": { "description": "Video tile status: ready to play." },
+
+  "attachImageOrVideo": "Attach image or video",
+  "@attachImageOrVideo": { "description": "Tooltip for the composer attach button." },
+  "pasteText": "Paste text",
+  "@pasteText": { "description": "Tooltip for the composer paste button." },
+  "messageHint": "Message",
+  "@messageHint": { "description": "Placeholder text in the message composer." }
+}
