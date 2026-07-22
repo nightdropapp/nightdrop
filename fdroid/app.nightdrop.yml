@@ -8,11 +8,12 @@
 # identical across clean builds — only the RSA signature block differs, which F-Droid re-creates.
 #
 # FILL IN before submitting (placeholders marked TODO):
-#   - A STABLE production relay .onion for NIGHTDROP_RELAY (baked at build time). The value below is the
-#     current dev relay; a real release must bake a long-lived, independently-hosted relay onion,
-#     and bump the versionCode whenever it changes.
 #   - Confirm AllowedAPKSigningKeys matches the signer of the published APK
 #     (`apksigner verify --print-certs NightDrop.apk`).
+#
+# The NIGHTDROP_RELAY onion baked below is the intended production relay (its hidden-service key is
+# moved to the production host out of band; the .onion address is stable). Bump the versionCode if
+# that address ever changes, since it is compiled into the APK.
 
 Categories:
   - Internet
@@ -46,10 +47,11 @@ Builds:
     subdir: app
     # F-Droid provides the NDK and a rust toolchain; the exact rustc comes from rust-toolchain.toml
     # (pinned 1.96.0). Pin the same NDK we verified.
-    # Must equal `flutter.ndkVersion` for Flutter 3.44.6 (android/app/build.gradle.kts uses it).
-    # docs/reproducible-builds.md records NDK 28.2 as tested — 28.2.x is label r28c, so verify
-    # whether this should be r28c (not r28b) against what 3.44.6 actually resolves.
-    ndk: r28b
+    # Matches `flutter.ndkVersion` for Flutter 3.44.6, which pins NDK 28.2.13676358 (= r28c) —
+    # confirmed in the SDK (packages/flutter_tools/lib/src/android/gradle_utils.dart). android/app/
+    # build.gradle.kts uses flutter.ndkVersion, so this MUST stay in sync on a Flutter bump. Also
+    # the NDK tested for reproducibility in docs/reproducible-builds.md.
+    ndk: r28c
     rust: stable                              # rust-toolchain.toml pins the concrete 1.96.0
     sudo:
       # Install the EXACT Flutter SDK we build with (framework revision ee80f08bbf = 3.44.6), so the
