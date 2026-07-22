@@ -1,0 +1,16 @@
+# cargokit build options for the Flutter app's bundled core (app/rust_builder).
+# Build the security core with the embedded Tor transport so the app gets a reachable
+# .onion and works over WAN/LTE (ARCHITECTURE.md §6). Applies to every platform target.
+cargo:
+  debug:
+    extra_flags:
+      - --features
+      - tor
+  release:
+    extra_flags:
+      - --features
+      - tor
+  profile:
+    extra_flags:
+      - --features
+      - tor

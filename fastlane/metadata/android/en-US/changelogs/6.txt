@@ -1,0 +1,1 @@
+Packaging fix for F-Droid: the release APK no longer embeds Android Gradle's opaque "dependency metadata" signing block, which F-Droid's scanner rejects. No functional or behavioral changes from 0.1.4.

@@ -1,0 +1,1 @@
+Added an "About Night Drop" item to the menu that shows the app version (and the open-source license notices).
