@@ -8,19 +8,19 @@
 # identical across clean builds — only the RSA signature block differs, which F-Droid re-creates.
 #
 # FILL IN before submitting (placeholders marked TODO):
-#   - Repo / SourceCode / IssueTracker URLs (no git remote is configured yet).
-#   - The release tag + commit for each Builds entry.
 #   - A STABLE production relay .onion for NIGHTDROP_RELAY (baked at build time). The value below is the
 #     current dev relay; a real release must bake a long-lived, independently-hosted relay onion,
 #     and bump the versionCode whenever it changes.
+#   - Confirm AllowedAPKSigningKeys matches the signer of the published APK
+#     (`apksigner verify --print-certs NightDrop.apk`).
 
 Categories:
   - Internet
   - Security
 License: AGPL-3.0-or-later
 AuthorName: Night Drop
-SourceCode: https://TODO/nightdrop           # TODO: public repo URL
-IssueTracker: https://TODO/nightdrop/issues  # TODO
+SourceCode: https://github.com/nightdropapp/nightdrop
+IssueTracker: https://github.com/nightdropapp/nightdrop/issues
 # Donate: (privacy-coin addresses live in config/app_config.json)
 
 # The localized store listing (title, summary, full description, changelogs) is maintained under
@@ -37,16 +37,19 @@ Description: |-
     no plaintext, no identities, no logs.
 
 RepoType: git
-Repo: https://TODO/nightdrop.git             # TODO
+Repo: https://github.com/nightdropapp/nightdrop.git
 
 Builds:
   - versionName: 0.1.0
     versionCode: 1
-    commit: v0.1.0                            # TODO: tag this release
+    commit: v0.1.0                            # tag exists on origin
     subdir: app
     # F-Droid provides the NDK and a rust toolchain; the exact rustc comes from rust-toolchain.toml
     # (pinned 1.96.0). Pin the same NDK we verified.
-    ndk: r28b                                 # NDK 28.2.x (verify the exact F-Droid label)
+    # Must equal `flutter.ndkVersion` for Flutter 3.44.6 (android/app/build.gradle.kts uses it).
+    # docs/reproducible-builds.md records NDK 28.2 as tested — 28.2.x is label r28c, so verify
+    # whether this should be r28c (not r28b) against what 3.44.6 actually resolves.
+    ndk: r28b
     rust: stable                              # rust-toolchain.toml pins the concrete 1.96.0
     sudo:
       # Install the EXACT Flutter SDK we build with (framework revision ee80f08bbf = 3.44.6), so the

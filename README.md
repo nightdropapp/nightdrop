@@ -153,3 +153,8 @@ design, threat model, and non-negotiable invariants.
 integration as a whole (pairing/PAKE, relay, at-rest storage, FFI boundary) has **not** had an
 independent security audit. See [`SECURITY.md`](SECURITY.md#audit-status) — treat the app as
 promising and improving, not battle-tested, until that's done.
+
+## License
+
+Licensed under the GNU Affero General Public License v3.0 or later
+(`AGPL-3.0-or-later`) — see [`LICENSE`](LICENSE).
