@@ -1,0 +1,45 @@
+[package]
+name = "nightdrop_relay"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Night Drop minimal relay: untrusted rendezvous mailbox + 24h store-and-forward, served as its own Tor onion service."
+
+[[bin]]
+name = "nightdrop-relay"
+path = "src/main.rs"
+
+[dependencies]
+# Shares the relay protocol + store (RelayCore) with the core (relay_client module).
+nightdrop = { path = "../core" }
+anyhow = "1"
+
+# The relay publishes ITS OWN onion service (its own keystore, separate from any chat
+# identity; ARCHITECTURE.md §11.2) and accepts rendezvous streams. Same arti stack/versions
+# as the core's Tor transport so the workspace reuses the compiled dependency tree. rustls
+# (pure-Rust TLS) so no system OpenSSL is needed.
+arti-client = { version = "0.43", default-features = false, features = [
+    "tokio", "rustls", "onion-service-client", "onion-service-service",
+    # Restricted discovery: gate the relay's onion to authorized clients only (private relays, §3.2).
+    "restricted-discovery",
+] }
+tor-rtcompat = { version = "0.43", features = ["tokio", "rustls"] }
+rustls = { version = "0.23", default-features = false, features = ["ring"] }
+tor-hsservice = "0.43"
+tor-cell = "0.43"
+# CfgPath for the restricted-discovery authorized-clients directory (private relays, §3.2).
+tor-config-path = "0.43"
+safelog = "0.8"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util"] }
+futures = "0.3"
+# arti's dir cache pulls rusqlite; bundle SQLite from source (no system libsqlite3 needed).
+libsqlite3-sys = { version = "0.37", features = ["bundled"] }
+
+# Dev-only live dashboard (TUI) over the relay flow (NIGHTDROP_RELAY_TUI=1). ratatui re-exports
+# crossterm for terminal handling.
+ratatui = "0.29"
+
+# Optional arti/relay diagnostics: when RUST_LOG is set, surface arti's tracing (onion-service
+# publish, descriptor upload, circuit health). Off unless RUST_LOG is present — no logs by default.
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }

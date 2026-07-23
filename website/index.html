@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Night Drop — private messaging that leaves no trace</title>
+  <meta name="description" content="Night Drop is a free, anonymous, end-to-end encrypted 1:1 messenger. No accounts, no server-side keys, no logs. Peer-to-peer over Tor, local-first storage." />
+  <link rel="canonical" href="https://nightdrop.app/" />
+  <meta name="robots" content="index, follow, max-image-preview:large" />
+  <!-- Privacy: don't leak the referring URL to anything the page links out to. -->
+  <meta name="referrer" content="no-referrer" />
+  <meta name="theme-color" content="#0e0f14" />
+  <meta name="color-scheme" content="dark" />
+
+  <!-- Open Graph (link previews) -->
+  <meta property="og:title" content="Night Drop — private messaging that leaves no trace" />
+  <meta property="og:description" content="Sealed. Dropped. Delivered. Anonymous, end-to-end encrypted 1:1 chat over Tor — no accounts, no server-side keys, no logs, no one in between." />
+  <meta property="og:type" content="website" />
+  <meta property="og:url" content="https://nightdrop.app/" />
+  <meta property="og:site_name" content="Night Drop" />
+  <meta property="og:locale" content="en" />
+  <meta property="og:image" content="https://nightdrop.app/icon-512.png" />
+  <meta property="og:image:width" content="512" />
+  <meta property="og:image:height" content="512" />
+  <meta property="og:image:alt" content="Night Drop app icon" />
+
+  <!-- Twitter/X card -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="Night Drop — private messaging that leaves no trace" />
+  <meta name="twitter:description" content="Anonymous, end-to-end encrypted 1:1 chat over Tor — no accounts, no server-side keys, no logs, no one in between." />
+  <meta name="twitter:image" content="https://nightdrop.app/icon-512.png" />
+
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-192.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="icon-512.png" />
+  <link rel="apple-touch-icon" href="apple-touch-icon.png" />
+  <link rel="manifest" href="/manifest.webmanifest" />
+  <link rel="stylesheet" href="styles.css" />
+
+  <!-- Structured data: help search engines understand this is a free cross-platform
+       communication app and its home page. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@graph": [
+      {
+        "@type": "WebSite",
+        "@id": "https://nightdrop.app/#website",
+        "url": "https://nightdrop.app/",
+        "name": "Night Drop",
+        "description": "Anonymous, end-to-end encrypted 1:1 messaging over Tor. No accounts, no server-side keys, no logs.",
+        "inLanguage": "en"
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://nightdrop.app/#app",
+        "name": "Night Drop",
+        "applicationCategory": "CommunicationApplication",
+        "operatingSystem": "Android, iOS, Windows, macOS, Linux",
+        "url": "https://nightdrop.app/",
+        "image": "https://nightdrop.app/icon-512.png",
+        "description": "A free, anonymous, end-to-end encrypted 1:1 messenger. Peer-to-peer over Tor, local-first storage, no accounts and no server-side keys.",
+        "isAccessibleForFree": true,
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      }
+    ]
+  }
+  </script>
+
+  <!-- Shared config (donation addresses, copy, download links). Generated from
+       config/app_config.json by `make config` — the single source of truth shared with the app. -->
+  <script src="config.js"></script>
+</head>
+<body>
+  <nav>
+    <div class="nav-inner">
+      <span class="brand"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</span>
+      <div class="nav-links">
+        <a href="#features">Features</a>
+        <a href="#why">Why it's different</a>
+        <a href="limits.html">Honest limits</a>
+        <a href="#donate">Donate</a>
+        <a href="#download">Download</a>
+      </div>
+    </div>
+  </nav>
+  <header class="hero">
+    <div class="hero-content">
+      <h1 id="hero-headline">Sealed. Dropped. Delivered.</h1>
+      <p class="tagline" id="hero-tagline">
+        Like a night deposit box: every message is a sealed envelope, dropped for one
+        person only, opened by no one in between. Anonymous, end-to-end encrypted 1:1
+        chat over Tor. No accounts. No phone number. No server-side keys. No logs.
+      </p>
+      <div class="cta">
+        <a class="btn primary" href="#download">Get Night Drop</a>
+        <a class="btn ghost" href="#features">See how it works</a>
+      </div>
+      <p class="fineprint">Free and open. Peer-to-peer over Tor. Android · <!--iOS  ·-->Windows ·<!-- macOS ·--> Linux.</p>
+    </div>
+  </header>
+
+  <main>
+    <section id="features" class="section">
+      <h2>Built privacy-first, from the ground up</h2>
+      <div class="grid">
+        <article class="card">
+          <h3>🕵️ Anonymous by default</h3>
+          <p>No sign-up, no email, no phone number. Your identity is a key that lives
+             only on your device. The default name is just “Anon”.</p>
+        </article>
+        <article class="card">
+          <h3>🔒 End-to-end encrypted</h3>
+          <p>Every message uses the Signal Double Ratchet. Only you and the person
+             you’re talking to can read it — with forward secrecy on every message.</p>
+        </article>
+        <article class="card">
+          <h3>🧅 Peer-to-peer over Tor</h3>
+          <p>Messages travel directly between devices through the Tor network. There’s
+             no central server watching who talks to whom.</p>
+        </article>
+        <article class="card">
+          <h3>📵 No server-side keys, no logs</h3>
+          <p>We can’t read your messages because we never hold your keys — and we keep
+             no logs. There’s nothing to hand over, because there’s nothing to keep.</p>
+        </article>
+        <article class="card">
+          <h3>📱 Local-first storage</h3>
+          <p>By default your history stays on your device, encrypted at rest. Optionally
+             store it on the server for 24 hours to save space — and both of you are
+             clearly warned while that’s on.</p>
+        </article>
+        <article class="card">
+          <h3>🛂 You approve who reaches you</h3>
+          <p>Pair by QR code or a short code with a shared secret. A stranger can’t
+             message you until you approve the request.</p>
+        </article>
+        <article class="card">
+          <h3>📮 Delivered even when they’re offline</h3>
+          <p>If your contact is offline, the encrypted message waits on an untrusted
+             relay for up to 24 hours — it sees only ciphertext, never content. You
+             see when it’s queued and when it’s delivered.</p>
+        </article>
+        <article class="card">
+          <h3>🛰️ More ways to reach you</h3>
+          <p>Add extra relays that also hold your mailbox. Messages are copied to all of
+             them, so one relay being down or blocked doesn’t drop your mail — and every
+             relay still sees only ciphertext. Run your own if you like; nothing about it
+             is trusted.</p>
+        </article>
+        <article class="card">
+          <h3>📷 Photos and videos, encrypted too</h3>
+          <p>Attachments travel end-to-end encrypted like every message, and are
+             stored sealed on your device. Images are compressed on-device so they
+             move fast over Tor.</p>
+        </article>
+        <article class="card">
+          <h3>🗝️ Backups you own</h3>
+          <p>Optional encrypted backups protected by a recovery password shown to you
+             exactly once — never stored, never sent anywhere. Lose the password, lose
+             the backup: that’s the point. Restore keeps your identity and chats.</p>
+        </article>
+        <article class="card">
+          <h3>🎚️ Back up your way</h3>
+          <p>Choose <strong>Lite</strong> (just your identity and contacts, no messages)
+             or <strong>Full</strong> (with history and media) — save it to a file, or opt
+             in to an encrypted 24-hour copy on the server that only your password can open.
+             You can even back up a single chat and merge it back later.</p>
+        </article>
+        <article class="card">
+          <h3>⏱️ Disappearing messages</h3>
+          <p>Set a per-chat timer — an hour, a day, a week — and older messages delete
+             themselves on both devices. It’s a shared setting, so changing it keeps both
+             sides in sync.</p>
+        </article>
+        <article class="card">
+          <h3>↩️ Unsend and edit</h3>
+          <p>Change your mind? Edit a message or delete it for everyone. If it hasn’t
+             reached them yet it’s pulled back before it ever arrives; if it has, it turns
+             into a “deleted” marker on both sides.</p>
+        </article>
+        <article class="card">
+          <h3>🫥 Nothing hidden between you</h3>
+          <p>When the other person keeps a backup of your chat, or turns on 24-hour server
+             storage, you see a clear, persistent warning. Privacy you can’t see isn’t
+             privacy — so the app tells you where your messages live.</p>
+        </article>
+        <article class="card">
+          <h3>🔕 Notifications without leaks</h3>
+          <p>New-message alerts are generated on your device and say only “New
+             message” — no content, no sender, and nothing goes through a push
+             provider tied to your identity. On Android you can opt in to keep receiving
+             them in the background over Tor — still with no push provider.</p>
+        </article>
+        <article class="card">
+          <h3>🧹 Leave without a trace</h3>
+          <p>Delete a chat and the other person is told; log out and your identity,
+             keys, messages, and decrypted files are wiped from the device. Nothing
+             lingers on a server, because nothing was there.</p>
+        </article>
+        <article class="card">
+          <h3>💻 One app, every device</h3>
+          <p>Android, <!--iOS,--> Windows, <!--macOS,--> and Linux from one codebase — with the same
+             Rust security core doing the cryptography on every platform.</p>
+        </article>
+      </div>
+    </section>
+
+    <section id="why" class="section alt">
+      <h2>Why Night Drop is different</h2>
+      <p class="lead">
+        Most “private” messengers still tie you to a phone number, keep metadata on
+        their servers, or hold keys that can be compelled. Night Drop is designed so
+        there is simply nothing to collect.
+      </p>
+      <div class="compare">
+        <div class="compare-col us">
+          <h3>Night Drop</h3>
+          <ul>
+            <li>✅ No phone number or account</li>
+            <li>✅ No server-side keys</li>
+            <li>✅ No logs, minimal metadata</li>
+            <li>✅ Peer-to-peer over Tor</li>
+            <li>✅ Local-first; optional 24h server storage with a warning</li>
+            <li>✅ You approve contacts before the first message</li>
+            <li>✅ Encrypted backups only you can open — Lite, Full, or one chat</li>
+            <li>✅ Disappearing messages and delete-for-everyone</li>
+            <li>✅ Clear warnings when a message is stored or backed up</li>
+            <li>✅ Donations in privacy coins — no payment trail</li>
+          </ul>
+        </div>
+        <div class="compare-col them">
+          <h3>Typical “secure” chat apps</h3>
+          <ul>
+            <li>⚠️ Require a phone number that identifies you</li>
+            <li>⚠️ Keep accounts and metadata on central servers</li>
+            <li>⚠️ Hold keys or routing data that can be compelled</li>
+            <li>⚠️ Connect over the open internet by default</li>
+            <li>⚠️ Store history in the cloud, sometimes by default</li>
+            <li>⚠️ Anyone with your number can reach you</li>
+            <li>⚠️ Cloud backups the provider can open or be compelled to share</li>
+            <li>⚠️ Quietly sync or store data without telling you</li>
+            <li>⚠️ Paid tiers tied to your identity</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section id="donate" class="section">
+      <h2>Support Night Drop</h2>
+      <p class="lead" id="donate-blurb">
+        Night Drop is free. If it’s useful to you, a donation keeps it alive. We accept
+        privacy coins so giving stays anonymous — no accounts, no tracking, no trail.
+      </p>
+      <div class="grid" id="donate-grid">
+        <article class="card coin">
+          <h3>Monero (XMR)</h3>
+          <p class="muted">Strong sender, receiver, and amount privacy.</p>
+          <code class="addr">replace-with-your-XMR-address</code>
+        </article>
+      </div>
+      <!--<p class="fineprint">Addresses are non-custodial and published as-is. Edit them in one
+        place — <code>config/app_config.json</code> — then run <code>make config</code>.</p>-->
+    </section>
+
+    <section id="download" class="section alt">
+      <h2>Get Night Drop</h2>
+      <p class="lead">One app, every device.</p>
+      <div class="downloads" id="download-links">
+        <!--<a class="btn ghost" href="#">iOS</a>-->
+        <a class="btn ghost" href="#">Android</a>
+        <a class="btn ghost" href="#">Windows</a>
+        <!--a class="btn ghost" href="#">macOS</a>-->
+        <a class="btn ghost" href="#">Linux</a>
+      </div>
+      <!--<p class="fineprint">Download links are placeholders until the first release.</p>-->
+    </section>
+  </main>
+
+  <footer>
+    <p><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop — free, anonymous, end-to-end encrypted. No accounts. No logs.</p>
+    <p class="muted">No competitor names. Just the facts about how your data is handled — including <a href="limits.html">what we can't protect you from</a>.</p>
+    <p class="muted footer-links">
+      <a href="https://github.com/nightdropapp/nightdrop" id="source-link">Source code</a> ·
+      <a href="/.well-known/security.txt">Report a vulnerability</a> ·
+      <a href="limits.html">Honest limits</a>
+    </p>
+  </footer>
+
+  <!-- Populate the parts that change (addresses, copy, download links) from the shared config
+       so they stay in sync with the app. Falls back to the static HTML above if config.js is
+       absent (e.g. opened without `make config`). -->
+  <script>
+    (function () {
+      var c = window.NIGHTDROP_CONFIG;
+      if (!c) return;
+      function esc(s) {
+        return String(s).replace(/[&<>"]/g, function (m) {
+          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m];
+        });
+      }
+      function setText(id, txt) {
+        var e = document.getElementById(id);
+        if (e && txt) e.textContent = txt;
+      }
+      if (c.links && c.links.source) {
+        var src = document.getElementById('source-link');
+        if (src) src.href = c.links.source;
+      }
+      if (c.app) {
+        setText('hero-headline', c.app.headline);
+        setText('hero-tagline', c.app.tagline);
+        setText('donate-blurb', c.app.blurb);
+        if (c.app.name) document.title = c.app.name + ' — private messaging that leaves no trace';
+      }
+      if (Array.isArray(c.donations) && c.donations.length) {
+        var grid = document.getElementById('donate-grid');
+        if (grid) {
+          grid.innerHTML = c.donations.map(function (d) {
+            return '<article class="card coin"><h3>' + esc(d.name) + ' (' + esc(d.ticker) +
+              ')</h3><p class="muted">' + esc(d.note || '') + '</p><code class="addr">' +
+              esc(d.address) + '</code></article>';
+          }).join('');
+        }
+      }
+      if (c.downloads) {
+        var box = document.getElementById('download-links');
+        if (box) {
+          var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
+          box.innerHTML = Object.keys(labels).map(function (k) {
+            var url = c.downloads[k];
+            var dl = url ? ' download' : '';
+            return '<a class="btn ghost"' + dl + ' href="' + (url ? esc(url) : '#') + '">' + labels[k] + '</a>';
+          }).join('');
+        }
+      }
+    })();
+  </script>
+
+  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
+  <script>
+    (function () {
+      var nav = document.querySelector('nav');
+      if (!nav) return;
+      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+      onScroll();
+      window.addEventListener('scroll', onScroll, { passive: true });
+    })();
+  </script>
+</body>
+</html>

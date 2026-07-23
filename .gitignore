@@ -1,0 +1,44 @@
+# Local secrets & runtime state — NEVER commit.
+# relay-state/ holds the relay's arti keystore, i.e. its private onion identity keys.
+/relay-state/
+# wallets/ holds wallet images containing a recovery MNEMONIC / seed phrase.
+/wallets/
+
+# Logs (e.g. relay.log)
+*.log
+
+# Rust
+/target/
+**/*.rs.bk
+Cargo.lock
+
+# Flutter / Dart
+app/.dart_tool/
+app/.flutter-plugins
+app/.flutter-plugins-dependencies
+app/build/
+app/**/build/
+app/.packages
+app/pubspec.lock
+app/ios/Pods/
+app/ios/.symlinks/
+app/macos/Pods/
+app/.idea/
+app/android/.gradle/
+app/android/local.properties
+app/*/flutter/ephemeral/
+
+# Note: the flutter_rust_bridge output (app/lib/src/rust/, core/src/frb_generated.rs)
+# is generated but intentionally committed so the project builds without codegen.
+
+# Editor / OS
+.DS_Store
+*.swp
+.vscode/
+
+# Local Claude Code settings (machine-specific; contains local paths)
+.claude/
+
+# Project docs kept local-only (guidance + internal notes)
+CLAUDE.md
+notes/

@@ -1,0 +1,6 @@
+# Pinned to an EXACT version (not "stable") so builds are reproducible: F-Droid's build server,
+# CI, and every developer resolve the identical rustc, a prerequisite for bit-for-bit reproducible
+# native libs. Bump deliberately (and re-verify reproducibility) on a toolchain move.
+[toolchain]
+channel = "1.96.0"
+components = ["rustfmt", "clippy"]

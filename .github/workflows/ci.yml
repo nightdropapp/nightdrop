@@ -1,0 +1,94 @@
+# Continuous integration — the automated half of MAINTENANCE.md §3 (TODO #14).
+#
+# Two jobs:
+#   * rust    — fmt / clippy / tests / the Tor-feature compile. Runs on the committed
+#               `core/` + `relay/` crates alone, so it is green on a bare checkout.
+#   * flutter — analyze + the widget & Dart↔Rust bridge tests (which build and load the
+#               real libnightdrop.so). This presupposes the app's platform scaffolding
+#               and the vendored `app/rust_builder/` plugin are committed (see
+#               `make bootstrap`); until they are, keep this job in mind but expect the
+#               rust job to be the live gate.
+#
+# Not run here: the Tor smoke test and the on-device `integration_test/` suite — both need
+# real network/hardware (or xvfb + a display) and stay manual per MAINTENANCE.md §3.
+
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+# Cancel superseded runs on the same ref to save CI minutes.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  rust:
+    name: Rust core + relay
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # rust-toolchain.toml pins the channel + clippy/rustfmt components.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Format (cargo fmt --check)
+        run: cargo fmt --all --check
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test -p nightdrop
+
+      # The Tor path is feature-gated (pulls arti); a plain build never compiles it, so
+      # verify it separately. Compile-only — the live circuit test is #[ignore]d.
+      - name: Tor feature compiles
+        run: cargo build -p nightdrop --features tor
+
+  flutter:
+    name: Flutter app
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The bridge test builds and loads the real libnightdrop.so, so this job needs Rust too.
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          flutter-version: 3.44.0
+
+      # flutter_secure_storage (libsecret) + fc_native_video_thumbnail (ffmpeg) native deps,
+      # needed once a desktop build is added; harmless for analyze/test.
+      - name: Linux desktop build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config \
+            libgtk-3-dev libsecret-1-dev libavformat-dev libavcodec-dev \
+            libavutil-dev libswscale-dev
+
+      - name: Sync generated config
+        run: make config
+
+      - name: Build the Rust core (libnightdrop.so)
+        run: make core-build
+
+      - name: Resolve Dart deps
+        run: cd app && flutter pub get
+
+      # Vendored cargokit under app/rust_builder ships analyzer noise — scope analysis to
+      # our own sources (MAINTENANCE.md §3).
+      - name: Analyze
+        run: cd app && flutter analyze lib test
+
+      - name: Test (widget + Dart↔Rust bridge)
+        run: cd app && flutter test

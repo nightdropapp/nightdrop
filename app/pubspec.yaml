@@ -1,0 +1,58 @@
+name: night_drop
+description: "Night Drop — a privacy-first 1:1 messenger."
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations: # gen-l10n localized strings (see l10n.yaml + lib/l10n/*.arb)
+    sdk: flutter
+  intl: any # version pinned by flutter_localizations; used by generated AppLocalizations
+  cupertino_icons: ^1.0.8
+  qr_flutter: ^4.1.0 # render pairing QR codes
+  # Backup save/load picker. The 12.x beta is REQUIRED on this toolchain: stable v11
+  # pins Kotlin Gradle Plugin 1.8.22, which silently fails under Gradle 9 / AGP 9
+  # built-in Kotlin (its classes never compile → "cannot find symbol" at :app).
+  file_picker: ^12.0.0-beta.7
+  path_provider: ^2.1.4 # default backup locations (Documents/Desktop) + persisted state dir
+  flutter_secure_storage: ^10.3.1 # OS-backed keystore for the at-rest persistence key
+  open_filex: ^4.5.0 # open a received video/file in the system player (cross-platform)
+  image: ^4.9.1 # downscale/recompress images before sending (big speed win over Tor)
+  # Preview frame for sent videos (Android/iOS/macOS/Windows; no Linux). Replaced the
+  # unmaintained `video_thumbnail`, whose 2023-era Gradle config breaks under AGP 9.
+  fc_native_video_thumbnail: ^3.0.1
+  flutter_local_notifications: ^22.0.1 # local notifications for new messages/requests
+  flutter_rust_bridge: 2.12.0 # Dart <-> Rust FFI bridge (matches the codegen version)
+  # cargokit plugin that builds core/ and bundles libnightdrop into each platform target.
+  nightdrop:
+    path: rust_builder
+  flutter_launcher_icons: ^0.14.4
+  flutter_foreground_task: ^10.0.0 # opt-in Android background-delivery foreground service (#13)
+  flutter_zxing: ^2.3.0 # on-device QR scanning for pairing (§5a); Apache-2.0 ZXing, no Google Play Services / ML Kit
+  permission_handler: ^12.0.0 # runtime camera-permission request + open-settings for the scanner (no phone-home; see DEPENDENCIES.md)
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  generate: true # run gen-l10n on build: lib/l10n/*.arb -> AppLocalizations
+  assets:
+    # Shared config (donation addresses, copy, links). Generated from config/app_config.json
+    # by `make config` — the single source of truth shared with the website.
+    - assets/app_config.json
+    - assets/icons/icon-512.png
+  fonts:
+    # Color-emoji fallback so emoji render on desktop (Flutter's Linux/Windows builds don't
+    # ship one; Android/iOS have a system emoji font but this is a harmless fallback there).
+    - family: NotoColorEmoji
+      fonts:
+        - asset: assets/fonts/NotoColorEmoji.ttf
