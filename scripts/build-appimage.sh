@@ -82,29 +82,48 @@ APPDIR="$WORK/NightDrop.AppDir"
 mkdir -p "$APPDIR/usr/bin"
 cp -a "$BUNDLE_SRC/." "$APPDIR/usr/bin/"
 
+# XDG_DATA_DIRS must include the AppDir's share/ so GTK's icon theme lookup finds the bundled
+# hicolor icons — the runner calls gtk_window_set_icon_name(APPLICATION_ID), which resolves by
+# theme name, not by path. Without this the window/taskbar icon falls back to a generic one even
+# though the AppImage file itself shows the logo (that comes from .DirIcon).
 cat > "$APPDIR/AppRun" <<'EOF'
 #!/bin/sh
 HERE="$(dirname "$(readlink -f "$0")")"
+export XDG_DATA_DIRS="$HERE/usr/share:${XDG_DATA_DIRS:-/usr/local/share:/usr/share}"
 exec "$HERE/usr/bin/night_drop" "$@"
 EOF
 chmod +x "$APPDIR/AppRun"
 
+# The .desktop basename MUST equal the Wayland app_id (application-id / g_set_prgname) so
+# compositors bind the window to this entry; StartupWMClass does the same under X11. Kept in
+# sync with the entry written by install-desktop-app.sh.
 cat > "$APPDIR/$APP_ID.desktop" <<EOF
 [Desktop Entry]
 Type=Application
 Name=Night Drop
+GenericName=Private Messenger
 Comment=Private, anonymous, end-to-end encrypted 1:1 messenger over Tor
 Exec=night_drop
 Icon=$APP_ID
-Categories=Network;InstantMessaging;
 Terminal=false
+StartupNotify=true
+StartupWMClass=$APP_ID
+Categories=Network;InstantMessaging;Chat;Security;
+Keywords=chat;messenger;tor;private;encrypted;anonymous;messaging;
 EOF
 
-if [ -f "$ICON_SRC" ]; then
-  cp "$ICON_SRC" "$APPDIR/$APP_ID.png"
-else
-  err "icon not found at $ICON_SRC"; exit 1
-fi
+[ -f "$ICON_SRC" ] || { err "icon not found at $ICON_SRC"; exit 1; }
+# Top-level icon: appimagetool requires it next to the .desktop and turns it into .DirIcon,
+# which is what file managers and desktop-integration tools show for the AppImage file.
+cp "$ICON_SRC" "$APPDIR/$APP_ID.png"
+# Themed copies at standard hicolor sizes, resolved at runtime via XDG_DATA_DIRS above.
+CONVERT="$(command -v magick || command -v convert || true)"
+[ -n "$CONVERT" ] || c "ImageMagick not found — bundling the 512px master at every icon size"
+for s in 16 32 48 64 128 256 512; do
+  dst="$APPDIR/usr/share/icons/hicolor/${s}x${s}/apps/$APP_ID.png"; mkdir -p "$(dirname "$dst")"
+  if [ -n "$CONVERT" ]; then "$CONVERT" "$ICON_SRC" -resize "${s}x${s}" "$dst"; else cp "$ICON_SRC" "$dst"; fi
+done
+ok "icons → AppDir usr/share/icons/hicolor/*/apps/$APP_ID.png (16–512) + .DirIcon"
 
 mkdir -p "$OUT_DIR"
 c "Packaging AppImage…"
