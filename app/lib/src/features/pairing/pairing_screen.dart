@@ -68,7 +68,10 @@ class _InviteTabState extends State<_InviteTab> {
     final preAuth = invite.qrPayload.isNotEmpty;
     final qrData = preAuth ? invite.qrPayload : invite.shortCode;
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(24),
+      // Pad past the system navigation bar. targetSdk 36 means Android draws the app
+      // edge-to-edge, so a flat inset leaves the last lines (the short code and the line
+      // explaining it) sitting under the nav bar, unreadable and unselectable.
+      padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.viewPaddingOf(context).bottom),
       child: Column(
         children: [
           Text(
@@ -203,7 +206,9 @@ class _JoinTabState extends State<_JoinTab> {
     return Stack(
       children: [
         Padding(
-          padding: const EdgeInsets.all(24),
+          // Bottom inset clears the system navigation bar (see the Invite tab): edge-to-edge is
+          // enforced from targetSdk 35, so a flat inset hides the last row of content under it.
+          padding: EdgeInsets.fromLTRB(24, 24, 24, 24 + MediaQuery.viewPaddingOf(context).bottom),
           // Scrollable so the field + buttons never overflow when the on-screen keyboard opens on
           // a short screen.
           child: SingleChildScrollView(

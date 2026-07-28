@@ -89,7 +89,10 @@ class _VerifyScreenState extends State<VerifyScreen> {
           final verified = contact?.verified ?? false;
           final peerVerified = contact?.peerVerified ?? false;
           return ListView(
-            padding: const EdgeInsets.all(20),
+            // Clear the system navigation bar (see pairing_screen): without the inset the last
+            // lines of the safety-number guidance sit under it.
+            padding:
+                EdgeInsets.fromLTRB(20, 20, 20, 20 + MediaQuery.viewPaddingOf(context).bottom),
             children: [
               Text(
                 l10n.verifyIntro(widget.name),

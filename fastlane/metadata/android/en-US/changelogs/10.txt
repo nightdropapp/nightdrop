@@ -1,0 +1,1 @@
+Fixes text being hidden behind the system navigation bar at the bottom of the screen. On the pairing screen this hid the explanation of your secret words, and it also affected the safety-number verification and support screens. No other changes from 0.1.8.

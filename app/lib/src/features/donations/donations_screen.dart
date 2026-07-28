@@ -20,7 +20,9 @@ class DonationsScreen extends StatelessWidget {
     return Scaffold(
       appBar: AppBar(title: Text(AppLocalizations.of(context)!.supportNightDrop)),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        // Clear the system navigation bar: edge-to-edge is enforced from targetSdk 35, so a
+        // flat inset leaves the last row of content unreadable underneath it.
+        padding: EdgeInsets.fromLTRB(16, 16, 16, 16 + MediaQuery.viewPaddingOf(context).bottom),
         children: [
           Text(
             AppConfig.current.blurb,
