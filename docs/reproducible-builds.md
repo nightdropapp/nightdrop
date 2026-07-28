@@ -17,7 +17,14 @@ be deterministic.
 - **Deterministic `versionCode`:** read from `pubspec.yaml` `version: x.y.z+N` (a committed integer,
   **not** derived from git/time). Bump `N` monotonically each release. ✅
 - **Pinned Rust toolchain:** `rust-toolchain.toml` pins an **exact** `1.96.0` (not `stable`), so
-  every builder resolves the identical `rustc`. ✅
+  every builder resolves the identical `rustc`. ✅ ⚠️ **But cargokit bypasses it for the app
+  build:** `app/rust_builder/cargokit/build_tool/lib/src/builder.dart` runs
+  `rustup run <toolchain> cargo build` with `<toolchain>` taken from `core/cargokit.yaml`'s
+  options, which only accept `stable`/`beta`/`nightly` — and `rustup run` overrides the
+  toolchain file. So `flutter build apk` builds the core with whatever `stable` currently is,
+  not with 1.96.0. It has matched so far only because this machine's `stable` *is* 1.96.0;
+  it silently stops matching the day stable moves. The F-Droid recipe patches that line (see
+  `fdroid/README.md`); local release builds still need the same care.
 
 ## Proven: the release APK is content-reproducible
 
@@ -55,8 +62,19 @@ still nightly-only as of 1.96, so `--remap-path-prefix` is the stable knob.** Th
 the F-Droid build recipe / a repro build wrapper — they can't be a committed `.cargo/config.toml`
 (the build path is machine-specific), so they're set from `$PWD`/`$CARGO_HOME` at build time.
 
-cargokit invokes `cargo` and honours `RUSTFLAGS` from the environment, so exporting them before
-`flutter build apk` propagates to the core lib.
+⚠️ **For the Android build the flags must go in `CARGO_ENCODED_RUSTFLAGS`, not `RUSTFLAGS`.**
+cargokit's `android_environment.dart` sets `CARGO_ENCODED_RUSTFLAGS` itself (an `-L` libgcc
+workaround for the NDK), and that variable overrides plain `RUSTFLAGS` *entirely* in cargo — so
+exporting `RUSTFLAGS` before `flutter build apk` is silently ignored for the core lib. cargokit
+does preserve and append to the encoded variable, so this works:
+
+```sh
+export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$PWD=.$(printf '\037')--remap-path-prefix=$CARGO_HOME=/cargo"
+```
+
+(`\037` is the unit separator cargo expects between encoded flags.) Verified 2026-07-27 by
+building the app in the real F-Droid buildserver container: with `RUSTFLAGS` the resulting
+`libnightdrop.so` still had 779 `/home/vagrant/.cargo/registry` paths and zero `/cargo` ones.
 
 ## Remaining work
 
@@ -75,16 +93,25 @@ the box. What's proven vs. left:
    check: on a *different machine / build path*, confirm the F-Droid recipe's remap `RUSTFLAGS`
    actually reach cargokit's `cargo` invocation (it reads env `RUSTFLAGS`, so exporting before
    `flutter build apk` should suffice). Pin the **NDK version** (tested: 28.2) too.
+6. **Release builds don't apply the flags yet.** Verified 2026-07-27 against the published
+   `v0.1.6` `NightDrop.apk`: its `lib/arm64-v8a/libnightdrop.so` still contains ~826
+   `/home/shawn/…` strings and ~779 `.cargo/registry` ones, so that APK was built *without* the
+   remap `RUSTFLAGS` and **cannot** be byte-matched by an F-Droid rebuild. Nothing in
+   `scripts/` or the `Makefile` exports them. Until the release path sets the same flags the
+   recipe does, the recipe must not declare `binary:` — F-Droid would fetch that APK, fail the
+   comparison, and the app would not get reproducible status.
 5. **KGP plugin (`TODO.md` #5).** `flutter_foreground_task` applies its own Kotlin Gradle Plugin —
    resolve (bump to a migrated release, or vendor with the upstream migration diff) to keep the
    Gradle build clean and future-proof. Didn't block reproducibility, but worth clearing.
 
 ## Getting into F-Droid
 
-The build recipe is **drafted** at [`../fdroid/app.nightdrop.yml`](../fdroid/app.nightdrop.yml) — a
-reference copy of the `fdroiddata` metadata (provisions Flutter 3.44.6 + Rust 1.96.0 + the Android
-targets, exports the repro `RUSTFLAGS`, runs `flutter build apk --release`, and pins the signing
-key for reproducible verification). The **store listing** (title, summary, full description, and the
+The build recipe is **submitted** ([MR !43625](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/43625))
+and mirrored byte-for-byte at [`../fdroid/app.nightdrop.yml`](../fdroid/app.nightdrop.yml); see
+[`../fdroid/README.md`](../fdroid/README.md) for its shape and how to validate it locally. It
+provisions Flutter 3.44.6 + Rust 1.96.0 + the Android targets, patches cargokit's hardcoded
+`stable`, exports the repro `RUSTFLAGS`, runs `flutter build apk --release`, and pins the signing
+key. The **store listing** (title, summary, full description, and the
 v1 changelog) is in place under [`../fastlane/metadata/android/en-US/`](../fastlane/metadata/android/en-US/),
 which F-Droid pulls automatically — only screenshots remain to be dropped in (see the images README
 there). Remaining steps:
