@@ -122,11 +122,16 @@ script, both learned the hard way:
 
 ## Validate before pushing to the MR
 
-`rewritemeta` canonicalises formatting (including line wrapping — it now *unwraps* long build
-commands rather than folding them), so run it and expect an empty diff:
+⚠️ **Install fdroidserver from master, not from PyPI.** fdroiddata CI installs it from the master
+tarball, and master disagrees with the released version about line wrapping: the release
+*unwraps* long build commands, master *folds* them. Validating against the PyPI release produced
+a file that passed locally and then failed CI's `fdroid rewritemeta` on formatting alone.
+
+`rewritemeta` canonicalises formatting, so run it and expect an empty diff:
 
 ```sh
-python3 -m venv /tmp/fdv && /tmp/fdv/bin/pip install fdroidserver
+python3 -m venv /tmp/fdv
+/tmp/fdv/bin/pip install https://gitlab.com/fdroid/fdroidserver/-/archive/master/fdroidserver-master.tar.gz
 mkdir -p /tmp/fdtest/metadata && cd /tmp/fdtest
 cp <repo>/fdroid/app.nightdrop.yml metadata/
 printf 'repo_url: https://example.com/fdroid/repo\nrepo_name: t\nrepo_description: t\n' > config.yml
