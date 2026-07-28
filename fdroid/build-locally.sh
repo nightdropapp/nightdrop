@@ -44,6 +44,13 @@ mkdir -p "$ARTIFACTS/recipe"
 # Staged through the artifacts dir rather than bind-mounted from the repo: on SELinux systems a
 # direct mount needs a :z relabel, and relabelling files inside the git tree is rude.
 cp "$REPO_ROOT/fdroid/$APPID.yml" "$ARTIFACTS/recipe/$APPID.yml"
+# Chicken-and-egg: once the recipe declares binary:, fdroidserver downloads that APK to compare
+# against and fails if it is missing. So the build that PRODUCES the release APK has to run with
+# binary: stripped; re-run without SKIP_BINARY afterwards to get the reproducibility verdict.
+if [ "${SKIP_BINARY:-0}" = 1 ]; then
+    sed -i "/^ *binary: /d" "$ARTIFACTS/recipe/$APPID.yml"
+    echo "==> binary: stripped for this run (pre-publication build)"
+fi
 podman volume create "$VOLUME" >/dev/null 2>&1 || true
 podman volume create "$SDK_VOLUME" >/dev/null 2>&1 || true
 podman image exists "$IMAGE" || podman pull "$IMAGE"
@@ -61,7 +68,8 @@ source /etc/profile.d/bsenv.sh
 # Workspace is $home_vagrant itself, not a subdir: fdroiddata CI does `pushd $home_vagrant`
 # before `fdroid build`, so the build dir is /home/vagrant/build/<appid>. Matching that path
 # matters — the Rust core is path-remapped, but Flutter AOT/dex may embed absolute paths, and a
-# published APK only byte-matches F-Droid's rebuild if both are built at the same path.
+# published APK only byte-matches an F-Droid rebuild if both are built at the same path.
+# (Do not use apostrophes in this block: the whole script is a single-quoted argument to bash -lc.)
 WS=$home_vagrant
 
 # --- provision, mirroring the CI job -------------------------------------------------
