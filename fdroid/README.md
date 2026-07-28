@@ -22,8 +22,15 @@ feedback, a pipeline link) belongs in an MR *comment*, not the description.
 It follows [`templates/build-flutter.yml`](https://gitlab.com/fdroid/fdroiddata/-/blob/master/templates/build-flutter.yml),
 srclib variant (we don't vendor Flutter as a submodule):
 
-- **Flutter** comes from the `flutter@stable` srclib, then `prebuild` checks out the exact
-  revision we release with. Pinned by **full commit hash**, not the tag.
+- **Flutter** comes from the `flutter@stable` srclib. The version is pinned upstream in
+  `app/.fvmrc` (the standard fvm file, also consumed by this repo's CI) and *extracted* by the
+  recipe, so a Flutter bump needs no fdroiddata MR and CI cannot drift from what we ship.
+- **The build runs at a fixed path** (`/build/nightdrop`), per the template's "use the same build
+  path as upstream" step. This is load-bearing. Measured across two build paths, 9 entries
+  differ: `libapp.so` (the Flutter AOT snapshot), `libdartjni.so` and `libflutter_zxing.so`, on
+  all three ABIs — `libnightdrop.so` does not, because the remap flags cover our crate and
+  nothing else. Verified by building 0.1.8 at `/home/vagrant/somewhere/else` and still matching
+  the published APK (`./fdroid/build-locally.sh` honours `WS_PATH=` for exactly this test).
 - **Rust** comes from Debian's `rustup` package (`apt-get install -y rustup`), which puts the
   `cargo`/`rustc` proxies in `/usr/bin`. Never install it from `sh.rustup.rs` — F-Droid does not
   accept fetching a toolchain installer over the network.
