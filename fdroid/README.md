@@ -45,7 +45,115 @@ srclib variant (we don't vendor Flutter as a submodule):
   whole `_toolchain` expression has to be replaced. Re-check this after any cargokit update.
 - Non-Android platform dirs are `rm`'d. `rm`/`scandelete` paths are relative to the **repo
   root**, not `subdir`.
-- **No `binary:`** — see below.
+- **`binary:`** declares the published APK so F-Droid verifies reproducibility — see below.
+
+## Reproducible builds (`binary:`)
+
+`AllowedAPKSigningKeys` alone does not earn "reproducible" status; F-Droid also needs `binary:`,
+the URL of the published APK, to rebuild and compare. 1398 of the 1414 fdroiddata recipes that
+pin signing keys declare it. **It must be in place before the app is merged** — per the
+inclusion template, an app published under F-Droid's key cannot switch to developer-signed
+later without breaking upgrades for everyone who installed it.
+
+v0.1.6 could not have it: that APK was built without the remap flags (826 `/home/shawn/…` paths
+in the shipped `.so`), so no rebuild could ever byte-match it. **v0.1.7 is the first release
+built by `build-locally.sh`**, i.e. in F-Droid's own container at F-Droid's own build path, and
+it verifies:
+
+```
+Successfully built app.nightdrop:8 from 210daa37c0538ece325ac96d8091b8c086755edf
+...successfully verified
+compared built binary to supplied reference binary successfully
+```
+
+### Cutting a release that stays verifiable
+
+1. Bump `app/pubspec.yaml`, then **run `make config`** — it regenerates `app_version.dart`, and
+   skipping it ships a build whose About screen shows the previous version.
+2. Add `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`, commit, tag, push.
+3. Update the recipe's `commit:`/`versionName`/`versionCode`/`CurrentVersion*`, then build the
+   release artifact with `SKIP_BINARY=1 ./fdroid/build-locally.sh` (the flag is needed because
+   `binary:` makes fdroidserver download an APK that does not exist yet).
+4. Sign it — **with `--alignment-preserved`**:
+
+```sh
+apksigner sign --ks "$storeFile" --ks-key-alias "$keyAlias" \
+  --v1-signing-enabled false --v2-signing-enabled true \
+  --v3-signing-enabled false --v4-signing-enabled false \
+  --alignment-preserved \
+  --in ~/.cache/fdroid-local/apk/app.nightdrop_<code>.apk --out NightDrop.apk
+```
+
+   Without that flag apksigner re-aligns entries, shifting every local header a few bytes. The
+   contents still compare equal (fdroidserver's `diff -r` passes) but the copied v2 signature
+   fails its CHUNKED_SHA512 check, so a genuinely reproducible build reports as **not**
+   reproducible. This cost one failed verification round.
+5. Publish, then re-run `./fdroid/build-locally.sh` (no `SKIP_BINARY`) and confirm
+   "compared built binary to supplied reference binary successfully".
+
+Field order (top level and inside a build entry) must match `yaml_app_field_order` /
+`build_flags` in fdroidserver's `metadata.py`, or `rewritemeta` fails CI.
+
+## Peer recipes
+
+15 apps in fdroiddata build with **cargokit**, our exact toolchain — closest are
+`dev.khoj.pitaka.fdroid` (Rust 1.96.0, NDK r28c, near-identical shape),
+`org.localsend.localsend_app` (`subdir: app` with the same `rm`/`scandelete` prefixing, and the
+only other user of `CARGO_ENCODED_RUSTFLAGS`), `com.secluso.mobile`, and
+`business.braid.polycule` (also vodozemac). Re-derive the list any time with:
+
+```sh
+curl -sL "https://gitlab.com/fdroid/fdroiddata/-/archive/master/fdroiddata-master.tar.gz?path=metadata" | tar xz
+grep -l cargokit fdroiddata-master-metadata/metadata/*.yml
+```
+
+We match that cohort on every structural axis (Debian rustup, Flutter srclib, cargokit patch,
+`--enforce-lockfile`, relocated `PUB_CACHE`, `rm`/`scandelete`, NDK r28c). Two deliberate
+departures, both justified above: `CARGO_ENCODED_RUSTFLAGS` + remap (only LocalSend also does
+this, and it is required for the flags to take effect at all), and no `binary:` while
+`AllowedAPKSigningKeys` is set (`com.kjxbyz.picguard` is the same).
+
+Worth knowing when editing: **no metadata file in fdroiddata contains a `#` comment** — 0 of
+6360. Rationale goes in `MaintainerNotes` (used by 11%) or here.
+
+## Run the actual F-Droid build locally
+
+`./fdroid/build-locally.sh` runs the build in the same container image and with the same command
+fdroiddata's CI uses to gate merge requests, so a green run here means the MR's `fdroid build`
+job should pass. It is **not** the Vagrant buildserver VM (`makebuildserver`) — that needs
+Vagrant + libvirt/VirtualBox and ~200 GB; fdroiddata's own pipeline runs
+`fdroid build --on-server` inside `registry.gitlab.com/fdroid/fdroidserver:buildserver-trixie`,
+which is what this reproduces. Requirements: podman (or docker, swap the command) and ~40 GB.
+
+```sh
+./fdroid/build-locally.sh setup     # provision only — fast plumbing check
+./fdroid/build-locally.sh           # full build, ~12 min warm / ~25 min cold
+./fdroid/build-locally.sh --fresh   # nuke the cached volumes first
+```
+
+The APK lands in `~/.cache/fdroid-local/apk/`, logs next to it. Two podman volumes cache the
+Flutter srclib, gradle, pub, cargo and the NDK between runs. Notes for anyone touching the
+script, both learned the hard way:
+
+- **Mount volumes `:z`.** With SELinux, podman gives a named volume a per-container MCS
+  category, so the *next* container gets "Permission denied" on what the previous one wrote —
+  including a `chown -R` failing as root.
+- **Install the SDK/NDK as `vagrant`, not root.** fdroidserver's own NDK auto-install runs as
+  `vagrant` and silently fails to download; installing as root leaves a tree the build user
+  cannot read.
+
+## Validate before pushing to the MR
+
+Run **`./fdroid/check-metadata.sh`** (add `--write` to apply). It reproduces the CI job exactly
+and is the only check that counts.
+
+⚠️ **Do not validate with a pip-installed fdroidserver.** The `fdroid rewritemeta` job runs on
+`debian:trixie-slim` and takes its *code* from the fdroidserver master tarball but its
+*dependencies* from the Debian package — and line wrapping is decided by **ruamel.yaml**, so
+Debian's ruamel version defines the canonical form. A pip install (release *or* master) wraps at
+a different width and will bless a file that CI then rejects. This cost two failed pipelines:
+the PyPI release unwrapped a long line CI wanted folded, and pip-master folded four lines CI
+wanted flat.
 
 ## Why there is no `binary:` yet
 

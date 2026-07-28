@@ -18,8 +18,7 @@ Builds:
       - apt-get update
       - apt-get install -y build-essential clang cmake pkg-config rustup
     output: build/app/outputs/flutter-apk/app-release.apk
-    binary: 
-      https://github.com/nightdropapp/nightdrop/releases/download/v%v/NightDrop.apk
+    binary: https://github.com/nightdropapp/nightdrop/releases/download/v%v/NightDrop.apk
     srclibs:
       - flutter@stable
     rm:
@@ -29,11 +28,9 @@ Builds:
       - app/windows
     prebuild:
       - git -C $$flutter$$ checkout -f ee80f08bbf97172ec030b8751ceab557177a34a6
-      - sed -i -e "s|_buildOptions?.toolchain.name ?? 'stable'|'1.96.0'|" 
-        rust_builder/cargokit/build_tool/lib/src/builder.dart
+      - sed -i -e "s|_buildOptions?.toolchain.name ?? 'stable'|'1.96.0'|" rust_builder/cargokit/build_tool/lib/src/builder.dart
       - rustup default 1.96.0
-      - rustup target add aarch64-linux-android armv7-linux-androideabi 
-        x86_64-linux-android
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
       - export PUB_CACHE=$(pwd)/.pub-cache
       - $$flutter$$/bin/flutter config --no-analytics
       - $$flutter$$/bin/flutter pub get --enforce-lockfile
@@ -44,14 +41,13 @@ Builds:
       - export PATH="$$flutter$$/bin:$PATH"
       - export PUB_CACHE=$(pwd)/.pub-cache
       - export CARGO_HOME="$HOME/.cargo"
-      - export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$(cd ../ && 
-        pwd)=.$(printf '\037')--remap-path-prefix=$CARGO_HOME=/cargo"
+      - export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$(cd ../ && pwd)=.$(printf
+        '\037')--remap-path-prefix=$CARGO_HOME=/cargo"
       - flutter build apk --release --dart-define=NIGHTDROP_TOR=1 
         --dart-define=NIGHTDROP_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
     ndk: r28c
 
-AllowedAPKSigningKeys: 
-  d08b8e6408aff4f43556c05b819fef25afdd6912be7a678b0552468a4582c0ac
+AllowedAPKSigningKeys: d08b8e6408aff4f43556c05b819fef25afdd6912be7a678b0552468a4582c0ac
 
 MaintainerNotes: |
   Flutter UI over a cross-compiled Rust core (libnightdrop.so, built by cargokit through the
