@@ -19,6 +19,17 @@ RECIPE="$REPO_ROOT/fdroid/$APPID.yml"
 WRITE=0
 [ "${1:-}" = "--write" ] && WRITE=1
 
+# F-Droid caps the fastlane whatsNew (changelogs/<versionCode>.txt) at 500 characters; over that
+# the Code Quality report raises a Minor. Checked here because it is read from the *tagged*
+# commit, so it cannot be fixed after a release without cutting another one.
+overlong=0
+for f in "$REPO_ROOT"/fastlane/metadata/android/en-US/changelogs/*.txt; do
+    n=$(python3 -c "import sys;print(len(open(sys.argv[1],encoding='utf-8').read().strip()))" "$f")
+    if [ "$n" -ge 500 ]; then echo "changelog too long: $(basename "$f") is $n chars (limit 500)"; overlong=1
+    elif [ "$n" -ge 450 ]; then echo "changelog close to limit: $(basename "$f") is $n chars"; fi
+done
+[ "$overlong" = 0 ] || echo "^ trim before tagging a release"
+
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 cp "$RECIPE" "$WORK/in.yml"
