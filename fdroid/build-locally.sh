@@ -61,7 +61,7 @@ podman run --rm -i \
     --volume "$VOLUME:/home/vagrant:z" \
     --volume "$SDK_VOLUME:/opt/android-sdk:z" \
     --volume "$ARTIFACTS:/mnt/out:z" \
-    --env MODE="$MODE" --env APPID="$APPID" --env VERCODE="$VERCODE" --env NDKVER="$NDKVER" \
+    --env MODE="$MODE" --env APPID="$APPID" --env VERCODE="$VERCODE" --env NDKVER="$NDKVER" --env WS_PATH="${WS_PATH:-}" \
     "$IMAGE" bash -lc '
 set -euxo pipefail
 source /etc/profile.d/bsenv.sh
@@ -70,7 +70,7 @@ source /etc/profile.d/bsenv.sh
 # matters — the Rust core is path-remapped, but Flutter AOT/dex may embed absolute paths, and a
 # published APK only byte-matches an F-Droid rebuild if both are built at the same path.
 # (Do not use apostrophes in this block: the whole script is a single-quoted argument to bash -lc.)
-WS=$home_vagrant
+WS=${WS_PATH:-$home_vagrant}
 
 # --- provision, mirroring the CI job -------------------------------------------------
 apt-get -q update
