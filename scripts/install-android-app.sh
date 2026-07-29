@@ -300,6 +300,37 @@ export_android_sdk() {
     fi
 }
 
+# Flutter names per-ABI outputs after the Android ABI but takes --target-platform in its own
+# vocabulary, so map between the two. Unknown/absent ABI means "build everything".
+abi_to_target() {
+    case "$1" in
+        arm64-v8a)   echo "android-arm64" ;;
+        armeabi-v7a) echo "android-arm" ;;
+        x86_64)      echo "android-x64" ;;
+        *)           echo "" ;;
+    esac
+}
+
+# Primary ABI of the selected device, or empty when we can't ask (no adb yet, no device, or
+# --build-only). Callers must treat empty as "fall back to a universal APK".
+detect_abi() {
+    [ -n "${ADB:-}" ] || return 0
+    local -a tgt=()
+    [ -n "${TARGET_SERIAL:-}" ] && tgt=(-s "$TARGET_SERIAL")
+    "$ADB" "${tgt[@]}" shell getprop ro.product.cpu.abi 2>/dev/null | tr -d '\r\n'
+}
+
+# The APK to install: the split matching this device if one was built, else the universal.
+resolve_apk_path() {
+    local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
+    local abi; abi=$(detect_abi)
+    if [ -n "$abi" ] && [ -f "$dir/app-$abi-$BUILD_MODE.apk" ]; then
+        echo "$dir/app-$abi-$BUILD_MODE.apk"
+    else
+        echo "$dir/app-$BUILD_MODE.apk"
+    fi
+}
+
 build_apk() {
     print_header "Building Android APK ($BUILD_MODE, Tor mode)"
 
@@ -330,8 +361,32 @@ build_apk() {
         log_warn "No android/key.properties: release APK will be DEBUG-signed (local use only)"
     fi
 
-    if "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" 2>&1; then
-        APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/app-$BUILD_MODE.apk"
+    # Build only what the target device can actually run. A universal APK carries all three
+    # architectures (~113MB) where the device uses one (~35-46MB), so this cuts both the Rust
+    # cross-compile and the push. --universal forces the old all-ABIs build.
+    local abi="" target=""
+    if [ "${UNIVERSAL:-0}" != 1 ]; then
+        abi=$(detect_abi)
+        target=$(abi_to_target "$abi")
+    fi
+    local -a split=()
+    if [ -n "$target" ]; then
+        split=(--split-per-abi "--target-platform=$target")
+        log_success "Device ABI $abi - building only that ($target)"
+    elif [ -n "$abi" ]; then
+        log_warn "Unrecognised device ABI '$abi' - building a universal APK"
+    elif [ "${UNIVERSAL:-0}" = 1 ]; then
+        log_info "Building a universal APK (--universal)"
+    else
+        log_info "No device to query - building a universal APK"
+    fi
+
+    if "$FLUTTER" build apk "--$BUILD_MODE" "${split[@]}" "${defines[@]}" 2>&1; then
+        if [ -n "$target" ]; then
+            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/app-$abi-$BUILD_MODE.apk"
+        else
+            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/app-$BUILD_MODE.apk"
+        fi
         if [ -f "$APK_PATH" ]; then
             log_success "APK built: $APK_PATH"
             # Guard: the Rust security core MUST be in the APK's jniLibs. A native-lib rename
@@ -409,6 +464,9 @@ OPTIONS
                       over multiple transports (wireless debugging) is auto-resolved.
   --diag              Build with opt-in pairing/transport diagnostics (logcat tag `nd-diag`).
                       Protocol outcomes only — never keys, codes, onion addresses, or names.
+  --universal         Build one APK containing every ABI. By default the script reads the
+                      device's ro.product.cpu.abi and builds only that, which is ~35-46MB
+                      instead of ~113MB and skips cross-compiling the Rust core three times.
   --build-only        Build APK without installing
   --install-only      Install existing APK (skip build)
   --list-devices      Show connected devices
@@ -462,6 +520,7 @@ main() {
         case "$1" in
             --release) BUILD_MODE="release" ;;
             --diag) DIAG=1 ;;
+            --universal) UNIVERSAL=1 ;;
             --device)
                 if [ -z "${2:-}" ]; then
                     log_error "--device needs a serial (see: $0 --list-devices)"
@@ -509,7 +568,7 @@ main() {
             setup_adb || exit 1
             check_device || exit 1
             select_device || exit 1
-            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/nightdrop-$BUILD_MODE.apk"
+            APK_PATH=$(resolve_apk_path)
             install_apk || exit 1
             exit 0
             ;;
