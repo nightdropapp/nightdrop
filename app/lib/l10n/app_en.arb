@@ -203,6 +203,18 @@
   "@pointCameraHint": {
     "description": "Hint overlaid on the live camera preview while scanning."
   },
+  "qrNotRecognised": "That QR isn’t a Night Drop invite. Ask them to open New chat → Invite.",
+  "@qrNotRecognised": {
+    "description": "Toast when a QR decodes cleanly but is not a pairing payload."
+  },
+  "qrNoneFound": "Couldn’t read a QR code. Try more light, hold steadier, or move a little closer.",
+  "@qrNoneFound": {
+    "description": "Toast when no QR could be decoded before the scan deadline."
+  },
+  "qrTryAgain": "Try again",
+  "@qrTryAgain": {
+    "description": "Action on the scan-failed toast that restarts scanning."
+  },
 
   "cancel": "Cancel",
   "@cancel": {

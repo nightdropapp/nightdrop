@@ -166,6 +166,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get pointCameraHint => 'Point the camera at your contact’s invite QR.';
 
   @override
+  String get qrNotRecognised =>
+      'That QR isn’t a Night Drop invite. Ask them to open New chat → Invite.';
+
+  @override
+  String get qrNoneFound =>
+      'Couldn’t read a QR code. Try more light, hold steadier, or move a little closer.';
+
+  @override
+  String get qrTryAgain => 'Try again';
+
+  @override
   String get cancel => 'Cancel';
 
   @override

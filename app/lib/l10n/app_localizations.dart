@@ -364,6 +364,24 @@ abstract class AppLocalizations {
   /// **'Point the camera at your contact’s invite QR.'**
   String get pointCameraHint;
 
+  /// Toast when a QR decodes cleanly but is not a pairing payload.
+  ///
+  /// In en, this message translates to:
+  /// **'That QR isn’t a Night Drop invite. Ask them to open New chat → Invite.'**
+  String get qrNotRecognised;
+
+  /// Toast when no QR could be decoded before the scan deadline.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn’t read a QR code. Try more light, hold steadier, or move a little closer.'**
+  String get qrNoneFound;
+
+  /// Action on the scan-failed toast that restarts scanning.
+  ///
+  /// In en, this message translates to:
+  /// **'Try again'**
+  String get qrTryAgain;
+
   /// Generic Cancel button, used across dialogs.
   ///
   /// In en, this message translates to:

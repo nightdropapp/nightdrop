@@ -53,8 +53,28 @@ class ScanScreen extends StatefulWidget {
 /// `onControllerCreated` still reported success). We surface a retry rather than a black preview.
 const _cameraStallTimeout = Duration(seconds: 7);
 
+/// How long to keep trying before telling the user it isn't working. The reader re-attempts a
+/// decode every [_scanRetryInterval], so this is roughly 33 attempts — plenty for a dense invite
+/// QR read off a screen, while still failing loudly instead of hanging forever.
+const _scanDeadline = Duration(seconds: 5);
+
+/// Gap between decode attempts. Deliberately well under the requested 500ms: a dense
+/// pre-authorized QR often needs several passes before one lands.
+const _scanRetryInterval = Duration(milliseconds: 150);
+
 class _ScanScreenState extends State<ScanScreen> {
   bool _handled = false;
+
+  /// Set once a QR decoded cleanly but wasn't a pairing payload. Distinguishes "I can't read any
+  /// QR" from "that's the wrong QR", which used to be indistinguishable — both simply did nothing.
+  bool _sawForeignQr = false;
+
+  /// Fires [_scanDeadline] after scanning starts if nothing usable has been read.
+  Timer? _deadline;
+
+  /// True once the deadline passed. Scanning is paused until the user retries, so the camera
+  /// isn't left running against a QR it will never accept.
+  bool _gaveUp = false;
 
   /// Camera runtime-permission status. `null` while the first request is in flight. We gate the
   /// reader on this so a fresh install gets an explicit prompt (and a clear "denied" path) instead
@@ -86,7 +106,35 @@ class _ScanScreenState extends State<ScanScreen> {
   @override
   void dispose() {
     _watchdog?.cancel();
+    _deadline?.cancel();
     super.dispose();
+  }
+
+  /// Start (or restart) the give-up clock.
+  void _startDeadline() {
+    _deadline?.cancel();
+    if (!canScanQr) return;
+    _deadline = Timer(_scanDeadline, () {
+      if (!mounted || _handled || _cameraError != null) return;
+      setState(() => _gaveUp = true);
+      final l10n = AppLocalizations.of(context)!;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        content: Text(_sawForeignQr ? l10n.qrNotRecognised : l10n.qrNoneFound),
+        duration: const Duration(seconds: 8),
+        action: SnackBarAction(label: l10n.qrTryAgain, onPressed: _rescan),
+      ));
+    });
+  }
+
+  /// Resume scanning after the deadline gave up.
+  void _rescan() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    setState(() {
+      _gaveUp = false;
+      _sawForeignQr = false;
+    });
+    _startDeadline();
   }
 
   /// Ask for camera access (or re-check after the user returns from Settings). Surfaces the result
@@ -114,27 +162,35 @@ class _ScanScreenState extends State<ScanScreen> {
 
   void _onScan(Code code) {
     _onFrame();
-    if (_handled) return;
+    if (_handled || _gaveUp) return;
     final text = code.text?.trim();
     if (text == null || text.isEmpty) return;
-    if (widget.raw || isScannablePairing(text)) {
-      _handled = true;
-      _watchdog?.cancel();
-      setState(() => _detected = true);
-      // Let the "connecting" overlay paint one frame before we pop, so the successful read is
-      // visibly acknowledged rather than the camera just disappearing.
-      Future<void>.delayed(const Duration(milliseconds: 220), () {
-        if (mounted) Navigator.of(context).pop(text);
-      });
+    if (!(widget.raw || isScannablePairing(text))) {
+      // A readable QR that isn't ours. Remember it so the deadline can say which problem this is
+      // rather than silently discarding every frame, which looked identical to a dead camera.
+      _sawForeignQr = true;
+      return;
     }
+    _handled = true;
+    _watchdog?.cancel();
+    _deadline?.cancel();
+    setState(() => _detected = true);
+    // Let the "connecting" overlay paint one frame before we pop, so the successful read is
+    // visibly acknowledged rather than the camera just disappearing.
+    Future<void>.delayed(const Duration(milliseconds: 220), () {
+      if (mounted) Navigator.of(context).pop(text);
+    });
   }
 
   void _retry() {
     setState(() {
       _cameraError = null;
       _readerEpoch++;
+      _gaveUp = false;
+      _sawForeignQr = false;
     });
     _startWatchdog();
+    _startDeadline();
   }
 
   @override
@@ -202,6 +258,7 @@ class _ScanScreenState extends State<ScanScreen> {
                   setState(() => _cameraError = error);
                 } else {
                   _startWatchdog();
+                  _startDeadline();
                 }
               },
               codeFormat: Format.qrCode, // QR-only: faster per-frame decode.
@@ -215,7 +272,7 @@ class _ScanScreenState extends State<ScanScreen> {
               // decode try per second; 150ms gives ~6×, which is what actually locks a dense code.
               resolution: ResolutionPreset.veryHigh,
               cropPercent: 0.8,
-              scanDelay: const Duration(milliseconds: 150),
+              scanDelay: _scanRetryInterval,
               showGallery: false, // camera-only; no photo-library access for pairing.
             ),
             if (_detected)
