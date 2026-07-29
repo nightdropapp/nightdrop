@@ -11,7 +11,7 @@ Repo: https://github.com/nightdropapp/nightdrop.git
 
 Builds:
   - versionName: 0.1.10
-    versionCode: 11
+    versionCode: 1011
     commit: 9f616d468427d87f09b5da674fb82e7b83b08b55
     subdir: app
     sudo:
@@ -19,8 +19,9 @@ Builds:
       - apt-get install -y build-essential clang cmake pkg-config rustup
       - mkdir -p /build
       - chown -R vagrant /build
-    output: build/app/outputs/flutter-apk/app-release.apk
-    binary: https://github.com/nightdropapp/nightdrop/releases/download/v%v/NightDrop.apk
+    output: build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk
+    binary: 
+      https://github.com/nightdropapp/nightdrop/releases/download/v%v/NightDrop-armeabi-v7a.apk
     srclibs:
       - flutter@stable
     rm:
@@ -57,7 +58,118 @@ Builds:
       - export CARGO_HOME="$HOME/.cargo"
       - export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$(cd ../ && pwd)=.$(printf
         '\037')--remap-path-prefix=$CARGO_HOME=/cargo"
-      - flutter build apk --release --dart-define=NIGHTDROP_TOR=1 
+      - flutter build apk --release --split-per-abi --target-platform=android-arm
+        --dart-define=NIGHTDROP_TOR=1 
+        --dart-define=NIGHTDROP_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
+      - popd
+      - mv $repo app.nightdrop
+    ndk: r28c
+
+  - versionName: 0.1.10
+    versionCode: 2011
+    commit: 9f616d468427d87f09b5da674fb82e7b83b08b55
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential clang cmake pkg-config rustup
+      - mkdir -p /build
+      - chown -R vagrant /build
+    output: build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+    binary: 
+      https://github.com/nightdropapp/nightdrop/releases/download/v%v/NightDrop-arm64-v8a.apk
+    srclibs:
+      - flutter@stable
+    rm:
+      - app/ios
+      - app/linux
+      - app/macos
+      - app/windows
+    prebuild:
+      - export repo=/build/nightdrop
+      - flutterVersion=$(sed -n -E 's/.*"flutter"[^"]*"([^"]+)".*/\1/p' .fvmrc)
+      - '[[ $flutterVersion ]]'
+      - git -C $$flutter$$ checkout -f $flutterVersion
+      - cd ../..
+      - mv app.nightdrop $repo
+      - pushd $repo/app
+      - sed -i -e "s|_buildOptions?.toolchain.name ?? 'stable'|'1.96.0'|" rust_builder/cargokit/build_tool/lib/src/builder.dart
+      - rustup default 1.96.0
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter pub get --enforce-lockfile
+      - popd
+      - mv $repo app.nightdrop
+    scandelete:
+      - app/.pub-cache
+      - core/fuzz/seeds
+    build:
+      - export repo=/build/nightdrop
+      - export PATH="$$flutter$$/bin:$PATH"
+      - cd ../..
+      - mv app.nightdrop $repo
+      - pushd $repo/app
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - export CARGO_HOME="$HOME/.cargo"
+      - export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$(cd ../ && pwd)=.$(printf
+        '\037')--remap-path-prefix=$CARGO_HOME=/cargo"
+      - flutter build apk --release --split-per-abi --target-platform=android-arm64
+        --dart-define=NIGHTDROP_TOR=1 
+        --dart-define=NIGHTDROP_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
+      - popd
+      - mv $repo app.nightdrop
+    ndk: r28c
+
+  - versionName: 0.1.10
+    versionCode: 4011
+    commit: 9f616d468427d87f09b5da674fb82e7b83b08b55
+    subdir: app
+    sudo:
+      - apt-get update
+      - apt-get install -y build-essential clang cmake pkg-config rustup
+      - mkdir -p /build
+      - chown -R vagrant /build
+    output: build/app/outputs/flutter-apk/app-x86_64-release.apk
+    binary: 
+      https://github.com/nightdropapp/nightdrop/releases/download/v%v/NightDrop-x86_64.apk
+    srclibs:
+      - flutter@stable
+    rm:
+      - app/ios
+      - app/linux
+      - app/macos
+      - app/windows
+    prebuild:
+      - export repo=/build/nightdrop
+      - flutterVersion=$(sed -n -E 's/.*"flutter"[^"]*"([^"]+)".*/\1/p' .fvmrc)
+      - '[[ $flutterVersion ]]'
+      - git -C $$flutter$$ checkout -f $flutterVersion
+      - cd ../..
+      - mv app.nightdrop $repo
+      - pushd $repo/app
+      - sed -i -e "s|_buildOptions?.toolchain.name ?? 'stable'|'1.96.0'|" rust_builder/cargokit/build_tool/lib/src/builder.dart
+      - rustup default 1.96.0
+      - rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - $$flutter$$/bin/flutter config --no-analytics
+      - $$flutter$$/bin/flutter pub get --enforce-lockfile
+      - popd
+      - mv $repo app.nightdrop
+    scandelete:
+      - app/.pub-cache
+      - core/fuzz/seeds
+    build:
+      - export repo=/build/nightdrop
+      - export PATH="$$flutter$$/bin:$PATH"
+      - cd ../..
+      - mv app.nightdrop $repo
+      - pushd $repo/app
+      - export PUB_CACHE=$(pwd)/.pub-cache
+      - export CARGO_HOME="$HOME/.cargo"
+      - export CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$(cd ../ && pwd)=.$(printf
+        '\037')--remap-path-prefix=$CARGO_HOME=/cargo"
+      - flutter build apk --release --split-per-abi --target-platform=android-x64
+        --dart-define=NIGHTDROP_TOR=1 
         --dart-define=NIGHTDROP_RELAY=bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
       - popd
       - mv $repo app.nightdrop
@@ -100,6 +212,10 @@ MaintainerNotes: |
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[\d.]+$
+VercodeOperation:
+  - '%c + 1000'
+  - '%c + 2000'
+  - '%c + 4000'
 UpdateCheckData: app/pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
 CurrentVersion: 0.1.10
-CurrentVersionCode: 11
+CurrentVersionCode: 4011

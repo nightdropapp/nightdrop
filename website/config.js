@@ -16,10 +16,10 @@ window.NIGHTDROP_CONFIG = {
   ],
   "downloads": {
     "ios": "",
-    "android": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.4/NightDrop.apk",
+    "android": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.10/NightDrop.apk",
     "windows": "",
     "macos": "",
-    "linux": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.4/Night_Drop-x86_64.AppImage"
+    "linux": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.10/Night_Drop-x86_64.AppImage"
   },
   "downloads_onion": {
     "ios": "",

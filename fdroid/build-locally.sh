@@ -32,13 +32,15 @@ if [ "${1:-}" = "--fresh" ]; then
 fi
 [ $# -gt 0 ] && MODE=$1
 
-# versionCode to build, read from the recipe so this can't drift.
-VERCODE=$(sed -n -E 's/^ *versionCode: ([0-9]+)$/\1/p' "$REPO_ROOT/fdroid/$APPID.yml" | tail -1)
+# versionCode(s) to build, read from the recipe so this cannot drift. With per-ABI splitting the
+# recipe has one block per ABI, so pass VERCODE=<code> to build just one; the default builds all.
+ALL_VERCODES=$(sed -n -E 's/^ *versionCode: ([0-9]+)$/\1/p' "$REPO_ROOT/fdroid/$APPID.yml")
+VERCODE=${VERCODE:-$ALL_VERCODES}
 [ -n "$VERCODE" ] || { echo "could not read versionCode from the recipe" >&2; exit 1; }
 # NDK release name (e.g. r28c), also from the recipe. Pre-installed as root during provisioning:
 # fdroidserver's auto-install runs as `vagrant` and silently skips the download there.
 NDKVER=$(sed -n -E 's/^ *ndk: *(.+)$/\1/p' "$REPO_ROOT/fdroid/$APPID.yml" | tail -1)
-echo "==> $APPID:$VERCODE   mode=$MODE   image=$IMAGE"
+echo "==> $APPID  versionCodes: $(echo $VERCODE | tr '\n' ' ')  mode=$MODE  image=$IMAGE"
 
 mkdir -p "$ARTIFACTS/recipe"
 # Staged through the artifacts dir rather than bind-mounted from the repo: on SELinux systems a
@@ -48,7 +50,27 @@ cp "$REPO_ROOT/fdroid/$APPID.yml" "$ARTIFACTS/recipe/$APPID.yml"
 # against and fails if it is missing. So the build that PRODUCES the release APK has to run with
 # binary: stripped; re-run without SKIP_BINARY afterwards to get the reproducibility verdict.
 if [ "${SKIP_BINARY:-0}" = 1 ]; then
-    sed -i "/^ *binary: /d" "$ARTIFACTS/recipe/$APPID.yml"
+    # Must remove the key *and* any wrapped continuation lines: rewritemeta folds a long binary:
+    # URL onto the next line, and deleting only the key leaves an orphan line that YAML then
+    # appends to the preceding output: value, producing a bogus glob path.
+    python3 - "$ARTIFACTS/recipe/$APPID.yml" <<'PYEOF'
+import re, sys
+path = sys.argv[1]
+out, skipping, key_indent = [], False, 0
+for line in open(path):
+    if re.match(r'^\s*binary:\s*(\S.*)?$', line):
+        skipping, key_indent = True, len(line) - len(line.lstrip())
+        continue
+    if skipping:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if stripped and indent > key_indent and not stripped.startswith('- ') \
+           and not re.match(r'^[A-Za-z_][A-Za-z0-9_]*:(\s|$)', stripped):
+            continue          # wrapped continuation of the binary: value
+        skipping = False
+    out.append(line)
+open(path, 'w').writelines(out)
+PYEOF
     echo "==> binary: stripped for this run (pre-publication build)"
 fi
 podman volume create "$VOLUME" >/dev/null 2>&1 || true
@@ -123,14 +145,22 @@ if [ "$MODE" = shell ]; then exec bash; fi
 
 $fdroid readmeta
 $fdroid lint "$APPID" || true       # category names need fdroiddata config/, so never fatal here
-$fdroid fetchsrclibs "$APPID:$VERCODE" --verbose
+for vc in $VERCODE; do $fdroid fetchsrclibs "$APPID:$vc" --verbose; done
 if [ "$MODE" = setup ]; then echo "SETUP OK"; exit 0; fi
 
-# The exact command fdroiddata CI runs.
-set +e
-(unset CI; $fdroid build --verbose --test --refresh-scanner --on-server --no-tarball "$APPID:$VERCODE")
-rc=$?
-set -e
+# The exact command fdroiddata CI runs, once per build block.
+rc=0
+for vc in $VERCODE; do
+    echo "=== building $APPID:$vc ==="
+    # `fdroid build --on-server` removes sudo when it finishes (production hardening), so every
+    # subsequent block has to put it back — fdroiddata CI does the same inside its build loop.
+    apt-get -qy install sudo >/dev/null
+    set +e
+    (unset CI; $fdroid build --verbose --test --refresh-scanner --on-server --no-tarball "$APPID:$vc")
+    this=$?
+    set -e
+    [ $this -eq 0 ] || rc=$this
+done
 
 cp -a "$WS/logs/." /mnt/out/logs/ 2>/dev/null || { mkdir -p /mnt/out/logs; cp -a "$WS"/logs/. /mnt/out/logs/ 2>/dev/null || true; }
 mkdir -p /mnt/out/apk
