@@ -22,6 +22,17 @@ WRITE=0
 # F-Droid caps the fastlane whatsNew (changelogs/<versionCode>.txt) at 500 characters; over that
 # the Code Quality report raises a Minor. Checked here because it is read from the *tagged*
 # commit, so it cannot be fixed after a release without cutting another one.
+# F-Droid reads the changelog as changelogs/<versionCode>.txt, matched against each build's
+# versionCode (and CurrentVersionCode for the app-level entry) - see insert_localized_app_metadata
+# in fdroidserver/update.py. With per-ABI splitting those are 1011/2011/4011, not the pubspec's
+# base, so a missing file means the release silently ships with no "What's New" at all.
+missing=0
+for vc in $(sed -n -E 's/^ *versionCode: ([0-9]+)$/\1/p' "$RECIPE"); do
+    [ -f "$REPO_ROOT/fastlane/metadata/android/en-US/changelogs/$vc.txt" ] \
+        || { echo "no changelog for versionCode $vc (expected changelogs/$vc.txt)"; missing=1; }
+done
+[ "$missing" = 0 ] || echo "^ add before tagging, F-Droid reads these from the built commit"
+
 overlong=0
 for f in "$REPO_ROOT"/fastlane/metadata/android/en-US/changelogs/*.txt; do
     n=$(python3 -c "import sys;print(len(open(sys.argv[1],encoding='utf-8').read().strip()))" "$f")

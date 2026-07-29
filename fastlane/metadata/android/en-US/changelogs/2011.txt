@@ -1,0 +1,1 @@
+Improves QR scanning when pairing. The scanner keeps retrying for five seconds instead of appearing to hang, and now tells you what went wrong: whether it could not read a code at all, or read one that is not a Night Drop invite. Previously both cases looked identical, with the camera simply sitting there doing nothing. No other changes from 0.1.9.
