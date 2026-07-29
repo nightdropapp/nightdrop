@@ -178,20 +178,22 @@ def cmd_test(args):
 
 
 def render_report(mr, results):
-    lines = ["I built this locally in `registry.gitlab.com/fdroid/fdroidserver:buildserver-trixie` "
-             "with the same `fdroid build --verbose --test --refresh-scanner --on-server "
-             "--no-tarball` the CI uses.\n"]
+    """A comment a maintainer can act on: what was built, where, and what I did NOT check."""
+    out = ["Not a maintainer — just working through the test queue.\n"]
     for appid, vercodes, rc, ok, fail, err, _log in results:
+        codes = ", ".join(map(str, vercodes))
         if rc == 0:
-            lines.append(f"`{appid}` {', '.join(map(str, vercodes))} — **builds fine**:\n")
-            lines += [f"```\n{chr(10).join(ok)}\n```\n"]
+            out.append(f"Built `{appid}` {codes} in `buildserver-trixie` with the same command CI "
+                       f"runs (`fdroid build --verbose --test --refresh-scanner --on-server "
+                       f"--no-tarball`). It builds:\n")
+            out.append("```\n" + "\n".join(ok) + "\n```\n")
         else:
-            lines.append(f"`{appid}` {', '.join(map(str, vercodes))} — **fails**:\n")
-            detail = (fail + err)[:4]
-            lines += [f"```\n{chr(10).join(detail)}\n```\n"]
-    lines.append("Built on a x86_64 host; I did not verify the signature or the "
-                 "reproducibility of any published APK, only that it builds.")
-    return "\n".join(lines)
+            out.append(f"Built `{appid}` {codes} in `buildserver-trixie` with the same command CI "
+                       f"runs. It fails:\n")
+            out.append("```\n" + "\n".join((fail + err)[:4]) + "\n```\n")
+    out.append("x86_64 host. This only says the build completes — I haven't reviewed the recipe, "
+               "checked signatures, or verified reproducibility.")
+    return "\n".join(out)
 
 
 def main():

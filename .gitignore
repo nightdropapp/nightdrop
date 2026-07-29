@@ -50,3 +50,7 @@ app/*/flutter/ephemeral/
 # Project docs kept local-only (guidance + internal notes)
 CLAUDE.md
 notes/
+
+# Python bytecode from the fdroid helper scripts
+__pycache__/
+*.pyc
