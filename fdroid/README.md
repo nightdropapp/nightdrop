@@ -77,7 +77,11 @@ compared built binary to supplied reference binary successfully
 
 1. Bump `app/pubspec.yaml`, then **run `make config`** — it regenerates `app_version.dart`, and
    skipping it ships a build whose About screen shows the previous version.
-2. Add `fastlane/metadata/android/en-US/changelogs/<versionCode>.txt`, commit, tag, push.
+2. Add a changelog for **every** versionCode the recipe builds — with the per-ABI split that is
+   `changelogs/1012.txt`, `2012.txt`, `4012.txt`, not the pubspec's base. F-Droid resolves
+   `changelogs/<versionCode>.txt` and reads it from the *tagged commit*, so a missing file means
+   the release ships with no "What's New" and cannot be fixed afterwards.
+   `check-metadata.sh` fails if any is missing. Commit, tag, push.
 3. Update the recipe's `commit:`/`versionName`/`versionCode`/`CurrentVersion*`, then build the
    release artifact with `SKIP_BINARY=1 ./fdroid/build-locally.sh` (the flag is needed because
    `binary:` makes fdroidserver download an APK that does not exist yet).
@@ -96,7 +100,11 @@ apksigner sign --ks "$storeFile" --ks-key-alias "$keyAlias" \
    fails its CHUNKED_SHA512 check, so a genuinely reproducible build reports as **not**
    reproducible. This cost one failed verification round.
 5. Publish, then re-run `./fdroid/build-locally.sh` (no `SKIP_BINARY`) and confirm
-   "compared built binary to supplied reference binary successfully".
+   "compared built binary to supplied reference binary successfully" for every block.
+6. **Update MR !43625.** linsui asked for this explicitly on 2026-07-29: while the MR is queued
+   for testing, any new release must be reflected in it, or they will test a version that is no
+   longer current. Copy the recipe to the fork's `add-nightdrop` branch and push — this needs a
+   GitLab token, which is not kept on this box.
 
 Field order (top level and inside a build entry) must match `yaml_app_field_order` /
 `build_flags` in fdroidserver's `metadata.py`, or `rewritemeta` fails CI.
