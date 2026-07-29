@@ -132,12 +132,17 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
-  /// A friendly, non-technical explanation for a failed send (the only send error the core
-  /// raises is "offline and no relay accepted the message"). The draft is preserved on failure.
+  /// A friendly, non-technical explanation for a failed send. The draft is preserved on failure,
+  /// so nothing the user typed is lost and nothing lands in the transcript that wasn't sent.
   String _sendErrorText(AppLocalizations l10n, Object e) {
     final msg = cleanCoreError(e);
     if (msg.contains('no relay accepted')) {
       return l10n.couldntSendOffline;
+    }
+    // The core refuses sends until the other side accepts: the peer would drop them anyway, so
+    // they must not sit in the transcript looking delivered.
+    if (msg.contains('accept the chat')) {
+      return l10n.cantSendUntilAccepted;
     }
     return l10n.couldntSend(msg);
   }

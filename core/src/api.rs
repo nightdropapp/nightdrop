@@ -1845,6 +1845,18 @@ mod tests {
             "joiner sees the awaiting-approval notice after connecting via QR"
         );
 
+        // Sending before approval is refused outright. Otherwise the message would sit in the
+        // sender's history looking delivered while the peer's core drops it as unauthorized.
+        let refused = b.send_message(&b_contact, "too early").unwrap_err().to_string();
+        assert!(
+            refused.contains("accept the chat"),
+            "send before approval is refused, got: {refused}"
+        );
+        assert!(
+            !b.messages(&b_contact).iter().any(|m| m.text == "too early"),
+            "a refused send leaves nothing behind in the chat"
+        );
+
         // A polls and sees the pending request; approves it.
         a.poll_once().unwrap();
         assert_eq!(a.incoming_requests().len(), 1);
@@ -1908,6 +1920,16 @@ mod tests {
         })
         .expect("A receives the pairing request over TCP");
         a.authorize(&a_contact, true).unwrap();
+
+        // Wait until B has actually received the approval: sending before that is refused, since
+        // the message would only be dropped by A as unauthorized.
+        wait_for(Duration::from_secs(5), || {
+            (!b.messages(&b_contact)
+                .iter()
+                .any(|m| m.system && m.kind == "await_approval"))
+            .then_some(())
+        })
+        .expect("B learns it was approved");
 
         // B -> A over real TCP sockets.
         b.send_message(&b_contact, "hello from B").unwrap();
@@ -1981,6 +2003,8 @@ mod tests {
         let a_contact = a.incoming_requests()[0].id.clone();
         a.authorize(&a_contact, true).unwrap();
 
+        // B must hear the approval before it may send (see the guard in Node::send).
+        b.poll_once().unwrap();
         b.send_message(&b_contact, "short code works").unwrap();
         a.poll_once().unwrap();
         assert!(a

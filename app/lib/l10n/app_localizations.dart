@@ -1042,6 +1042,12 @@ abstract class AppLocalizations {
   /// **'More'**
   String get more;
 
+  /// Send refused while short-code pairing is still waiting on the other person to accept.
+  ///
+  /// In en, this message translates to:
+  /// **'They haven’t accepted the chat yet. Your message hasn’t been sent — it’s still in the box, so you can send it once they accept.'**
+  String get cantSendUntilAccepted;
+
   /// Send failure when the peer is offline and no relay accepted the message.
   ///
   /// In en, this message translates to:

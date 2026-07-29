@@ -2,6 +2,20 @@
 //! per-chat setters + time sweep. Split out of `node.rs` (IMPROVEMENT_PLAN.md §2.1).
 use super::*;
 
+/// Refused-send reason while short-code pairing is still waiting on the invitee. Matched by the
+/// UI to show a "wait for them to accept" toast rather than a generic failure.
+pub(crate) const AWAITING_APPROVAL: &str =
+    "waiting for the other person to accept the chat before messages can be sent";
+
+/// True from the moment a short-code join completes until the invitee approves (or their first
+/// message arrives). Sending in that window would queue a message the peer's core will drop as
+/// unauthorized, leaving it sitting in the sender's history looking delivered — so refuse it.
+fn awaiting_approval(chat: &super::Chat) -> bool {
+    chat.history
+        .iter()
+        .any(|m| m.system && m.kind == "await_approval")
+}
+
 impl Node {
     /// Send a message to an established contact (advances the ratchet). Delivered directly
     /// over the transport if the peer is reachable; otherwise queued in the relay's
@@ -14,6 +28,9 @@ impl Node {
             .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
         if !chat.authorized {
             anyhow::bail!("authorize this contact before messaging");
+        }
+        if awaiting_approval(chat) {
+            anyhow::bail!(AWAITING_APPROVAL);
         }
         if chat.closed {
             anyhow::bail!("this chat was deleted; create a new one to keep talking");
@@ -440,6 +457,9 @@ impl Node {
                     .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
                 if !chat.authorized {
                     anyhow::bail!("authorize this contact before messaging");
+                }
+                if awaiting_approval(chat) {
+                    anyhow::bail!(AWAITING_APPROVAL);
                 }
                 if chat.closed {
                     anyhow::bail!("this chat was deleted; create a new one to keep talking");

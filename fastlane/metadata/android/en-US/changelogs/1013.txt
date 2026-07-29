@@ -1,0 +1,1 @@
+You can no longer send a message before the other person has accepted the chat. Previously the message sat in your conversation looking sent, while their device quietly discarded it. Night Drop now tells you to wait and keeps your text in the box so you can send it the moment they accept. Also updates several bundled libraries.

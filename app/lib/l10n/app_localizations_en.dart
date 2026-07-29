@@ -589,6 +589,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get more => 'More';
 
   @override
+  String get cantSendUntilAccepted =>
+      'They haven’t accepted the chat yet. Your message hasn’t been sent — it’s still in the box, so you can send it once they accept.';
+
+  @override
   String get couldntSendOffline =>
       'Couldn’t send — they’re offline and no relay could hold the message. Check your relay settings and try again; your message is still here.';
 

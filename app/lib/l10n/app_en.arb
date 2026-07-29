@@ -557,6 +557,10 @@
   "more": "More",
   "@more": { "description": "Tooltip for the chat overflow menu." },
 
+  "cantSendUntilAccepted": "They haven’t accepted the chat yet. Your message hasn’t been sent — it’s still in the box, so you can send it once they accept.",
+  "@cantSendUntilAccepted": {
+    "description": "Send refused while short-code pairing is still waiting on the other person to accept."
+  },
   "couldntSendOffline": "Couldn’t send — they’re offline and no relay could hold the message. Check your relay settings and try again; your message is still here.",
   "@couldntSendOffline": { "description": "Send failure when the peer is offline and no relay accepted the message." },
   "couldntSend": "Couldn’t send: {error}",
