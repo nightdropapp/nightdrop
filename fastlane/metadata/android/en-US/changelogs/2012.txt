@@ -1,0 +1,1 @@
+Android downloads are now split by processor type, so you only download the code your phone can actually run — about 35–46 MB instead of 113 MB. F-Droid picks the right one automatically; if you download directly, arm64-v8a suits almost every phone made since 2015. The in-app download links, which still pointed at an old release, are also corrected. No other changes from 0.1.10.
