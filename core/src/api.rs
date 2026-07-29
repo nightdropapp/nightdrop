@@ -1847,7 +1847,10 @@ mod tests {
 
         // Sending before approval is refused outright. Otherwise the message would sit in the
         // sender's history looking delivered while the peer's core drops it as unauthorized.
-        let refused = b.send_message(&b_contact, "too early").unwrap_err().to_string();
+        let refused = b
+            .send_message(&b_contact, "too early")
+            .unwrap_err()
+            .to_string();
         assert!(
             refused.contains("accept the chat"),
             "send before approval is refused, got: {refused}"
