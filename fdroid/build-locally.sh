@@ -19,9 +19,15 @@ SDK_VOLUME=fdroid-sdk           # caches /opt/android-sdk, incl. the ~1 GB NDK
 # Both volumes are mounted :z — on SELinux systems podman gives a named volume a per-container
 # MCS category, so without the shared label the *next* container is denied access to content the
 # previous one wrote (shows up as "Permission denied" on the NDK, even for root).
-APPID=app.nightdrop
+# Defaults build Night Drop from this repo. fdroid/test-mr.py overrides APPID/RECIPE_FILE to
+# build somebody else's app straight from a fdroiddata merge request.
+APPID=${APPID:-app.nightdrop}
 REPO_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
+RECIPE_FILE=${RECIPE_FILE:-$REPO_ROOT/fdroid/$APPID.yml}
 ARTIFACTS=${FDROID_LOCAL_ARTIFACTS:-$HOME/.cache/fdroid-local}
+# Where srclib definitions come from. Night Drop only needs flutter; an arbitrary MR can
+# reference any of them, so they are fetched from fdroiddata and staged next to the recipe.
+SRCLIB_BASE=https://gitlab.com/fdroid/fdroiddata/-/raw/master/srclibs
 
 MODE=build
 if [ "${1:-}" = "--fresh" ]; then
@@ -34,18 +40,30 @@ fi
 
 # versionCode(s) to build, read from the recipe so this cannot drift. With per-ABI splitting the
 # recipe has one block per ABI, so pass VERCODE=<code> to build just one; the default builds all.
-ALL_VERCODES=$(sed -n -E 's/^ *versionCode: ([0-9]+)$/\1/p' "$REPO_ROOT/fdroid/$APPID.yml")
+ALL_VERCODES=$(sed -n -E 's/^ *versionCode: ([0-9]+)$/\1/p' "$RECIPE_FILE")
 VERCODE=${VERCODE:-$ALL_VERCODES}
 [ -n "$VERCODE" ] || { echo "could not read versionCode from the recipe" >&2; exit 1; }
 # NDK release name (e.g. r28c), also from the recipe. Pre-installed as root during provisioning:
 # fdroidserver's auto-install runs as `vagrant` and silently skips the download there.
-NDKVER=$(sed -n -E 's/^ *ndk: *(.+)$/\1/p' "$REPO_ROOT/fdroid/$APPID.yml" | tail -1)
+NDKVER=$(sed -n -E 's/^ *ndk: *(.+)$/\1/p' "$RECIPE_FILE" | tail -1)
 echo "==> $APPID  versionCodes: $(echo $VERCODE | tr '\n' ' ')  mode=$MODE  image=$IMAGE"
 
 mkdir -p "$ARTIFACTS/recipe"
 # Staged through the artifacts dir rather than bind-mounted from the repo: on SELinux systems a
 # direct mount needs a :z relabel, and relabelling files inside the git tree is rude.
-cp "$REPO_ROOT/fdroid/$APPID.yml" "$ARTIFACTS/recipe/$APPID.yml"
+cp "$RECIPE_FILE" "$ARTIFACTS/recipe/$APPID.yml"
+# Stage every srclib the recipe references, fetched from fdroiddata.
+rm -rf "$ARTIFACTS/recipe/srclibs"; mkdir -p "$ARTIFACTS/recipe/srclibs"
+for lib in $(sed -n -E 's/^ *- ([A-Za-z0-9_.@-]+)$/\1/p' "$RECIPE_FILE" | grep -oE '^[A-Za-z0-9_.-]+@?' | tr -d '@' | sort -u); do
+    case "$lib" in
+        *.*[a-z]) : ;;   # skip things that look like paths/dirs from rm:/scandelete:
+    esac
+    if curl -fsSL "$SRCLIB_BASE/$lib.yml" -o "$ARTIFACTS/recipe/srclibs/$lib.yml" 2>/dev/null; then
+        echo "==> staged srclib $lib"
+    else
+        rm -f "$ARTIFACTS/recipe/srclibs/$lib.yml"
+    fi
+done
 # Chicken-and-egg: once the recipe declares binary:, fdroidserver downloads that APK to compare
 # against and fails if it is missing. So the build that PRODUCES the release APK has to run with
 # binary: stripped; re-run without SKIP_BINARY afterwards to get the reproducibility verdict.
@@ -121,8 +139,7 @@ export GRADLE_USER_HOME=$home_vagrant/.gradle
 # --- workspace: a minimal fdroiddata ---------------------------------------------------
 mkdir -p "$WS"/{metadata,srclibs,build,tmp,logs,unsigned}
 cp /mnt/out/recipe/$APPID.yml "$WS/metadata/$APPID.yml"
-# srclib definition, same as fdroiddata/srclibs/flutter.yml
-printf "RepoType: git\nRepo: https://github.com/flutter/flutter.git\n" > "$WS/srclibs/flutter.yml"
+cp /mnt/out/recipe/srclibs/*.yml "$WS/srclibs/" 2>/dev/null || true
 cat > "$WS/config.yml" <<EOF
 repo_url: https://f-droid.org/repo
 repo_name: local
