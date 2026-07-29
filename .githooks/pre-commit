@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+# Runs the cheap half of CI before a commit exists, so a formatting slip can't reach a release
+# tag — which is exactly what happened with v0.1.12: the tests passed, `cargo fmt` was never run,
+# and CI only said so after the tag was pushed and immutable.
+#
+# Install:  make hooks     (sets core.hooksPath to .githooks)
+# Bypass:   git commit --no-verify
+#
+# Only what is fast and staged gets checked. Tests, the F-Droid metadata check and anything
+# needing a container stay out: a hook that takes minutes gets bypassed, and a bypassed hook
+# protects nothing.
+set -uo pipefail
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT" || exit 1
+staged=$(git diff --cached --name-only --diff-filter=ACM)
+[ -n "$staged" ] || exit 0
+
+fail=0
+step() {  # step <label> <command...>
+    local label=$1; shift
+    if ! out=$("$@" 2>&1); then
+        printf '\033[0;31m✗\033[0m %s\n' "$label"
+        printf '%s\n' "$out" | tail -25
+        fail=1
+    else
+        printf '\033[0;32m✓\033[0m %s\n' "$label"
+    fi
+}
+
+if grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$' <<<"$staged"; then
+    step "cargo fmt --all --check" cargo fmt --all --check
+    if [ "${SKIP_CLIPPY:-0}" != 1 ]; then
+        # Slow on a cold target dir; SKIP_CLIPPY=1 when iterating, CI still enforces it.
+        step "cargo clippy --all-targets -D warnings" \
+            cargo clippy --all-targets -- -D warnings
+    fi
+fi
+
+if grep -qE '^app/.*\.(dart|arb)$|^app/pubspec\.yaml$' <<<"$staged"; then
+    step "flutter analyze" bash -c 'cd app && flutter analyze lib'
+fi
+
+# The generated version constant is easy to forget after a version bump, and shipping it stale
+# means the About screen reports the previous release (see v0.1.7).
+if grep -q '^app/pubspec\.yaml$' <<<"$staged"; then
+    want=$(sed -n 's/^version: *//p' app/pubspec.yaml)
+    have=$(sed -n "s/.*kAppVersion = '\(.*\)';/\1/p" app/lib/src/core/app_version.dart)
+    if [ "$want" != "$have" ]; then
+        printf '\033[0;31m✗\033[0m app_version.dart is stale (%s, expected %s) — run: make config\n' \
+            "${have:-none}" "$want"
+        fail=1
+    else
+        printf '\033[0;32m✓\033[0m app_version.dart matches pubspec\n'
+    fi
+fi
+
+if [ "$fail" != 0 ]; then
+    printf '\ncommit aborted. Fix the above, or bypass with: git commit --no-verify\n'
+    exit 1
+fi
+exit 0

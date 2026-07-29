@@ -1,5 +1,5 @@
 # Night Drop — common tasks. Requires the Flutter SDK and the Rust toolchain.
-.PHONY: help app-get app-run app-test app-analyze core-build core-test relay-run fmt clippy bootstrap gen-bridge config
+.PHONY: help app-get app-run app-test app-analyze core-build core-test relay-run fmt clippy bootstrap gen-bridge config hooks
 
 help:
 	@echo "App (Flutter, in app/):"
@@ -15,6 +15,11 @@ help:
 	@echo "  make fmt          cargo fmt"
 	@echo "  make clippy       cargo clippy --all-targets"
 	@echo "  make bootstrap    one-time: populate Flutter platform folders + pub get"
+	@echo "  make hooks        one-time: enable the pre-commit checks in .githooks/"
+
+# Git does not share hooks, so they live in .githooks/ and this points git at them. Runs the
+# fast half of CI (fmt, clippy, analyze) before a commit exists.
+hooks:        ; git config core.hooksPath .githooks && echo "pre-commit checks enabled (bypass with git commit --no-verify)"
 
 app-get:      ; cd app && flutter pub get
 app-run:      config ; cd app && flutter run
