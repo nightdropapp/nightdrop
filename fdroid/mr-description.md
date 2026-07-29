@@ -13,8 +13,8 @@
 
 ## Suggested
 
-* [ ] External repos are added as git submodules instead of srclibs — Flutter is provisioned with the `flutter@stable` srclib, following the srclib variant of `templates/build-flutter.yml`. It is not vendored as a submodule upstream.
+* [ ] External repos are added as git submodules instead of srclibs — Flutter is provisioned with the `flutter@stable` srclib, following the srclib variant of `templates/build-flutter.yml`; it is not vendored as a submodule upstream. The Flutter version is pinned in `app/.fvmrc` and extracted by the recipe, so bumping it needs no change here either.
 * [x] Enable [Reproducible Builds](https://f-droid.org/docs/Reproducible_Builds)
-* [ ] Multiple apks for native code — currently one universal APK (arm64-v8a / armeabi-v7a / x86_64).
+* [x] Multiple apks for native code — built per ABI (armeabi-v7a / arm64-v8a / x86_64), 35–46 MB each instead of one 113 MB universal APK.
 
 /label ~"New App"
