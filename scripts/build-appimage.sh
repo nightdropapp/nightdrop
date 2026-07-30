@@ -132,4 +132,10 @@ ARCH=x86_64 "${AITOOL_RUN[@]}" "$APPDIR" "$OUT" >/dev/null 2>&1 \
 chmod +x "$OUT"
 
 ok "single-file build → $OUT ($(du -h "$OUT" | cut -f1))"
+
+# The AppImage lands directly in website/applications/, which the onion service serves live — so
+# refresh the signed manifest now rather than leaving SHA256SUMS describing the previous build.
+if [ -x "$PROJECT_ROOT/scripts/deploy-website.sh" ]; then
+    "$PROJECT_ROOT/scripts/deploy-website.sh" || c "manifest refresh failed — run scripts/deploy-website.sh by hand"
+fi
 c "Users: download it, then  chmod +x Night_Drop-x86_64.AppImage && ./Night_Drop-x86_64.AppImage"

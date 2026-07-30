@@ -361,31 +361,34 @@ build_apk() {
         log_warn "No android/key.properties: release APK will be DEBUG-signed (local use only)"
     fi
 
-    # Build only what the target device can actually run. A universal APK carries all three
-    # architectures (~113MB) where the device uses one (~35-46MB), so this cuts both the Rust
-    # cross-compile and the push. --universal forces the old all-ABIs build.
-    local abi="" target=""
-    if [ "${UNIVERSAL:-0}" != 1 ]; then
-        abi=$(detect_abi)
-        target=$(abi_to_target "$abi")
-    fi
+    # Debug and release want different things. A debug install is for iterating, so build only the
+    # ABI this device runs: ~43MB instead of ~113MB and the Rust core cross-compiles once, not three
+    # times. A release install doubles as the website deploy, so build every ABI — publishing one
+    # split would leave the download page offering different versions per CPU.
+    local abi target="" ; abi=$(detect_abi)
     local -a split=()
-    if [ -n "$target" ]; then
+    if [ "${UNIVERSAL:-0}" = 1 ]; then
+        log_info "Building a universal APK (--universal)"
+    elif [ "$BUILD_MODE" == "release" ]; then
+        split=(--split-per-abi)
+        log_success "Release: building every ABI for the website; installing ${abi:-the matching one}"
+    elif [ -n "$abi" ] && target=$(abi_to_target "$abi") && [ -n "$target" ]; then
         split=(--split-per-abi "--target-platform=$target")
         log_success "Device ABI $abi - building only that ($target)"
     elif [ -n "$abi" ]; then
         log_warn "Unrecognised device ABI '$abi' - building a universal APK"
-    elif [ "${UNIVERSAL:-0}" = 1 ]; then
-        log_info "Building a universal APK (--universal)"
     else
         log_info "No device to query - building a universal APK"
     fi
 
     if "$FLUTTER" build apk "--$BUILD_MODE" "${split[@]}" "${defines[@]}" 2>&1; then
-        if [ -n "$target" ]; then
-            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/app-$abi-$BUILD_MODE.apk"
+        local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
+        # Install the split matching this device; a release build made all three, a debug build
+        # made only this one. Fall back to the universal when there is no per-ABI file.
+        if [ -n "$abi" ] && [ -f "$dir/app-$abi-$BUILD_MODE.apk" ]; then
+            APK_PATH="$dir/app-$abi-$BUILD_MODE.apk"
         else
-            APK_PATH="$PROJECT_ROOT/app/build/app/outputs/flutter-apk/app-$BUILD_MODE.apk"
+            APK_PATH="$dir/app-$BUILD_MODE.apk"
         fi
         if [ -f "$APK_PATH" ]; then
             log_success "APK built: $APK_PATH"
@@ -397,12 +400,53 @@ build_apk() {
                 return 1
             fi
             log_success "core lib present in APK: libnightdrop.so"
+            # The site also offers a universal APK, and --split-per-abi does not produce one. Build
+            # it now rather than letting deploy publish a stale app-release.apk left by an earlier
+            # run — that is precisely how the download page drifted a version behind before.
+            if [ "$BUILD_MODE" == "release" ] && [ "${UNIVERSAL:-0}" != 1 ] \
+               && [ "${NO_DEPLOY_WEB:-0}" != 1 ] \
+               && [ -f "$PROJECT_ROOT/website/applications/android/NightDrop.apk" ]; then
+                log_info "Also building the universal APK for the website"
+                "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" 2>&1 | tail -2 \
+                    || log_warn "universal build failed — the website's universal download will lag"
+            fi
             return 0
         fi
     fi
 
     log_error "APK build failed"
     return 1
+}
+
+# Publish the APK just built to the locally-served Tor website. Only for --release: a debug build
+# is debug-signed (deploy-website.sh rejects it) and would be a terrible public download. The site
+# names files NightDrop[-<abi>].apk, so map flutter's app[-<abi>]-release.apk onto that.
+deploy_website() {
+    print_header "Publishing to the Tor website"
+    local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
+    local -a staged=()
+    for built in "$dir"/app-*-release.apk "$dir"/app-release.apk; do
+        [ -f "$built" ] || continue
+        local base name
+        base=$(basename "$built")
+        if [ "$base" = "app-release.apk" ]; then
+            # The site's universal download. Only refresh it if one is already published —
+            # otherwise a release install would start offering a file the page never listed.
+            [ -f "$PROJECT_ROOT/website/applications/android/NightDrop.apk" ] || continue
+            name="NightDrop.apk"
+        else
+            local a=${base#app-}; a=${a%-release.apk}; name="NightDrop-$a.apk"
+        fi
+        cp -f "$built" "$dir/$name"
+        staged+=("$dir/$name")
+    done
+    [ ${#staged[@]} -gt 0 ] || { log_warn "nothing to publish"; return 0; }
+    if "$PROJECT_ROOT/scripts/deploy-website.sh" "${staged[@]}"; then
+        log_success "website updated (served live — no restart needed)"
+    else
+        log_error "website not updated"
+        return 1
+    fi
 }
 
 install_apk() {
@@ -468,6 +512,8 @@ OPTIONS
                       device's ro.product.cpu.abi and builds only that, which is ~35-46MB
                       instead of ~113MB and skips cross-compiling the Rust core three times.
   --build-only        Build APK without installing
+                      (with --release, a successful install also publishes the APK to the
+                      locally-served Tor website; NO_DEPLOY_WEB=1 skips that)
   --install-only      Install existing APK (skip build)
   --list-devices      Show connected devices
   --help              Show this help message
@@ -586,6 +632,11 @@ main() {
     select_device || exit 1
     build_apk || exit 1
     install_apk || exit 1
+    # Everything is still local, so a release install doubles as the website deploy. Gated on
+    # --release so a debug build can never become the public download.
+    if [ "$BUILD_MODE" == "release" ] && [ "${NO_DEPLOY_WEB:-0}" != 1 ]; then
+        deploy_website || log_warn "continuing — the app is installed, only the website lagged"
+    fi
     launch_app
 
     print_header "Complete! ✓"
