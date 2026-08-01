@@ -4,7 +4,7 @@ window.NIGHTDROP_CONFIG = {
     "name": "Night Drop",
     "headline": "Sealed. Dropped. Delivered.",
     "tagline": "Like a night deposit box: every message is a sealed envelope, dropped for one person only, opened by no one in between. Anonymous, end-to-end encrypted 1:1 chat over Tor. No accounts. No phone number. No server-side keys. No logs.",
-    "blurb": "Night Drop is free. If it's useful to you, a donation keeps it alive. We accept privacy coins so giving stays anonymous \u2014 no accounts, no tracking, no trail."
+    "blurb": "Night Drop is free. If it's useful to you, a donation keeps it alive. We accept privacy coins so giving stays anonymous — no accounts, no tracking, no trail."
   },
   "donations": [
     {
@@ -16,14 +16,14 @@ window.NIGHTDROP_CONFIG = {
   ],
   "downloads": {
     "ios": "",
-    "android": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.11/NightDrop.apk",
+    "android": "https://github.com/nightdropapp/nightdrop/releases/latest",
     "windows": "",
     "macos": "",
-    "linux": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.11/Night_Drop-x86_64.AppImage"
+    "linux": "https://github.com/nightdropapp/nightdrop/releases/download/v0.1.12/Night_Drop-x86_64.AppImage"
   },
   "downloads_onion": {
     "ios": "",
-    "android": "/applications/android/NightDrop.apk",
+    "android": "/applications/android/",
     "windows": "",
     "macos": "",
     "linux": "/applications/linux/Night_Drop-x86_64.AppImage"

@@ -281,9 +281,8 @@
         <a class="btn ghost" href="#">Linux</a>
       </div>
       <p class="fineprint">
-        The Android button gives the universal build, which runs on any phone. Smaller
-        per-processor builds — roughly a third the size — are on the
-        <a href="https://github.com/nightdropapp/nightdrop/releases/latest">release page</a>;
+        The Android button opens the list of builds so you can pick one. The universal build runs
+        on any phone; the per-processor builds are roughly a third the size, and
         <code>arm64-v8a</code> suits almost every phone made since 2015. If you install a
         per-processor build you can't switch back to the universal one without uninstalling
         first, because Android reads it as a downgrade.
@@ -293,7 +292,7 @@
 
   <footer>
     <p><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop — free, anonymous, end-to-end encrypted. No accounts. No logs.</p>
-    <p class="muted">No competitor names. Just the facts about how your data is handled — including <a href="limits.html">what we can't protect you from</a>.</p>
+    <p class="muted">We don't trash competitors. Just the facts about how your data is handled — including <a href="limits.html">what we can't protect you from</a>.</p>
     <p class="muted footer-links">
       <a href="https://github.com/nightdropapp/nightdrop" id="source-link">Source code</a> ·
       <a href="/.well-known/security.txt">Report a vulnerability</a> ·
@@ -352,7 +351,10 @@
             // Never a javascript:/data: scheme, even if the config were tampered with. esc() handles
             // characters; this guards the scheme.
             var ok = url && (/^https?:\/\//i.test(url) || /^\/applications\/[\w.\/-]+$/.test(url));
-            var dl = ok ? ' download' : '';
+            // `download` only for a link to an actual file. Android points at a folder (the .onion
+            // mirror) or the release page (clearnet) so the visitor picks their build; marking
+            // those `download` would save the listing page itself instead of opening it.
+            var dl = ok && /\.[A-Za-z0-9]+$/.test(url) ? ' download' : '';
             return '<a class="btn ghost"' + dl + ' href="' + (ok ? esc(url) : '#') + '">' + labels[k] + '</a>';
           }).join('');
         }
