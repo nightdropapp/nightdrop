@@ -938,6 +938,32 @@ class AppLocalizationsEn extends AppLocalizations {
   String get duressCurrentSecret => 'Your normal PIN or passphrase';
 
   @override
+  String get coverTrafficMenu => 'Cover traffic';
+
+  @override
+  String get coverTrafficTitle => 'Cover traffic';
+
+  @override
+  String get coverTrafficBody =>
+      'Sends occasional dummy mail to yourself, so the server that holds your offline messages sees activity it can\'t tell apart from real messages. Without it, that server can build a picture of when you\'re awake and active — not what you say, or to whom, but when.';
+
+  @override
+  String get coverTrafficLimit =>
+      'This raises the cost of watching you; it does not stop it. Real messages are still sent on top of the dummy ones, so someone patient can still see when you\'re genuinely busy. It also costs battery and data, and only runs while the app is open (or with background delivery on).';
+
+  @override
+  String get coverTrafficOn => 'Cover traffic is on.';
+
+  @override
+  String get coverTrafficOff => 'Cover traffic is off.';
+
+  @override
+  String get turnOn => 'Turn on';
+
+  @override
+  String get turnOff => 'Turn off';
+
+  @override
   String get nameContactTitle => 'Name this contact';
 
   @override

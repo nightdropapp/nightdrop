@@ -1307,3 +1307,47 @@ fn a_local_nickname_stays_local_and_survives_a_restart() {
     assert_eq!(alice2.contacts()[0].local_name, "Dana from the shop");
     std::fs::remove_file(&path).ok();
 }
+
+#[test]
+fn cover_traffic_is_indistinguishable_mail_that_never_surfaces() {
+    // #4: the relay's only per-identity signal is "mailbox X was posted to at time T". Cover
+    // traffic muddies it with self-addressed dummies — which must look like ordinary mail to the
+    // relay and be invisible everywhere else. See `docs/design/cover-traffic.md`.
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    // A real message and a cover post both land as one sealed blob in a mailbox: from the relay's
+    // side they are the same event, which is the entire point.
+    net.disconnect("bob");
+    alice.send(&bob_contact, "a real one").unwrap();
+    alice.send_cover_traffic();
+
+    // Cover is addressed to Alice herself, so Bob's mailbox holds only the real message.
+    let received = bob.poll_relay().unwrap();
+    assert_eq!(received.len(), 1, "cover must not reach a peer's mailbox");
+    assert_eq!(received[0].1, "a real one");
+
+    // Alice drains her own cover and it vanishes: no history, no message, nothing to see.
+    let drained = alice.poll_relay().unwrap();
+    assert!(drained.is_empty(), "cover produces no received message");
+    assert!(
+        alice
+            .messages(&bob_contact)
+            .iter()
+            .all(|m| m.text == "a real one"),
+        "cover must never appear in a conversation"
+    );
+    assert_eq!(
+        alice.contacts().len(),
+        1,
+        "cover creates no phantom contact"
+    );
+}

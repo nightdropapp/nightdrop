@@ -209,6 +209,15 @@ class RustNightdropCore extends NightdropCore {
   /// Whether a wipe code is armed. Needs the unlocked store key; without one (locked, or no lock
   /// at all) the answer is a plain no.
   @override
+  Future<bool> coverTrafficEnabled() async => rust.coverTrafficEnabled();
+
+  @override
+  Future<void> setCoverTraffic(bool enabled) async {
+    await rust.setCoverTraffic(enabled: enabled);
+    notifyListeners();
+  }
+
+  @override
   Future<void> setLocalName(String contactId, String name) async {
     await _core!.setLocalName(contactId: contactId, name: name);
     await _refresh();

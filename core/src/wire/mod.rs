@@ -183,6 +183,18 @@ pub enum Frame {
     /// the screen), so absence of this frame does not mean no screenshot was taken. See
     /// `SECURITY.md`.
     Screenshot { from: String, message: WireOlm },
+    /// Cover traffic (#4): a dummy post, addressed to **ourselves**, that exists only so the relay
+    /// sees mailbox activity it cannot distinguish from real mail. Dropped on arrival — no history,
+    /// no ack, no notification.
+    ///
+    /// Appended at the end because variant order is wire-visible. It never reaches a peer: cover is
+    /// self-addressed, so an inbound `Cover` from anyone else is simply discarded like any other
+    /// frame we have no use for.
+    ///
+    /// Carries no marker and no authentication, deliberately — there is nothing to authenticate.
+    /// The bytes are random padding, and the fixed-size bucketing that already applies to every
+    /// frame is what makes it indistinguishable from a real message on the wire.
+    Cover { padding: Vec<u8> },
 }
 
 impl Frame {

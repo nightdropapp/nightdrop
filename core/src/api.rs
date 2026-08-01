@@ -69,6 +69,29 @@ const RELAY_POLL_BACKGROUND: Duration = Duration::from_secs(60);
 /// answering a joiner's SPAKE2 opener feels near-instant (pairing is a brief, attended flow).
 const RELAY_POLL_PAIRING: Duration = Duration::from_secs(2);
 
+/// Cover traffic (#4), opt-in and off by default. A process-wide flag like `BACKGROUND`: the poller
+/// reads it every tick, so toggling it takes effect without restarting anything.
+static COVER_TRAFFIC: AtomicBool = AtomicBool::new(false);
+
+/// Mean gap between cover posts. Intervals are drawn from an **exponential** distribution around
+/// this, not spaced evenly: a fixed cadence is its own fingerprint, and an observer can subtract
+/// every post that lands on a 30-minute boundary and read what is left. Exponential is memoryless,
+/// so the next post says nothing about the last.
+const COVER_MEAN: Duration = Duration::from_secs(30 * 60);
+
+/// Floor on the sampled interval. The tail of an exponential draws arbitrarily short gaps, and a
+/// burst of them costs the user battery and the relay operator — who is usually a volunteer —
+/// bandwidth, for no extra concealment.
+const COVER_MIN: Duration = Duration::from_secs(5 * 60);
+
+/// Draw the next cover interval: exponential with mean [`COVER_MEAN`], floored at [`COVER_MIN`].
+fn next_cover_delay() -> Duration {
+    // Inverse-transform sampling: -mean * ln(U), U in (0,1].
+    let u: f64 = 1.0 - rand::random::<f64>(); // (0,1], never 0 -> never infinite
+    let secs = -(COVER_MEAN.as_secs_f64()) * u.ln();
+    Duration::from_secs_f64(secs.max(COVER_MIN.as_secs_f64()))
+}
+
 /// How long a staged short-code invite is honored, and how long a joiner waits for the
 /// inviter to answer before giving up (§5b). Both sides are attended during pairing.
 const SHORT_CODE_TTL: Duration = Duration::from_secs(600);
@@ -1612,6 +1635,24 @@ pub fn clear_duress_secret(dir: String, passphrase: String) -> Result<()> {
     crate::storage::lock::clear_duress(&dir, &passphrase)
 }
 
+/// Turn **cover traffic** (#4) on or off. Off by default, and deliberately opt-in: it costs the
+/// user battery and bandwidth continuously, and costs whoever runs the relay — usually a
+/// volunteer — the load of carrying dummy mail.
+///
+/// What it buys: the relay's per-mailbox timing profile stops being a clean read of when you are
+/// active. What it does **not** buy, and the UI must say so: this is chaff, not constant-rate
+/// transmission. Real messages still post *in addition* to the cover, so a patient observer can
+/// still see aggregate volume rise when you are genuinely busy. It raises the cost of traffic
+/// analysis; it does not end it. See `docs/design/cover-traffic.md` §4.
+pub fn set_cover_traffic(enabled: bool) {
+    COVER_TRAFFIC.store(enabled, Ordering::Relaxed);
+}
+
+/// Whether cover traffic is currently on.
+pub fn cover_traffic_enabled() -> bool {
+    COVER_TRAFFIC.load(Ordering::Relaxed)
+}
+
 /// Whether a wipe code is armed. Needs the **store key**, which is precisely what makes this safe
 /// to expose: the unlocked app can tell the user where they stand, while someone holding only an
 /// image of the device still cannot — reading it requires the key the lock protects.
@@ -1671,6 +1712,8 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, running: Arc<AtomicBool>) {
     thread::spawn(move || {
         // Fire immediately on startup so offline mail is fetched as the app opens.
         let mut last_relay: Option<std::time::Instant> = None;
+        let mut next_cover: Option<std::time::Instant> = None;
+        let mut cover_delay = next_cover_delay();
         while running.load(Ordering::Relaxed) {
             // Foreground: pump often for snappy delivery. Backgrounded: poll far less often
             // to cut battery/CPU and avoid chatty background work (the warm Tor stream still
@@ -1719,6 +1762,23 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, running: Arc<AtomicBool>) {
             }
             if relay_due {
                 last_relay = Some(std::time::Instant::now());
+            }
+            // Cover traffic (#4) runs on its own randomised clock, deliberately NOT tied to the
+            // relay poll: posting cover exactly when we drain would pair every dummy with a take,
+            // which is a pattern in itself.
+            if COVER_TRAFFIC.load(Ordering::Relaxed) {
+                if next_cover.is_none_or(|t: std::time::Instant| t.elapsed() >= cover_delay) {
+                    {
+                        let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                        let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            g.me.send_cover_traffic();
+                        }));
+                    }
+                    next_cover = Some(std::time::Instant::now());
+                    cover_delay = next_cover_delay();
+                }
+            } else {
+                next_cover = None; // turning it off resets the clock; on again re-samples
             }
         }
     });
@@ -2189,6 +2249,28 @@ mod tests {
         let parts: Vec<&str> = code.split('-').collect();
         assert_eq!(parts.len(), 4, "slot + 3 words: {code}");
         assert!(parts[0].parse::<u32>().is_ok());
+    }
+
+    #[test]
+    fn cover_traffic_intervals_are_random_and_floored() {
+        // #4: a fixed cadence is its own fingerprint — an observer subtracts every post on a
+        // 30-minute boundary and reads what's left — so intervals are drawn from an exponential
+        // distribution. Assert they actually vary, and that the floor holds against its long tail
+        // (which would otherwise burst, costing the user battery and the relay operator bandwidth).
+        let draws: Vec<Duration> = (0..200).map(|_| next_cover_delay()).collect();
+        let unique: std::collections::HashSet<u64> =
+            draws.iter().map(|d| d.as_millis() as u64).collect();
+        assert!(unique.len() > 100, "intervals must not be a fixed period");
+        assert!(
+            draws.iter().all(|d| *d >= COVER_MIN),
+            "no draw may fall below the floor"
+        );
+        // Sanity on the shape: an exponential around COVER_MEAN should not have every draw pinned
+        // at the floor, or the randomness is doing nothing.
+        assert!(
+            draws.iter().any(|d| *d > COVER_MEAN),
+            "the distribution should reach past its mean"
+        );
     }
 
     #[test]

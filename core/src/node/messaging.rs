@@ -223,6 +223,35 @@ impl Node {
         }
     }
 
+    /// Post one piece of **cover traffic** (#4): a dummy blob to our *own* mailbox, so the relay
+    /// sees activity it cannot tell apart from real mail. Drained and dropped on our next poll like
+    /// anything else addressed to us.
+    ///
+    /// Self-addressed on purpose. The relay's only per-identity signal is "mailbox X was posted to
+    /// at time T" — it never learns the sender (Tor) — so muddying *our own* mailbox is exactly the
+    /// observable, needs no cooperation from contacts, and works for an identity with no contacts
+    /// at all, whose otherwise-silent mailbox is itself informative.
+    ///
+    /// Best-effort and silent: a failed cover post is not worth a retry, a log line, or a user's
+    /// attention. See `docs/design/cover-traffic.md`.
+    pub(crate) fn send_cover_traffic(&mut self) {
+        let Some(relay) = self.relay.clone() else {
+            return; // nothing to cover: no relay means no mailbox to watch
+        };
+        // Random payload, then the same fixed-size bucketing every frame gets — which is what makes
+        // this indistinguishable from a real message rather than merely encrypted.
+        let mut padding = vec![0u8; 32 + (rand::random::<usize>() % 96)];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut padding);
+        let bytes = wire::encode(&Frame::Cover { padding });
+        let me = self.identity_key();
+        let Ok(blob) = relay_wrap(&me, &bytes) else {
+            return;
+        };
+        // Our own relay set, exactly as a peer would post to us.
+        let targets: Vec<String> = self.my_relays.clone();
+        let _ = queue_on_relays(self.transport.as_ref(), &Some(relay), &targets, &me, &blob);
+    }
+
     /// Fetch the operator-signed relay directory (§3.1), verify it against the baked-in key, and —
     /// if strictly newer than the version we hold — adopt its relay set as our shared defaults.
     /// Tries every relay we currently know (primary + my_relays + discovered) so a **rotated**

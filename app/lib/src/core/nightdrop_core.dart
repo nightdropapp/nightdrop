@@ -274,6 +274,13 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Disarm duress. Needs the normal secret. Succeeds whether or not anything was armed.
   Future<void> clearDuressSecret(String secret) async {}
 
+  /// Whether cover traffic (#4) is on.
+  Future<bool> coverTrafficEnabled() async => false;
+
+  /// Turn cover traffic on or off. Opt-in: it costs battery and bandwidth continuously, and the
+  /// UI must be honest that it *degrades* traffic analysis rather than defeating it.
+  Future<void> setCoverTraffic(bool enabled) async {}
+
   /// Give a contact a nickname only you see. Never sent — the peer can neither read nor set it.
   /// Empty clears it, falling back to their chosen name plus their identity tag.
   Future<void> setLocalName(String contactId, String name) async {}

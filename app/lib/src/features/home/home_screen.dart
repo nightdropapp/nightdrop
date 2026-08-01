@@ -55,6 +55,7 @@ class HomeScreen extends StatelessWidget {
               if (value == 'background') _backgroundDeliverySettings(context);
               if (value == 'applock') showAppLockSettings(context, core);
               if (value == 'duress') showDuressSettings(context, core);
+              if (value == 'cover') _coverTrafficSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'about') _showAbout(context);
               if (value == 'logout') _confirmLogout(context, core);
@@ -69,6 +70,7 @@ class HomeScreen extends StatelessWidget {
               // whether or not one is armed, so a glance at an unlocked phone gives nothing away.
               // The feature itself is public; only *your* having armed it is worth hiding (#3).
               PopupMenuItem(value: 'duress', child: Text(l10n.duressMenu)),
+              PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
               PopupMenuItem(value: 'about', child: Text(l10n.aboutMenu)),
               PopupMenuItem(
@@ -159,6 +161,54 @@ class HomeScreen extends StatelessWidget {
       ),
     );
   }
+}
+
+/// Cover traffic (#4). Opt-in, and the dialog carries the limit as prominently as the benefit:
+/// this is chaff, not constant-rate transmission, so it raises the cost of traffic analysis
+/// without ending it. A user who believes it makes them untrackable is worse off than one who
+/// knows what it actually buys. See `docs/design/cover-traffic.md` §4.
+Future<void> _coverTrafficSettings(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final on = await core.coverTrafficEnabled();
+  if (!context.mounted) return;
+  final theme = Theme.of(context);
+  final turnOn = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(l10n.coverTrafficTitle),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.coverTrafficBody),
+            const SizedBox(height: 16),
+            Text(
+              l10n.coverTrafficLimit,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(!on),
+          child: Text(on ? l10n.turnOff : l10n.turnOn),
+        ),
+      ],
+    ),
+  );
+  if (turnOn == null || !context.mounted) return;
+  final messenger = ScaffoldMessenger.of(context);
+  await core.setCoverTraffic(turnOn);
+  messenger.showSnackBar(SnackBar(
+    content: Text(turnOn ? l10n.coverTrafficOn : l10n.coverTrafficOff),
+  ));
 }
 
 /// A dismissible banner shown while this device's onion descriptor is still publishing to Tor

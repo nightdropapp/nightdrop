@@ -1642,6 +1642,54 @@ abstract class AppLocalizations {
   /// **'Your normal PIN or passphrase'**
   String get duressCurrentSecret;
 
+  /// No description provided for @coverTrafficMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover traffic'**
+  String get coverTrafficMenu;
+
+  /// No description provided for @coverTrafficTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover traffic'**
+  String get coverTrafficTitle;
+
+  /// No description provided for @coverTrafficBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Sends occasional dummy mail to yourself, so the server that holds your offline messages sees activity it can\'t tell apart from real messages. Without it, that server can build a picture of when you\'re awake and active — not what you say, or to whom, but when.'**
+  String get coverTrafficBody;
+
+  /// No description provided for @coverTrafficLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'This raises the cost of watching you; it does not stop it. Real messages are still sent on top of the dummy ones, so someone patient can still see when you\'re genuinely busy. It also costs battery and data, and only runs while the app is open (or with background delivery on).'**
+  String get coverTrafficLimit;
+
+  /// No description provided for @coverTrafficOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover traffic is on.'**
+  String get coverTrafficOn;
+
+  /// No description provided for @coverTrafficOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover traffic is off.'**
+  String get coverTrafficOff;
+
+  /// No description provided for @turnOn.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get turnOn;
+
+  /// No description provided for @turnOff.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off'**
+  String get turnOff;
+
   /// No description provided for @nameContactTitle.
   ///
   /// In en, this message translates to:

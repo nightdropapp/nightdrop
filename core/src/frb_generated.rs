@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 895847936;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -43517900;
 
 // Section: executor
 
@@ -2673,6 +2673,38 @@ fn wire__crate__api__clear_store_passphrase_impl(
         },
     )
 }
+fn wire__crate__api__cover_traffic_enabled_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "cover_traffic_enabled",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok(crate::api::cover_traffic_enabled())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__destroy_store_lock_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -2803,6 +2835,41 @@ fn wire__crate__api__reset_tor_guards_impl(
                 transform_result_sse::<_, ()>((move || {
                     let output_ok = Result::<_, ()>::Ok({
                         crate::api::reset_tor_guards(api_state_dir);
+                    })?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__set_cover_traffic_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "set_cover_traffic",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_enabled = <bool>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok = Result::<_, ()>::Ok({
+                        crate::api::set_cover_traffic(api_enabled);
                     })?;
                     Ok(output_ok)
                 })())
@@ -3536,18 +3603,20 @@ fn pde_ffi_dispatcher_primary_impl(
         }
         50 => wire__crate__api__clear_duress_secret_impl(port, ptr, rust_vec_len, data_len),
         51 => wire__crate__api__clear_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
-        52 => wire__crate__api__destroy_store_lock_impl(port, ptr, rust_vec_len, data_len),
-        53 => wire__crate__api__duress_is_armed_impl(port, ptr, rust_vec_len, data_len),
-        54 => wire__crate__api__random_store_key_impl(port, ptr, rust_vec_len, data_len),
-        55 => wire__crate__api__reset_tor_guards_impl(port, ptr, rust_vec_len, data_len),
-        56 => wire__crate__api__set_diagnostics_impl(port, ptr, rust_vec_len, data_len),
-        57 => wire__crate__api__set_duress_secret_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__set_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
-        59 => wire__crate__api__store_is_locked_impl(port, ptr, rust_vec_len, data_len),
-        60 => wire__crate__api__store_secret_is_correct_impl(port, ptr, rust_vec_len, data_len),
-        61 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__unlock_store_key_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__unsubscribe_impl(port, ptr, rust_vec_len, data_len),
+        52 => wire__crate__api__cover_traffic_enabled_impl(port, ptr, rust_vec_len, data_len),
+        53 => wire__crate__api__destroy_store_lock_impl(port, ptr, rust_vec_len, data_len),
+        54 => wire__crate__api__duress_is_armed_impl(port, ptr, rust_vec_len, data_len),
+        55 => wire__crate__api__random_store_key_impl(port, ptr, rust_vec_len, data_len),
+        56 => wire__crate__api__reset_tor_guards_impl(port, ptr, rust_vec_len, data_len),
+        57 => wire__crate__api__set_cover_traffic_impl(port, ptr, rust_vec_len, data_len),
+        58 => wire__crate__api__set_diagnostics_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__set_duress_secret_impl(port, ptr, rust_vec_len, data_len),
+        60 => wire__crate__api__set_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
+        61 => wire__crate__api__store_is_locked_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__store_secret_is_correct_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__unlock_store_key_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__unsubscribe_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

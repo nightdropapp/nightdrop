@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `now_secs`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
@@ -88,6 +88,22 @@ Future<void> clearDuressSecret(
         {required String dir, required String passphrase}) =>
     RustLib.instance.api
         .crateApiClearDuressSecret(dir: dir, passphrase: passphrase);
+
+/// Turn **cover traffic** (#4) on or off. Off by default, and deliberately opt-in: it costs the
+/// user battery and bandwidth continuously, and costs whoever runs the relay — usually a
+/// volunteer — the load of carrying dummy mail.
+///
+/// What it buys: the relay's per-mailbox timing profile stops being a clean read of when you are
+/// active. What it does **not** buy, and the UI must say so: this is chaff, not constant-rate
+/// transmission. Real messages still post *in addition* to the cover, so a patient observer can
+/// still see aggregate volume rise when you are genuinely busy. It raises the cost of traffic
+/// analysis; it does not end it. See `docs/design/cover-traffic.md` §4.
+Future<void> setCoverTraffic({required bool enabled}) =>
+    RustLib.instance.api.crateApiSetCoverTraffic(enabled: enabled);
+
+/// Whether cover traffic is currently on.
+Future<bool> coverTrafficEnabled() =>
+    RustLib.instance.api.crateApiCoverTrafficEnabled();
 
 /// Whether a wipe code is armed. Needs the **store key**, which is precisely what makes this safe
 /// to expose: the unlocked app can tell the user where they stand, while someone holding only an

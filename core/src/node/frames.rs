@@ -345,6 +345,13 @@ impl Node {
                 }
                 Ok(None)
             }
+            Frame::Cover { .. } => {
+                // Cover traffic (#4): dropped on sight. It exists only to give the relay mailbox
+                // activity that looks like real mail; nothing downstream should ever see it — no
+                // history entry, no ack, no notification, and no `dirty` flag beyond the one set
+                // above (a poll that drained only cover has changed nothing worth persisting).
+                Ok(None)
+            }
             Frame::Screenshot { from, message } => {
                 // Transparency (#1): the peer captured this conversation to their gallery, where
                 // nothing we do — disappearing timers, remote-storage caps, unsend — can reach it.
