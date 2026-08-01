@@ -248,3 +248,20 @@ class Message {
   /// A received video whose payload hasn't arrived yet (only the incoming placeholder).
   bool get receiving => isVideo && mediaId.isEmpty && !sending;
 }
+
+/// A bridge line the core refused, with the parser's reason. Shown back to the user rather than
+/// dropped: someone copying bridges over a censored connection needs to know *which* line is wrong.
+class RejectedBridge {
+  const RejectedBridge({required this.line, required this.reason});
+
+  final String line;
+  final String reason;
+}
+
+/// Outcome of saving bridges: how many were accepted, and everything that wasn't.
+class BridgeSave {
+  const BridgeSave({required this.accepted, required this.rejected});
+
+  final int accepted;
+  final List<RejectedBridge> rejected;
+}

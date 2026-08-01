@@ -55,6 +55,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool dco_decode_bool(dynamic raw);
 
   @protected
+  BridgeSaveResult dco_decode_bridge_save_result(dynamic raw);
+
+  @protected
   ChatMessage dco_decode_chat_message(dynamic raw);
 
   @protected
@@ -79,6 +82,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw);
 
   @protected
+  List<RejectedBridge> dco_decode_list_rejected_bridge(dynamic raw);
+
+  @protected
   List<RelayHealth> dco_decode_list_relay_health(dynamic raw);
 
   @protected
@@ -86,6 +92,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairingInvite dco_decode_pairing_invite(dynamic raw);
+
+  @protected
+  RejectedBridge dco_decode_rejected_bridge(dynamic raw);
 
   @protected
   RelayHealth dco_decode_relay_health(dynamic raw);
@@ -146,6 +155,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   bool sse_decode_bool(SseDeserializer deserializer);
 
   @protected
+  BridgeSaveResult sse_decode_bridge_save_result(SseDeserializer deserializer);
+
+  @protected
   ChatMessage sse_decode_chat_message(SseDeserializer deserializer);
 
   @protected
@@ -170,6 +182,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Uint8List sse_decode_list_prim_u_8_strict(SseDeserializer deserializer);
 
   @protected
+  List<RejectedBridge> sse_decode_list_rejected_bridge(
+      SseDeserializer deserializer);
+
+  @protected
   List<RelayHealth> sse_decode_list_relay_health(SseDeserializer deserializer);
 
   @protected
@@ -177,6 +193,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   PairingInvite sse_decode_pairing_invite(SseDeserializer deserializer);
+
+  @protected
+  RejectedBridge sse_decode_rejected_bridge(SseDeserializer deserializer);
 
   @protected
   RelayHealth sse_decode_relay_health(SseDeserializer deserializer);
@@ -241,6 +260,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_bool(bool self, SseSerializer serializer);
 
   @protected
+  void sse_encode_bridge_save_result(
+      BridgeSaveResult self, SseSerializer serializer);
+
+  @protected
   void sse_encode_chat_message(ChatMessage self, SseSerializer serializer);
 
   @protected
@@ -267,6 +290,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       Uint8List self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_rejected_bridge(
+      List<RejectedBridge> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_list_relay_health(
       List<RelayHealth> self, SseSerializer serializer);
 
@@ -275,6 +302,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_pairing_invite(PairingInvite self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rejected_bridge(
+      RejectedBridge self, SseSerializer serializer);
 
   @protected
   void sse_encode_relay_health(RelayHealth self, SseSerializer serializer);

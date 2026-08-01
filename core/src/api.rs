@@ -1635,6 +1635,94 @@ pub fn clear_duress_secret(dir: String, passphrase: String) -> Result<()> {
     crate::storage::lock::clear_duress(&dir, &passphrase)
 }
 
+/// Bridge validation, delegated to arti's own parser so the editor and the bootstrap can never
+/// disagree about what a valid line is.
+#[cfg(feature = "tor")]
+use crate::transport::tor::check_bridge_line;
+
+/// Without the Tor feature there is no parser to ask, so nothing is rejected. The shipped app is
+/// always built with `tor`; this exists so the crate still compiles for the in-process demo and the
+/// non-Tor tests, which never write bridges.
+#[cfg(not(feature = "tor"))]
+fn check_bridge_line(_line: &str) -> std::result::Result<(), String> {
+    Ok(())
+}
+
+/// One rejected bridge line, with the parser's reason — shown back to the user rather than
+/// silently dropped (`docs/design/android-bridges.md` §2).
+pub struct RejectedBridge {
+    pub line: String,
+    pub reason: String,
+}
+
+/// Outcome of saving bridges: how many were accepted, and every line that wasn't.
+pub struct BridgeSaveResult {
+    pub accepted: u32,
+    pub rejected: Vec<RejectedBridge>,
+}
+
+/// The bridge lines currently configured, as the user last saved them. Empty when none are set.
+///
+/// Bridges let the client reach Tor where the **public relay list** is IP-blocked. They are local
+/// config and never leave the device — which bridges you use is exactly what a censor wants to
+/// learn. See `docs/bridges.md`.
+pub fn read_bridges(dir: String) -> String {
+    std::fs::read_to_string(format!("{dir}/bridges.txt")).unwrap_or_default()
+}
+
+/// Save bridge lines, validating each with the **same parse the Tor bootstrap uses**, so the editor
+/// cannot accept something that would be silently dropped at startup.
+///
+/// Only accepted lines are written; rejects come back with the parser's reason. Takes effect when
+/// the Tor client is next built, so the caller must restart the core (or say that it will apply on
+/// restart) rather than implying it is live.
+///
+/// This exists because on **Android** the Tor state directory is app-private: a user behind a
+/// national firewall has no way to place `bridges.txt` there by hand, which is the platform that
+/// needs it most.
+pub fn write_bridges(dir: String, text: String) -> Result<BridgeSaveResult> {
+    let mut kept: Vec<String> = Vec::new();
+    let mut rejected: Vec<RejectedBridge> = Vec::new();
+    for raw in text.lines() {
+        let line = raw.trim();
+        // Blank lines and comments are carried through untouched: a user's own "# from
+        // bridges.torproject.org, 2026-08" note is worth keeping.
+        if line.is_empty() || line.starts_with('#') {
+            kept.push(raw.to_string());
+            continue;
+        }
+        match check_bridge_line(line) {
+            Ok(()) => kept.push(line.to_string()),
+            Err(reason) => rejected.push(RejectedBridge {
+                line: line.to_string(),
+                reason,
+            }),
+        }
+    }
+    let accepted = kept
+        .iter()
+        .filter(|l| {
+            let t = l.trim();
+            !t.is_empty() && !t.starts_with('#')
+        })
+        .count() as u32;
+    let path = format!("{dir}/bridges.txt");
+    if accepted == 0 && kept.iter().all(|l| l.trim().is_empty()) {
+        // Cleared: remove the file rather than leaving an empty one, so bootstrap takes the
+        // "no bridges" path exactly as it did before any were ever set.
+        let _ = std::fs::remove_file(&path);
+    } else {
+        std::fs::create_dir_all(&dir).ok();
+        std::fs::write(&path, format!("{}\n", kept.join("\n")))?;
+    }
+    Ok(BridgeSaveResult { accepted, rejected })
+}
+
+/// Validate a bridge line without saving, for live feedback while typing.
+pub fn check_bridge(line: String) -> Option<String> {
+    check_bridge_line(&line).err()
+}
+
 /// Turn **cover traffic** (#4) on or off. Off by default, and deliberately opt-in: it costs the
 /// user battery and bandwidth continuously, and costs whoever runs the relay — usually a
 /// volunteer — the load of carrying dummy mail.
@@ -2249,6 +2337,47 @@ mod tests {
         let parts: Vec<&str> = code.split('-').collect();
         assert_eq!(parts.len(), 4, "slot + 3 words: {code}");
         assert!(parts[0].parse::<u32>().is_ok());
+    }
+
+    #[cfg(feature = "tor")]
+    #[test]
+    fn bridges_are_validated_with_the_same_parser_the_bootstrap_uses() {
+        // Android's Tor state dir is app-private, so a user behind a firewall cannot drop bridges.txt
+        // in by hand — the editor is the only way in. It must therefore reject exactly what the
+        // bootstrap would reject, or a user copying bridges over a censored link gets "saved" for a
+        // line that silently does nothing. See docs/design/android-bridges.md.
+        let dir = std::env::temp_dir().join(format!("nd-bridges-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.to_string_lossy().into_owned();
+
+        let text = "# from bridges.torproject.org\n\
+                38.229.33.83:80 0BAC39417268B96B9F514E7F63FA6FBA1A788955\n\
+                this is not a bridge\n";
+        let out = write_bridges(dir.clone(), text.to_string()).unwrap();
+        assert_eq!(out.accepted, 1);
+        assert_eq!(out.rejected.len(), 1);
+        assert_eq!(out.rejected[0].line, "this is not a bridge");
+        assert!(
+            !out.rejected[0].reason.is_empty(),
+            "the user must be told why"
+        );
+
+        // The comment survives — a user's own note about where the bridges came from is worth keeping.
+        let saved = read_bridges(dir.clone());
+        assert!(saved.contains("# from bridges.torproject.org"));
+        assert!(saved.contains("38.229.33.83:80"));
+        assert!(
+            !saved.contains("this is not a bridge"),
+            "rejects are not written"
+        );
+
+        // Clearing removes the file, so bootstrap takes the same "no bridges" path as a fresh install
+        // rather than reading an empty one.
+        write_bridges(dir.clone(), String::new()).unwrap();
+        assert!(read_bridges(dir.clone()).is_empty());
+        assert!(!std::path::Path::new(&format!("{dir}/bridges.txt")).exists());
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 
     #[test]

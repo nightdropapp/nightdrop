@@ -209,6 +209,21 @@ class RustNightdropCore extends NightdropCore {
   /// Whether a wipe code is armed. Needs the unlocked store key; without one (locked, or no lock
   /// at all) the answer is a plain no.
   @override
+  Future<String> readBridges() async =>
+      rust.readBridges(dir: (await _torStateDir())!);
+
+  @override
+  Future<BridgeSave> writeBridges(String text) async {
+    final r = await rust.writeBridges(dir: (await _torStateDir())!, text: text);
+    return BridgeSave(
+      accepted: r.accepted,
+      rejected: [
+        for (final b in r.rejected) RejectedBridge(line: b.line, reason: b.reason),
+      ],
+    );
+  }
+
+  @override
   Future<bool> coverTrafficEnabled() async => rust.coverTrafficEnabled();
 
   @override

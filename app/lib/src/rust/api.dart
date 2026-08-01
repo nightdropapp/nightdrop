@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_store_key`, `drive`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
@@ -88,6 +88,32 @@ Future<void> clearDuressSecret(
         {required String dir, required String passphrase}) =>
     RustLib.instance.api
         .crateApiClearDuressSecret(dir: dir, passphrase: passphrase);
+
+/// The bridge lines currently configured, as the user last saved them. Empty when none are set.
+///
+/// Bridges let the client reach Tor where the **public relay list** is IP-blocked. They are local
+/// config and never leave the device — which bridges you use is exactly what a censor wants to
+/// learn. See `docs/bridges.md`.
+Future<String> readBridges({required String dir}) =>
+    RustLib.instance.api.crateApiReadBridges(dir: dir);
+
+/// Save bridge lines, validating each with the **same parse the Tor bootstrap uses**, so the editor
+/// cannot accept something that would be silently dropped at startup.
+///
+/// Only accepted lines are written; rejects come back with the parser's reason. Takes effect when
+/// the Tor client is next built, so the caller must restart the core (or say that it will apply on
+/// restart) rather than implying it is live.
+///
+/// This exists because on **Android** the Tor state directory is app-private: a user behind a
+/// national firewall has no way to place `bridges.txt` there by hand, which is the platform that
+/// needs it most.
+Future<BridgeSaveResult> writeBridges(
+        {required String dir, required String text}) =>
+    RustLib.instance.api.crateApiWriteBridges(dir: dir, text: text);
+
+/// Validate a bridge line without saving, for live feedback while typing.
+Future<String?> checkBridge({required String line}) =>
+    RustLib.instance.api.crateApiCheckBridge(line: line);
 
 /// Turn **cover traffic** (#4) on or off. Off by default, and deliberately opt-in: it costs the
 /// user battery and bandwidth continuously, and costs whoever runs the relay — usually a
@@ -516,6 +542,28 @@ class AppEvent {
           contacts == other.contacts;
 }
 
+/// Outcome of saving bridges: how many were accepted, and every line that wasn't.
+class BridgeSaveResult {
+  final int accepted;
+  final List<RejectedBridge> rejected;
+
+  const BridgeSaveResult({
+    required this.accepted,
+    required this.rejected,
+  });
+
+  @override
+  int get hashCode => accepted.hashCode ^ rejected.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is BridgeSaveResult &&
+          runtimeType == other.runtimeType &&
+          accepted == other.accepted &&
+          rejected == other.rejected;
+}
+
 /// One message in a conversation (UI-facing).
 class ChatMessage {
   final bool fromMe;
@@ -769,6 +817,29 @@ class PairingInvite {
           runtimeType == other.runtimeType &&
           shortCode == other.shortCode &&
           qrPayload == other.qrPayload;
+}
+
+/// One rejected bridge line, with the parser's reason — shown back to the user rather than
+/// silently dropped (`docs/design/android-bridges.md` §2).
+class RejectedBridge {
+  final String line;
+  final String reason;
+
+  const RejectedBridge({
+    required this.line,
+    required this.reason,
+  });
+
+  @override
+  int get hashCode => line.hashCode ^ reason.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RejectedBridge &&
+          runtimeType == other.runtimeType &&
+          line == other.line &&
+          reason == other.reason;
 }
 
 /// Reachability of one of our advertised extra relays (#17), for the UI's relay-status surface.

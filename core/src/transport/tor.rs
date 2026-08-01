@@ -454,6 +454,21 @@ fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
 /// that names a pluggable transport — `obfs4 ADDR FINGERPRINT cert=… iat-mode=…`, `snowflake …` —
 /// also parses here; it additionally needs a matching entry in `transports.txt` (see
 /// [`apply_transports`]) pointing arti at the PT client binary.
+/// Validate one bridge line with **the same parse the bootstrap uses**, so the settings editor can
+/// never accept a line that would later be dropped on startup. Returns the parse error verbatim:
+/// a bridge line is operator-supplied config carrying no secret, and someone copying bridges over a
+/// censored link needs to know which line is wrong and why.
+pub fn check_bridge_line(line: &str) -> std::result::Result<(), String> {
+    let spec = line
+        .trim()
+        .strip_prefix("Bridge ")
+        .unwrap_or(line.trim())
+        .trim();
+    spec.parse::<BridgeConfigBuilder>()
+        .map(|_| ())
+        .map_err(|e| e.to_string())
+}
+
 fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
     let path = format!("{base}/bridges.txt");
     let Ok(contents) = std::fs::read_to_string(&path) else {

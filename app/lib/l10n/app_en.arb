@@ -1087,6 +1087,24 @@
   "duressDone": "Wipe code set.",
   "duressCleared": "Wipe code removed.",
   "duressCurrentSecret": "Your normal PIN or passphrase",
+  "bridgesMenu": "Tor bridges",
+  "bridgesTitle": "Tor bridges",
+  "bridgesBody": "If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.",
+  "bridgesLimit": "Bridges help where a network blocks the public list of Tor relays. They do not help where a network inspects traffic and blocks Tor by how it looks — that needs obfs4 or Snowflake, which this version can't run on Android yet. If Tor still won't connect after adding bridges, that is probably why.",
+  "bridgesHint": "203.0.113.5:9001 A1B2C3…",
+  "bridgesWhereToGet": "Get bridges from bridges.torproject.org, or email bridges@torproject.org with \"get transport none\" in the body.",
+  "bridgesSaved": "{count, plural, =0{No bridges saved} =1{1 bridge saved} other{{count} bridges saved}}",
+  "@bridgesSaved": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "bridgesRejected": "{count, plural, =1{1 line was not understood} other{{count} lines were not understood}}",
+  "@bridgesRejected": {
+    "placeholders": { "count": { "type": "int" } }
+  },
+  "bridgesRestartTitle": "Reconnect now?",
+  "bridgesRestartBody": "Bridges are used when Night Drop connects to Tor, so they take effect on the next connection. Reconnecting now takes a minute or two.",
+  "bridgesRestartNow": "Reconnect",
+  "later": "Later",
   "coverTrafficMenu": "Cover traffic",
   "coverTrafficTitle": "Cover traffic",
   "coverTrafficBody": "Sends occasional dummy mail to yourself, so the server that holds your offline messages sees activity it can't tell apart from real messages. Without it, that server can build a picture of when you're awake and active — not what you say, or to whom, but when.",

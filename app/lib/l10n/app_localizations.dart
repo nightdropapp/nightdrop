@@ -1642,6 +1642,72 @@ abstract class AppLocalizations {
   /// **'Your normal PIN or passphrase'**
   String get duressCurrentSecret;
 
+  /// No description provided for @bridgesMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'Tor bridges'**
+  String get bridgesMenu;
+
+  /// No description provided for @bridgesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tor bridges'**
+  String get bridgesTitle;
+
+  /// No description provided for @bridgesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.'**
+  String get bridgesBody;
+
+  /// No description provided for @bridgesLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Bridges help where a network blocks the public list of Tor relays. They do not help where a network inspects traffic and blocks Tor by how it looks — that needs obfs4 or Snowflake, which this version can\'t run on Android yet. If Tor still won\'t connect after adding bridges, that is probably why.'**
+  String get bridgesLimit;
+
+  /// No description provided for @bridgesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'203.0.113.5:9001 A1B2C3…'**
+  String get bridgesHint;
+
+  /// No description provided for @bridgesWhereToGet.
+  ///
+  /// In en, this message translates to:
+  /// **'Get bridges from bridges.torproject.org, or email bridges@torproject.org with \"get transport none\" in the body.'**
+  String get bridgesWhereToGet;
+
+  /// No description provided for @bridgesSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No bridges saved} =1{1 bridge saved} other{{count} bridges saved}}'**
+  String bridgesSaved(int count);
+
+  /// No description provided for @bridgesRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 line was not understood} other{{count} lines were not understood}}'**
+  String bridgesRejected(int count);
+
+  /// No description provided for @bridgesRestartTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect now?'**
+  String get bridgesRestartTitle;
+
+  /// No description provided for @bridgesRestartBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Bridges are used when Night Drop connects to Tor, so they take effect on the next connection. Reconnecting now takes a minute or two.'**
+  String get bridgesRestartBody;
+
+  /// No description provided for @bridgesRestartNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect'**
+  String get bridgesRestartNow;
+
   /// No description provided for @coverTrafficMenu.
   ///
   /// In en, this message translates to:

@@ -53,5 +53,9 @@ notes/
 __pycache__/
 *.pyc
 
+# bash script for testing purposes
+scripts/watch-relay-queue.sh
+scripts/deploy-website.sh
+
 # Project todo lists
 TODO.*

@@ -274,6 +274,15 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Disarm duress. Needs the normal secret. Succeeds whether or not anything was armed.
   Future<void> clearDuressSecret(String secret) async {}
 
+  /// The bridge lines currently saved, or empty. Bridges reach Tor where the public relay list is
+  /// IP-blocked; they are local config and never leave the device.
+  Future<String> readBridges() async => '';
+
+  /// Save bridge lines, validated with the same parser the Tor bootstrap uses. Applies when the
+  /// core is next started, so the caller must restart rather than implying it is already live.
+  Future<BridgeSave> writeBridges(String text) async =>
+      const BridgeSave(accepted: 0, rejected: []);
+
   /// Whether cover traffic (#4) is on.
   Future<bool> coverTrafficEnabled() async => false;
 

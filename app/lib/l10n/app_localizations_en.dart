@@ -938,6 +938,60 @@ class AppLocalizationsEn extends AppLocalizations {
   String get duressCurrentSecret => 'Your normal PIN or passphrase';
 
   @override
+  String get bridgesMenu => 'Tor bridges';
+
+  @override
+  String get bridgesTitle => 'Tor bridges';
+
+  @override
+  String get bridgesBody =>
+      'If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.';
+
+  @override
+  String get bridgesLimit =>
+      'Bridges help where a network blocks the public list of Tor relays. They do not help where a network inspects traffic and blocks Tor by how it looks — that needs obfs4 or Snowflake, which this version can\'t run on Android yet. If Tor still won\'t connect after adding bridges, that is probably why.';
+
+  @override
+  String get bridgesHint => '203.0.113.5:9001 A1B2C3…';
+
+  @override
+  String get bridgesWhereToGet =>
+      'Get bridges from bridges.torproject.org, or email bridges@torproject.org with \"get transport none\" in the body.';
+
+  @override
+  String bridgesSaved(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bridges saved',
+      one: '1 bridge saved',
+      zero: 'No bridges saved',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String bridgesRejected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lines were not understood',
+      one: '1 line was not understood',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get bridgesRestartTitle => 'Reconnect now?';
+
+  @override
+  String get bridgesRestartBody =>
+      'Bridges are used when Night Drop connects to Tor, so they take effect on the next connection. Reconnecting now takes a minute or two.';
+
+  @override
+  String get bridgesRestartNow => 'Reconnect';
+
+  @override
   String get coverTrafficMenu => 'Cover traffic';
 
   @override
