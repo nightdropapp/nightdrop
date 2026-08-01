@@ -188,6 +188,15 @@ pub struct Contact {
     /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
     /// says their device drained our mailbox. `0` when we have no reading yet.
     ///
+    /// A nickname **you** gave this contact, or empty. Local only: it is never sent, never
+    /// announced, and never leaves the device — only you know that this key is the person you met,
+    /// and the peer cannot supply that knowledge. Takes precedence over `their_name` in the UI.
+    pub local_name: String,
+    /// Six characters derived from this contact's identity key, to tell two unnamed contacts apart
+    /// (`docs/design/contact-naming.md`). **Not verification** — it is short enough to grind, so a
+    /// matching tag proves nothing and the UI must never let it look like the safety number does.
+    /// Derived rather than random so it *changes* when the identity does.
+    pub identity_tag: String,
     /// Drives the "no sign of them" notice. It reports **silence, not a cause**: a wiped identity,
     /// a seized phone, a lost phone and a flat battery all look the same from here, and the UI must
     /// not imply otherwise. That ambiguity is deliberate — see `docs/design/silence-detection.md`.
@@ -1478,6 +1487,16 @@ impl NightdropCore {
     pub fn set_my_name(&self, contact_id: &str, name: &str) -> Result<()> {
         let mut g = self.lock();
         g.me.set_my_name(contact_id, name)?;
+        g.save();
+        Ok(())
+    }
+
+    /// Give a contact a nickname that only you see (`contact-naming.md`). Never sent, so a peer
+    /// can neither read it nor set it; empty clears it. This is the answer to a contact list of
+    /// identical "Anon"s — the peer's own name is their choice, and may be missing or duplicated.
+    pub fn set_local_name(&self, contact_id: &str, name: &str) -> Result<()> {
+        let mut g = self.lock();
+        g.me.set_local_name(contact_id, name)?;
         g.save();
         Ok(())
     }

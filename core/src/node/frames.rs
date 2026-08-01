@@ -107,7 +107,9 @@ impl Node {
                                 peer_verified: false,
                                 peer_relays: Vec::new(),
                                 remote_storage_healthy: true,
-                                last_seen_secs: 0, // filled from `Chat::last_seen` in `contacts()`
+                                last_seen_secs: 0, // these three are filled in `contacts()` from the chat
+                                local_name: String::new(),
+                                identity_tag: String::new(),
                             },
                             peer_address: peer_address.clone(),
                             session: accepted.session,
@@ -121,6 +123,7 @@ impl Node {
                             // Pairing is itself contact: start the clock rather than
                             // reporting a brand-new chat as silent.
                             last_seen: Some(crate::api::now_secs()),
+                            local_name: String::new(),
                             remote_storage_healthy: true,
                         },
                     );

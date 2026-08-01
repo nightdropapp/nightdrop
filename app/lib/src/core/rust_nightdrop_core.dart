@@ -209,6 +209,12 @@ class RustNightdropCore extends NightdropCore {
   /// Whether a wipe code is armed. Needs the unlocked store key; without one (locked, or no lock
   /// at all) the answer is a plain no.
   @override
+  Future<void> setLocalName(String contactId, String name) async {
+    await _core!.setLocalName(contactId: contactId, name: name);
+    await _refresh();
+  }
+
+  @override
   Future<bool> isDuressArmed() async {
     final key = _unlockedKey ?? await _readStoreKey();
     if (key == null) return false;
@@ -1026,6 +1032,8 @@ class RustNightdropCore extends NightdropCore {
         peerRelays: c.peerRelays,
         remoteStorageHealthy: c.remoteStorageHealthy,
         lastSeenSecs: c.lastSeenSecs.toInt(),
+        localName: c.localName,
+        identityTag: c.identityTag,
       );
 
   List<Message> _mapMessages(String contactId, List<rust.ChatMessage> history) {

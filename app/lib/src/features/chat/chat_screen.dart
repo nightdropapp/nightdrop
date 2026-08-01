@@ -84,6 +84,40 @@ String formatBytes(int bytes) {
   return '${size.toStringAsFixed(size >= 10 ? 0 : 1)} ${units[unit]}';
 }
 
+/// The six-character tag derived from a contact's identity key, shown beside the name of anyone
+/// you haven't nicknamed yourself (`docs/design/contact-naming.md`).
+///
+/// Styled as an identifier, never as a name: monospace, muted, and always *beside* the name rather
+/// than replacing it. That distinction is load-bearing — the tag is short enough that someone who
+/// wants a matching one can generate keys until they get it, so it disambiguates and never
+/// verifies. The safety number remains the only answer to "is this really them".
+class IdentityTag extends StatelessWidget {
+  const IdentityTag({super.key, required this.tag});
+
+  final String tag;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        tag,
+        style: TextStyle(
+          fontFamily: 'monospace',
+          fontSize: 11.5,
+          letterSpacing: 0.5,
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
 /// A 1:1 conversation. Shows the remote-storage warning banner when server storage is
 /// on, lets you rename yourself in this chat, and toggle 24h server storage.
 class ChatScreen extends StatefulWidget {
@@ -429,6 +463,48 @@ class _ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  /// Name this contact, for your eyes only. Distinct from [_renameSelf], which announces *your*
+  /// name to them: this one never leaves the device, because only you know that this identity key
+  /// is the person you actually met.
+  Future<void> _nameContact(Contact contact) async {
+    final l10n = AppLocalizations.of(context)!;
+    final controller = TextEditingController(text: contact.localName);
+    final name = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(l10n.nameContactTitle),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.nameContactBody(contact.identityTag)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              decoration: InputDecoration(hintText: contact.theirName),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(l10n.cancel),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, controller.text),
+            child: Text(l10n.save),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name != null && mounted) {
+      await NightdropScope.of(context).setLocalName(widget.contactId, name);
+    }
+  }
+
   /// Pick this chat's disappearing-messages timer. The choice is synced to the peer (both
   /// devices then delete messages older than the timer).
   Future<void> _pickDisappearing(Contact contact) async {
@@ -515,7 +591,11 @@ class _ChatScreenState extends State<ChatScreen> {
                 Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Flexible(child: Text(contact.theirName)),
+                    Flexible(child: Text(contact.displayName)),
+                    if (contact.showIdentityTag) ...[
+                      const SizedBox(width: 6),
+                      IdentityTag(tag: contact.identityTag),
+                    ],
                     if (contact.verified) ...[
                       const SizedBox(width: 6),
                       Icon(Icons.verified_user,
@@ -549,6 +629,11 @@ class _ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ),
+              ),
+              IconButton(
+                tooltip: l10n.nameContactTooltip,
+                icon: const Icon(Icons.drive_file_rename_outline),
+                onPressed: () => _nameContact(contact),
               ),
               IconButton(
                 tooltip: l10n.renameYourselfTooltip,

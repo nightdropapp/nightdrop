@@ -734,6 +734,20 @@ impl Node {
 impl Node {
     /// Set our per-chat display name (§4). Blank falls back to [`DEFAULT_NAME`]; on a live
     /// chat the new name is also sent E2E-encrypted so the peer relabels our messages.
+    /// Give this contact a nickname of your own. **Never sent** — unlike `set_my_name`, nothing
+    /// goes on the wire: only you know that this identity key is the person you met, and the peer
+    /// cannot supply that knowledge. Empty clears it, falling back to their chosen name plus their
+    /// identity tag. See `docs/design/contact-naming.md`.
+    pub fn set_local_name(&mut self, contact_id: &str, name: &str) -> Result<()> {
+        let chat = self
+            .chats
+            .get_mut(contact_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
+        chat.local_name = name.trim().to_string();
+        self.dirty = true;
+        Ok(())
+    }
+
     pub fn set_my_name(&mut self, contact_id: &str, name: &str) -> Result<()> {
         let from = self.identity_key();
         let resolved = if name.trim().is_empty() {

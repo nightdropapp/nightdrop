@@ -1642,6 +1642,24 @@ abstract class AppLocalizations {
   /// **'Your normal PIN or passphrase'**
   String get duressCurrentSecret;
 
+  /// No description provided for @nameContactTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Name this contact'**
+  String get nameContactTitle;
+
+  /// No description provided for @nameContactTooltip.
+  ///
+  /// In en, this message translates to:
+  /// **'Name this contact (only you see it)'**
+  String get nameContactTooltip;
+
+  /// Explains the local nickname and the identity tag. Must not imply the tag verifies anyone: it is short enough to grind, so the safety number remains the real check.
+  ///
+  /// In en, this message translates to:
+  /// **'A name only you see — it is never sent, and they can\'\'t see or change it. Until you set one, this contact shows as {tag}, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.'**
+  String nameContactBody(String tag);
+
   /// Shown in a chat when nothing authenticated has arrived from the peer for a long time. Deliberately states the observation only: the app cannot tell a wiped identity from a lost phone or a holiday, and must not imply it can.
   ///
   /// In en, this message translates to:

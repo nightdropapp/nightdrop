@@ -64,6 +64,7 @@ impl Node {
                     })
                     .collect(),
                 last_seen_unix: chat.last_seen,
+                local_name: chat.local_name.clone(),
             })
             .collect();
         PersistedState {
@@ -261,7 +262,9 @@ impl Node {
                         peer_verified: chat.peer_verified,
                         peer_relays: chat.peer_relays.clone(),
                         remote_storage_healthy: true,
-                        last_seen_secs: 0, // filled from `Chat::last_seen` in `contacts()`
+                        last_seen_secs: 0, // these three are filled in `contacts()` from the chat
+                        local_name: String::new(),
+                        identity_tag: String::new(),
                     },
                     peer_address: chat.peer_address.clone(),
                     session,
@@ -285,6 +288,7 @@ impl Node {
                         })
                         .collect(),
                     last_seen: chat.last_seen_unix,
+                    local_name: chat.local_name.clone(),
                     authorized: true, // persisted chats were authorized before saving
                     code: None,
                     closed: chat.closed,
@@ -331,7 +335,9 @@ impl Node {
                                 peer_verified: pchat.peer_verified,
                                 peer_relays: pchat.peer_relays.clone(),
                                 remote_storage_healthy: true,
-                                last_seen_secs: 0, // filled from `Chat::last_seen` in `contacts()`
+                                last_seen_secs: 0, // these three are filled in `contacts()` from the chat
+                                local_name: String::new(),
+                                identity_tag: String::new(),
                             },
                             peer_address: pchat.peer_address.clone(),
                             session,
@@ -341,6 +347,7 @@ impl Node {
                             closed: pchat.closed,
                             relay_receipts: HashMap::new(),
                             last_seen: pchat.last_seen_unix,
+                            local_name: pchat.local_name.clone(),
                             remote_storage_healthy: true,
                         },
                     );

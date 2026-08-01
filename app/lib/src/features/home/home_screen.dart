@@ -121,7 +121,11 @@ class HomeScreen extends StatelessWidget {
                     title: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Flexible(child: Text(c.theirName)),
+                        Flexible(child: Text(c.displayName)),
+                        if (c.showIdentityTag) ...[
+                          const SizedBox(width: 6),
+                          IdentityTag(tag: c.identityTag),
+                        ],
                         if (c.verified) ...[
                           const SizedBox(width: 6),
                           Icon(Icons.verified_user,

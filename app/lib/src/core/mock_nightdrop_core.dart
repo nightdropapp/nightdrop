@@ -300,6 +300,13 @@ class MockNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> setLocalName(String contactId, String name) async {
+    final c = _contacts.firstWhere((c) => c.id == contactId);
+    c.localName = name.trim();
+    notifyListeners();
+  }
+
+  @override
   Future<void> setRemoteStorage(String contactId, bool enabled) async {
     await _fakeWork();
     final c = _contacts.firstWhere((c) => c.id == contactId);

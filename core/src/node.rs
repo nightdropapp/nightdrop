@@ -323,6 +323,8 @@ struct Chat {
     /// Only authenticated events update it. Anything a stranger could send would otherwise let
     /// them fake liveness for someone whose phone was taken (`silence-detection.md`).
     last_seen: Option<u64>,
+    /// A nickname the local user gave this contact. **Never sent** — see `contact-naming.md` §2.
+    local_name: String,
     /// False while an inbound request awaits the local user's approval (§5). A chat we
     /// initiated is authorized immediately; one opened by a stranger's `Hello` is not.
     authorized: bool,
@@ -1039,6 +1041,8 @@ impl Node {
                 let mut dto = c.contact.clone();
                 dto.remote_storage_healthy = c.remote_storage_healthy;
                 dto.last_seen_secs = c.last_seen.unwrap_or(0);
+                dto.local_name = c.local_name.clone();
+                dto.identity_tag = identity_tag(&c.contact.id);
                 dto
             })
             .collect()
@@ -1405,6 +1409,24 @@ pub fn run_join_handshake(
 
 /// The relay handle a server backup is stored under. Derived from the password with a
 /// fixed salt, so the user needs only their recovery password to both locate and decrypt.
+/// Six characters derived from an identity key, so two contacts who never named themselves are
+/// still distinguishable (`docs/design/contact-naming.md` §3).
+///
+/// Crockford-style alphabet: no I/L/O/U, so it can't be misread or accidentally spell anything.
+/// ~30 bits — ample against *accidental* collision across a handful of contacts, and nowhere near
+/// enough to resist someone grinding keys for a matching tag. That is why it is a disambiguator and
+/// never a verification: the safety number is the thing that answers "is this really them".
+pub(crate) fn identity_tag(identity_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    const ALPHABET: &[u8] = b"0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    let digest = Sha256::digest(identity_key.as_bytes());
+    digest
+        .iter()
+        .take(6)
+        .map(|b| ALPHABET[(*b as usize) % ALPHABET.len()] as char)
+        .collect()
+}
+
 fn backup_handle(password: &str) -> Result<String> {
     let key = crate::storage::derive_key(password, b"nightdrop-backup-handle")?;
     Ok(format!("bkp:{}", base64_handle(&key[..16])))

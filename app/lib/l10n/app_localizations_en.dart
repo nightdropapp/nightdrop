@@ -938,6 +938,17 @@ class AppLocalizationsEn extends AppLocalizations {
   String get duressCurrentSecret => 'Your normal PIN or passphrase';
 
   @override
+  String get nameContactTitle => 'Name this contact';
+
+  @override
+  String get nameContactTooltip => 'Name this contact (only you see it)';
+
+  @override
+  String nameContactBody(String tag) {
+    return 'A name only you see — it is never sent, and they can\'\'t see or change it. Until you set one, this contact shows as $tag, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.';
+  }
+
+  @override
   String silenceBanner(int days) {
     return 'No sign of this person for $days days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.';
   }

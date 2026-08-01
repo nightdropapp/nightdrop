@@ -274,6 +274,10 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Disarm duress. Needs the normal secret. Succeeds whether or not anything was armed.
   Future<void> clearDuressSecret(String secret) async {}
 
+  /// Give a contact a nickname only you see. Never sent — the peer can neither read nor set it.
+  /// Empty clears it, falling back to their chosen name plus their identity tag.
+  Future<void> setLocalName(String contactId, String name) async {}
+
   /// Whether a wipe code is currently armed, so the UI can offer *remove* only when there is
   /// something to remove. Readable only because the app is unlocked — the flag is sealed under the
   /// store key, so an imaged device still gives nothing away.

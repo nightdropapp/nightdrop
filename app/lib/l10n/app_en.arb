@@ -1087,6 +1087,13 @@
   "duressDone": "Wipe code set.",
   "duressCleared": "Wipe code removed.",
   "duressCurrentSecret": "Your normal PIN or passphrase",
+  "nameContactTitle": "Name this contact",
+  "nameContactTooltip": "Name this contact (only you see it)",
+  "nameContactBody": "A name only you see — it is never sent, and they can''t see or change it. Until you set one, this contact shows as {tag}, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.",
+  "@nameContactBody": {
+    "description": "Explains the local nickname and the identity tag. Must not imply the tag verifies anyone: it is short enough to grind, so the safety number remains the real check.",
+    "placeholders": { "tag": { "type": "String", "example": "K7QF2M" } }
+  },
   "silenceBanner": "No sign of this person for {days} days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.",
   "@silenceBanner": {
     "description": "Shown in a chat when nothing authenticated has arrived from the peer for a long time. Deliberately states the observation only: the app cannot tell a wiped identity from a lost phone or a holiday, and must not imply it can.",

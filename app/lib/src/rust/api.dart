@@ -426,6 +426,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<void> setDisappearing(
       {required String contactId, required BigInt secs});
 
+  /// Give a contact a nickname that only you see (`contact-naming.md`). Never sent, so a peer
+  /// can neither read it nor set it; empty clears it. This is the answer to a contact list of
+  /// identical "Anon"s — the peer's own name is their choice, and may be missing or duplicated.
+  Future<void> setLocalName({required String contactId, required String name});
+
   /// Set the local user's display name within one chat (§4).
   Future<void> setMyName({required String contactId, required String name});
 
@@ -639,6 +644,17 @@ class Contact {
   /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
   /// says their device drained our mailbox. `0` when we have no reading yet.
   ///
+  /// A nickname **you** gave this contact, or empty. Local only: it is never sent, never
+  /// announced, and never leaves the device — only you know that this key is the person you met,
+  /// and the peer cannot supply that knowledge. Takes precedence over `their_name` in the UI.
+  final String localName;
+
+  /// Six characters derived from this contact's identity key, to tell two unnamed contacts apart
+  /// (`docs/design/contact-naming.md`). **Not verification** — it is short enough to grind, so a
+  /// matching tag proves nothing and the UI must never let it look like the safety number does.
+  /// Derived rather than random so it *changes* when the identity does.
+  final String identityTag;
+
   /// Drives the "no sign of them" notice. It reports **silence, not a cause**: a wiped identity,
   /// a seized phone, a lost phone and a flat battery all look the same from here, and the UI must
   /// not imply otherwise. That ambiguity is deliberate — see `docs/design/silence-detection.md`.
@@ -656,6 +672,8 @@ class Contact {
     required this.peerVerified,
     required this.peerRelays,
     required this.remoteStorageHealthy,
+    required this.localName,
+    required this.identityTag,
     required this.lastSeenSecs,
   });
 
@@ -672,6 +690,8 @@ class Contact {
       peerVerified.hashCode ^
       peerRelays.hashCode ^
       remoteStorageHealthy.hashCode ^
+      localName.hashCode ^
+      identityTag.hashCode ^
       lastSeenSecs.hashCode;
 
   @override
@@ -690,6 +710,8 @@ class Contact {
           peerVerified == other.peerVerified &&
           peerRelays == other.peerRelays &&
           remoteStorageHealthy == other.remoteStorageHealthy &&
+          localName == other.localName &&
+          identityTag == other.identityTag &&
           lastSeenSecs == other.lastSeenSecs;
 }
 

@@ -1261,3 +1261,49 @@ fn screenshot_notice_survives_a_total_outage_and_delivers_on_retry() {
 fn victim_view(bob: &Node, _victim: &str) -> String {
     bob.contacts().last().unwrap().id.clone()
 }
+
+#[test]
+fn a_local_nickname_stays_local_and_survives_a_restart() {
+    use crate::storage;
+    // Everyone defaults to "Anon", so a contact list is unreadable until you can label people
+    // yourself (`docs/design/contact-naming.md`). The label is *yours*: it must never reach the
+    // peer, and must outlive a restart or it is worthless.
+    let key: storage::StoreKey = [17u8; 32];
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    alice
+        .set_local_name(&bob_contact, "  Dana from the shop  ")
+        .unwrap();
+    assert_eq!(alice.contacts()[0].local_name, "Dana from the shop");
+
+    // Nothing went on the wire: Bob's view of himself, and of Alice, is untouched.
+    bob.pump().unwrap();
+    assert_eq!(bob.contacts()[0].local_name, "");
+    assert_eq!(
+        bob.messages(&alice_contact).len(),
+        0,
+        "naming sends nothing"
+    );
+
+    // Two unnamed contacts are still told apart by their identity tag, which is derived from the
+    // key — so it changes if the identity does, unlike a random label.
+    let tag = alice.contacts()[0].identity_tag.clone();
+    assert_eq!(tag.len(), 6);
+    assert_eq!(tag, crate::node::identity_tag(&bob_contact));
+    assert_ne!(tag, crate::node::identity_tag(&alice_contact));
+
+    // Survives a restart.
+    let path = std::env::temp_dir().join(format!("nightdrop-nick-{}.bin", std::process::id()));
+    let path = path.to_str().unwrap().to_string();
+    storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
+    let state = storage::load_from_file(&path, &key).unwrap();
+    let alice2 = Node::restore(&state, Box::new(net.endpoint("alice")), &key).unwrap();
+    assert_eq!(alice2.contacts()[0].local_name, "Dana from the shop");
+    std::fs::remove_file(&path).ok();
+}

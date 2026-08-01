@@ -69,6 +69,8 @@ class Contact {
     this.peerRelays = const [],
     this.remoteStorageHealthy = true,
     this.lastSeenSecs = 0,
+    this.localName = '',
+    this.identityTag = '',
   });
 
   final String id;
@@ -125,6 +127,24 @@ class Contact {
   /// identity, a seized phone and a holiday are indistinguishable from here. See
   /// `docs/design/silence-detection.md`.
   int lastSeenSecs;
+
+  /// A nickname **you** gave this contact. Local only — never sent, never announced. Takes
+  /// precedence over [theirName], which is whatever the peer chose (or "Anon" forever).
+  String localName;
+
+  /// Six characters derived from the contact's identity key, so two unnamed contacts are still
+  /// distinguishable. **Not verification** — short enough to grind, so a matching tag proves
+  /// nothing; the safety number is the check. See `docs/design/contact-naming.md`.
+  String identityTag;
+
+  /// What to call this contact in a list or title: your nickname if you set one, else the name
+  /// they chose. Never empty.
+  String get displayName => localName.isNotEmpty ? localName : theirName;
+
+  /// Whether the identity tag should be shown alongside [displayName]. Suppressed once you have
+  /// named them yourself — that is the point at which you have vouched for who this is; until
+  /// then, two contacts can both call themselves "Anon", or both call themselves "Alex".
+  bool get showIdentityTag => localName.isEmpty && identityTag.isNotEmpty;
 }
 
 /// Reachability of one of *our* advertised extra relays (#17), for the relay-status surface.

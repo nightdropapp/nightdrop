@@ -71,6 +71,11 @@ pub struct PersistedChat {
     /// "silent".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_seen_unix: Option<u64>,
+    /// A nickname the local user gave this contact (`contact-naming.md`). Local only — it is never
+    /// sent, so it lives here rather than travelling with a rename. `#[serde(default)]` keeps older
+    /// state files loadable; a new field on a shipped format must never be required.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub local_name: String,
 }
 
 /// One relay recall receipt for a still-queued message (see [`PersistedChat::queued_receipts`]).
