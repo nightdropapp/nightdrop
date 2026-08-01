@@ -41,8 +41,6 @@ app/*/flutter/ephemeral/
 .DS_Store
 *.swp
 .vscode/
-# Stray local debug screenshot — not part of the project.
-/backup-file-error.png
 
 # Local Claude Code settings (machine-specific; contains local paths)
 .claude/
@@ -54,3 +52,6 @@ notes/
 # Python bytecode from the fdroid helper scripts
 __pycache__/
 *.pyc
+
+# Project todo lists
+TODO.*
