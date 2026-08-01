@@ -154,6 +154,22 @@ integration as a whole (pairing/PAKE, relay, at-rest storage, FFI boundary) has 
 independent security audit. See [`SECURITY.md`](SECURITY.md#audit-status) — treat the app as
 promising and improving, not battle-tested, until that's done.
 
+## Support
+
+Night Drop takes no payments, runs no accounts, and has nothing to sell — so donations are the
+only funding. **Monero (XMR):**
+
+```
+49yRv29r6yHYBGZH4z1uGTXg68VFYX4Zf1cWopevd32YLUwj86mXddNe8bCTaZKcRQYDRdHJrcL6uAiCRKH1AMrDTQNNZZm
+```
+
+Monero is the default for the same reason the app exists: it doesn't leak the sender, the
+receiver, or the amount to anyone watching the chain. This is the same address shown in the app
+(**Support Night Drop**) and on the website: the canonical copy lives in
+[`config/app_config.json`](config/app_config.json) and `make config` syncs it into
+`app/assets/app_config.json` and `website/config.js`. Change it there and re-run `make config` —
+this README is the one copy that isn't generated, so update it in the same commit.
+
 ## License
 
 Licensed under the GNU Affero General Public License v3.0 or later
