@@ -121,6 +121,43 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   safe *because backup passwords are randomly generated (~100 bits)*, so entropy — not KDF cost —
   is the load-bearing defense. **Invariant to preserve:** never let a user choose their own
   server-backup password, or the fixed-salt recovery handle becomes brute-forceable by the relay.
+- **Screenshot detection is best-effort, and its absence proves nothing.** *(Known limit, by
+  design.)* Screenshots are deliberately **not** blocked: a permanent `FLAG_SECURE` only pushes a
+  determined person to photograph the screen with a second device, which no software can detect,
+  while breaking a legitimate thing users want. Instead a capture is reported — locally and to the
+  peer over an authenticated control frame (`Frame::Screenshot`). The reporting is blind to
+  **every Android below 14** (`Activity.ScreenCaptureCallback` is API 34+), **every desktop
+  platform**, **screen recording**, and **a camera pointed at the screen**. So a peer who sees no
+  notice has learned nothing, and the UI/website must never imply otherwise. What *is* blocked is
+  the Recents thumbnail, since that capture has no user intent behind it.
+- **App-lock PIN entropy.** *(Known and disclosed, not a bug.)* The opt-in app lock
+  (`ARCHITECTURE.md` §7d) accepts either a PIN or a passphrase. A **passphrase** protects the
+  history against someone who copies `store-key.lock` off the device; a short **PIN does not**, and
+  no key-derivation cost can change that — ~20 bits is exhaustible whatever the cost per guess. The
+  lock uses `Argon2id` at 64 MiB / t=3 (far above the backup default above, since this secret
+  is user-chosen), and the app rate-limits attempts, but both only slow an attacker typing at the
+  phone. A PIN is offered because "stops the person who picked up my unlocked phone" is a real
+  threat worth covering; the UI says which threat each option covers instead of implying parity.
+  Hardware-throttled unlock (Keystore user-authentication binding) is the only real fix for short
+  secrets and is deliberately not used, because it cannot support a duress secret.
+- **The wipe code inherits the PIN's limit, and cannot be rehearsed.** *(Known limit, by design.)*
+  A second secret at the lock screen deletes the identity instead of opening it (`#3`,
+  `docs/design/duress-wipe.md`). Two things it does **not** do. It does not protect a device that
+  was **imaged before** you used it: the copy still holds the lock file, and a short PIN there is
+  exhaustible exactly as above — duress defends against the person holding your phone, not against
+  a forensic copy already taken. And it cannot be practised: entering it destroys everything, every
+  time, which is what makes it work under pressure. Arming it self-checks that the code opens the
+  duress slot, so it can fail closed rather than silently.
+  The lock file is written so an armed wipe code is **indistinguishable** from an unarmed one, and
+  the app never displays whether one is set outside the wipe-code screen itself — a "duress: on"
+  readout in a menu or banner would tell whoever picks up the phone that it exists. **Your contacts
+  are not notified**, and cannot be: the wipe runs at the lock screen with no store key (the duress
+  secret unwraps filler, by design), so there is no ratchet state to authenticate a "chat deleted"
+  notice with, for anyone. Peers learn from your silence — agree on an out-of-band fallback before
+  you need one. A server backup, if you made one, is **not** removed by
+  the wipe — it is addressed by a handle derived from the recovery password, which is never
+  persisted, so nothing on the device can find it. It stays opaque and expires within its TTL
+  (24h default, 36h max), but a written-down recovery password can be compelled inside that window.
 - **Store-key zeroization.** *(Addressed.)* The long-lived at-rest key is now wiped on drop and the
   transient decode/generate buffers are zeroized; a live-memory/cold-boot attacker still sees
   plaintext history in RAM, so this is hygiene, not a fix for a disclosure bug.

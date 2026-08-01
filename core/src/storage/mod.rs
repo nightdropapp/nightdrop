@@ -14,6 +14,8 @@ use serde::{Deserialize, Serialize};
 use crate::Result;
 
 /// 32-byte symmetric key, sourced from the OS keystore in production.
+pub mod lock;
+
 pub type StoreKey = [u8; 32];
 
 const NONCE_LEN: usize = 12;
@@ -63,6 +65,12 @@ pub struct PersistedChat {
     /// session pickles beside them. `#[serde(default)]` keeps older state files loadable.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub queued_receipts: Vec<PersistedReceipt>,
+    /// Unix seconds of the last **authenticated** contact from the peer (message or verified
+    /// control frame), for the "no sign of them" notice. `#[serde(default)]` keeps older state
+    /// files loadable — they simply have no reading yet, which reads as "unknown", never as
+    /// "silent".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_seen_unix: Option<u64>,
 }
 
 /// One relay recall receipt for a still-queued message (see [`PersistedChat::queued_receipts`]).

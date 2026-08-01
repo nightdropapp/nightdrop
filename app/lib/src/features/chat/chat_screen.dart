@@ -13,6 +13,7 @@ import '../../app.dart';
 import '../../core/nightdrop_core.dart';
 import '../../core/media_cache.dart';
 import '../../core/models.dart';
+import '../../core/screenshot_detector.dart';
 import '../backup/backup_actions.dart';
 import 'verify_screen.dart';
 
@@ -102,7 +103,20 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scroll = ScrollController();
 
   @override
+  void initState() {
+    super.initState();
+    // Screenshot transparency (#1): while this chat is open, a screenshot is logged here and the
+    // peer is told. Registered per-chat rather than globally so a capture is never attributed to a
+    // conversation the user isn't actually looking at.
+    ScreenshotDetector.listen(() {
+      if (!mounted) return;
+      NightdropScope.of(context).reportScreenshot(widget.contactId);
+    });
+  }
+
+  @override
   void dispose() {
+    ScreenshotDetector.stop();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -603,6 +617,7 @@ class _ChatScreenState extends State<ChatScreen> {
               if (contact.remoteStorage)
                 _RemoteStorageBanner(healthy: contact.remoteStorageHealthy),
               if (contact.peerBackedUp) const _PeerBackupBanner(),
+              _SilenceBanner(lastSeenSecs: contact.lastSeenSecs),
               Expanded(
                 child: visibleMessages.isEmpty
                     ? Center(child: Text(l10n.sayHi))
@@ -690,6 +705,56 @@ class _RemoteStorageBanner extends StatelessWidget {
 /// Persistent transparency warning that the peer keeps a Full backup of this chat (#7), so
 /// messages sent here may persist in the other person's backup. Mirrors the server-storage
 /// banner — a signal the invariant treats like remote storage.
+
+/// "No sign of them" — shown when nothing authenticated has arrived from this peer for a fortnight.
+///
+/// This is what stands in for a duress-wipe notice, which **cannot exist**: the wipe runs with no
+/// store key, so there is no ratchet state to authenticate a "chat deleted" frame with
+/// (`docs/design/duress-wipe.md` §5). See `docs/design/silence-detection.md`.
+///
+/// It reports **silence, never a cause.** A wiped identity, a seized phone, a lost phone and a
+/// holiday look identical from here. The vagueness is deliberate: a message that said "they wiped"
+/// would be a record on this device that someone used an anti-forensics feature. The wording must
+/// stay observational for that reason — don't "improve" it into a diagnosis.
+class _SilenceBanner extends StatelessWidget {
+  const _SilenceBanner({required this.lastSeenSecs});
+
+  /// Unix seconds of the last authenticated contact; 0 = no reading yet (never "silent").
+  final int lastSeenSecs;
+
+  /// Clear of ordinary life — a long weekend, a holiday, a few days on a flat phone — while still
+  /// arriving long after the relay's 24h store-and-forward horizon has passed.
+  static const _threshold = Duration(days: 14);
+
+  @override
+  Widget build(BuildContext context) {
+    if (lastSeenSecs <= 0) return const SizedBox.shrink();
+    final since = DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(lastSeenSecs * 1000),
+    );
+    if (since < _threshold) return const SizedBox.shrink();
+
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+      child: Row(
+        children: [
+          Icon(Icons.schedule, size: 18, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              AppLocalizations.of(context)!.silenceBanner(since.inDays),
+              style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 12.5),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 /// Subtle, tappable nudge shown on an unverified chat. Verification (comparing the safety number
 /// out-of-band) is what actually rules out a MITM on pairing, but it's easy to skip — so we keep a
 /// low-key reminder in front of the user until they verify. Tap → [VerifyScreen].

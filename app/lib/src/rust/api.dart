@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `now_secs`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
 
 /// Subscribe to push events from the core (flutter_rust_bridge stream). Call once at
@@ -39,6 +39,84 @@ Future<void> resetTorGuards({required String stateDir}) =>
 /// [`new_tor`](NightdropCore::new_tor) on later launches to restore the saved state.
 Future<String> randomStoreKey() =>
     RustLib.instance.api.crateApiRandomStoreKey();
+
+/// Whether this store's key is protected by a passphrase rather than sitting in the platform
+/// keystore. `dir` is the same directory the state blob lives in.
+Future<bool> storeIsLocked({required String dir}) =>
+    RustLib.instance.api.crateApiStoreIsLocked(dir: dir);
+
+/// Put the store key behind `passphrase`. The caller **must** then delete its keystore copy of
+/// `key_b64`; leaving it there defeats the entire purpose, since the key would still be readable
+/// without the passphrase.
+///
+/// A short PIN cannot be made safe here: an attacker holding the lock file tries every 4-6 digit
+/// value offline regardless of the derivation cost. Only a passphrase with real entropy protects
+/// an imaged device, and the UI must say so rather than implying otherwise.
+Future<void> setStorePassphrase(
+        {required String dir,
+        required String keyB64,
+        required String passphrase}) =>
+    RustLib.instance.api.crateApiSetStorePassphrase(
+        dir: dir, keyB64: keyB64, passphrase: passphrase);
+
+/// Recover the store key from `secret`, base64-encoded for the Dart side to hand straight back to a
+/// core constructor. Errors on a wrong secret without saying which part was wrong.
+///
+/// A **duress** secret (#3) returns `duress: true` instead of a key; the caller must then wipe (see
+/// `docs/design/duress-wipe.md`). Both slots are always derived, so the two outcomes are
+/// indistinguishable by timing to anyone watching the user unlock.
+Future<StoreUnlock> unlockStoreKey(
+        {required String dir, required String secret}) =>
+    RustLib.instance.api.crateApiUnlockStoreKey(dir: dir, secret: secret);
+
+/// Arm (or replace) the **duress** secret (#3) — the second secret that wipes instead of opening.
+/// Requires the normal secret, so an adversary who coerced one unlock cannot re-arm or disarm it.
+///
+/// The lock file is written so that an armed duress slot is **indistinguishable** from an unarmed
+/// one, and the UI must never display which it is: showing it would mean persisting it, which is
+/// the tell the design removes. Warn the user at this moment and nowhere else.
+Future<void> setDuressSecret(
+        {required String dir,
+        required String passphrase,
+        required String duress}) =>
+    RustLib.instance.api.crateApiSetDuressSecret(
+        dir: dir, passphrase: passphrase, duress: duress);
+
+/// Disarm duress. Requires the normal secret. Succeeds whether or not anything was armed, so a
+/// caller who has not proven they know the state cannot infer it from the outcome.
+Future<void> clearDuressSecret(
+        {required String dir, required String passphrase}) =>
+    RustLib.instance.api
+        .crateApiClearDuressSecret(dir: dir, passphrase: passphrase);
+
+/// Whether a wipe code is armed. Needs the **store key**, which is precisely what makes this safe
+/// to expose: the unlocked app can tell the user where they stand, while someone holding only an
+/// image of the device still cannot — reading it requires the key the lock protects.
+///
+/// Offering no readout at all was worse. A user who cannot see whether their wipe code is armed can
+/// believe they have one when they don't, and find out while being coerced.
+Future<bool> duressIsArmed({required String dir, required String keyB64}) =>
+    RustLib.instance.api.crateApiDuressIsArmed(dir: dir, keyB64: keyB64);
+
+/// Whether `secret` is the **normal** secret — so a settings flow can reject a wrong one up front
+/// rather than after the user has filled in everything that follows. A duress secret answers
+/// `false` and wipes nothing: its contract is the lock screen.
+Future<bool> storeSecretIsCorrect(
+        {required String dir, required String secret}) =>
+    RustLib.instance.api.crateApiStoreSecretIsCorrect(dir: dir, secret: secret);
+
+/// Delete the lock file without any secret — **only** for the duress wipe, where the store it
+/// protects is destroyed in the same breath. Leaving it behind would show a lock screen for a store
+/// that no longer exists.
+Future<void> destroyStoreLock({required String dir}) =>
+    RustLib.instance.api.crateApiDestroyStoreLock(dir: dir);
+
+/// Drop the passphrase lock, returning the store key so the caller can restore its keystore copy.
+/// Without that the store would be unopenable — the lock file was the only way in.
+Future<String> clearStorePassphrase(
+        {required String dir, required String passphrase}) =>
+    RustLib.instance.api
+        .crateApiClearStorePassphrase(dir: dir, passphrase: passphrase);
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<NightdropCore>>
 abstract class NightdropCore implements RustOpaqueInterface {
@@ -106,6 +184,14 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Delete a chat (TODO #1): signal the peer (who then sees a "chat deleted" notice) and
   /// remove it locally. Creating a new chat is required to talk again.
   Future<void> deleteChat({required String contactId});
+
+  /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
+  /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
+  /// "chat deleted" — never anything that identifies this as a duress event.
+  ///
+  /// Best-effort by design. The caller must wipe regardless of the count returned: a wipe that
+  /// can be prevented by taking the phone off the network is not a wipe.
+  Future<int> duressLogout();
 
   /// Edit the text of one of our own messages (`msg_id` from [`ChatMessage`]). Allowed
   /// within 15 minutes of sending, or at any time while the message is still queued on
@@ -237,6 +323,16 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
   /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   Future<List<RelayHealth>> relayHealth();
+
+  /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
+  ///
+  /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which
+  /// is undetectable. Making them visible is the honest trade. Fire-and-forget from the UI's point
+  /// of view; a chat that no longer exists is silently ignored.
+  ///
+  /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
+  /// not imply otherwise.
+  Future<void> reportScreenshot({required String contactId});
 
   /// Restore a core from a password-encrypted backup file (§7, TODO #5). `listen_addr` +
   /// `relay_addr` select the real networked transport (as in [`new_networked`]); omit
@@ -539,6 +635,15 @@ class Contact {
   /// implying a server copy exists. Always `true` when server storage is off. Ephemeral.
   final bool remoteStorageHealthy;
 
+  /// Unix seconds of the last **authenticated** contact from this peer — a message we decrypted
+  /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
+  /// says their device drained our mailbox. `0` when we have no reading yet.
+  ///
+  /// Drives the "no sign of them" notice. It reports **silence, not a cause**: a wiped identity,
+  /// a seized phone, a lost phone and a flat battery all look the same from here, and the UI must
+  /// not imply otherwise. That ambiguity is deliberate — see `docs/design/silence-detection.md`.
+  final BigInt lastSeenSecs;
+
   const Contact({
     required this.id,
     required this.theirName,
@@ -551,6 +656,7 @@ class Contact {
     required this.peerVerified,
     required this.peerRelays,
     required this.remoteStorageHealthy,
+    required this.lastSeenSecs,
   });
 
   @override
@@ -565,7 +671,8 @@ class Contact {
       verified.hashCode ^
       peerVerified.hashCode ^
       peerRelays.hashCode ^
-      remoteStorageHealthy.hashCode;
+      remoteStorageHealthy.hashCode ^
+      lastSeenSecs.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -582,7 +689,8 @@ class Contact {
           verified == other.verified &&
           peerVerified == other.peerVerified &&
           peerRelays == other.peerRelays &&
-          remoteStorageHealthy == other.remoteStorageHealthy;
+          remoteStorageHealthy == other.remoteStorageHealthy &&
+          lastSeenSecs == other.lastSeenSecs;
 }
 
 /// An anonymous, device-held identity handle (just its public id for the UI).
@@ -674,4 +782,30 @@ class ServerBackupInfo {
           runtimeType == other.runtimeType &&
           password == other.password &&
           expiresAtSecs == other.expiresAtSecs;
+}
+
+/// What a secret presented at the lock screen turned out to be.
+class StoreUnlock {
+  /// The **duress** secret (#3) was presented: the caller must wipe the identity, and `key_b64`
+  /// is empty. Never true and non-empty at once — the duress secret yields no key, ever.
+  final bool duress;
+
+  /// The store key, base64, when this was the normal secret.
+  final String keyB64;
+
+  const StoreUnlock({
+    required this.duress,
+    required this.keyB64,
+  });
+
+  @override
+  int get hashCode => duress.hashCode ^ keyB64.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is StoreUnlock &&
+          runtimeType == other.runtimeType &&
+          duress == other.duress &&
+          keyB64 == other.keyB64;
 }

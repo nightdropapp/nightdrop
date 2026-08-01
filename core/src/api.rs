@@ -184,6 +184,14 @@ pub struct Contact {
     /// directly). Lets the UI downgrade the storage banner to "not currently stored" instead of
     /// implying a server copy exists. Always `true` when server storage is off. Ephemeral.
     pub remote_storage_healthy: bool,
+    /// Unix seconds of the last **authenticated** contact from this peer — a message we decrypted
+    /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
+    /// says their device drained our mailbox. `0` when we have no reading yet.
+    ///
+    /// Drives the "no sign of them" notice. It reports **silence, not a cause**: a wiped identity,
+    /// a seized phone, a lost phone and a flat battery all look the same from here, and the UI must
+    /// not imply otherwise. That ambiguity is deliberate — see `docs/design/silence-detection.md`.
+    pub last_seen_secs: u64,
 }
 
 /// Reachability of one of our advertised extra relays (#17), for the UI's relay-status surface.
@@ -1350,6 +1358,21 @@ impl NightdropCore {
         Ok(password)
     }
 
+    /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
+    ///
+    /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which
+    /// is undetectable. Making them visible is the honest trade. Fire-and-forget from the UI's point
+    /// of view; a chat that no longer exists is silently ignored.
+    ///
+    /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
+    /// not imply otherwise.
+    pub fn report_screenshot(&self, contact_id: String) -> Result<()> {
+        let mut g = self.lock();
+        g.me.report_screenshot(&contact_id);
+        g.save();
+        Ok(())
+    }
+
     /// Merge a scoped backup file at `path` into the **current** identity (#8): add the chat(s)
     /// it carries without disturbing our identity or any active session (existing chats only
     /// gain missing history). Returns how many messages were merged.
@@ -1397,6 +1420,19 @@ impl NightdropCore {
     pub fn logout(&self) -> u32 {
         let mut g = self.lock();
         let failed = g.me.logout();
+        emit("contacts");
+        failed as u32
+    }
+
+    /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
+    /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
+    /// "chat deleted" — never anything that identifies this as a duress event.
+    ///
+    /// Best-effort by design. The caller must wipe regardless of the count returned: a wipe that
+    /// can be prevented by taking the phone off the network is not a wipe.
+    pub fn duress_logout(&self) -> u32 {
+        let mut g = self.lock();
+        let failed = g.me.duress_logout();
         emit("contacts");
         failed as u32
     }
@@ -1487,6 +1523,112 @@ pub fn random_store_key() -> String {
     let encoded = base64::engine::general_purpose::STANDARD.encode(key);
     key.zeroize(); // don't leave the raw key on the stack after it's been handed off as base64
     encoded
+}
+
+/// Whether this store's key is protected by a passphrase rather than sitting in the platform
+/// keystore. `dir` is the same directory the state blob lives in.
+pub fn store_is_locked(dir: String) -> bool {
+    crate::storage::lock::is_locked(&dir)
+}
+
+/// Put the store key behind `passphrase`. The caller **must** then delete its keystore copy of
+/// `key_b64`; leaving it there defeats the entire purpose, since the key would still be readable
+/// without the passphrase.
+///
+/// A short PIN cannot be made safe here: an attacker holding the lock file tries every 4-6 digit
+/// value offline regardless of the derivation cost. Only a passphrase with real entropy protects
+/// an imaged device, and the UI must say so rather than implying otherwise.
+pub fn set_store_passphrase(dir: String, key_b64: String, passphrase: String) -> Result<()> {
+    let key = decode_store_key(&key_b64)?;
+    crate::storage::lock::set_passphrase(&dir, &key, &passphrase)
+}
+
+/// What a secret presented at the lock screen turned out to be.
+pub struct StoreUnlock {
+    /// The **duress** secret (#3) was presented: the caller must wipe the identity, and `key_b64`
+    /// is empty. Never true and non-empty at once — the duress secret yields no key, ever.
+    pub duress: bool,
+    /// The store key, base64, when this was the normal secret.
+    pub key_b64: String,
+}
+
+/// Recover the store key from `secret`, base64-encoded for the Dart side to hand straight back to a
+/// core constructor. Errors on a wrong secret without saying which part was wrong.
+///
+/// A **duress** secret (#3) returns `duress: true` instead of a key; the caller must then wipe (see
+/// `docs/design/duress-wipe.md`). Both slots are always derived, so the two outcomes are
+/// indistinguishable by timing to anyone watching the user unlock.
+pub fn unlock_store_key(dir: String, secret: String) -> Result<StoreUnlock> {
+    use base64::Engine as _;
+    use zeroize::Zeroize as _;
+    match crate::storage::lock::unlock(&dir, &secret)? {
+        crate::storage::lock::Opened::Normal(mut key) => {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+            key.zeroize();
+            Ok(StoreUnlock {
+                duress: false,
+                key_b64: encoded,
+            })
+        }
+        crate::storage::lock::Opened::Duress => Ok(StoreUnlock {
+            duress: true,
+            key_b64: String::new(),
+        }),
+    }
+}
+
+/// Arm (or replace) the **duress** secret (#3) — the second secret that wipes instead of opening.
+/// Requires the normal secret, so an adversary who coerced one unlock cannot re-arm or disarm it.
+///
+/// The lock file is written so that an armed duress slot is **indistinguishable** from an unarmed
+/// one, and the UI must never display which it is: showing it would mean persisting it, which is
+/// the tell the design removes. Warn the user at this moment and nowhere else.
+pub fn set_duress_secret(dir: String, passphrase: String, duress: String) -> Result<()> {
+    crate::storage::lock::set_duress(&dir, &passphrase, &duress)
+}
+
+/// Disarm duress. Requires the normal secret. Succeeds whether or not anything was armed, so a
+/// caller who has not proven they know the state cannot infer it from the outcome.
+pub fn clear_duress_secret(dir: String, passphrase: String) -> Result<()> {
+    crate::storage::lock::clear_duress(&dir, &passphrase)
+}
+
+/// Whether a wipe code is armed. Needs the **store key**, which is precisely what makes this safe
+/// to expose: the unlocked app can tell the user where they stand, while someone holding only an
+/// image of the device still cannot — reading it requires the key the lock protects.
+///
+/// Offering no readout at all was worse. A user who cannot see whether their wipe code is armed can
+/// believe they have one when they don't, and find out while being coerced.
+pub fn duress_is_armed(dir: String, key_b64: String) -> bool {
+    let Ok(key) = decode_store_key(&key_b64) else {
+        return false;
+    };
+    crate::storage::lock::duress_armed(&dir, &key)
+}
+
+/// Whether `secret` is the **normal** secret — so a settings flow can reject a wrong one up front
+/// rather than after the user has filled in everything that follows. A duress secret answers
+/// `false` and wipes nothing: its contract is the lock screen.
+pub fn store_secret_is_correct(dir: String, secret: String) -> bool {
+    crate::storage::lock::is_normal_secret(&dir, &secret)
+}
+
+/// Delete the lock file without any secret — **only** for the duress wipe, where the store it
+/// protects is destroyed in the same breath. Leaving it behind would show a lock screen for a store
+/// that no longer exists.
+pub fn destroy_store_lock(dir: String) -> Result<()> {
+    crate::storage::lock::destroy(&dir)
+}
+
+/// Drop the passphrase lock, returning the store key so the caller can restore its keystore copy.
+/// Without that the store would be unopenable — the lock file was the only way in.
+pub fn clear_store_passphrase(dir: String, passphrase: String) -> Result<String> {
+    use base64::Engine as _;
+    use zeroize::Zeroize as _;
+    let mut key = crate::storage::lock::clear(&dir, &passphrase)?;
+    let encoded = base64::engine::general_purpose::STANDARD.encode(key);
+    key.zeroize();
+    Ok(encoded)
 }
 
 /// Decode a base64 32-byte at-rest key.

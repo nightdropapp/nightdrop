@@ -266,6 +266,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Night Drop found data saved on this device but couldn’t open it. Two common, fixable causes: Tor hasn’t connected yet, or your system keyring/wallet (e.g. KDE Wallet or GNOME Keyring) is locked — unlock it, then tap Try again. Your existing data is preserved and won’t be overwritten automatically.';
 
   @override
+  String get loadErrorBodyMobile =>
+      'Night Drop found data saved on this device but couldn’t open it. Usually Tor simply hasn’t connected yet — tap Try again. If it keeps failing, the key that unlocks this data is no longer on the device, which can happen after clearing the app’s storage or moving to a new phone; in that case only a backup can bring it back. Your existing data is preserved and won’t be overwritten automatically.';
+
+  @override
   String get tryAgain => 'Try again';
 
   @override
@@ -770,4 +774,171 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get messageHint => 'Message';
+
+  @override
+  String get appLockMenu => 'App lock';
+
+  @override
+  String get lockedTitle => 'Night Drop is locked';
+
+  @override
+  String get lockedBody =>
+      'Enter your PIN or passphrase to open your messages.';
+
+  @override
+  String get lockedField => 'PIN or passphrase';
+
+  @override
+  String get lockedFailed => 'That didn\'t unlock it. Try again.';
+
+  @override
+  String get lockedUnlock => 'Unlock';
+
+  @override
+  String get lockedNoRecovery =>
+      'There is no way to recover this. Without it, the messages on this device stay encrypted for good.';
+
+  @override
+  String get appLockOffTitle => 'App lock is off';
+
+  @override
+  String get appLockOffBody =>
+      'Your messages are unlocked whenever the app opens. Turn on a lock to require a PIN or passphrase first.';
+
+  @override
+  String get appLockOnTitle => 'App lock is on';
+
+  @override
+  String get appLockOnBody =>
+      'Your messages need your PIN or passphrase before they can be opened.';
+
+  @override
+  String get appLockChoosePin => 'Use a PIN';
+
+  @override
+  String get appLockChoosePinBody =>
+      'Quick to type. Stops someone who picks up your unlocked phone — but a short PIN can be broken by someone who copies the data off your device.';
+
+  @override
+  String get appLockChoosePassphrase => 'Use a passphrase';
+
+  @override
+  String get appLockChoosePassphraseBody =>
+      'Longer to type. The only option that also protects your messages if someone copies the data off your device.';
+
+  @override
+  String get appLockEnable => 'Turn on app lock';
+
+  @override
+  String get appLockDisable => 'Turn off app lock';
+
+  @override
+  String get appLockNewSecret => 'New PIN or passphrase';
+
+  @override
+  String get appLockConfirmSecret => 'Enter it again';
+
+  @override
+  String get appLockMismatch => 'Those don\'t match.';
+
+  @override
+  String get appLockTooShortPin => 'Use at least 6 digits.';
+
+  @override
+  String get appLockTooShortPassphrase => 'Use at least 12 characters.';
+
+  @override
+  String get appLockWarnNoRecovery =>
+      'If you forget this, your messages are gone. There is no reset and no recovery — not by us, not by anyone.';
+
+  @override
+  String get appLockIUnderstand => 'I understand — turn it on';
+
+  @override
+  String get appLockEnabled => 'App lock is on.';
+
+  @override
+  String get appLockDisabled => 'App lock is off.';
+
+  @override
+  String get appLockWrongSecret => 'That didn\'t match. Nothing was changed.';
+
+  @override
+  String get appLockCurrentSecret => 'Current PIN or passphrase';
+
+  @override
+  String get appLockBgNote =>
+      'Background delivery is on, so your key stays in memory while the app is locked — otherwise messages couldn\'t arrive. Turn background delivery off if you\'d rather the key be forgotten each time you lock.';
+
+  @override
+  String get duressSet => 'Set a wipe code';
+
+  @override
+  String get duressReplace => 'Replace it';
+
+  @override
+  String get duressRemove => 'Remove the wipe code';
+
+  @override
+  String get duressSkip => 'Not now';
+
+  @override
+  String get duressMenu => 'Wipe code';
+
+  @override
+  String get duressOnBody =>
+      'A wipe code is set. Entering it at the lock screen deletes your identity and messages instead of opening them.';
+
+  @override
+  String get duressOffBody =>
+      'No wipe code is set. You can add a second code that deletes your identity and messages instead of opening them.';
+
+  @override
+  String get duressOfferBody =>
+      'You can also set a second code that wipes instead of unlocking. Entering it at the lock screen deletes your identity and messages and leaves the app looking freshly installed. You can add one later under “Wipe code”.';
+
+  @override
+  String get duressNeedsLock =>
+      'Set an app lock first. The wipe code is a second code for the same lock screen.';
+
+  @override
+  String get duressTitle => 'Wipe code';
+
+  @override
+  String get duressBody =>
+      'A second code for the lock screen. Entering it does not open your messages — it deletes them, along with your identity, and leaves the app looking like it was just installed.';
+
+  @override
+  String get duressNew => 'New wipe code';
+
+  @override
+  String get duressConfirm => 'Enter it again';
+
+  @override
+  String get duressSame =>
+      'This must be different from the code that opens your messages.';
+
+  @override
+  String get duressWarnTitle => 'Before you set this';
+
+  @override
+  String get duressWarnBody =>
+      'You cannot practise this. Entering the wipe code destroys everything on this device, every time, with no confirmation and no undo — that is what makes it work under pressure.\n\nWe have checked that the code you just chose does work. You will not be reminded that a wipe code is set: showing it anywhere would tell whoever picks up your phone that it exists.\n\nYour contacts are not told anything. The wipe code deliberately gives the app no way to read your messages, which also leaves it no way to send on your behalf — so your contacts simply stop hearing from you. Agree on another way to reach each other before you need it.';
+
+  @override
+  String get duressUnderstand => 'I understand — set it';
+
+  @override
+  String get duressDone => 'Wipe code set.';
+
+  @override
+  String get duressCleared => 'Wipe code removed.';
+
+  @override
+  String get duressCurrentSecret => 'Your normal PIN or passphrase';
+
+  @override
+  String silenceBanner(int days) {
+    return 'No sign of this person for $days days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.';
+  }
 }

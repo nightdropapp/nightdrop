@@ -68,6 +68,7 @@ class Contact {
     this.peerVerified = false,
     this.peerRelays = const [],
     this.remoteStorageHealthy = true,
+    this.lastSeenSecs = 0,
   });
 
   final String id;
@@ -115,6 +116,15 @@ class Contact {
   /// couldn't reach any relay to store the copy (the message still reached the peer directly), so
   /// the storage banner is downgraded to "not currently stored". Always `true` when storage is off.
   bool remoteStorageHealthy;
+
+  /// Unix seconds of the last **authenticated** contact from this peer — a decrypted message, or a
+  /// control frame that verified on their ratchet (including the silent delivery ack, so a peer who
+  /// reads without replying still counts as alive). `0` = no reading yet.
+  ///
+  /// Drives the "no sign of them" banner, which reports **silence and never a cause**: a wiped
+  /// identity, a seized phone and a holiday are indistinguishable from here. See
+  /// `docs/design/silence-detection.md`.
+  int lastSeenSecs;
 }
 
 /// Reachability of one of *our* advertised extra relays (#17), for the relay-status surface.

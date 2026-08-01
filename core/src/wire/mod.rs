@@ -167,6 +167,22 @@ pub enum Frame {
     /// thumbnail) — see `node::pack_media_incoming`. The matching `Media` frame carries the
     /// same `transfer_id`, letting the receiver replace the placeholder with the real media.
     MediaIncoming { from: String, message: WireOlm },
+    /// Transparency signal (#1): the sender took a **screenshot** of this chat, so a copy of the
+    /// visible messages now exists outside the app, in their device's gallery — beyond anything
+    /// disappearing timers or remote-storage limits can reach.
+    ///
+    /// Deliberately an **event**, not a state flag like [`BackedUp`](Frame::BackedUp): each
+    /// screenshot is reported and logged separately, since "they screenshotted this chat once,
+    /// months ago" and "they are screenshotting it now" are different things to know.
+    ///
+    /// **E2E-authenticated** like the other control frames: `message` decrypts to a fixed marker
+    /// (`node::MARK_SCREENSHOT`) on the session, so a stranger can't fake a screenshot accusation
+    /// or replay a stale one. Carries no plaintext — the frame's arrival *is* the signal.
+    ///
+    /// **Not a guarantee.** Only Android 14+ can detect a screenshot at all (and never a photo of
+    /// the screen), so absence of this frame does not mean no screenshot was taken. See
+    /// `SECURITY.md`.
+    Screenshot { from: String, message: WireOlm },
 }
 
 impl Frame {

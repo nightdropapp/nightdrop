@@ -310,13 +310,18 @@ on a re-pair (new session) exactly like `verified`.
   2 KB → Bob receives 2 KB" size-correlation channel that onion routing alone leaves open. (Coarse
   buckets for media; timing/volume correlation is a separate, harder problem — see the transport
   alternatives note and the mixnet discussion.)
-- **Authenticated control plane:** the peer-state control signals `Closed`, `Ack`, `BackedUp`, and
-  `Verified` are **E2E-authenticated** — each carries an encrypted fixed marker on the ratchet, and the
+- **Authenticated control plane:** the peer-state control signals `Closed`, `Ack`, `BackedUp`,
+  `Verified`, and `Screenshot` are **E2E-authenticated** — each carries an encrypted fixed marker on the ratchet, and the
   receiver acts only if it decrypts to the expected value (`node::MARK_*`, `verify_control`). This
   closes a spoofing/replay gap: without it, anyone who knew your identity key could forge a
-  "the other person deleted this chat" (`Closed`), a false delivery `Ack`, or a fake backup
-  transparency scare. Message *content* was always ratchet-authenticated; this extends the same
-  guarantee to the signals that mutate chat state.
+  "the other person deleted this chat" (`Closed`), a false delivery `Ack`, a fake backup
+  transparency scare, or a fabricated screenshot accusation (`Screenshot`) — that last one being a
+  way to manufacture distrust between two people who have no other channel to check. Message *content* was always ratchet-authenticated; this extends the same
+  guarantee to the signals that mutate chat state. `Closed` and `Screenshot` are additionally
+  **held for retry** (`pending_control`) when neither the peer nor a relay is reachable as they are
+  raised: both report a one-off event the user cannot resend by hand. Design record for the
+  screenshot signal, including what detection can and cannot see:
+  `docs/design/screenshot-transparency.md`.
 - **Onion client authorization (reachability gate):** the Tor transport can restrict *who may even
   fetch our onion descriptor* to paired contacts, using v3 **restricted discovery**
   (`core/src/transport/{client_auth,tor}.rs`, `--features tor`). Each side hands the other a **public**
@@ -399,6 +404,29 @@ three transfer mechanisms, each covering a different scenario.
 All backup files/blobs are encrypted at rest; the password is the only thing that can
 open them, and only the user (7a) or the paired device (7b) ever holds it.
 
+### 7d. App lock — the at-rest key behind a user secret
+
+By default the 32-byte at-rest key lives in the OS keystore, so the app opens the history with no
+user interaction. That is the right default (nothing to forget, nothing to lose) but it means
+possession of an unlocked device is possession of the history. The **opt-in app lock** re-wraps
+that key under `Argon2id(secret, salt)` — 64 MiB / t=3, well above the §7 backup parameters
+because this secret is *user-chosen* — and stores `{salt, params, wrapped}` in `store-key.lock`
+beside the state blob. Enabling a lock **deletes the keystore copy**; without that the lock would
+be decoration. The sealed state format is unchanged, and there is no recovery path: the secret is
+the only way in, by design.
+
+The user picks **PIN or passphrase**, and the distinction is real, not cosmetic: a short PIN
+defeats someone who picks up the unlocked phone, but ~20 bits cannot survive an attacker who
+copies the lock file off the device, at any KDF cost. Only a passphrase covers that case. The UI
+states this on each option rather than presenting them as equivalent conveniences.
+
+Lock lifetime follows the existing background-delivery toggle, with no new setting: **off** → the
+key is dropped on lock, so nothing can read the store until the next unlock; **on** → it stays
+resident, because a foreground service that cannot decrypt cannot deliver. That trade is inherent
+to receiving while locked (Signal makes the same one).
+
+Design record, including how this constrains the planned duress wipe: `docs/design/app-lock.md`.
+
 ---
 
 ## 8. Threat Model (summary)
@@ -440,7 +468,7 @@ here weakens the §-level invariants — it states their limits.
   the peer see a `.onion`, not an IP or location.
 - **Frame sizes** — wire v2 pads every frame to a fixed size, so an on-path observer
   learns nothing from length (not message size, not "typing vs. media").
-- **Control-plane authenticity** — `Closed`/`Ack`/`BackedUp`/`Verified`/`Approved` carry a
+- **Control-plane authenticity** — `Closed`/`Ack`/`BackedUp`/`Verified`/`Screenshot`/`Approved` carry a
   ratchet-encrypted marker, so they can't be spoofed or replayed by the relay.
 - **Onion reachability** — restricted discovery (#22) gates the onion descriptor to
   authorized contacts, so a stranger cannot even confirm a user's service is online.

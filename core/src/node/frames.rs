@@ -45,14 +45,53 @@ impl Node {
                 let is_repair = prior.is_some();
                 let open_rekey = prior.map(|c| !c.closed).unwrap_or(false);
                 if open_rekey {
+                    crate::diag!(
+                        "pair: Hello from a contact we already have an open chat with — re-keying \
+                         it rather than raising a new request"
+                    );
+                    let mut already_authorized = false;
                     if let Some(chat) = self.chats.get_mut(&contact_id) {
                         chat.session = accepted.session;
                         chat.peer_address = peer_address.clone();
                         chat.closed = false;
                         chat.contact.verified = false; // new session invalidates prior verification
                         chat.contact.peer_verified = false; // …as does the peer's prior signal
+                        already_authorized = chat.authorized;
+                    }
+                    // Re-pairing someone we already approved shows *us* no request — correct, we
+                    // know them — but the joiner is sitting on "waiting for them to accept", and
+                    // the approval echo only goes out from `authorize()`, which never runs here.
+                    // Without this the joiner waits forever on a chat that is already live on our
+                    // side. Echo the approval ourselves.
+                    if already_authorized {
+                        devlog!(
+                            "[nightdrop] re-pair of an already-approved chat with {contact_id}: \
+                             echoing the approval so their side stops waiting"
+                        );
+                        let from = self.identity_key();
+                        let code = self
+                            .chats
+                            .get(&contact_id)
+                            .and_then(|c| c.code.clone())
+                            .unwrap_or_default();
+                        let _ = self.deliver(
+                            &peer_address,
+                            &contact_id,
+                            &Frame::Approved { from, code },
+                        );
                     }
                 } else {
+                    // Which branch this took is the whole authorization story, so say it out loud:
+                    // a stranger must land as a *request*, and "created a chat already approved"
+                    // in this log means the invariant was bypassed.
+                    crate::diag!(
+                        "pair: new chat from an unknown identity — {}",
+                        if self.require_authorization {
+                            "held as a request pending approval"
+                        } else {
+                            "AUTO-APPROVED (require_authorization is off)"
+                        }
+                    );
                     self.chats.insert(
                         contact_id.clone(),
                         Chat {
@@ -68,6 +107,7 @@ impl Node {
                                 peer_verified: false,
                                 peer_relays: Vec::new(),
                                 remote_storage_healthy: true,
+                                last_seen_secs: 0, // filled from `Chat::last_seen` in `contacts()`
                             },
                             peer_address: peer_address.clone(),
                             session: accepted.session,
@@ -78,6 +118,9 @@ impl Node {
                             code: self.last_invite_code.clone(),
                             closed: false,
                             relay_receipts: HashMap::new(),
+                            // Pairing is itself contact: start the clock rather than
+                            // reporting a brand-new chat as silent.
+                            last_seen: Some(crate::api::now_secs()),
                             remote_storage_healthy: true,
                         },
                     );
@@ -124,6 +167,8 @@ impl Node {
                     return Ok(None); // ignore messages from a not-yet-authorized contact
                 }
                 let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
+                // Decrypting on their ratchet is proof it was them (silence-detection design).
+                chat.last_seen = Some(crate::api::now_secs());
                 let text = String::from_utf8_lossy(&plaintext).into_owned();
                 flip_queued_delivered(&mut chat.history); // they're online → queued msgs delivered
                 chat.history
@@ -292,6 +337,24 @@ impl Node {
                         "👻 The other person deleted this chat. A new chat will need to be \
                          created to keep talking."
                             .to_string(),
+                    ));
+                    return Ok(Some((from, String::new())));
+                }
+                Ok(None)
+            }
+            Frame::Screenshot { from, message } => {
+                // Transparency (#1): the peer captured this conversation to their gallery, where
+                // nothing we do — disappearing timers, remote-storage caps, unsend — can reach it.
+                // Authenticate first: an unauthenticated version would let anyone who knows the
+                // identity key manufacture distrust between two people.
+                if !self.verify_control(&from, &message, MARK_SCREENSHOT) {
+                    return Ok(None);
+                }
+                if let Some(chat) = self.chats.get_mut(&from) {
+                    // Logged every time, not once: unlike `BackedUp`'s state flag, repetition here
+                    // is information the user should have.
+                    chat.history.push(ChatMessage::system(
+                        "📸 The other person took a screenshot of this chat.".to_string(),
                     ));
                     return Ok(Some((from, String::new())));
                 }

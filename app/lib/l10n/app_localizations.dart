@@ -532,6 +532,12 @@ abstract class AppLocalizations {
   /// **'Night Drop found data saved on this device but couldn’t open it. Two common, fixable causes: Tor hasn’t connected yet, or your system keyring/wallet (e.g. KDE Wallet or GNOME Keyring) is locked — unlock it, then tap Try again. Your existing data is preserved and won’t be overwritten automatically.'**
   String get loadErrorBody;
 
+  /// Android/iOS wording for the same screen. No mention of desktop keyrings; the phone equivalent is not something the user can unlock by hand.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop found data saved on this device but couldn’t open it. Usually Tor simply hasn’t connected yet — tap Try again. If it keeps failing, the key that unlocks this data is no longer on the device, which can happen after clearing the app’s storage or moving to a new phone; in that case only a backup can bring it back. Your existing data is preserved and won’t be overwritten automatically.'**
+  String get loadErrorBodyMobile;
+
   /// Button to retry loading the saved session.
   ///
   /// In en, this message translates to:
@@ -1341,6 +1347,306 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Message'**
   String get messageHint;
+
+  /// No description provided for @appLockMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'App lock'**
+  String get appLockMenu;
+
+  /// No description provided for @lockedTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop is locked'**
+  String get lockedTitle;
+
+  /// No description provided for @lockedBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter your PIN or passphrase to open your messages.'**
+  String get lockedBody;
+
+  /// No description provided for @lockedField.
+  ///
+  /// In en, this message translates to:
+  /// **'PIN or passphrase'**
+  String get lockedField;
+
+  /// No description provided for @lockedFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'That didn\'t unlock it. Try again.'**
+  String get lockedFailed;
+
+  /// No description provided for @lockedUnlock.
+  ///
+  /// In en, this message translates to:
+  /// **'Unlock'**
+  String get lockedUnlock;
+
+  /// No description provided for @lockedNoRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'There is no way to recover this. Without it, the messages on this device stay encrypted for good.'**
+  String get lockedNoRecovery;
+
+  /// No description provided for @appLockOffTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'App lock is off'**
+  String get appLockOffTitle;
+
+  /// No description provided for @appLockOffBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your messages are unlocked whenever the app opens. Turn on a lock to require a PIN or passphrase first.'**
+  String get appLockOffBody;
+
+  /// No description provided for @appLockOnTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'App lock is on'**
+  String get appLockOnTitle;
+
+  /// No description provided for @appLockOnBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Your messages need your PIN or passphrase before they can be opened.'**
+  String get appLockOnBody;
+
+  /// No description provided for @appLockChoosePin.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a PIN'**
+  String get appLockChoosePin;
+
+  /// No description provided for @appLockChoosePinBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Quick to type. Stops someone who picks up your unlocked phone — but a short PIN can be broken by someone who copies the data off your device.'**
+  String get appLockChoosePinBody;
+
+  /// No description provided for @appLockChoosePassphrase.
+  ///
+  /// In en, this message translates to:
+  /// **'Use a passphrase'**
+  String get appLockChoosePassphrase;
+
+  /// No description provided for @appLockChoosePassphraseBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Longer to type. The only option that also protects your messages if someone copies the data off your device.'**
+  String get appLockChoosePassphraseBody;
+
+  /// No description provided for @appLockEnable.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on app lock'**
+  String get appLockEnable;
+
+  /// No description provided for @appLockDisable.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn off app lock'**
+  String get appLockDisable;
+
+  /// No description provided for @appLockNewSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'New PIN or passphrase'**
+  String get appLockNewSecret;
+
+  /// No description provided for @appLockConfirmSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter it again'**
+  String get appLockConfirmSecret;
+
+  /// No description provided for @appLockMismatch.
+  ///
+  /// In en, this message translates to:
+  /// **'Those don\'t match.'**
+  String get appLockMismatch;
+
+  /// No description provided for @appLockTooShortPin.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at least 6 digits.'**
+  String get appLockTooShortPin;
+
+  /// No description provided for @appLockTooShortPassphrase.
+  ///
+  /// In en, this message translates to:
+  /// **'Use at least 12 characters.'**
+  String get appLockTooShortPassphrase;
+
+  /// No description provided for @appLockWarnNoRecovery.
+  ///
+  /// In en, this message translates to:
+  /// **'If you forget this, your messages are gone. There is no reset and no recovery — not by us, not by anyone.'**
+  String get appLockWarnNoRecovery;
+
+  /// No description provided for @appLockIUnderstand.
+  ///
+  /// In en, this message translates to:
+  /// **'I understand — turn it on'**
+  String get appLockIUnderstand;
+
+  /// No description provided for @appLockEnabled.
+  ///
+  /// In en, this message translates to:
+  /// **'App lock is on.'**
+  String get appLockEnabled;
+
+  /// No description provided for @appLockDisabled.
+  ///
+  /// In en, this message translates to:
+  /// **'App lock is off.'**
+  String get appLockDisabled;
+
+  /// No description provided for @appLockWrongSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'That didn\'t match. Nothing was changed.'**
+  String get appLockWrongSecret;
+
+  /// No description provided for @appLockCurrentSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'Current PIN or passphrase'**
+  String get appLockCurrentSecret;
+
+  /// No description provided for @appLockBgNote.
+  ///
+  /// In en, this message translates to:
+  /// **'Background delivery is on, so your key stays in memory while the app is locked — otherwise messages couldn\'t arrive. Turn background delivery off if you\'d rather the key be forgotten each time you lock.'**
+  String get appLockBgNote;
+
+  /// No description provided for @duressSet.
+  ///
+  /// In en, this message translates to:
+  /// **'Set a wipe code'**
+  String get duressSet;
+
+  /// No description provided for @duressReplace.
+  ///
+  /// In en, this message translates to:
+  /// **'Replace it'**
+  String get duressReplace;
+
+  /// No description provided for @duressRemove.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove the wipe code'**
+  String get duressRemove;
+
+  /// No description provided for @duressSkip.
+  ///
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get duressSkip;
+
+  /// No description provided for @duressMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe code'**
+  String get duressMenu;
+
+  /// No description provided for @duressOnBody.
+  ///
+  /// In en, this message translates to:
+  /// **'A wipe code is set. Entering it at the lock screen deletes your identity and messages instead of opening them.'**
+  String get duressOnBody;
+
+  /// No description provided for @duressOffBody.
+  ///
+  /// In en, this message translates to:
+  /// **'No wipe code is set. You can add a second code that deletes your identity and messages instead of opening them.'**
+  String get duressOffBody;
+
+  /// No description provided for @duressOfferBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You can also set a second code that wipes instead of unlocking. Entering it at the lock screen deletes your identity and messages and leaves the app looking freshly installed. You can add one later under “Wipe code”.'**
+  String get duressOfferBody;
+
+  /// No description provided for @duressNeedsLock.
+  ///
+  /// In en, this message translates to:
+  /// **'Set an app lock first. The wipe code is a second code for the same lock screen.'**
+  String get duressNeedsLock;
+
+  /// No description provided for @duressTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe code'**
+  String get duressTitle;
+
+  /// No description provided for @duressBody.
+  ///
+  /// In en, this message translates to:
+  /// **'A second code for the lock screen. Entering it does not open your messages — it deletes them, along with your identity, and leaves the app looking like it was just installed.'**
+  String get duressBody;
+
+  /// No description provided for @duressNew.
+  ///
+  /// In en, this message translates to:
+  /// **'New wipe code'**
+  String get duressNew;
+
+  /// No description provided for @duressConfirm.
+  ///
+  /// In en, this message translates to:
+  /// **'Enter it again'**
+  String get duressConfirm;
+
+  /// No description provided for @duressSame.
+  ///
+  /// In en, this message translates to:
+  /// **'This must be different from the code that opens your messages.'**
+  String get duressSame;
+
+  /// No description provided for @duressWarnTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Before you set this'**
+  String get duressWarnTitle;
+
+  /// No description provided for @duressWarnBody.
+  ///
+  /// In en, this message translates to:
+  /// **'You cannot practise this. Entering the wipe code destroys everything on this device, every time, with no confirmation and no undo — that is what makes it work under pressure.\n\nWe have checked that the code you just chose does work. You will not be reminded that a wipe code is set: showing it anywhere would tell whoever picks up your phone that it exists.\n\nYour contacts are not told anything. The wipe code deliberately gives the app no way to read your messages, which also leaves it no way to send on your behalf — so your contacts simply stop hearing from you. Agree on another way to reach each other before you need it.'**
+  String get duressWarnBody;
+
+  /// No description provided for @duressUnderstand.
+  ///
+  /// In en, this message translates to:
+  /// **'I understand — set it'**
+  String get duressUnderstand;
+
+  /// No description provided for @duressDone.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe code set.'**
+  String get duressDone;
+
+  /// No description provided for @duressCleared.
+  ///
+  /// In en, this message translates to:
+  /// **'Wipe code removed.'**
+  String get duressCleared;
+
+  /// No description provided for @duressCurrentSecret.
+  ///
+  /// In en, this message translates to:
+  /// **'Your normal PIN or passphrase'**
+  String get duressCurrentSecret;
+
+  /// Shown in a chat when nothing authenticated has arrived from the peer for a long time. Deliberately states the observation only: the app cannot tell a wiped identity from a lost phone or a holiday, and must not imply it can.
+  ///
+  /// In en, this message translates to:
+  /// **'No sign of this person for {days} days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.'**
+  String silenceBanner(int days);
 }
 
 class _AppLocalizationsDelegate

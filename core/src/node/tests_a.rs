@@ -1015,3 +1015,249 @@ fn double_pairing_the_same_contact_keeps_messaging_working_both_ways() {
         .iter()
         .any(|m| m.system && m.text.to_lowercase().contains("re-paired")));
 }
+
+#[test]
+fn screenshot_notifies_both_sides_every_time_and_cannot_be_forged() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // Both sides learn about it: the capturer sees what their peer was told, the peer sees the
+    // event. Screenshots are allowed (#1) precisely because they're made visible instead.
+    alice.report_screenshot(&bob_contact);
+    bob.pump().unwrap();
+    let mine = alice.messages(&bob_contact);
+    assert!(
+        mine.iter()
+            .any(|m| m.system && m.text.contains("You took a screenshot")),
+        "the capturer must see that the peer was told"
+    );
+    let theirs = bob.messages(&alice_contact);
+    assert_eq!(
+        theirs
+            .iter()
+            .filter(|m| m.system && m.text.contains("took a screenshot"))
+            .count(),
+        1
+    );
+
+    // An event, not a state flag: a second screenshot is reported again. Timing and count are the
+    // informative part, so `BackedUp`-style once-only dedupe would lose real information.
+    alice.report_screenshot(&bob_contact);
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.messages(&alice_contact)
+            .iter()
+            .filter(|m| m.system && m.text.contains("took a screenshot"))
+            .count(),
+        2,
+        "each screenshot is its own notice"
+    );
+
+    // Forgery: a genuine peer's ciphertext must not be re-labellable as a screenshot. Mallory has
+    // a real session with Bob, so she can produce a valid control frame — but the marker inside is
+    // domain-separated per frame type, so splicing it into a `Screenshot` fails to verify.
+    let mut mallory = Node::new(Box::new(net.endpoint("mallory")));
+    // A fresh bundle: one-time pre-keys are single-use, and Alice already consumed the first.
+    let bundle2 = bob.publish_bundle();
+    let victim = mallory.connect_with_bundle("bob", &bundle2).unwrap();
+    bob.pump().unwrap();
+    let before = bob
+        .messages(&victim_view(&bob, &victim))
+        .iter()
+        .filter(|m| m.text.contains("took a screenshot"))
+        .count();
+    if let Some((addr, frame)) = mallory.authed_control(&victim, MARK_BACKEDUP, |from, message| {
+        Frame::BackedUp { from, message }
+    }) {
+        let spliced = match frame {
+            Frame::BackedUp { from, message } => Frame::Screenshot { from, message },
+            other => other,
+        };
+        let _ = mallory.deliver(&addr, &victim, &spliced);
+    }
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.messages(&victim_view(&bob, &victim))
+            .iter()
+            .filter(|m| m.text.contains("took a screenshot"))
+            .count(),
+        before,
+        "a cross-type splice must not produce a screenshot notice"
+    );
+}
+
+#[test]
+fn re_pairing_an_approved_chat_echoes_the_approval() {
+    // Field report (2026-08-01): pairing again with a contact who had already approved us left the
+    // joiner stuck on "waiting for the other person to accept", while the inviter showed a live
+    // chat and no request — because the inviter's chat was *already* authorized, so `authorize()`
+    // (the only thing that sends the approval echo) never ran.
+    let net = MemoryNetwork::new();
+    let mut inviter = Node::new(Box::new(net.endpoint("inviter")));
+    inviter.set_require_authorization(true);
+    let mut joiner = Node::new(Box::new(net.endpoint("joiner")));
+
+    // First pairing, approved the normal way.
+    let bundle = inviter.publish_bundle();
+    let inviter_contact = joiner.connect_with_bundle("inviter", &bundle).unwrap();
+    inviter.pump().unwrap();
+    let joiner_contact = inviter.pending_authorizations()[0].id.clone();
+    inviter.authorize(&joiner_contact, true).unwrap();
+    joiner.pump().unwrap();
+
+    // Pair again — the reverse direction, or simply a second scan. The joiner posts the same
+    // "waiting to be accepted" notice the api layer adds on every join (`connect_via_qr` /
+    // `join_via_short_code`), which is the thing that must get cleared.
+    let bundle2 = inviter.publish_bundle();
+    joiner.connect_with_bundle("inviter", &bundle2).unwrap();
+    joiner.note_awaiting_approval(&inviter_contact);
+    assert!(
+        awaiting_approval(&joiner, &inviter_contact),
+        "precondition: the joiner is waiting"
+    );
+
+    inviter.pump().unwrap();
+    assert!(
+        inviter.pending_authorizations().is_empty(),
+        "a known, approved contact must not resurface as a request"
+    );
+    joiner.pump().unwrap();
+    assert!(
+        !awaiting_approval(&joiner, &inviter_contact),
+        "the joiner must be told the chat is already approved, not left waiting forever"
+    );
+}
+
+/// Whether `node`'s chat with `contact` is showing the "waiting to be accepted" notice.
+fn awaiting_approval(node: &Node, contact: &str) -> bool {
+    node.messages(contact)
+        .iter()
+        .any(|m| m.system && m.kind == "await_approval")
+}
+
+#[test]
+fn last_seen_tracks_authenticated_contact_including_silent_acks() {
+    // Silence detection (#3 follow-up): the peer-side signal that replaces a duress "chat deleted"
+    // notice, which cannot exist (`duress-wipe.md` §5). It must count *any* proof of life, not just
+    // typed messages — otherwise a peer who reads but doesn't reply looks gone.
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // Pairing itself is contact, so a brand-new chat is never reported as silent.
+    let paired_at = alice.contacts()[0].last_seen_secs;
+    assert!(paired_at > 0, "pairing starts the clock");
+
+    // A control frame that verifies on their ratchet is proof of life even though the user never
+    // typed: this is the case that matters, since a peer can be alive and simply not reply.
+    alice.chats.get_mut(&bob_contact).unwrap().last_seen = Some(1);
+    bob.report_screenshot(&alice_contact);
+    alice.pump().unwrap();
+    assert!(
+        alice.contacts()[0].last_seen_secs > 1,
+        "an authenticated control frame counts as proof of life"
+    );
+
+    // A forged frame must NOT refresh it — otherwise anyone could make a seized phone look alive.
+    alice.chats.get_mut(&bob_contact).unwrap().last_seen = Some(1);
+    let forged = Frame::Screenshot {
+        from: bob_contact.clone(),
+        message: WireOlm {
+            message_type: 1,
+            body: "not a real ciphertext".to_string(),
+        },
+    };
+    let _ = alice.process_frame(None, forged);
+    assert_eq!(
+        alice.contacts()[0].last_seen_secs,
+        1,
+        "a frame that fails to verify must not count as proof of life"
+    );
+}
+
+#[test]
+fn screenshot_notice_survives_an_offline_peer_via_the_relay() {
+    // Field report (2026-08-01): a screenshot taken while the peer's client was closed never
+    // reached them once they reopened it. The notice is only useful if it survives the peer being
+    // offline — that is the normal case, not an edge case, since the capturer has no idea whether
+    // the other side is running.
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // Bob's client is closed when Alice screenshots the chat.
+    net.disconnect("bob");
+    alice.report_screenshot(&bob_contact);
+
+    // Bob reopens and drains his mailbox: the notice was held for him.
+    bob.poll_relay().unwrap();
+    assert!(
+        bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.system && m.text.contains("took a screenshot")),
+        "a screenshot taken while the peer was offline must still reach them"
+    );
+}
+
+#[test]
+fn screenshot_notice_survives_a_total_outage_and_delivers_on_retry() {
+    // The capturing device is itself offline — no peer, no relay. Taking a screenshot on a phone
+    // with no signal is ordinary, and the local side has already told the user "the other person
+    // was told", so the notice is held and retried rather than dropped.
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    bob.set_relay(relay.clone());
+
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // Peer unreachable AND Alice has no relay: both delivery paths are down at capture time.
+    net.disconnect("bob");
+    alice.report_screenshot(&bob_contact);
+    bob.poll_relay().unwrap();
+    assert!(
+        !bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.text.contains("took a screenshot")),
+        "nothing could be delivered while every path was down"
+    );
+
+    // Alice gets connectivity back; the poller's retry posts the held notice.
+    alice.set_relay(relay.clone());
+    alice.flush_pending_control();
+    bob.poll_relay().unwrap();
+    assert!(
+        bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.system && m.text.contains("took a screenshot")),
+        "the retried screenshot notice finally reaches the peer"
+    );
+}
+
+/// Bob's contact id for whoever most recently paired with him (Mallory, above).
+fn victim_view(bob: &Node, _victim: &str) -> String {
+    bob.contacts().last().unwrap().id.clone()
+}

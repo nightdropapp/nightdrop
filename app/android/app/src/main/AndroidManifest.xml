@@ -18,6 +18,12 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
+    <!-- Screenshot transparency (#1): lets the app be told when the user screenshots a chat, so it
+         can log it and tell the peer. Android 14+ only, and it reports *that* a screenshot happened
+         — never its contents, and never a photo taken of the screen. Normal permission: no prompt,
+         and no ability to read any screen content. -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE" />
+
     <!-- Strip permissions that transitive plugins merge in but Night Drop never uses. Keeping the
          permission set minimal matters for a privacy-first app (and for the F-Droid listing). Each
          is injected by a dependency, not by us; tools:node="remove" deletes it from the merged

@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../rust/api.dart' as rust;
+import 'background_delivery.dart';
 import 'nightdrop_core.dart';
 import 'media_cache.dart';
 import 'models.dart';
@@ -77,6 +78,189 @@ class RustNightdropCore extends NightdropCore {
 
   Future<String> _stateFilePath() async =>
       '${(await getApplicationSupportDirectory()).path}/$_kStateFile';
+
+  // --- App lock (see docs/design/app-lock.md) ------------------------------------------
+  // Unlocked at-rest key, held only in memory. Non-null means "this session has unlocked the
+  // store"; it is also the *only* copy when a lock is set, because enabling a lock deletes the
+  // keystore entry. Dart can't zeroize a String, so dropping the reference is as far as this
+  // goes — the Rust side never keeps the key beyond the call.
+  String? _unlockedKey;
+
+  /// Set when launch stopped because the store is locked. Cached because `build` can't await
+  /// [isStoreLocked], and the UI has to decide between the lock screen and onboarding synchronously.
+  bool _lockedOut = false;
+
+  @override
+  bool get needsUnlock => _lockedOut;
+
+  /// Whether a passphrase/PIN lock is set on this device.
+  @override
+  Future<bool> isStoreLocked() async => rust.storeIsLocked(dir: (await _torStateDir())!);
+
+  /// Whether this session has already unlocked the store.
+  @override
+  bool get storeUnlocked => _unlockedKey != null;
+
+  /// The at-rest key, or null when there is none to be had — either because no identity exists
+  /// yet, or because a lock is set and this session hasn't unlocked it.
+  ///
+  /// Every path to the key goes through here or [_ensureStoreKey]. It used to be read inline in
+  /// four places, which is exactly how one of them would keep reading a keystore copy that
+  /// enabling a lock was supposed to have removed.
+  Future<String?> _readStoreKey() async =>
+      await isStoreLocked() ? _unlockedKey : _secure.read(key: _kStoreKeyName);
+
+  /// The at-rest key, creating and persisting one on first use.
+  ///
+  /// When a lock is set this must **not** write to the keystore: the whole point of the lock is
+  /// that the key is not retrievable without the secret.
+  Future<String> _ensureStoreKey() async {
+    if (await isStoreLocked()) {
+      final key = _unlockedKey;
+      if (key == null) {
+        throw StateError('The store is locked — it must be unlocked before it can be opened.');
+      }
+      return key;
+    }
+    final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
+    await _secure.write(key: _kStoreKeyName, value: key);
+    return key;
+  }
+
+  /// Try `secret` against the lock. Returns false on a wrong secret; deliberately says nothing
+  /// about *why* it failed, so a damaged lock file and a wrong secret look alike from outside.
+  @override
+  Future<bool> unlockStore(String secret) async {
+    try {
+      final outcome = await rust.unlockStoreKey(
+        dir: (await _torStateDir())!,
+        secret: secret,
+      );
+      // The duress secret (#3): destroy the identity instead of opening it, and report success so
+      // the screen moves on exactly as a normal unlock would. What the person holding the phone
+      // sees is an app that opened and happens to be empty.
+      if (outcome.duress) {
+        await _duressWipe();
+        return true;
+      }
+      _unlockedKey = outcome.keyB64;
+      _lockedOut = false;
+      // The key was the only thing missing: boot the identity now, so a successful unlock lands
+      // on the chat list rather than on onboarding (which would offer to overwrite it).
+      _booting = true;
+      notifyListeners();
+      await start();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Put the existing at-rest key behind `secret`, then delete the keystore copy — without that
+  /// deletion the lock is decoration, since the key would still be readable without the secret.
+  @override
+  Future<void> enableStoreLock(String secret) async {
+    final key = await _ensureStoreKey();
+    final dir = (await _torStateDir())!;
+    await rust.setStorePassphrase(dir: dir, keyB64: key, passphrase: secret);
+    await _secure.delete(key: _kStoreKeyName);
+    _unlockedKey = key; // already unlocked; don't make the user re-enter it immediately
+    notifyListeners();
+  }
+
+  /// Drop the lock, restoring the keystore copy. The key comes back out of the lock file, so a
+  /// wrong secret throws and changes nothing.
+  @override
+  Future<void> disableStoreLock(String secret) async {
+    final key = await rust.clearStorePassphrase(
+      dir: (await _torStateDir())!,
+      passphrase: secret,
+    );
+    await _secure.write(key: _kStoreKeyName, value: key);
+    _unlockedKey = key;
+    // There is no lock any more, so nothing can be locked *out*. Clearing this defensively matters
+    // because a re-lock can race the disable — anything that briefly backgrounds the app mid-flow
+    // sets the flag while the lock file still exists, and it would otherwise survive the removal
+    // and strand the user on a lock screen no secret can dismiss.
+    _lockedOut = false;
+    notifyListeners();
+  }
+
+  /// Arm or replace the duress secret (#3). Requires the normal secret; the core also refuses a
+  /// duress secret that would open the normal slot, and self-checks the one it writes.
+  @override
+  Future<void> setDuressSecret(String secret, String duress) async {
+    await rust.setDuressSecret(
+      dir: (await _torStateDir())!,
+      passphrase: secret,
+      duress: duress,
+    );
+  }
+
+  /// Disarm duress. Succeeds whether or not anything was armed, on purpose.
+  @override
+  Future<void> clearDuressSecret(String secret) async {
+    await rust.clearDuressSecret(
+      dir: (await _torStateDir())!,
+      passphrase: secret,
+    );
+  }
+
+  /// Whether a wipe code is armed. Needs the unlocked store key; without one (locked, or no lock
+  /// at all) the answer is a plain no.
+  @override
+  Future<bool> isDuressArmed() async {
+    final key = _unlockedKey ?? await _readStoreKey();
+    if (key == null) return false;
+    return rust.duressIsArmed(dir: (await _torStateDir())!, keyB64: key);
+  }
+
+  @override
+  Future<bool> verifyStoreSecret(String secret) async =>
+      rust.storeSecretIsCorrect(dir: (await _torStateDir())!, secret: secret);
+
+  /// The duress wipe (#3). Destroys the identity, then lands on onboarding — indistinguishable,
+  /// from the outside, from unlocking an app that was never used.
+  ///
+  /// Ordering is the whole design here, so don't rearrange it casually:
+  ///
+  ///  * The **lock file goes first**, before anything that can throw or stall. If the wipe is
+  ///    interrupted after this point the app comes up as a fresh install rather than showing a
+  ///    lock screen for a store that no longer exists.
+  ///  * The peer notice runs on a **hard time bound**, and the wipe proceeds whatever it returns.
+  ///    A wipe that can be prevented by taking the phone off the network is not a wipe.
+  ///  * The notice is the ordinary "chat deleted" — nothing says *duress*. See
+  ///    `docs/design/duress-wipe.md` §5.
+  Future<void> _duressWipe() async {
+    final dir = await _torStateDir();
+    if (dir != null) {
+      try {
+        await rust.destroyStoreLock(dir: dir);
+      } catch (_) {
+        // Even if this fails, keep going: the state blob below is what holds the messages.
+      }
+    }
+    _unlockedKey = null;
+    _lockedOut = false;
+    // Reuse the ordinary teardown, which already routes to onboarding before any await, so the
+    // screen is empty immediately — `duress: true` only changes which chats are told.
+    await logout(duress: true);
+  }
+
+  /// Forget the unlocked key, if we are allowed to.
+  ///
+  /// With background delivery **on** the key has to stay resident or the foreground service
+  /// couldn't decrypt anything it receives while locked — the same trade Signal makes. With it
+  /// off, nothing needs the store until the next unlock, so the key goes.
+  @override
+  Future<void> lockStore() async {
+    if (!await isStoreLocked()) return;
+    if (await BackgroundDelivery.isEnabled()) return;
+    _unlockedKey = null;
+    _lockedOut = true;
+    await _closeCore();
+    notifyListeners();
+  }
 
   /// Tor's state base dir (also where the persisted state file lives). We pin it to the app
   /// support dir on every platform — mobile needs an explicit writable dir, and on desktop a
@@ -278,7 +462,17 @@ class RustNightdropCore extends NightdropCore {
     await _closeCore();
     try {
       if (_torEnabled) {
-        final key = await _secure.read(key: _kStoreKeyName);
+        // A locked store has no readable key yet, and the check below would then see
+        // "no key + saved state" and fall through to onboarding — which is precisely the
+        // overwrite-recoverable-data path the comment there warns about. Stop and let the UI
+        // ask for the secret instead.
+        if (await isStoreLocked() && !storeUnlocked) {
+          _lockedOut = true;
+          _booting = false;
+          notifyListeners();
+          return;
+        }
+        final key = await _readStoreKey();
         final statePath = await _stateFilePath();
         final hasState = File(statePath).existsSync();
         if (key != null && hasState) {
@@ -363,8 +557,7 @@ class RustNightdropCore extends NightdropCore {
       // Embedded Tor: a reachable .onion, WAN-capable. Bootstrapping takes a while.
       // On mobile, arti needs an explicit writable state dir (the app's support dir). A
       // persistence key (held in the OS secure store) makes the identity survive restarts.
-      final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
-      await _secure.write(key: _kStoreKeyName, value: key);
+      final key = await _ensureStoreKey();
       final statePath = await _stateFilePath();
       _core = await rust.NightdropCore.newTor(
         stateDir: await _torStateDir(),
@@ -488,6 +681,11 @@ class RustNightdropCore extends NightdropCore {
 
   @override
   Future<List<RelayHealth>> relayHealth() async {
+    // The home screen's health banner starts polling from `initState`, which runs before `start()`
+    // has finished building the core (Tor bootstrap takes seconds). No core yet means no relay is
+    // known to be unreachable, so report nothing and let the next 6s tick pick it up — same shape
+    // as `onionReady`'s guard above.
+    if (_core == null) return const [];
     final health = await _core!.relayHealth();
     return health
         .map((h) => RelayHealth(address: h.address, reachable: h.reachable))
@@ -516,8 +714,7 @@ class RustNightdropCore extends NightdropCore {
     await _closeCore();
     if (_torEnabled) {
       // Restore the backup onto Tor and persist it (so it survives future restarts too).
-      final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
-      await _secure.write(key: _kStoreKeyName, value: key);
+      final key = await _ensureStoreKey();
       _core = await rust.NightdropCore.restoreBackupTor(
         backupPath: path,
         password: password,
@@ -556,8 +753,7 @@ class RustNightdropCore extends NightdropCore {
     }
     // As in `importBackup`: release the Tor state lock before the restored core takes it.
     await _closeCore();
-    final key = await _secure.read(key: _kStoreKeyName) ?? await rust.randomStoreKey();
-    await _secure.write(key: _kStoreKeyName, value: key);
+    final key = await _ensureStoreKey();
     _core = await rust.NightdropCore.restoreServerBackupTor(
       password: password,
       stateDir: await _torStateDir(),
@@ -589,7 +785,7 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
-  Future<int> logout() async {
+  Future<int> logout({bool duress = false}) async {
     // Tear down in-memory state and route to onboarding IMMEDIATELY — before any await that
     // could stall (FRB stream cancel / secure storage / file IO). Earlier, awaiting the
     // stream cancel first could hang and leave the screen stuck.
@@ -618,8 +814,29 @@ class RustNightdropCore extends NightdropCore {
     // must run BEFORE the local files are wiped just below (it needs the live transport + relay).
     int notNotified = 0;
     try {
-      notNotified = await core?.logout() ?? 0;
+      if (duress) {
+        // Every chat is told, not just un-backed ones (no restore is coming), and the whole thing
+        // is capped: under coercion the wipe must not be delayed by a peer that won't answer, and
+        // must not be preventable by pulling the phone off the network.
+        notNotified = await core
+                ?.duressLogout()
+                .timeout(const Duration(seconds: 5), onTimeout: () => 0) ??
+            0;
+      } else {
+        notNotified = await core?.logout() ?? 0;
+      }
     } catch (_) {}
+    // Stop the core BEFORE deleting anything it owns. Nulling `_core` above only drops Dart's
+    // reference — the Rust instance keeps running, and its next dirty tick re-persists the state
+    // file we are about to remove. The resurrected file then outlives the keystore key deleted
+    // below, so the next launch finds "saved data, no key" and shows the recovery screen for an
+    // identity that was deliberately destroyed. The duress path made this near-certain, since
+    // `duressLogout()` marks the state dirty immediately beforehand.
+    try {
+      await core?.shutdown();
+    } catch (_) {
+      // Best-effort: a core that won't stop cleanly must not block the wipe.
+    }
     // Decrypted media must not outlive the identity: drop the in-memory caches and delete
     // the plaintext `nightdrop-media-*` temp files written for the system player.
     unawaited(MediaCache.wipe());
@@ -728,6 +945,12 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> reportScreenshot(String contactId) async {
+    await _core!.reportScreenshot(contactId: contactId);
+    await _refresh();
+  }
+
+  @override
   Future<void> setDisappearing(String contactId, int secs) async {
     await _core!.setDisappearing(contactId: contactId, secs: BigInt.from(secs));
     await _refresh();
@@ -802,6 +1025,7 @@ class RustNightdropCore extends NightdropCore {
         peerVerified: c.peerVerified,
         peerRelays: c.peerRelays,
         remoteStorageHealthy: c.remoteStorageHealthy,
+        lastSeenSecs: c.lastSeenSecs.toInt(),
       );
 
   List<Message> _mapMessages(String contactId, List<rust.ChatMessage> history) {

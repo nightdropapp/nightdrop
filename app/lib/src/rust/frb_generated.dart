@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -775841955;
+  int get rustContentHash => 155264902;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -120,6 +120,8 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiNightdropCoreDeleteChat(
       {required NightdropCore that, required String contactId});
+
+  Future<int> crateApiNightdropCoreDuressLogout({required NightdropCore that});
 
   Future<void> crateApiNightdropCoreEditMessage(
       {required NightdropCore that,
@@ -180,6 +182,9 @@ abstract class RustLibApi extends BaseApi {
 
   Future<List<RelayHealth>> crateApiNightdropCoreRelayHealth(
       {required NightdropCore that});
+
+  Future<void> crateApiNightdropCoreReportScreenshot(
+      {required NightdropCore that, required String contactId});
 
   Future<NightdropCore> crateApiNightdropCoreRestoreBackup(
       {required String path,
@@ -262,13 +267,42 @@ abstract class RustLibApi extends BaseApi {
       required String contactId,
       required String scanned});
 
+  Future<void> crateApiClearDuressSecret(
+      {required String dir, required String passphrase});
+
+  Future<String> crateApiClearStorePassphrase(
+      {required String dir, required String passphrase});
+
+  Future<void> crateApiDestroyStoreLock({required String dir});
+
+  Future<bool> crateApiDuressIsArmed(
+      {required String dir, required String keyB64});
+
   Future<String> crateApiRandomStoreKey();
 
   Future<void> crateApiResetTorGuards({required String stateDir});
 
   Future<void> crateApiSetDiagnostics({required bool enabled});
 
+  Future<void> crateApiSetDuressSecret(
+      {required String dir,
+      required String passphrase,
+      required String duress});
+
+  Future<void> crateApiSetStorePassphrase(
+      {required String dir,
+      required String keyB64,
+      required String passphrase});
+
+  Future<bool> crateApiStoreIsLocked({required String dir});
+
+  Future<bool> crateApiStoreSecretIsCorrect(
+      {required String dir, required String secret});
+
   Stream<AppEvent> crateApiSubscribe();
+
+  Future<StoreUnlock> crateApiUnlockStoreKey(
+      {required String dir, required String secret});
 
   Future<void> crateApiUnsubscribe();
 
@@ -629,6 +663,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<int> crateApiNightdropCoreDuressLogout({required NightdropCore that}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 13, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_u_32,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiNightdropCoreDuressLogoutConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiNightdropCoreDuressLogoutConstMeta =>
+      const TaskConstMeta(
+        debugName: "NightdropCore_duress_logout",
+        argNames: ["that"],
+      );
+
+  @override
   Future<void> crateApiNightdropCoreEditMessage(
       {required NightdropCore that,
       required String contactId,
@@ -643,7 +703,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(msgId, serializer);
         sse_encode_String(text, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 13, port: port_);
+            funcId: 14, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -670,7 +730,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 14, port: port_);
+            funcId: 15, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_identity,
@@ -697,7 +757,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 15, port: port_);
+            funcId: 16, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_contact,
@@ -725,7 +785,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(code, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 16, port: port_);
+            funcId: 17, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_contact,
@@ -751,7 +811,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 17, port: port_);
+            funcId: 18, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_u_32,
@@ -779,7 +839,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(mediaId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 18, port: port_);
+            funcId: 19, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_prim_u_8_strict,
@@ -810,7 +870,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(mediaId, serializer);
         sse_encode_String(ext, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 19, port: port_);
+            funcId: 20, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -841,7 +901,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(path, serializer);
         sse_encode_String(password, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 20, port: port_);
+            funcId: 21, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_u_32,
@@ -869,7 +929,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 21, port: port_);
+            funcId: 22, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_chat_message,
@@ -896,7 +956,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 22, port: port_);
+            funcId: 23, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_String,
@@ -920,7 +980,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 23, port: port_);
+            funcId: 24, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -952,7 +1012,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(persistPath, serializer);
         sse_encode_opt_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 24, port: port_);
+            funcId: 25, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -980,7 +1040,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(listenAddr, serializer);
         sse_encode_String(relayAddr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 25, port: port_);
+            funcId: 26, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1013,7 +1073,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(persistPath, serializer);
         sse_encode_opt_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 26, port: port_);
+            funcId: 27, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1040,7 +1100,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 27, port: port_);
+            funcId: 28, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1068,7 +1128,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_opt_String(code, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 28, port: port_);
+            funcId: 29, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_contact,
@@ -1095,7 +1155,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 29, port: port_);
+            funcId: 30, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_relay_health,
@@ -1114,6 +1174,34 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiNightdropCoreReportScreenshot(
+      {required NightdropCore that, required String contactId}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that, serializer);
+        sse_encode_String(contactId, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 31, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiNightdropCoreReportScreenshotConstMeta,
+      argValues: [that, contactId],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiNightdropCoreReportScreenshotConstMeta =>
+      const TaskConstMeta(
+        debugName: "NightdropCore_report_screenshot",
+        argNames: ["that", "contactId"],
+      );
+
+  @override
   Future<NightdropCore> crateApiNightdropCoreRestoreBackup(
       {required String path,
       required String password,
@@ -1127,7 +1215,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(listenAddr, serializer);
         sse_encode_opt_String(relayAddr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 30, port: port_);
+            funcId: 32, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1164,7 +1252,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(persistPath, serializer);
         sse_encode_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 31, port: port_);
+            funcId: 33, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1213,7 +1301,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(persistPath, serializer);
         sse_encode_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 32, port: port_);
+            funcId: 34, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1248,7 +1336,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 33, port: port_);
+            funcId: 35, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1276,7 +1364,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 34, port: port_);
+            funcId: 36, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1304,7 +1392,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 35, port: port_);
+            funcId: 37, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1341,7 +1429,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(kind, serializer);
         sse_encode_list_prim_u_8_loose(thumb, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 36, port: port_);
+            funcId: 38, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1372,7 +1460,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(text, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 37, port: port_);
+            funcId: 39, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_chat_message,
@@ -1400,7 +1488,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_bool(background, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 38, port: port_);
+            funcId: 40, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1431,7 +1519,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_u_64(secs, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 39, port: port_);
+            funcId: 41, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1462,7 +1550,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 40, port: port_);
+            funcId: 42, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1490,7 +1578,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_list_String(relays, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 41, port: port_);
+            funcId: 43, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1521,7 +1609,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_bool(enabled, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 42, port: port_);
+            funcId: 44, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1552,7 +1640,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_bool(verified, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 43, port: port_);
+            funcId: 45, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1578,7 +1666,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 46, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1609,7 +1697,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(msgId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
+            funcId: 47, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1640,7 +1728,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(scanned, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 46, port: port_);
+            funcId: 48, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1659,12 +1747,115 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiClearDuressSecret(
+      {required String dir, required String passphrase}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(passphrase, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 49, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiClearDuressSecretConstMeta,
+      argValues: [dir, passphrase],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiClearDuressSecretConstMeta => const TaskConstMeta(
+        debugName: "clear_duress_secret",
+        argNames: ["dir", "passphrase"],
+      );
+
+  @override
+  Future<String> crateApiClearStorePassphrase(
+      {required String dir, required String passphrase}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(passphrase, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 50, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_String,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiClearStorePassphraseConstMeta,
+      argValues: [dir, passphrase],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiClearStorePassphraseConstMeta =>
+      const TaskConstMeta(
+        debugName: "clear_store_passphrase",
+        argNames: ["dir", "passphrase"],
+      );
+
+  @override
+  Future<void> crateApiDestroyStoreLock({required String dir}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 51, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiDestroyStoreLockConstMeta,
+      argValues: [dir],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDestroyStoreLockConstMeta => const TaskConstMeta(
+        debugName: "destroy_store_lock",
+        argNames: ["dir"],
+      );
+
+  @override
+  Future<bool> crateApiDuressIsArmed(
+      {required String dir, required String keyB64}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(keyB64, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 52, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiDuressIsArmedConstMeta,
+      argValues: [dir, keyB64],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiDuressIsArmedConstMeta => const TaskConstMeta(
+        debugName: "duress_is_armed",
+        argNames: ["dir", "keyB64"],
+      );
+
+  @override
   Future<String> crateApiRandomStoreKey() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 47, port: port_);
+            funcId: 53, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1688,7 +1879,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(stateDir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 48, port: port_);
+            funcId: 54, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1712,7 +1903,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_bool(enabled, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 49, port: port_);
+            funcId: 55, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1730,6 +1921,115 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<void> crateApiSetDuressSecret(
+      {required String dir,
+      required String passphrase,
+      required String duress}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(passphrase, serializer);
+        sse_encode_String(duress, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 56, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiSetDuressSecretConstMeta,
+      argValues: [dir, passphrase, duress],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSetDuressSecretConstMeta => const TaskConstMeta(
+        debugName: "set_duress_secret",
+        argNames: ["dir", "passphrase", "duress"],
+      );
+
+  @override
+  Future<void> crateApiSetStorePassphrase(
+      {required String dir,
+      required String keyB64,
+      required String passphrase}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(keyB64, serializer);
+        sse_encode_String(passphrase, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 57, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_unit,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiSetStorePassphraseConstMeta,
+      argValues: [dir, keyB64, passphrase],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiSetStorePassphraseConstMeta => const TaskConstMeta(
+        debugName: "set_store_passphrase",
+        argNames: ["dir", "keyB64", "passphrase"],
+      );
+
+  @override
+  Future<bool> crateApiStoreIsLocked({required String dir}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 58, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiStoreIsLockedConstMeta,
+      argValues: [dir],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiStoreIsLockedConstMeta => const TaskConstMeta(
+        debugName: "store_is_locked",
+        argNames: ["dir"],
+      );
+
+  @override
+  Future<bool> crateApiStoreSecretIsCorrect(
+      {required String dir, required String secret}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(secret, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 59, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_bool,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiStoreSecretIsCorrectConstMeta,
+      argValues: [dir, secret],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiStoreSecretIsCorrectConstMeta =>
+      const TaskConstMeta(
+        debugName: "store_secret_is_correct",
+        argNames: ["dir", "secret"],
+      );
+
+  @override
   Stream<AppEvent> crateApiSubscribe() {
     final sink = RustStreamSink<AppEvent>();
     unawaited(handler.executeNormal(NormalTask(
@@ -1737,7 +2037,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_StreamSink_app_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 50, port: port_);
+            funcId: 60, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1756,12 +2056,38 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<StoreUnlock> crateApiUnlockStoreKey(
+      {required String dir, required String secret}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_String(dir, serializer);
+        sse_encode_String(secret, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 61, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_store_unlock,
+        decodeErrorData: sse_decode_AnyhowException,
+      ),
+      constMeta: kCrateApiUnlockStoreKeyConstMeta,
+      argValues: [dir, secret],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiUnlockStoreKeyConstMeta => const TaskConstMeta(
+        debugName: "unlock_store_key",
+        argNames: ["dir", "secret"],
+      );
+
+  @override
   Future<void> crateApiUnsubscribe() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 51, port: port_);
+            funcId: 62, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1873,8 +2199,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Contact dco_decode_contact(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 11)
-      throw Exception('unexpected arr length: expect 11 but see ${arr.length}');
+    if (arr.length != 12)
+      throw Exception('unexpected arr length: expect 12 but see ${arr.length}');
     return Contact(
       id: dco_decode_String(arr[0]),
       theirName: dco_decode_String(arr[1]),
@@ -1887,6 +2213,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       peerVerified: dco_decode_bool(arr[8]),
       peerRelays: dco_decode_list_String(arr[9]),
       remoteStorageHealthy: dco_decode_bool(arr[10]),
+      lastSeenSecs: dco_decode_u_64(arr[11]),
     );
   }
 
@@ -1976,6 +2303,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return ServerBackupInfo(
       password: dco_decode_String(arr[0]),
       expiresAtSecs: dco_decode_u_64(arr[1]),
+    );
+  }
+
+  @protected
+  StoreUnlock dco_decode_store_unlock(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return StoreUnlock(
+      duress: dco_decode_bool(arr[0]),
+      keyB64: dco_decode_String(arr[1]),
     );
   }
 
@@ -2123,6 +2462,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_peerVerified = sse_decode_bool(deserializer);
     final var_peerRelays = sse_decode_list_String(deserializer);
     final var_remoteStorageHealthy = sse_decode_bool(deserializer);
+    final var_lastSeenSecs = sse_decode_u_64(deserializer);
     return Contact(
         id: var_id,
         theirName: var_theirName,
@@ -2134,7 +2474,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         verified: var_verified,
         peerVerified: var_peerVerified,
         peerRelays: var_peerRelays,
-        remoteStorageHealthy: var_remoteStorageHealthy);
+        remoteStorageHealthy: var_remoteStorageHealthy,
+        lastSeenSecs: var_lastSeenSecs);
   }
 
   @protected
@@ -2240,6 +2581,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_expiresAtSecs = sse_decode_u_64(deserializer);
     return ServerBackupInfo(
         password: var_password, expiresAtSecs: var_expiresAtSecs);
+  }
+
+  @protected
+  StoreUnlock sse_decode_store_unlock(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    final var_duress = sse_decode_bool(deserializer);
+    final var_keyB64 = sse_decode_String(deserializer);
+    return StoreUnlock(duress: var_duress, keyB64: var_keyB64);
   }
 
   @protected
@@ -2384,6 +2733,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.peerVerified, serializer);
     sse_encode_list_String(self.peerRelays, serializer);
     sse_encode_bool(self.remoteStorageHealthy, serializer);
+    sse_encode_u_64(self.lastSeenSecs, serializer);
   }
 
   @protected
@@ -2477,6 +2827,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.password, serializer);
     sse_encode_u_64(self.expiresAtSecs, serializer);
+  }
+
+  @protected
+  void sse_encode_store_unlock(StoreUnlock self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.duress, serializer);
+    sse_encode_String(self.keyB64, serializer);
   }
 
   @protected
@@ -2626,6 +2983,17 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   Future<void> deleteChat({required String contactId}) => RustLib.instance.api
       .crateApiNightdropCoreDeleteChat(that: this, contactId: contactId);
 
+  /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
+  /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
+  /// "chat deleted" — never anything that identifies this as a duress event.
+  ///
+  /// Best-effort by design. The caller must wipe regardless of the count returned: a wipe that
+  /// can be prevented by taking the phone off the network is not a wipe.
+  Future<int> duressLogout() =>
+      RustLib.instance.api.crateApiNightdropCoreDuressLogout(
+        that: this,
+      );
+
   /// Edit the text of one of our own messages (`msg_id` from [`ChatMessage`]). Allowed
   /// within 15 minutes of sending, or at any time while the message is still queued on
   /// the relay (the peer never saw it — the queued blob is recalled and replaced).
@@ -2721,6 +3089,18 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       RustLib.instance.api.crateApiNightdropCoreRelayHealth(
         that: this,
       );
+
+  /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
+  ///
+  /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which
+  /// is undetectable. Making them visible is the honest trade. Fire-and-forget from the UI's point
+  /// of view; a chat that no longer exists is silently ignored.
+  ///
+  /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
+  /// not imply otherwise.
+  Future<void> reportScreenshot({required String contactId}) => RustLib
+      .instance.api
+      .crateApiNightdropCoreReportScreenshot(that: this, contactId: contactId);
 
   /// The human-comparable **safety number** for a contact (12×5 digits, identical on both
   /// devices) — compare it out-of-band to confirm no MITM on pairing (key-verification design).

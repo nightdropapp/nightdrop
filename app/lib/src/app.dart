@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
@@ -7,6 +8,7 @@ import 'core/background_delivery.dart';
 import 'core/nightdrop_core.dart';
 import 'core/notifications.dart';
 import 'features/home/home_screen.dart';
+import 'features/lock/lock_screen.dart';
 import 'features/onboarding/onboarding_screen.dart';
 import 'theme/theme.dart';
 
@@ -80,6 +82,18 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
       foreground: foreground,
       hasIdentity: core.identity != null,
     );
+    // Re-lock on leaving the foreground, so the secret is required again on return rather than
+    // once per install. A no-op when background delivery is on — that mode needs the key resident
+    // to receive anything (see docs/design/app-lock.md §5) — and when no lock is set at all.
+    //
+    // Deliberately `paused`/`hidden` only, NOT `inactive`. On Android `inactive` fires transiently
+    // while the app is still on screen — a dialog taking focus, the keyboard opening, the
+    // notification shade — and re-locking there produced a real bug: disabling the app lock threw
+    // the user onto the lock screen, because the re-lock ran mid-flow while the lock file still
+    // existed, and left `_lockedOut` set after it was gone. The app-switcher thumbnail is not
+    // affected: that is `FLAG_SECURE` in `MainActivity.onPause`, independent of this.
+    final gone = state == AppLifecycleState.paused || state == AppLifecycleState.hidden;
+    if (gone) unawaited(core.lockStore());
   }
 
   @override
@@ -105,6 +119,9 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
         // Saved data exists but wouldn't open: don't pretend it's a fresh install (onboarding
         // would overwrite it). Show an explicit recovery choice instead.
         if (core.loadError) return const _LoadErrorScreen();
+        // BEFORE the identity check: a locked store can't expose an identity, and reading that as
+        // a fresh install would send the user to onboarding, which overwrites recoverable data.
+        if (core.needsUnlock) return const LockScreen();
         return core.identity == null
             ? const OnboardingScreen()
             : const HomeScreen();
@@ -177,6 +194,10 @@ class _SplashState extends State<_Splash> {
   }
 }
 
+/// Whether this is a phone/tablet, for the platform-appropriate recovery wording. `Platform` is
+/// unavailable on web, which the app doesn't target; `kIsWeb` guards aren't needed here.
+bool get _isMobile => Platform.isAndroid || Platform.isIOS;
+
 /// Shown when saved data exists on this device but couldn't be opened at launch. We deliberately do
 /// NOT drop straight to onboarding here: creating a new identity would overwrite the existing state
 /// file. Instead we offer to retry (the failure may be transient) or to continue to setup — after
@@ -204,7 +225,11 @@ class _LoadErrorScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               Text(
-                l10n.loadErrorBody,
+                // Platform-specific on purpose: the desktop copy names KDE Wallet / GNOME
+                // Keyring, which is meaningless on a phone and sends the user hunting for
+                // something that doesn't exist there. The mobile equivalent isn't a thing they
+                // can unlock by hand, so the wording points at the causes they can actually act on.
+                _isMobile ? l10n.loadErrorBodyMobile : l10n.loadErrorBody,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),

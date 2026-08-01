@@ -94,6 +94,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   ServerBackupInfo dco_decode_server_backup_info(dynamic raw);
 
   @protected
+  StoreUnlock dco_decode_store_unlock(dynamic raw);
+
+  @protected
   int dco_decode_u_16(dynamic raw);
 
   @protected
@@ -180,6 +183,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   ServerBackupInfo sse_decode_server_backup_info(SseDeserializer deserializer);
+
+  @protected
+  StoreUnlock sse_decode_store_unlock(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_16(SseDeserializer deserializer);
@@ -276,6 +282,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_server_backup_info(
       ServerBackupInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_store_unlock(StoreUnlock self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_16(int self, SseSerializer serializer);

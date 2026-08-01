@@ -11,6 +11,7 @@ import '../../core/models.dart';
 import '../backup/backup_actions.dart';
 import '../chat/chat_screen.dart';
 import '../donations/donations_screen.dart';
+import '../lock/app_lock_settings.dart';
 import '../pairing/pairing_screen.dart';
 
 /// The conversation list. Empty until the user pairs with someone.
@@ -52,6 +53,8 @@ class HomeScreen extends StatelessWidget {
             onSelected: (value) {
               if (value == 'identity') _showMyIdentity(context, core);
               if (value == 'background') _backgroundDeliverySettings(context);
+              if (value == 'applock') showAppLockSettings(context, core);
+              if (value == 'duress') showDuressSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'about') _showAbout(context);
               if (value == 'logout') _confirmLogout(context, core);
@@ -61,6 +64,11 @@ class HomeScreen extends StatelessWidget {
               if (BackgroundDelivery.supported)
                 PopupMenuItem(
                     value: 'background', child: Text(l10n.backgroundDeliveryMenu)),
+              PopupMenuItem(value: 'applock', child: Text(l10n.appLockMenu)),
+              // Its own row, and deliberately stateless in the label: "Wipe code" reads the same
+              // whether or not one is armed, so a glance at an unlocked phone gives nothing away.
+              // The feature itself is public; only *your* having armed it is worth hiding (#3).
+              PopupMenuItem(value: 'duress', child: Text(l10n.duressMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
               PopupMenuItem(value: 'about', child: Text(l10n.aboutMenu)),
               PopupMenuItem(

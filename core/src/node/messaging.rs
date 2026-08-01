@@ -193,8 +193,11 @@ impl Node {
         affected
     }
 
-    /// Retry chat-delete [`Closed`](crate::wire::Frame::Closed) signals (§11.6) that reached neither
-    /// the peer nor any relay when the chat was torn down (arti cold / relay briefly unreachable).
+    /// Retry authenticated control signals that reached neither the peer nor any relay when they
+    /// were raised (arti cold / relay briefly unreachable): a chat-delete
+    /// [`Closed`](crate::wire::Frame::Closed) (§11.6), or a
+    /// [`Screenshot`](crate::wire::Frame::Screenshot) notice (#1) taken while the device was off
+    /// the network.
     /// Called on the relay-poll cadence; re-posts the already-sealed frame (relay-first, direct
     /// fallback) until a copy lands, then drops it. Chat-independent and in-memory, like
     /// [`flush_pending_relay`](Self::flush_pending_relay).

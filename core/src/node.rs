@@ -47,6 +47,7 @@ const MARK_ACK: &[u8] = b"nightdrop/ctl/ack/v1";
 const MARK_BACKEDUP: &[u8] = b"nightdrop/ctl/backedup/v1";
 /// Two markers for the safety-number verification signal (§5b′): the state is carried by *which*
 /// one the receiver's ratchet decrypts, so it's authenticated with no tamperable plaintext flag.
+const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
 const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
 const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
 
@@ -315,6 +316,13 @@ struct Chat {
     peer_address: Address,
     session: Session,
     history: Vec<ChatMessage>,
+    /// Unix seconds when we last had **cryptographic** evidence the peer was alive: a message we
+    /// decrypted, or a control frame that verified on their ratchet. Not "when they last typed" —
+    /// a silent delivery ack counts, because it still proves their device drained our mailbox.
+    ///
+    /// Only authenticated events update it. Anything a stranger could send would otherwise let
+    /// them fake liveness for someone whose phone was taken (`silence-detection.md`).
+    last_seen: Option<u64>,
     /// False while an inbound request awaits the local user's approval (§5). A chat we
     /// initiated is authorized immediately; one opened by a stranger's `Hello` is not.
     authorized: bool,
@@ -718,6 +726,56 @@ impl Node {
         }
     }
 
+    /// Report that the user took a **screenshot** of this chat (#1), to both sides of it.
+    ///
+    /// Screenshots are deliberately *allowed* — blocking them only pushes people to photograph the
+    /// screen, which we cannot see at all — so the honest alternative is to make them visible. Logs
+    /// a local note (so the user knows what their peer was told) and sends the peer a
+    /// [`Screenshot`](Frame::Screenshot) frame — direct if they're reachable, else queued on the
+    /// relay for their next drain, else held in `pending_control` for the poller to retry. The
+    /// capture itself never fails; only the notice is retried.
+    ///
+    /// Every screenshot is reported; there is no dedupe flag, because the *count* and *timing* are
+    /// the informative part.
+    pub fn report_screenshot(&mut self, contact_id: &str) {
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return;
+        };
+        if chat.closed {
+            return; // nobody left to tell
+        }
+        chat.history.push(ChatMessage::system(
+            "📸 You took a screenshot. The other person was told.".to_string(),
+        ));
+        if let Some((addr, frame)) =
+            self.authed_control(contact_id, MARK_SCREENSHOT, |from, message| {
+                Frame::Screenshot { from, message }
+            })
+        {
+            // Direct-first (unlike `delete_chat`): when the peer *is* online, "they are
+            // screenshotting this right now" is the informative case and should not wait for a
+            // relay poll. `deliver` already falls back to the relay when the dial fails, so an
+            // offline peer picks it up on their next drain.
+            if self.deliver(&addr, contact_id, &frame).is_err() {
+                // Neither the peer nor any relay was reachable — the phone itself is offline, which
+                // is an ordinary thing to be while screenshotting. Hold the sealed frame for the
+                // poller to retry, exactly as a chat-delete `Closed` is: the local side has already
+                // promised the user that "the other person was told", and unlike a chat message
+                // there is nothing the user can resend to make good on that.
+                self.pending_control.push(PendingControl {
+                    recipient_ik: contact_id.to_string(),
+                    peer_address: addr,
+                    relays: self
+                        .chats
+                        .get(contact_id)
+                        .map(|c| c.contact.peer_relays.clone())
+                        .unwrap_or_default(),
+                    bytes: wire::encode(&frame),
+                });
+            }
+        }
+    }
+
     /// The peer-facing side of deleting this identity (#7 / §11.6): before the app wipes the
     /// local state file, signal [`Closed`](Frame::Closed) to the peer of every **un-backed**
     /// chat — otherwise their messages to a since-deleted identity would sit undeliverable.
@@ -725,10 +783,26 @@ impl Node {
     /// when we restore within its 24h window. Clears all chats. Returns how many un-backed chats we
     /// could **not** get the notice to (0 = all queued/sent), so the app can tell the user.
     pub fn logout(&mut self) -> usize {
+        self.logout_inner(false)
+    }
+
+    /// [`logout`](Self::logout) for the **duress wipe** (#3), differing in one way: *every* live
+    /// chat is notified, not just un-backed ones. `logout` stays silent on backed-up chats so the
+    /// peer's mail queues for a restore within the 24h window — after a duress wipe no restore is
+    /// coming, so that silence would just strand them.
+    ///
+    /// The notice itself is the **ordinary** `Closed`, deliberately indistinguishable from a normal
+    /// chat deletion: a duress-specific frame would be a permanent record on someone else's device
+    /// that an anti-forensics feature was used. See `docs/design/duress-wipe.md` §5.
+    pub fn duress_logout(&mut self) -> usize {
+        self.logout_inner(true)
+    }
+
+    fn logout_inner(&mut self, notify_backed_up: bool) -> usize {
         let notify: Vec<String> = self
             .chats
             .iter()
-            .filter(|(_, c)| !c.contact.backed_up && !c.closed)
+            .filter(|(_, c)| (notify_backed_up || !c.contact.backed_up) && !c.closed)
             .map(|(id, _)| id.clone())
             .collect();
         let mut failed = 0usize;
@@ -778,7 +852,7 @@ impl Node {
         self.last_invite_code = Some(code);
     }
 
-    /// Build an **authenticated** control frame (`Closed`/`Ack`/`BackedUp`): encrypt a fixed domain
+    /// Build an **authenticated** control frame (`Closed`/`Ack`/`BackedUp`/`Screenshot`): encrypt a fixed domain
     /// `marker` on the chat's ratchet so the receiver can prove it came from us and reject a forged
     /// or replayed one. Returns `(peer_address, frame)` for [`deliver`](Self::deliver), or `None`
     /// if the chat is gone. Paired with [`verify_control`](Self::verify_control) on the receiver.
@@ -805,7 +879,16 @@ impl Node {
         let Ok(olm) = message.to_olm() else {
             return false;
         };
-        matches!(crypto::decrypt(&mut chat.session, &olm), Ok(pt) if pt == marker)
+        let ok = matches!(crypto::decrypt(&mut chat.session, &olm), Ok(pt) if pt == marker);
+        if ok {
+            // Proof of life, and the *only* place most of it comes from: a silent delivery `Ack`
+            // means their device drained our mailbox, even though they never typed anything.
+            // Stamped here rather than per-branch so no authenticated frame is missed, and never
+            // for a frame that failed to verify — otherwise a stranger could fake liveness for
+            // someone whose phone has been taken.
+            chat.last_seen = Some(crate::api::now_secs());
+        }
+        ok
     }
 
     /// Send a control/relay frame to `peer_address`, falling back to the relay mailbox when
@@ -951,9 +1034,11 @@ impl Node {
             .values()
             .filter(|c| c.authorized)
             .map(|c| {
-                // `remote_storage_healthy` is live per-chat state, not part of the stored contact.
+                // `remote_storage_healthy` and `last_seen_secs` are live per-chat state, not part
+                // of the stored contact — filled in here so the UI sees one flat object.
                 let mut dto = c.contact.clone();
                 dto.remote_storage_healthy = c.remote_storage_healthy;
+                dto.last_seen_secs = c.last_seen.unwrap_or(0);
                 dto
             })
             .collect()

@@ -224,4 +224,65 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Set a chat's disappearing-messages timer in seconds (0 = off). A shared setting synced
   /// to the peer; messages older than the timer are deleted on both devices.
   Future<void> setDisappearing(String contactId, int secs);
+
+  /// Report that the user screenshotted this chat (#1): logs it locally and tells the peer.
+  ///
+  /// Only Android 14+ can detect a screenshot, and nothing can detect a photo of the screen — so
+  /// this makes captures visible when they happen, and must never be presented as a guarantee that
+  /// captures will be visible. Default is a no-op for implementations without a peer to tell.
+  Future<void> reportScreenshot(String contactId) async {}
+
+  // --- App lock (see docs/design/app-lock.md) ------------------------------------------
+  // The at-rest key normally sits in the OS keystore, which anyone holding the unlocked device
+  // can read through the app. A lock re-derives it from a secret the user knows instead. Both a
+  // PIN and a passphrase are offered: a PIN stops someone picking up the phone, but only a
+  // passphrase survives someone imaging the device — the UI has to say which is which.
+  //
+  // Defaults keep every implementation that doesn't support a lock (the mock, the in-process demo)
+  // behaving exactly as before: never locked, so nothing gates on an unlock.
+
+  /// Whether a lock is set on this device.
+  Future<bool> isStoreLocked() async => false;
+
+  /// Whether this session has unlocked the store. Meaningless unless [isStoreLocked].
+  bool get storeUnlocked => true;
+
+  /// Whether launch stopped short because the store is locked. Synchronous, because the widget
+  /// deciding between the lock screen and onboarding can't await. **The UI must check this before
+  /// `identity == null`:** a locked store has no readable identity, and treating that as a fresh
+  /// install would offer to overwrite data the user can still recover.
+  bool get needsUnlock => false;
+
+  /// Try `secret`; false if it doesn't open the lock. Callers must not report *why* it failed.
+  Future<bool> unlockStore(String secret) async => true;
+
+  /// Put the at-rest key behind `secret` and remove the keystore copy.
+  Future<void> enableStoreLock(String secret) async {}
+
+  /// Remove the lock, restoring the keystore copy. Throws on a wrong secret.
+  Future<void> disableStoreLock(String secret) async {}
+
+  /// Arm (or replace) the **duress** secret (#3) — the second secret that wipes instead of
+  /// opening. Needs the normal secret, so someone who coerced one unlock can't re-arm it. Throws
+  /// if the normal secret is wrong or if `duress` would also open the normal slot.
+  ///
+  /// **The UI must never display whether this is armed**, and must warn about it only here: a
+  /// persistent "duress is on" anywhere would tell whoever picks up the phone exactly what the
+  /// design hides. See `docs/design/duress-wipe.md` §6.
+  Future<void> setDuressSecret(String secret, String duress) async {}
+
+  /// Disarm duress. Needs the normal secret. Succeeds whether or not anything was armed.
+  Future<void> clearDuressSecret(String secret) async {}
+
+  /// Whether a wipe code is currently armed, so the UI can offer *remove* only when there is
+  /// something to remove. Readable only because the app is unlocked — the flag is sealed under the
+  /// store key, so an imaged device still gives nothing away.
+  Future<bool> isDuressArmed() async => false;
+
+  /// Whether `secret` is the normal unlock secret. Lets a settings flow reject a wrong secret
+  /// before asking for anything else. A wipe code answers false and wipes nothing here.
+  Future<bool> verifyStoreSecret(String secret) async => false;
+
+  /// Forget the unlocked key. A no-op while background delivery is on, which needs it resident.
+  Future<void> lockStore() async {}
 }
