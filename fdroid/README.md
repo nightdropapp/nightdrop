@@ -83,8 +83,15 @@ compared built binary to supplied reference binary successfully
    the release ships with no "What's New" and cannot be fixed afterwards.
    `check-metadata.sh` fails if any is missing. Commit, tag, push.
 3. Update the recipe's `commit:`/`versionName`/`versionCode`/`CurrentVersion*`, then build the
-   release artifact with `SKIP_BINARY=1 ./fdroid/build-locally.sh` (the flag is needed because
-   `binary:` makes fdroidserver download an APK that does not exist yet).
+   release artifact with `SKIP_BINARY=1 ./fdroid/build-locally.sh --fresh` (the flag is needed
+   because `binary:` makes fdroidserver download an APK that does not exist yet).
+
+   **`--fresh` is not optional on a release**, and this bites every time: the cached volume holds a
+   clone of this repo from the *previous* build, `fetchsrclibs` runs with `refresh=False`, and the
+   commit you just pushed is not in it. The failure is
+   `VCSException: Git checkout of '<sha>' failed … fatal: unable to read tree`, which reads like a
+   bad hash rather than a stale cache. A clean volume also matches what CI does, so a green run here
+   means more.
 4. Sign it — **with `--alignment-preserved`**:
 
 ```sh
