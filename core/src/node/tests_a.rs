@@ -168,6 +168,85 @@ fn state_survives_a_restart_via_encrypted_storage() {
     std::fs::remove_file(&path).ok();
 }
 
+// The invariant above, across a restart — which is where it was being lost. Found on a device
+// (2026-08-02): a request arrived on the desktop, the app restarted minutes later, and the chat
+// came back as an ordinary approved contact. Nobody ever approved it. `PersistedChat` had no
+// `authorized` field and restore hardcoded `true`, on a comment's assumption that only approved
+// chats were ever saved — but a pending request is a chat, and is saved like any other.
+//
+// So a stranger's Hello plus any restart was enough to become a contact, and the peer stayed
+// stuck on "waiting for the other person to accept" while their messages were being accepted.
+#[test]
+fn a_pending_request_is_still_pending_after_a_restart() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_require_authorization(true);
+    let mut bob = Node::new(Box::new(net.endpoint("bob"))); // stranger
+
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    assert_eq!(alice.pending_authorizations().len(), 1);
+    let bob_contact = alice.pending_authorizations()[0].id.clone();
+
+    let key: StoreKey = [3u8; 32];
+    let state = alice.export(&key);
+    drop(alice);
+    let mut alice2 = Node::restore(&state, Box::new(net.endpoint("alice")), &key).unwrap();
+
+    assert_eq!(
+        alice2.pending_authorizations().len(),
+        1,
+        "a restart is not an approval"
+    );
+    assert!(
+        alice2.contacts().is_empty(),
+        "an unapproved stranger must not be a contact"
+    );
+    assert!(
+        alice2.send(&bob_contact, "hi").is_err(),
+        "and must not be messageable"
+    );
+
+    // The other half: approval survives too, so this doesn't just make everyone pending forever.
+    alice2.authorize(&bob_contact, true).unwrap();
+    let state = alice2.export(&key);
+    drop(alice2);
+    let alice3 = Node::restore(&state, Box::new(net.endpoint("alice")), &key).unwrap();
+    assert_eq!(alice3.contacts().len(), 1, "an approval is not forgotten");
+    assert!(alice3.pending_authorizations().is_empty());
+}
+
+// A state file written before `authorized` existed has no such field. It must read as APPROVED:
+// defaulting to false would turn every real contact on an existing install into a request the user
+// has to re-approve, with no way to tell which were genuine.
+#[test]
+fn a_state_file_without_the_authorized_field_restores_as_approved() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    assert_eq!(alice.contacts().len(), 1);
+
+    let key: StoreKey = [4u8; 32];
+    let state = alice.export(&key);
+    // Exactly what an older file looks like: the field simply is not in the JSON.
+    let mut json = serde_json::to_value(&state).unwrap();
+    for chat in json["chats"].as_array_mut().unwrap() {
+        chat.as_object_mut().unwrap().remove("authorized");
+    }
+    let old: crate::storage::PersistedState = serde_json::from_value(json).unwrap();
+
+    let alice2 = Node::restore(&old, Box::new(net.endpoint("alice")), &key).unwrap();
+    assert_eq!(
+        alice2.contacts().len(),
+        1,
+        "an upgrade must not demote existing contacts to requests"
+    );
+}
+
 #[test]
 fn inbound_request_requires_authorization_before_messaging() {
     let net = MemoryNetwork::new();

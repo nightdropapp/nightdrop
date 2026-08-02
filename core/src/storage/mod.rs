@@ -83,6 +83,26 @@ pub struct PersistedChat {
     /// a chat without one simply mints a fresh key and re-announces it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_key: Option<String>,
+    /// Whether the local user has **approved** this chat, or it is still an inbound request awaiting
+    /// approval (`ARCHITECTURE.md` §5 — authorization before first message).
+    ///
+    /// Added 2026-08-02, after a device test. This field did not exist, and restore hardcoded
+    /// `authorized: true` on the reasoning that "persisted chats were authorized before saving" —
+    /// which is simply not so, since a pending request is a chat and is saved like any other. So a
+    /// stranger's unapproved request was **promoted to an approved contact by the next restart**,
+    /// with no approval ever given: exactly the invariant this app is supposed to hold.
+    ///
+    /// `default = "yes"`, not `#[serde(default)]`. A missing field means a state file written before
+    /// this existed, and defaulting those to `false` would demote every real contact on an upgrade
+    /// to a request the user has to re-approve. Files written from now on carry the truth.
+    #[serde(default = "yes")]
+    pub authorized: bool,
+}
+
+/// `serde` default for [`PersistedChat::authorized`] — see the field's note on why absence must
+/// read as approved.
+fn yes() -> bool {
+    true
 }
 
 /// One relay recall receipt for a still-queued message (see [`PersistedChat::queued_receipts`]).

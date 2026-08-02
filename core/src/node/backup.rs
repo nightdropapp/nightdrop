@@ -69,6 +69,7 @@ impl Node {
                     base64::engine::general_purpose::STANDARD.encode(k)
                 }),
                 local_name: chat.local_name.clone(),
+                authorized: chat.authorized,
             })
             .collect();
         PersistedState {
@@ -300,7 +301,11 @@ impl Node {
                             .ok()
                             .and_then(|v| v.try_into().ok())
                     }),
-                    authorized: true, // persisted chats were authorized before saving
+                    // NOT hardcoded true any more: a pending inbound request is persisted like any
+                    // other chat, so assuming approval here promoted strangers to contacts on the
+                    // next restart. Old files (field absent) still read as approved — see the
+                    // field's note.
+                    authorized: chat.authorized,
                     code: None,
                     closed: chat.closed,
                     relay_receipts,
@@ -353,7 +358,9 @@ impl Node {
                             peer_address: pchat.peer_address.clone(),
                             session,
                             history,
-                            authorized: true,
+                            // Same reasoning as the restore path above: a merged chat that was
+                            // still a pending request must not arrive approved.
+                            authorized: pchat.authorized,
                             code: None,
                             closed: pchat.closed,
                             relay_receipts: HashMap::new(),

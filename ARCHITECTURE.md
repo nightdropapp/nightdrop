@@ -140,6 +140,13 @@ handles automatically while a code is outstanding.
 In both flows the recipient sees an explicit **authorization prompt** before the
 first message is delivered.
 
+**Pending state is persisted, and this is load-bearing.** A request awaiting approval is an ordinary
+chat in the store, flagged unapproved. It was not flagged at all until 2026-08-02: the field did not
+exist and restore assumed approval, so *any restart promoted an unapproved stranger to a contact* —
+the invariant above held right up until the app was closed. A missing flag in an older state file
+reads as approved, so upgrades don't demote real contacts. Pinned by
+`a_pending_request_is_still_pending_after_a_restart`.
+
 ### 5b′. Safety-number verification (defense in depth)
 PAKE/QR already authenticate the first handshake, but users can additionally confirm no MITM
 sat on the pairing channel by comparing a **safety number** — `SHA-256` over the *sorted* pair
