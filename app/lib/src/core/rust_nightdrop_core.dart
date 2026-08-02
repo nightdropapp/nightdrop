@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show File, Directory, Platform;
+import 'dart:io' show Directory, File, FileSystemEntity, Platform;
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
@@ -549,6 +549,27 @@ class RustNightdropCore extends NightdropCore {
 
   /// Copy an unreadable state file aside before anything can overwrite it, so a transient failure
   /// (or a bug fixed in a later build) doesn't cost the user their data. Best-effort.
+  /// Move any persisted state out of the way before a **new** identity is created.
+  ///
+  /// The core restores from `persistPath` whenever that file exists — it has no other way to tell
+  /// "create" from "restore". So an unreadable state file, which is the exact reason the load-error
+  /// screen is on screen, made "set up a new identity" fail with "wrong key or corrupt store": the
+  /// recovery path blocked by the thing it exists to recover from. Found on a device, 2026-08-02,
+  /// straight after the same shape of bug in the sealed onion key.
+  ///
+  /// **Renamed, never deleted.** These bytes may be the user's only copy of an identity they are
+  /// abandoning under duress of a failed launch, possibly recoverable later with the right key.
+  /// The wipe removes the sidecars, so they never outlive a deliberate destruction.
+  Future<void> _setAsideOldState() async {
+    try {
+      final file = File(await _stateFilePath());
+      if (!file.existsSync()) return;
+      await file.rename('${file.path}.replaced-${DateTime.now().millisecondsSinceEpoch}');
+    } catch (_) {
+      // Non-Tor demo modes have no persistence and no plugin to ask; never block onboarding.
+    }
+  }
+
   Future<void> _preserveUnreadableState(String path) async {
     try {
       final file = File(path);
@@ -566,6 +587,7 @@ class RustNightdropCore extends NightdropCore {
     // have left a core holding the Tor state lock.
     await _closeCore();
     _guardHealDone = false;
+    await _setAsideOldState();
     final listen = _listenAddr;
     final relay = _relayAddr;
     if (_torEnabled) {
@@ -855,32 +877,74 @@ class RustNightdropCore extends NightdropCore {
     // Decrypted media must not outlive the identity: drop the in-memory caches and delete
     // the plaintext `nightdrop-media-*` temp files written for the system player.
     unawaited(MediaCache.wipe());
-    try {
+    // Each target is removed independently. This was one `try` around the lot, with a silent
+    // catch, and the first statement in it was the keystore delete — so on Android, where that
+    // call can throw, EVERY file below it was skipped and nothing said so. The identity still
+    // looked destroyed (onboarding overwrites the state file), while the store key, the sealed
+    // onion identity, arti's state and the authorized-client files all survived on disk. A wipe
+    // that half-succeeds in silence is the one failure mode this code must not have.
+    final failed = <String>[];
+    Future<void> step(String what, FutureOr<void> Function() act) async {
+      try {
+        await act();
+      } catch (_) {
+        failed.add(what);
+      }
+    }
+
+    // An absent target is not a failure — a wipe with no media, no contacts and no lock is
+    // ordinary — so existence is checked first rather than letting `delete()` throw for it.
+    void rm(FileSystemEntity target) {
+      if (target.existsSync()) target.deleteSync(recursive: true);
+    }
+
+    // Overwrite before deleting. If `delete` fails — which is how this whole wipe came to be
+    // skipped on Android — the entry that survives is then a random key that unlocks nothing,
+    // instead of the key that protected everything just destroyed (and that still unseals any
+    // copy of the state file or the sealed onion identity taken off the device). It also lands
+    // where a fresh identity wants to be: `_ensureStoreKey` reads it back and treats it as the
+    // new key, which is exactly right, since `randomStoreKey` returns a well-formed one.
+    await step('store key', () async {
+      try {
+        await _secure.write(key: _kStoreKeyName, value: await rust.randomStoreKey());
+      } catch (_) {
+        // Deletion is still worth attempting on its own.
+      }
       await _secure.delete(key: _kStoreKeyName);
-      final support = (await getApplicationSupportDirectory()).path;
-      final state = File('$support/$_kStateFile');
-      if (state.existsSync()) state.deleteSync();
-      final media = Directory('$support/nightdrop-media');
-      if (media.existsSync()) media.deleteSync(recursive: true);
+    });
+    String? support;
+    await step('app dir', () async {
+      support = (await getApplicationSupportDirectory()).path;
+    });
+    if (support case final dir?) {
+      // The state file AND its sidecars: `nightdrop-state.bin.unreadable-*` from a failed launch
+      // and `.replaced-*` from a new identity created over an old one. Both are encrypted copies
+      // of the identity being destroyed, and deleting the original while leaving them would make
+      // the wipe a rename.
+      await step('state file', () {
+        for (final f in Directory(dir).listSync()) {
+          if (f.path.split('/').last.startsWith(_kStateFile)) rm(f);
+        }
+      });
+      await step('media', () => rm(Directory('$dir/nightdrop-media')));
       // Every platform, not just mobile. This used to be Android/iOS only, which left desktop
       // logouts holding the whole Tor state: the onion identity key we were supposedly deleting,
       // and one keystore directory per peer *named after their onion address* — a contact list
       // that outlived the identity. The core drops those keys individually as chats are cleared,
       // but removing the directory is what guarantees nothing is left behind.
-      final artiState = Directory('$support/arti-state');
-      if (artiState.existsSync()) artiState.deleteSync(recursive: true);
+      await step('arti state', () => rm(Directory('$dir/arti-state')));
       // Authorized-client files (#22) name one file per contact. They hold public keys, so nothing
       // secret, but the count is still a contact list and it has no reason to outlive the identity.
-      final clientAuth = Directory('$support/client-auth');
-      if (clientAuth.existsSync()) clientAuth.deleteSync(recursive: true);
+      await step('client auth', () => rm(Directory('$dir/client-auth')));
       // The sealed onion identity (docs/design/onion-key-at-rest.md). It must go for two reasons:
       // it *is* the identity being destroyed, and leaving it behind breaks the next start outright
       // — a fresh identity has a new store key, the stale file will not unseal under it, and the
       // core treats an unreadable identity as an error rather than silently minting a new address.
-      final onionKey = File('$support/onion-key.sealed');
-      if (onionKey.existsSync()) onionKey.deleteSync();
-    } catch (_) {
-      // Ignore wipe failures — the in-memory identity is already gone.
+      await step('onion key', () => rm(File('$dir/onion-key.sealed')));
+    }
+    if (failed.isNotEmpty && _diagEnabled) {
+      // ignore: avoid_print — the wipe's outcome belongs on the record; names only, no paths.
+      print('[nd-diag] wipe: could not remove ${failed.join(', ')}');
     }
     return notNotified;
   }

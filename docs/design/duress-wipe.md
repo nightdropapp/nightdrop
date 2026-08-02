@@ -67,6 +67,19 @@ identity), and the keystore copy of the store key. The lock file **must** go wit
 it behind would show a lock screen for a store that no longer exists, which is both broken and
 conspicuous.
 
+**Each removal stands alone (2026-08-02, after a device test).** This was one `try` around the whole
+list with a silent `catch`, and its *first* statement was the keystore delete — the one call that
+throws on Android. When it threw, every deletion below it was skipped and nothing was recorded. The
+identity still looked destroyed, because onboarding overwrites the state file; in fact the store key,
+the sealed onion identity, arti's state and the authorized-client files all survived, and the next
+identity came up **on the wiped identity's onion address**. Under coercion — the case this feature
+exists for — that is the failure that matters most, and it was invisible.
+
+So: every target is attempted independently, a failure is reported rather than swallowed, and the
+store key is **overwritten with a fresh random key before it is deleted**, so that if the delete
+still fails what remains unlocks nothing. A wipe that half-succeeds in silence is the one failure
+mode this code must not have.
+
 **The peers are not told, and this is structural — not a preference.** (Settled 2026-08-01 by a
 device test, after two wrong turns. The first draft argued for silence on timing grounds. That
 reasoning was then revised to "tell them", on the basis that `logout()` routes to onboarding before

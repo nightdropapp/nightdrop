@@ -75,6 +75,19 @@ So:
 * First-run generation is the *only* path that may mint an identity, and only when the store has no
   key at all.
 
+**Amended 2026-08-02, after it bricked an app on a device.** "Fail loudly" was applied to *every*
+start-up, including the creation of a new identity — and a new identity has a new store key, under
+which any leftover file cannot unseal. A wipe that left the file behind therefore failed the one
+path the user had left ("set up a new identity" on the load-error screen), so the app could not be
+recovered from inside at all.
+
+The rule is right but was scoped too widely. It applies **only when an identity is being restored**
+— i.e. when the state file exists. When a new identity is being created the sealed key is not
+consulted at all, and is overwritten once the fresh identity has a key of its own. Both halves are
+pinned by `a_stale_onion_key_blocks_a_restore_but_never_a_new_identity`, confirmed to fail without
+the fix. The general lesson: a fail-closed rule protecting an existing identity must not also guard
+the path that exists precisely because there is no identity worth protecting.
+
 ## 5. What it does and does not buy
 
 **Does:** a cloned device no longer yields our onion secret key, our address, or our contacts'

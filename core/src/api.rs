@@ -795,8 +795,18 @@ impl NightdropCore {
                 (Some(path), Some(key)) => Some((path, decode_store_key(&key)?)),
                 _ => None,
             };
+            // Only when an identity is actually being restored. Creating a NEW identity means a new
+            // address, so a sealed key left on disk belongs to an identity being abandoned — and
+            // reading it there is not merely pointless, it is a trap: it will not unseal under the
+            // new store key, and `read_onion_key` fails hard on that (rightly — see its doc). The
+            // failure then lands on the one path the user has left, so "set up a new identity" on
+            // the load-error screen could not recover the app from inside. Found on a device,
+            // 2026-08-02, after a wipe left the file behind. The stale file is overwritten below,
+            // once the fresh identity has a key of its own to seal.
             let saved_onion_key = match (state_dir.as_deref(), persist.as_ref()) {
-                (Some(dir), Some((_, key))) => read_onion_key(dir, key)?,
+                (Some(dir), Some((path, key))) => {
+                    onion_key_for_start(dir, key, std::path::Path::new(path).exists())?
+                }
                 _ => None,
             };
             // Once the identity is safely sealed, arti's on-disk keystore has nothing we need and
@@ -1746,7 +1756,10 @@ pub fn clear_store_passphrase(dir: String, passphrase: String) -> Result<String>
 /// Decode a base64 32-byte at-rest key.
 /// Where the onion identity lives now: sealed under the store key, beside the state file, instead
 /// of unencrypted in arti's keystore (`docs/design/onion-key-at-rest.md`).
-#[cfg(feature = "tor")]
+// Not gated on the `tor` feature, unlike its caller: sealing is plain `storage` work with no arti
+// in it, and keeping it buildable without Tor is what lets the tests below cover the start-up
+// decision — the part that had a device-visible bug — in the default test run.
+#[cfg_attr(not(feature = "tor"), allow(dead_code))]
 const ONION_KEY_FILE: &str = "onion-key.sealed";
 
 /// Read the saved onion identity, or `None` on a first run.
@@ -1754,7 +1767,7 @@ const ONION_KEY_FILE: &str = "onion-key.sealed";
 /// An unreadable file is **not** treated as absent: returning `None` there would let the caller
 /// start with a fresh identity and silently change our address, stranding every contact. That case
 /// is an error, and callers must fail on it.
-#[cfg(feature = "tor")]
+#[cfg_attr(not(feature = "tor"), allow(dead_code))]
 fn read_onion_key(dir: &str, key: &crate::storage::StoreKey) -> Result<Option<[u8; 64]>> {
     let path = format!("{dir}/{ONION_KEY_FILE}");
     let Ok(blob) = std::fs::read(&path) else {
@@ -1768,8 +1781,28 @@ fn read_onion_key(dir: &str, key: &crate::storage::StoreKey) -> Result<Option<[u
     Ok(Some(bytes))
 }
 
+/// Which onion identity a start-up should use: the saved one when an identity is being restored,
+/// and none at all when a new one is being created.
+///
+/// The `restoring` distinction is the whole point. A new identity gets a new address, so a sealed
+/// key left on disk belongs to an identity being abandoned; it will not unseal under the new store
+/// key, and [`read_onion_key`] fails hard on that by design. Consulting it there turned a stale
+/// file into an unrecoverable app: the failure landed on "set up a new identity", the one path out
+/// of the load-error screen. The caller overwrites the file once the fresh identity has its own key.
+#[cfg_attr(not(feature = "tor"), allow(dead_code))]
+fn onion_key_for_start(
+    dir: &str,
+    key: &crate::storage::StoreKey,
+    restoring: bool,
+) -> Result<Option<[u8; 64]>> {
+    if !restoring {
+        return Ok(None);
+    }
+    read_onion_key(dir, key)
+}
+
 /// Seal the onion identity beside the state file. Called once, after a first-run bootstrap.
-#[cfg(feature = "tor")]
+#[cfg_attr(not(feature = "tor"), allow(dead_code))]
 fn write_onion_key(dir: &str, key: &crate::storage::StoreKey, bytes: &[u8; 64]) -> Result<()> {
     let sealed = crate::storage::seal(key, bytes)?;
     std::fs::create_dir_all(dir).ok();
@@ -1933,6 +1966,44 @@ fn random_secret_words() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Device bug, 2026-08-02. A wipe left `onion-key.sealed` behind; the next identity had a new
+    // store key, so the file would not unseal; and because start-up read it unconditionally, the
+    // hard failure hit *every* path — including "set up a new identity", the only way off the
+    // load-error screen. The app could not be recovered from inside.
+    //
+    // The restore path must still fail loudly (silently minting a new address strands every
+    // contact), so this pins both halves, not just the one that broke.
+    #[test]
+    fn a_stale_onion_key_blocks_a_restore_but_never_a_new_identity() {
+        let dir = std::env::temp_dir().join(format!("nd-onion-{}", rand::random::<u64>()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.to_str().unwrap();
+        let key: crate::storage::StoreKey = [7u8; 32];
+        let other: crate::storage::StoreKey = [9u8; 32];
+
+        write_onion_key(path, &key, &[42u8; 64]).unwrap();
+
+        // Restoring, and the key matches: the identity comes back, so the address is kept.
+        assert_eq!(
+            onion_key_for_start(path, &key, true).unwrap(),
+            Some([42u8; 64])
+        );
+        // Restoring, but the file will not unseal: fail, rather than start on a new address.
+        assert!(onion_key_for_start(path, &other, true).is_err());
+        // Creating a new identity: the leftover file is simply not consulted. This is the one
+        // that was broken — it returned the error above, and nothing could get past it.
+        assert_eq!(onion_key_for_start(path, &other, false).unwrap(), None);
+
+        // And the new identity's own key overwrites it, so the leftover does not linger.
+        write_onion_key(path, &other, &[1u8; 64]).unwrap();
+        assert_eq!(
+            onion_key_for_start(path, &other, true).unwrap(),
+            Some([1u8; 64])
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn store_key_round_trips_and_rejects_bad_input() {
