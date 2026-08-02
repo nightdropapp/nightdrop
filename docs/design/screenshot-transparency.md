@@ -113,13 +113,22 @@ Galaxy S25, Android 16 (API 36), release build, against the dev relay and a Linu
 
 ## 8. Not yet done
 
-* ~~**The Recents thumbnail was not re-checked on this build.**~~ Checked 2026-08-01, and it was
-  **broken**: the card showed the conversation. `FLAG_SECURE` added in `onPause` does not blank a
-  snapshot the system has already captured as the transition begins — the code asserted an ordering
-  the device does not honour. Now fixed with `setRecentsScreenshotEnabled(false)` on API 33+, which
-  stops the snapshot being taken at all and, unlike `FLAG_SECURE`, leaves deliberate screenshots
-  working. Verified blank on the S25 with the task still present in the recents list. Below API 33
-  the old approach remains as a documented best effort, not a guarantee.
+* ~~**The Recents thumbnail was not re-checked on this build.**~~ Re-checked 2026-08-01, and the
+  card was showing the conversation.
+
+  The old approach **was not broken so much as racy**, which is worth stating precisely because it
+  had been verified working before and looked settled. `FLAG_SECURE` does not take effect the
+  moment `addFlags` is called — it needs a window relayout — and the system captures its Recents
+  snapshot during the same transition. `onPause` → `addFlags` → relayout therefore *races* the
+  snapshot: win and the card is blank, lose and the conversation is legible. It had been winning.
+  What tipped it is unproven; more work at the transition (the cover-traffic poller, a second
+  instance running in Secure Folder) is the plausible cause.
+
+  Fixed on API 33+ with `setRecentsScreenshotEnabled(false)`, which removes the race rather than
+  trying to win it: the system never takes the snapshot, and because `FLAG_SECURE` is never
+  involved, deliberate screenshots keep working. Verified blank on the S25 with the task still
+  present in the recents list. Below API 33 the old approach remains the only option and stays a
+  best effort — a race we usually win, not a guarantee.
 * **`canDetect` is not surfaced in the UI.** The user is not currently told whether their *own*
   screenshots will be announced to their peer, which is a consent-relevant fact on Android ≤ 13.
 * **No capability advertisement to the peer.** Considered and dropped for now: it would let a
