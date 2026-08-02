@@ -799,6 +799,29 @@ impl NightdropCore {
                 (Some(dir), Some((_, key))) => read_onion_key(dir, key)?,
                 _ => None,
             };
+            // Once the identity is safely sealed, arti's on-disk keystore has nothing we need and
+            // plenty we don't want: the identity itself, and one directory per contact named after
+            // their onion address. Removed here — before bootstrap — rather than straight after the
+            // migration run, because during that run arti still holds it open and keeps writing
+            // per-period keys into it.
+            if saved_onion_key.is_some() {
+                if let Some(dir) = state_dir.as_deref() {
+                    let keystore = std::path::Path::new(dir).join("arti-state/keystore");
+                    if keystore.exists() {
+                        match std::fs::remove_dir_all(&keystore) {
+                            Ok(()) => crate::diag!(
+                                "keys: removed the on-disk keystore — identity and contact keys \
+                                 now live only in the sealed store"
+                            ),
+                            // Not fatal: the keys in it are superseded either way, and failing the
+                            // launch over a leftover directory would be worse than leaving it.
+                            Err(e) => {
+                                crate::diag!("keys: could not remove the on-disk keystore ({e})")
+                            }
+                        }
+                    }
+                }
+            }
             let transport = crate::transport::tor::TorTransport::bootstrap(
                 "nightdrop",
                 state_dir.as_deref(),
