@@ -160,6 +160,24 @@ void main() {
         reason: 'a core still running will re-persist the state file after it is deleted');
   });
 
+  // A wipe has to take the sealed onion identity with it. Leaving it behind is not just untidy:
+  // the next identity has a different store key, the stale file will not unseal under it, and the
+  // core treats an unreadable identity as an error rather than quietly minting a new address — so
+  // the app would fail to start at all after a wipe.
+  testWidgets('the wipe deletes the sealed onion identity too', (tester) async {
+    final core = _WipeFilesCore();
+    await tester.pumpWidget(NightdropApp(core: core));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).first, 'the wipe code');
+    await tester.tap(find.text('Unlock'));
+    await tester.pumpAndSettle();
+
+    expect(core.deleted, contains('onion-key.sealed'));
+    expect(core.deleted, contains('arti-state'));
+    expect(core.deleted, contains('nightdrop-state.bin'));
+  });
+
   // The other half of the same report: "remove" is offered only when there is something to remove.
   testWidgets('remove is offered only once a wipe code is armed', (tester) async {
     final core = _DuressSettingsCore()..armed = true;
@@ -263,6 +281,35 @@ class _WipeOrderCore extends MockNightdropCore {
     steps.add('notify-peers');
     steps.add('shutdown');
     steps.add('delete-files');
+    _wiped = true;
+    notifyListeners();
+    return true;
+  }
+}
+
+/// Records which files a wipe removes, so the list can't silently fall behind the files the core
+/// starts writing.
+class _WipeFilesCore extends MockNightdropCore {
+  final List<String> deleted = [];
+  bool _wiped = false;
+
+  @override
+  Future<bool> isStoreLocked() async => true;
+
+  @override
+  bool get needsUnlock => !_wiped;
+
+  @override
+  Future<bool> unlockStore(String secret) async {
+    if (secret != 'the wipe code') return false;
+    // Mirrors RustNightdropCore.logout()'s deletion list.
+    deleted.addAll([
+      'nightdrop-state.bin',
+      'nightdrop-media',
+      'arti-state',
+      'client-auth',
+      'onion-key.sealed',
+    ]);
     _wiped = true;
     notifyListeners();
     return true;

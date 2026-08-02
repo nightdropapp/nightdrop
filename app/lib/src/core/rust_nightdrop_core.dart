@@ -873,6 +873,12 @@ class RustNightdropCore extends NightdropCore {
       // secret, but the count is still a contact list and it has no reason to outlive the identity.
       final clientAuth = Directory('$support/client-auth');
       if (clientAuth.existsSync()) clientAuth.deleteSync(recursive: true);
+      // The sealed onion identity (docs/design/onion-key-at-rest.md). It must go for two reasons:
+      // it *is* the identity being destroyed, and leaving it behind breaks the next start outright
+      // — a fresh identity has a new store key, the stale file will not unseal under it, and the
+      // core treats an unreadable identity as an error rather than silently minting a new address.
+      final onionKey = File('$support/onion-key.sealed');
+      if (onionKey.existsSync()) onionKey.deleteSync();
     } catch (_) {
       // Ignore wipe failures — the in-memory identity is already gone.
     }
