@@ -1,3 +1,4 @@
+import com.android.build.gradle.internal.api.ApkVariantOutputImpl
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -98,4 +99,28 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// F-Droid's per-ABI version-code scheme (requested by the reviewer on fdroiddata!43625).
+//
+// Flutter's own `--split-per-abi` default adds 1000/2000/4000 per ABI, which makes the version
+// codes of ONE release span a range wider than the gap between releases: x86_64 of 0.1.15 is
+// 4016, while armeabi-v7a of 0.1.16 would be 1017. Anything picking "the highest version code"
+// — F-Droid's current-version logic included — then reads an older release as the newest.
+//
+// `versionCode * 10 + abi` keeps every ABI of a release adjacent and the ordering monotonic
+// across releases. The universal APK carries no ABI filter, so it keeps the plain version code.
+//
+// NOTE: the codes this produces must stay ABOVE anything already published, or Android refuses
+// the update as a downgrade. See MAINTENANCE.md — the base version code was raised when this
+// scheme was adopted, precisely because 16*10+1 = 161 is far below the 4016 already shipped.
+val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
+android.applicationVariants.configureEach {
+    val variant = this
+    variant.outputs.forEach { output ->
+        val abiVersionCode = abiCodes[output.filters.find { it.filterType == "ABI" }?.identifier]
+        if (abiVersionCode != null) {
+            (output as ApkVariantOutputImpl).versionCodeOverride = variant.versionCode * 10 + abiVersionCode
+        }
+    }
 }
