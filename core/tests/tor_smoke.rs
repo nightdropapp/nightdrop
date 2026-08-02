@@ -13,7 +13,7 @@ use nightdrop::transport::{client_auth, Transport};
 #[test]
 #[ignore = "needs network; bootstraps a real Tor circuit (slow)"]
 fn bootstrap_and_publish_onion_address() {
-    let transport = TorTransport::bootstrap("nightdroptest", None, None)
+    let transport = TorTransport::bootstrap("nightdroptest", None, None, None)
         .expect("bootstrap Tor and launch onion service");
     let address = transport.address();
     eprintln!("Tor onion address: {address}");
@@ -37,8 +37,8 @@ fn bootstrap_and_publish_onion_address() {
 fn two_onions_round_trip_a_frame() {
     use std::time::Duration;
 
-    let a = TorTransport::bootstrap("nightdropa", None, None).expect("bootstrap A");
-    let b = TorTransport::bootstrap("nightdropb", None, None).expect("bootstrap B");
+    let a = TorTransport::bootstrap("nightdropa", None, None, None).expect("bootstrap A");
+    let b = TorTransport::bootstrap("nightdropb", None, None, None).expect("bootstrap B");
     let a_addr = a.address();
 
     // Retry the dial until A's descriptor is reachable.
@@ -106,7 +106,7 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
 
     // 1. A as a public onion first, to learn its (stable, keystore-backed) address.
     let a_addr = {
-        let a = TorTransport::bootstrap("nightdropauth-a", Some(&a_state), Some(&a_auth))
+        let a = TorTransport::bootstrap("nightdropauth-a", Some(&a_state), Some(&a_auth), None)
             .expect("bootstrap A (public)");
         let addr = a.address();
         assert!(client_auth::authorized_count(Path::new(&a_auth)) == 0);
@@ -117,8 +117,12 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
     std::thread::sleep(Duration::from_secs(3));
 
     // 2. B mints its client key FOR A's onion; A authorizes it (the pairing exchange).
-    let b = TorTransport::bootstrap("nightdropauth-b", Some(&b_state), None).expect("bootstrap B");
-    let key_b = b
+    let b = TorTransport::bootstrap("nightdropauth-b", Some(&b_state), None, None)
+        .expect("bootstrap B");
+    // `make_service_discovery_key` now mints the x25519 secret itself and hands back both halves:
+    // the public key A authorizes, and the secret B keeps (sealed in the store, no longer written
+    // to arti's on-disk keystore — `docs/design/onion-key-at-rest.md`).
+    let (key_b, _secret_b) = b
         .make_service_discovery_key(&a_addr)
         .expect("B generates its descriptor-encryption key for A");
     eprintln!("B client key for A: {key_b}");
@@ -127,7 +131,7 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
     assert_eq!(client_auth::authorized_count(Path::new(&a_auth)), 1);
 
     // 3. Re-launch A on the SAME keystore + now-non-empty auth dir → restricted onion, same address.
-    let a = TorTransport::bootstrap("nightdropauth-a", Some(&a_state), Some(&a_auth))
+    let a = TorTransport::bootstrap("nightdropauth-a", Some(&a_state), Some(&a_auth), None)
         .expect("re-bootstrap A (restricted)");
     assert_eq!(
         a.address(),
@@ -178,7 +182,8 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
 
     // 5. C never exchanged a key with A → refused. B just proved the descriptor is live and
     //    reachable, so C failing over an equivalent window is the restriction, not a flaky net.
-    let c = TorTransport::bootstrap("nightdropauth-c", Some(&c_state), None).expect("bootstrap C");
+    let c = TorTransport::bootstrap("nightdropauth-c", Some(&c_state), None, None)
+        .expect("bootstrap C");
     let mut c_reached = false;
     for _ in 0..40 {
         if c.send(&a_addr, b"unauthorized hello").is_ok() {
@@ -223,7 +228,7 @@ fn relay_is_reachable_over_tor() {
     if let Some(s) = &state {
         eprintln!("using app state dir: {s}");
     }
-    let transport = TorTransport::bootstrap("nightdropprobe", state.as_deref(), None)
+    let transport = TorTransport::bootstrap("nightdropprobe", state.as_deref(), None, None)
         .expect("bootstrap Tor and launch onion service");
     eprintln!("client Tor is up (our onion: {})", transport.address());
 

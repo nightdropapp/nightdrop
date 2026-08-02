@@ -82,7 +82,8 @@ fn deployed_relay_store_and_forward_and_recall_over_tor() {
         std::env::var("RELAY_E2E_STATE").unwrap_or_else(|_| "/tmp/nd-relay-e2e-client".into());
     eprintln!("  bootstrapping Tor (state: {state}; cold bootstrap can take minutes)…");
     let boot = SystemTime::now();
-    let tor = TorTransport::bootstrap("ndrelaye2e", Some(&state), None).expect("bootstrap Tor");
+    let tor =
+        TorTransport::bootstrap("ndrelaye2e", Some(&state), None, None).expect("bootstrap Tor");
     eprintln!(
         "  Tor bootstrapped in ~{}s",
         boot.elapsed().map(|d| d.as_secs()).unwrap_or(0)
