@@ -113,9 +113,13 @@ Galaxy S25, Android 16 (API 36), release build, against the dev relay and a Linu
 
 ## 8. Not yet done
 
-* **The Recents thumbnail was not re-checked on this build.** `FLAG_SECURE`-while-backgrounded is
-  unchanged since it was verified, but it shares a lifecycle with the callback registration, so it
-  is worth one look before release.
+* ~~**The Recents thumbnail was not re-checked on this build.**~~ Checked 2026-08-01, and it was
+  **broken**: the card showed the conversation. `FLAG_SECURE` added in `onPause` does not blank a
+  snapshot the system has already captured as the transition begins — the code asserted an ordering
+  the device does not honour. Now fixed with `setRecentsScreenshotEnabled(false)` on API 33+, which
+  stops the snapshot being taken at all and, unlike `FLAG_SECURE`, leaves deliberate screenshots
+  working. Verified blank on the S25 with the task still present in the recents list. Below API 33
+  the old approach remains as a documented best effort, not a guarantee.
 * **`canDetect` is not surfaced in the UI.** The user is not currently told whether their *own*
   screenshots will be announced to their peer, which is a consent-relevant fact on Android ≤ 13.
 * **No capability advertisement to the peer.** Considered and dropped for now: it would let a

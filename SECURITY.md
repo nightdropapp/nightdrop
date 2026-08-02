@@ -125,7 +125,11 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   design.)* Screenshots are deliberately **not** blocked: a permanent `FLAG_SECURE` only pushes a
   determined person to photograph the screen with a second device, which no software can detect,
   while breaking a legitimate thing users want. Instead a capture is reported — locally and to the
-  peer over an authenticated control frame (`Frame::Screenshot`). The reporting is blind to
+  peer over an authenticated control frame (`Frame::Screenshot`). The app-switcher preview is
+  suppressed outright on Android 13+ (`setRecentsScreenshotEnabled`); on older releases that
+  suppression is best-effort and can fail, since the only tool available there is a window flag set
+  as the app leaves the foreground, which does not reliably beat the system's snapshot. The
+  reporting is blind to
   **every Android below 14** (`Activity.ScreenCaptureCallback` is API 34+), **every desktop
   platform**, **screen recording**, and **a camera pointed at the screen**. So a peer who sees no
   notice has learned nothing, and the UI/website must never imply otherwise. What *is* blocked is
