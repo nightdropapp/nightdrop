@@ -1633,3 +1633,65 @@ fn per_peer_client_keys_survive_a_restart() {
 
     std::fs::remove_file(&path).ok();
 }
+
+/// "Sent" must mean the peer actually has it — the point of `Frame::Delivered`.
+///
+/// Before this, a direct send stopped at "sent" forever: the only ack was the coarse `Ack`, sent
+/// only on a relay drain, and nothing promoted a directly-delivered message at all. The UI drew no
+/// badge for "sent", so a message that had merely been *dialled* looked exactly like one that had
+/// arrived. On 2026-08-02 one was lost when the core was torn down mid-flight and read as sent.
+#[test]
+fn a_direct_message_is_only_delivered_once_the_peer_receipts_it() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_on_alice = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    alice.send(&bob_on_alice, "did this land?").unwrap();
+    let sent = alice.messages(&bob_on_alice).last().unwrap().clone();
+    assert_eq!(sent.delivery, "sent", "dialled, but not yet acknowledged");
+
+    // Bob receives it and receipts it; Alice picks the receipt up.
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.messages(&bob_on_alice).last().unwrap().delivery,
+        "delivered",
+        "the peer confirmed this exact message"
+    );
+
+    // The case a coarse "everything up to now" ack gets wrong. Alice sends two more; the FIRST is
+    // lost outright (as it was on the device, when the core was torn down with it still buffered)
+    // while the second arrives normally.
+    alice.send(&bob_on_alice, "the lost one").unwrap();
+    let lost_id = alice.messages(&bob_on_alice).last().unwrap().msg_id.clone();
+    // Bob's core is torn down with that frame still buffered in his transport, and rebuilt from
+    // the state file — precisely what a guard heal did on the desktop. Re-registering the endpoint
+    // drops the old receiver, so the buffered frame dies with it and Bob never sees the message.
+    let key: StoreKey = [5u8; 32];
+    let state = bob.export(&key);
+    drop(bob);
+    let mut bob = Node::restore(&state, Box::new(net.endpoint("bob")), &key).unwrap();
+    alice.send(&bob_on_alice, "the next one").unwrap();
+    let next_id = alice.messages(&bob_on_alice).last().unwrap().msg_id.clone();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+
+    let by_id = |id: &str| -> String {
+        alice
+            .messages(&bob_on_alice)
+            .into_iter()
+            .find(|m| m.msg_id == id)
+            .unwrap()
+            .delivery
+    };
+    assert_eq!(by_id(&next_id), "delivered", "this one really did arrive");
+    assert_eq!(
+        by_id(&lost_id),
+        "sent",
+        "a message the peer never got must NOT be reported as delivered, however many later \
+         messages succeed — this is the whole reason receipts name a message id"
+    );
+}

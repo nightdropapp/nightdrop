@@ -1282,6 +1282,12 @@ abstract class AppLocalizations {
   /// **'Delivered'**
   String get deliveryDelivered;
 
+  /// Delivery status: handed to the peer's device but not yet confirmed by it. Distinct from Delivered, which means their device confirmed this exact message.
+  ///
+  /// In en, this message translates to:
+  /// **'Sent'**
+  String get deliverySent;
+
   /// Shown when an image attachment can't be decoded.
   ///
   /// In en, this message translates to:

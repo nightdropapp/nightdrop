@@ -288,6 +288,21 @@ fn user_frame_sender(frame: &Frame) -> Option<String> {
     }
 }
 
+/// The `(sender, message id)` a **delivery receipt** should name, for a frame that carries a user
+/// message. `None` for control frames — receipting one would loop, and there is nothing to report.
+///
+/// Kept separate from [`user_frame_sender`] because a receipt must name the *message*, not just the
+/// peer: see [`Frame::Delivered`] for why "everything up to now" is not good enough.
+fn user_frame_receipt(frame: &Frame) -> Option<(String, String)> {
+    match frame {
+        Frame::Message { from, id, .. } => Some((from.clone(), id.clone())),
+        // Media and edits carry their ids *inside* the encrypted envelope, so a receipt for them
+        // would have to be built after decryption rather than here. Left out deliberately: they
+        // keep today's behaviour (no receipt, so no false "delivered") until that is worth doing.
+        _ => None,
+    }
+}
+
 /// A random per-message id (96 bits, URL-safe base64). Shared by both sides via the wire
 /// frame so edits can name their target; carries no identity or ordering information.
 fn random_msg_id() -> String {

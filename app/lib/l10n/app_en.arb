@@ -974,6 +974,10 @@
   "@deliveryDelivered": {
     "description": "Delivery status: delivered."
   },
+  "deliverySent": "Sent",
+  "@deliverySent": {
+    "description": "Delivery status: handed to the peer's device but not yet confirmed by it. Distinct from Delivered, which means their device confirmed this exact message."
+  },
   "imageUnavailable": "Image unavailable",
   "@imageUnavailable": {
     "description": "Shown when an image attachment can't be decoded."

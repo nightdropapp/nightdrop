@@ -1081,9 +1081,15 @@ class _Bubble extends StatelessWidget {
                   ),
                 ],
                 // Sender delivery status: held on the relay, delivered, or expired unread.
+                // "sent" is included deliberately. It used to render NOTHING, so a message that
+                // had only been handed to the peer's onion looked identical to one they had
+                // actually received — and when a message was lost in flight (2026-08-02) the
+                // sender had no way to tell. Now it reads "Sent" until their device confirms
+                // that exact message, and only then "Delivered".
                 if (mine &&
                     !message.sending &&
                     (message.delivery == 'queued' ||
+                        message.delivery == 'sent' ||
                         message.delivery == 'delivered' ||
                         message.delivery == 'expired')) ...[
                   const SizedBox(height: 3),
@@ -1094,6 +1100,7 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => Icons.cloud_upload_outlined,
                           'expired' => Icons.error_outline,
+                          'sent' => Icons.done, // one tick: handed over, not confirmed
                           _ => Icons.done_all,
                         },
                         size: 12,
@@ -1104,6 +1111,7 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => l10n.deliveryHeld,
                           'expired' => l10n.deliveryExpired,
+                          'sent' => l10n.deliverySent,
                           _ => l10n.deliveryDelivered,
                         },
                         style: TextStyle(

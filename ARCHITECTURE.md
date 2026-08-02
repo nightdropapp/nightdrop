@@ -634,7 +634,20 @@ Operations (idempotent, authenticated only by capability tokens, never identity)
   insert into chat → **local generic notification** ("New message" — no content leaves the
   device) → send a **silent delivery `ack`** back (E2E control frame, itself store-and-forwarded;
   acks raise no notification and are never acked).
+- **Send while peer reachable:** the direct dial succeeds → mark message **sent**, badge "Sent"
+  (one tick). This is *not* delivery: the dial proves their onion service answered, not that their
+  app processed the frame.
 - **Sender gets ack:** badge `queued → delivered`.
+- **Sender gets a per-message receipt (`Frame::Delivered`):** badge `sent|queued → delivered`, for
+  **that message id only**.
+
+**Why receipts name a message id (2026-08-02).** `sent` used to be terminal and drew no badge, so a
+message that was merely dialled looked exactly like one that had arrived — and on a device, one was
+lost when the core was torn down with the frame still buffered, while the *next* message arrived
+normally. A coarse "everything up to now" ack would have marked the lost one delivered too. Olm
+decrypts out of order and a gap does not block later messages, so a later frame is no evidence about
+an earlier one. `Ack` (mailbox-drained, no id) is still sent alongside, because a peer on an older
+build understands only that.
 - **24h passes, no ack:** badge `queued → expired` ("not delivered").
 - **Sender recall:** `recall()` while unfetched → blob gone, receiver never notified; badge
   `queued → recalled` ("unsent"); the "stored on relay" indicator disappears on the sender.

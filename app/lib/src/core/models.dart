@@ -222,8 +222,16 @@ class Message {
   /// Sealed-file id of a video's preview thumbnail (empty if none).
   final String thumbId;
 
-  /// Delivery state of an outgoing message: "" / "sent" (direct), "queued" (held on the relay
-  /// for an offline peer), or "delivered" (peer since seen online). Drives the sender badge.
+  /// Delivery state of an outgoing message. Drives the sender badge:
+  ///
+  /// * `"sent"` — handed to the peer's onion. Their device has **not** confirmed it: the dial
+  ///   succeeding says the service answered, not that the app processed the frame.
+  /// * `"queued"` — held on a relay for an offline peer.
+  /// * `"delivered"` — their device sent a receipt naming *this* message (`Frame::Delivered`).
+  /// * `"expired"` — reaped from the relay unread.
+  ///
+  /// The `"sent"`/`"delivered"` split is load-bearing: `"sent"` used to be terminal and drew no
+  /// badge, so a message lost in flight was indistinguishable from one that arrived.
   final String delivery;
 
   /// True for a locally-shown optimistic media message that is still uploading over Tor.

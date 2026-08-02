@@ -735,6 +735,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deliveryDelivered => 'Delivered';
 
   @override
+  String get deliverySent => 'Sent';
+
+  @override
   String get imageUnavailable => 'Image unavailable';
 
   @override

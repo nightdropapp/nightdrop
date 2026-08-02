@@ -451,6 +451,32 @@ impl Node {
                 }
                 Ok(None)
             }
+            Frame::Delivered { from, message } => {
+                // Per-message delivery receipt: the peer has actually processed the message named
+                // by the decrypted payload. Decrypting on their session is the authentication —
+                // a forgery or replay cannot mark anything delivered.
+                let olm = message.to_olm()?;
+                let Some(chat) = self.chats.get_mut(&from) else {
+                    return Ok(None);
+                };
+                let Ok(plaintext) = crypto::decrypt(&mut chat.session, &olm) else {
+                    return Ok(None);
+                };
+                let msg_id = String::from_utf8_lossy(&plaintext).into_owned();
+                // Proof of life, exactly like any other authenticated frame from them.
+                chat.last_seen = Some(crate::api::now_secs());
+                // ONLY the named message. Not "everything older": a message can be lost while a
+                // later one arrives (a core torn down mid-flight, 2026-08-02), and promoting its
+                // neighbours would restore the very lie this frame exists to end.
+                if let Some(m) = chat
+                    .history
+                    .iter_mut()
+                    .find(|m| m.from_me && m.msg_id == msg_id)
+                {
+                    m.delivery = "delivered".to_string();
+                }
+                Ok(None)
+            }
             Frame::Name { from, message } => {
                 // The peer renamed themselves: decrypt and update their display name, which
                 // relabels every message from them (the UI derives the sender from the

@@ -655,12 +655,24 @@ impl Node {
     /// for each received user message (the empty handshake is consumed silently).
     pub fn pump(&mut self) -> Result<Vec<(String, String)>> {
         let mut received = Vec::new();
+        let mut receipts: Vec<(String, String)> = Vec::new();
         while let Some((from_address, bytes)) = self.transport.try_recv() {
             let frame = wire::decode(&bytes)?;
+            // Note the receipt BEFORE processing: `process_frame` consumes the frame, and a
+            // receipt is only honest once the message is actually in the history below.
+            let receipt = user_frame_receipt(&frame);
             if let Some(msg) = self.process_frame(Some(from_address), frame)? {
                 received.push(msg);
+                if let Some(r) = receipt {
+                    receipts.push(r);
+                }
             }
         }
+        // Per-message delivery receipts for anything that arrived over the DIRECT path. Without
+        // these a directly-sent message reached "sent" and stopped there forever — no frame ever
+        // promoted it — so the sender's UI showed a plain bubble that meant "we dialled their onion
+        // successfully", while looking exactly like a message that had arrived (2026-08-02).
+        self.send_receipts(&receipts);
         Ok(received)
     }
 
@@ -724,6 +736,7 @@ impl Node {
         }
         let mut received = Vec::new();
         let mut to_ack: Vec<String> = Vec::new(); // senders whose user messages we drained
+        let mut receipts: Vec<(String, String)> = Vec::new(); // and the exact messages, per sender
         for blob in harvest.blobs {
             let digest: [u8; 32] = Sha256::digest(&blob).into();
             if !self.seen_relay_blobs.insert(digest) {
@@ -742,9 +755,13 @@ impl Node {
                     to_ack.push(from);
                 }
             }
+            let receipt = user_frame_receipt(&frame);
             // Relay-delivered frames carry their own sender id (no transport address).
             if let Some(msg) = self.process_frame(None, frame)? {
                 received.push(msg);
+                if let Some(r) = receipt {
+                    receipts.push(r);
+                }
             }
         }
         // Send a silent, authenticated delivery ack to each peer whose message(s) we just picked
@@ -756,11 +773,34 @@ impl Node {
                 let _ = self.deliver(&addr, &from, &frame);
             }
         }
+        // …and a precise receipt per message on top. The coarse `Ack` above stays because a peer
+        // running an older build understands only that one; a current peer uses these to promote
+        // exactly the messages that arrived, and nothing else.
+        self.send_receipts(&receipts);
         Ok(received)
     }
 }
 
 impl Node {
+    /// Send one authenticated per-message delivery receipt for each `(peer, message id)`.
+    ///
+    /// Best-effort by design: a receipt that cannot be delivered must never fail the receive it
+    /// belongs to — the message *has* arrived, and the only casualty is the sender's badge, which
+    /// stays at "sent". That is the honest failure direction. Falls back to the relay like any
+    /// control frame, so a peer who has gone offline still learns their message landed.
+    pub(crate) fn send_receipts(&mut self, receipts: &[(String, String)]) {
+        for (from, msg_id) in receipts {
+            if let Some((addr, frame)) =
+                self.authed_control(from, msg_id.as_bytes(), |me, message| Frame::Delivered {
+                    from: me,
+                    message,
+                })
+            {
+                let _ = self.deliver(&addr, from, &frame);
+            }
+        }
+    }
+
     /// Set our per-chat display name (§4). Blank falls back to [`DEFAULT_NAME`]; on a live
     /// chat the new name is also sent E2E-encrypted so the peer relabels our messages.
     /// Give this contact a nickname of your own. **Never sent** — unlike `set_my_name`, nothing
