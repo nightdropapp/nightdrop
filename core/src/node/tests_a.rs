@@ -1450,3 +1450,107 @@ fn logout_forgets_every_peer_key() {
     );
     assert_eq!(revoked.lock().unwrap().len(), 2);
 }
+
+/// Shared recorder of `(peer_onion, secret)` pairs put back into the keystore.
+type InsertLog = std::sync::Arc<std::sync::Mutex<Vec<(String, [u8; 32])>>>;
+
+/// Records what the node puts back into the keystore at startup.
+struct KeyRestoreSpy {
+    inner: crate::transport::MemoryTransport,
+    inserted: InsertLog,
+    minted: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl crate::transport::Transport for KeyRestoreSpy {
+    fn address(&self) -> String {
+        self.inner.address()
+    }
+    fn is_synchronous(&self) -> bool {
+        self.inner.is_synchronous()
+    }
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        self.inner.send(peer, frame)
+    }
+    fn try_recv(&self) -> Option<(String, Vec<u8>)> {
+        self.inner.try_recv()
+    }
+    fn make_client_key(&self, peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
+        self.minted.lock().unwrap().push(peer_onion.to_string());
+        // Distinct per call, so a re-mint is visibly different from a restore.
+        let n = self.minted.lock().unwrap().len() as u8;
+        Some(Ok((format!("descriptor:x25519:{peer_onion}"), [n; 32])))
+    }
+    fn insert_client_key(&self, peer_onion: &str, secret: &[u8; 32]) -> Result<()> {
+        self.inserted
+            .lock()
+            .unwrap()
+            .push((peer_onion.to_string(), *secret));
+        Ok(())
+    }
+}
+
+#[test]
+fn per_peer_client_keys_survive_a_restart() {
+    use crate::storage;
+    // The keystore is in memory now (`docs/design/onion-key-at-rest.md`), so these keys exist only
+    // in our sealed store. If they were not put back at startup, every restricted peer would
+    // quietly drop to relay-only after each launch — working, but slower and more observable, with
+    // nothing surfaced to say why.
+    let key: storage::StoreKey = [21u8; 32];
+    let net = MemoryNetwork::new();
+    let inserted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let minted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut alice = Node::new(Box::new(KeyRestoreSpy {
+        inner: net.endpoint("alice"),
+        inserted: std::sync::Arc::clone(&inserted),
+        minted: std::sync::Arc::clone(&minted),
+    }));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    // Pairing minted one and kept the secret.
+    assert_eq!(minted.lock().unwrap().len(), 1);
+    let saved = alice.chats.get(&bob_contact).unwrap().client_key;
+    assert!(
+        saved.is_some(),
+        "the secret must be kept, not just handed to arti"
+    );
+
+    // Restart: persist, restore onto a fresh spy, and restore the keystore contents.
+    let path = std::env::temp_dir().join(format!("nightdrop-ckey-{}.bin", std::process::id()));
+    let path = path.to_str().unwrap().to_string();
+    storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
+    let state = storage::load_from_file(&path, &key).unwrap();
+    let inserted2 = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let minted2 = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut alice2 = Node::restore(
+        &state,
+        Box::new(KeyRestoreSpy {
+            inner: net.endpoint("alice"),
+            inserted: std::sync::Arc::clone(&inserted2),
+            minted: std::sync::Arc::clone(&minted2),
+        }),
+        &key,
+    )
+    .unwrap();
+    alice2.restore_client_keys();
+
+    // Put back, not re-minted: a re-mint would need the peer to authorize a new key first.
+    assert_eq!(inserted2.lock().unwrap().len(), 1);
+    assert_eq!(inserted2.lock().unwrap()[0].1, saved.unwrap());
+    assert!(
+        minted2.lock().unwrap().is_empty(),
+        "a saved key must not be replaced on restart"
+    );
+
+    // A chat with no saved key (paired before this existed) mints and re-announces instead, so it
+    // heals itself rather than needing a manual re-pair.
+    alice2.chats.get_mut(&bob_contact).unwrap().client_key = None;
+    assert_eq!(alice2.restore_client_keys(), 1, "one re-announced");
+    assert_eq!(minted2.lock().unwrap().len(), 1);
+    assert!(alice2.chats.get(&bob_contact).unwrap().client_key.is_some());
+
+    std::fs::remove_file(&path).ok();
+}

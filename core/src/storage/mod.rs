@@ -76,6 +76,13 @@ pub struct PersistedChat {
     /// state files loadable; a new field on a shipped format must never be required.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub local_name: String,
+    /// Base64 of our 32-byte client descriptor-encryption secret for this peer's restricted onion
+    /// (#22). Kept here — sealed with everything else — rather than in arti's keystore, which
+    /// stored it unencrypted in a directory named after the peer's address
+    /// (`docs/design/onion-key-at-rest.md`). `#[serde(default)]` keeps older state files loadable;
+    /// a chat without one simply mints a fresh key and re-announces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
 }
 
 /// One relay recall receipt for a still-queued message (see [`PersistedChat::queued_receipts`]).

@@ -325,6 +325,11 @@ struct Chat {
     last_seen: Option<u64>,
     /// A nickname the local user gave this contact. **Never sent** — see `contact-naming.md` §2.
     local_name: String,
+    /// Our 32-byte client secret for this peer's restricted onion (#22), kept here so it can be
+    /// re-inserted into the in-memory keystore at startup. `None` on a chat paired before this
+    /// existed: a fresh key is minted and re-announced, which the peer accepts on the existing
+    /// chat, so nothing needs re-pairing.
+    client_key: Option<[u8; 32]>,
     /// False while an inbound request awaits the local user's approval (§5). A chat we
     /// initiated is authorized immediately; one opened by a stranger's `Hello` is not.
     authorized: bool,
@@ -952,13 +957,19 @@ impl Node {
     /// fallback, and a no-op on transports without restricted discovery (`make_client_key` → `None`)
     /// or when `peer_address` isn't an onion — so non-Tor pairing is unaffected. Called whenever we
     /// (re)learn a peer's onion: on pairing and on address rotation.
-    fn announce_client_key(&self, contact: &str, peer_address: &str) {
+    fn announce_client_key(&mut self, contact: &str, peer_address: &str) {
         let Some(key_result) = self.transport.make_client_key(peer_address) else {
             return; // transport has no restricted-discovery client keys (e.g. tests, LAN)
         };
-        let Ok(client_key) = key_result else {
+        let Ok((client_key, secret)) = key_result else {
             return; // couldn't parse the peer onion / mint a key — leave us a public onion
         };
+        // Keep the secret: the keystore is in memory, so this is the only copy that survives a
+        // restart, and losing it would silently drop the peer to relay-only.
+        if let Some(chat) = self.chats.get_mut(contact) {
+            chat.client_key = Some(secret);
+            self.dirty = true;
+        }
         let frame = Frame::ClientKey {
             from: self.identity_key(),
             client_key,
@@ -973,7 +984,11 @@ impl Node {
     /// device can reach the restricted relay. `None` on transports without restricted discovery
     /// (tests, LAN); `Some(Err)` if the onion won't parse / key generation fails.
     pub(crate) fn relay_access_key(&self, relay_onion: &str) -> Option<Result<String>> {
-        self.transport.make_client_key(relay_onion)
+        // The relay's key is not persisted: unlike a peer, a relay is reached fresh each run and
+        // re-minting costs nothing, so only the public half matters here.
+        self.transport
+            .make_client_key(relay_onion)
+            .map(|r| r.map(|(public, _secret)| public))
     }
 
     /// Attach the primary relay for offline store-and-forward (§6). Without one (and no

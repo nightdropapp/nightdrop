@@ -64,6 +64,10 @@ impl Node {
                     })
                     .collect(),
                 last_seen_unix: chat.last_seen,
+                client_key: chat.client_key.map(|k| {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::STANDARD.encode(k)
+                }),
                 local_name: chat.local_name.clone(),
             })
             .collect();
@@ -289,6 +293,13 @@ impl Node {
                         .collect(),
                     last_seen: chat.last_seen_unix,
                     local_name: chat.local_name.clone(),
+                    client_key: chat.client_key.as_ref().and_then(|b| {
+                        use base64::Engine as _;
+                        base64::engine::general_purpose::STANDARD
+                            .decode(b)
+                            .ok()
+                            .and_then(|v| v.try_into().ok())
+                    }),
                     authorized: true, // persisted chats were authorized before saving
                     code: None,
                     closed: chat.closed,
@@ -348,6 +359,13 @@ impl Node {
                             relay_receipts: HashMap::new(),
                             last_seen: pchat.last_seen_unix,
                             local_name: pchat.local_name.clone(),
+                            client_key: pchat.client_key.as_ref().and_then(|b| {
+                                use base64::Engine as _;
+                                base64::engine::general_purpose::STANDARD
+                                    .decode(b)
+                                    .ok()
+                                    .and_then(|v| v.try_into().ok())
+                            }),
                             remote_storage_healthy: true,
                         },
                     );

@@ -163,6 +163,7 @@ impl Node {
                     // Pairing is itself contact: start the clock rather than reporting a
                     // brand-new chat as silent.
                     last_seen: Some(crate::api::now_secs()),
+                    client_key: None, // minted and announced immediately after pairing
                     local_name: String::new(),
                     remote_storage_healthy: true,
                 },

@@ -33,6 +33,7 @@ use tor_hsservice::config::restricted_discovery::DirectoryKeyProviderBuilder;
 use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder};
 use tor_hsservice::{handle_rend_requests, HsNickname, RunningOnionService};
 use tor_keymgr::KeystoreSelector;
+use tor_llcrypto::pk::ed25519;
 use tor_rtcompat::PreferredRuntime;
 
 use crate::transport::{client_auth, Address, Transport};
@@ -134,6 +135,9 @@ pub struct TorTransport {
     auth_dir: Option<String>,
     // Keep the running service alive for the lifetime of the transport.
     _service: Arc<RunningOnionService>,
+    /// The service nickname, kept so [`onion_key_material`](Self::onion_key_material) can name the
+    /// identity key in the keystore after launch.
+    nickname: HsNickname,
 }
 
 impl Drop for TorTransport {
@@ -149,10 +153,21 @@ impl TorTransport {
     /// `state_dir`, when set, is a writable base directory for arti's state + cache. It is
     /// **required on Android** (the default `${ARTI_LOCAL_DATA}` does not resolve in the app
     /// sandbox); on desktop, pass `None` to use arti's standard per-user locations.
+    /// `onion_key` is the 64-byte expanded ed25519 secret for our onion identity, held in our own
+    /// sealed store rather than arti's keystore (`docs/design/onion-key-at-rest.md`). `Some` on
+    /// every run after the first: it is inserted into the in-memory keystore **before** the service
+    /// launches, so the address survives restarts. `None` means "first run" and lets arti generate
+    /// one, which the caller then reads back with [`onion_key_material`](Self::onion_key_material)
+    /// and persists.
+    ///
+    /// Passing `None` when a key *does* exist would mint a **new identity** — a new address, every
+    /// contact stranded with no notice. The caller must never do that on a failed read; it must
+    /// fail instead. See §4 of the design note.
     pub fn bootstrap(
         nickname: &str,
         state_dir: Option<&str>,
         client_auth_dir: Option<&str>,
+        onion_key: Option<[u8; 64]>,
     ) -> Result<Self> {
         // rustls 0.23 needs a process-default crypto provider before any TLS config is
         // built; install ring once (ignore the error if another call already did).
@@ -162,8 +177,16 @@ impl TorTransport {
         if crate::diag::enabled() {
             install_arti_tracing();
         }
-        let config = tor_config(state_dir)?;
+        let on_disk_keystore = keystore_is_on_disk(state_dir, nickname, onion_key.is_some());
+        if on_disk_keystore {
+            crate::diag!(
+                "tor: reading the onion identity from the on-disk keystore once, to move it into \
+                 the sealed store; later runs keep the keystore in memory"
+            );
+        }
+        let config = tor_config(state_dir, on_disk_keystore)?;
         let runtime = Arc::new(Runtime::new().context("tokio runtime")?);
+        let nickname_owned: HsNickname = nickname.parse().context("onion service nickname")?;
         let auth_dir = client_auth_dir.map(str::to_string);
         let auth_dir_for_svc = auth_dir.clone();
         let (onion, client, service, inbound_rx) = runtime.block_on(async {
@@ -181,6 +204,26 @@ impl TorTransport {
                     .context("bootstrap Tor")?;
 
             let nickname: HsNickname = nickname.parse().context("onion service nickname")?;
+            // Restore our identity into the in-memory keystore before the service starts. arti
+            // would otherwise generate a fresh one and we would come up on a different address.
+            if let Some(bytes) = onion_key {
+                let expanded = ed25519::ExpandedKeypair::from_secret_key_bytes(bytes)
+                    .ok_or_else(|| anyhow::anyhow!("stored onion key is malformed"))?;
+                let spec = tor_hsservice::HsIdKeypairSpecifier::new(nickname.clone());
+                client
+                    .keymgr()
+                    .context("keystore unavailable")?
+                    .insert(
+                        tor_hscrypto::pk::HsIdKeypair::from(expanded),
+                        &spec,
+                        KeystoreSelector::Primary,
+                        true,
+                    )
+                    .context("restore onion identity into the keystore")?;
+                crate::diag!("tor: restored the saved onion identity into the in-memory keystore");
+            } else {
+                crate::diag!("tor: no saved onion identity — arti will generate one (first run)");
+            }
             // Whether our onion is restricted decides who can reach us at all: a peer we haven't
             // authorized can't even fetch the descriptor, so a brand-new contact's Hello has to
             // come via the relay (#22). Worth knowing when a chat request never arrives (#6).
@@ -243,6 +286,7 @@ impl TorTransport {
             running,
             auth_dir,
             _service: service,
+            nickname: nickname_owned,
         })
     }
 
@@ -250,13 +294,37 @@ impl TorTransport {
     /// connecting to peer `peer_onion`'s restricted onion, returning the **public** key string
     /// (`descriptor:x25519:…`) to hand the peer during pairing so they can authorize us (#22).
     /// arti uses the stored keypair automatically on future connects to that onion.
-    pub fn make_service_discovery_key(&self, peer_onion: &str) -> Result<String> {
+    pub fn make_service_discovery_key(&self, peer_onion: &str) -> Result<(String, [u8; 32])> {
         let hsid = HsId::from_str(peer_onion).context("parse peer onion address")?;
-        let key = self
+        // Generated here rather than by `generate_service_discovery_key`, because arti will only
+        // hand back the *public* half afterwards — and we need the secret to persist. Minting it
+        // ourselves is the only way to keep a copy.
+        let mut bytes = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+        let secret = tor_hscrypto::pk::HsClientDescEncSecretKey::from(
+            tor_llcrypto::pk::curve25519::StaticSecret::from(bytes),
+        );
+        let public = self
             .client
-            .generate_service_discovery_key(KeystoreSelector::Primary, hsid)
-            .context("generate client service-discovery key")?;
-        Ok(key.to_string())
+            .insert_service_discovery_key(KeystoreSelector::Primary, hsid, secret)
+            .context("install client service-discovery key")?;
+        Ok((public.to_string(), bytes))
+    }
+
+    /// The 64-byte expanded ed25519 secret for our onion identity, read back out of the in-memory
+    /// keystore so the caller can seal it into our own store
+    /// (`docs/design/onion-key-at-rest.md`).
+    ///
+    /// Called once, after a first-run bootstrap that let arti generate the identity. Returns `None`
+    /// only if the keystore has no such key, which would mean the service launched without one —
+    /// the caller must treat that as a failure rather than carrying on, or the next start mints a
+    /// different address.
+    pub fn onion_key_material(&self) -> Option<[u8; 64]> {
+        let spec = tor_hsservice::HsIdKeypairSpecifier::new(self.nickname.clone());
+        let keypair: tor_hscrypto::pk::HsIdKeypair =
+            self.client.keymgr().ok()?.get(&spec).ok()??;
+        let expanded: &ed25519::ExpandedKeypair = keypair.as_ref();
+        Some(expanded.to_secret_key_bytes())
     }
 
     /// A [`RelayDialer`](crate::relay_client::RelayDialer) that round-trips one newline-JSON relay
@@ -333,8 +401,19 @@ impl Transport for TorTransport {
     }
 
     /// Mint our client descriptor-encryption key for `peer_onion` (onion client auth, #22).
-    fn make_client_key(&self, peer_onion: &str) -> Option<Result<String>> {
+    fn make_client_key(&self, peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
         Some(self.make_service_discovery_key(peer_onion))
+    }
+
+    fn insert_client_key(&self, peer_onion: &str, secret: &[u8; 32]) -> Result<()> {
+        let hsid = HsId::from_str(peer_onion).context("parse peer onion address")?;
+        let secret = tor_hscrypto::pk::HsClientDescEncSecretKey::from(
+            tor_llcrypto::pk::curve25519::StaticSecret::from(*secret),
+        );
+        self.client
+            .insert_service_discovery_key(KeystoreSelector::Primary, hsid, secret)
+            .context("restore client key for a peer")?;
+        Ok(())
     }
 
     /// Write a paired contact's client key into our watched authorized-keys directory, so arti
@@ -430,11 +509,34 @@ fn apply_common_tuning(builder: &mut TorClientConfigBuilder) {
         .hs_intro_rend_attempts(HS_CONNECT_ATTEMPTS);
 }
 
-fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
+/// Whether arti's keystore should live **in memory** (the default now) or on disk for one
+/// migration run.
+///
+/// On disk is used exactly once: an install that predates this change has its onion identity in
+/// arti's own keystore and nothing else can read it — `get_service_discovery_key` returns only
+/// public halves, and the identity file is arti's format. So that run reads it through arti, the
+/// caller seals it, and every run afterwards is in-memory.
+#[cfg(feature = "tor")]
+fn keystore_is_on_disk(state_dir: Option<&str>, nickname: &str, have_saved_key: bool) -> bool {
+    if have_saved_key {
+        return false; // we hold the identity ourselves — never touch the disk keystore again
+    }
+    let Some(base) = state_dir else {
+        return false;
+    };
+    std::path::Path::new(base)
+        .join("arti-state/keystore/hss")
+        .join(nickname)
+        .join("ks_hs_id.ed25519_expanded_private")
+        .exists()
+}
+
+fn tor_config(state_dir: Option<&str>, on_disk_keystore: bool) -> Result<TorClientConfig> {
     match state_dir {
         None => {
             let mut builder = TorClientConfigBuilder::default();
             apply_common_tuning(&mut builder);
+            apply_keystore_kind(&mut builder, on_disk_keystore);
             builder.build().context("build Tor config")
         }
         Some(base) => {
@@ -450,6 +552,7 @@ fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
             // line that names such a transport has a binary to run it. Must come with the bridges:
             // arti's config validation rejects a PT bridge that has no matching transport entry.
             apply_transports(&mut builder, base);
+            apply_keystore_kind(&mut builder, on_disk_keystore);
             builder.build().context("build Tor config")
         }
     }
@@ -466,6 +569,23 @@ fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
 /// that names a pluggable transport — `obfs4 ADDR FINGERPRINT cert=… iat-mode=…`, `snowflake …` —
 /// also parses here; it additionally needs a matching entry in `transports.txt` (see
 /// [`apply_transports`]) pointing arti at the PT client binary.
+/// Keystore in memory unless this is the one-time migration read. In memory, neither our onion
+/// identity nor the per-contact client keys ever reach disk — they live in our sealed store and are
+/// re-inserted at startup (`docs/design/onion-key-at-rest.md`).
+fn apply_keystore_kind(builder: &mut TorClientConfigBuilder, on_disk: bool) {
+    use tor_config::ExplicitOrAuto;
+    use tor_keymgr::config::ArtiKeystoreKind;
+    builder
+        .storage()
+        .keystore()
+        .primary()
+        .kind(ExplicitOrAuto::Explicit(if on_disk {
+            ArtiKeystoreKind::Native
+        } else {
+            ArtiKeystoreKind::Ephemeral
+        }));
+}
+
 fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
     let path = format!("{base}/bridges.txt");
     let Ok(contents) = std::fs::read_to_string(&path) else {

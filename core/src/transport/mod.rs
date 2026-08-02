@@ -70,8 +70,21 @@ pub trait Transport: Send + Sync {
     /// can authorize us. arti then uses the stored keypair automatically on future connects to that
     /// onion. `None` for transports without restricted discovery (everything but Tor), so the node
     /// simply skips the client-key exchange.
-    fn make_client_key(&self, _peer_onion: &str) -> Option<Result<String>> {
+    /// Mint our client descriptor-encryption key for `peer_onion`'s restricted service (#22),
+    /// returning the **public** half to hand the peer and the **secret** for us to keep.
+    ///
+    /// The secret comes back because we persist it ourselves now, sealed in the store, instead of
+    /// leaving it in arti's on-disk keystore — where it sat unencrypted in a directory named after
+    /// the peer's onion address (`docs/design/onion-key-at-rest.md`).
+    fn make_client_key(&self, _peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
         None
+    }
+
+    /// Put a previously-saved client secret back into the keystore at startup. With the keystore
+    /// in memory this is what keeps a restricted peer reachable across restarts; without it every
+    /// chat would silently fall back to relay-only after each launch.
+    fn insert_client_key(&self, _peer_onion: &str, _secret: &[u8; 32]) -> Result<()> {
+        Ok(())
     }
 
     /// Authorize `contact_id` to reach our onion by writing their client public `key` into our

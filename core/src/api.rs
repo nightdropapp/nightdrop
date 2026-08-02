@@ -788,6 +788,17 @@ impl NightdropCore {
     ) -> Result<NightdropCore> {
         #[cfg(feature = "tor")]
         {
+            // The store key is needed BEFORE Tor starts now: the onion identity is sealed under it
+            // and has to be in the keystore before the service launches, or arti generates a new
+            // one and our address changes (`onion-key-at-rest.md` §4).
+            let persist = match (persist_path, persist_key) {
+                (Some(path), Some(key)) => Some((path, decode_store_key(&key)?)),
+                _ => None,
+            };
+            let saved_onion_key = match (state_dir.as_deref(), persist.as_ref()) {
+                (Some(dir), Some((_, key))) => read_onion_key(dir, key)?,
+                _ => None,
+            };
             let transport = crate::transport::tor::TorTransport::bootstrap(
                 "nightdrop",
                 state_dir.as_deref(),
@@ -797,16 +808,22 @@ impl NightdropCore {
                     .as_deref()
                     .map(|s| format!("{s}/client-auth"))
                     .as_deref(),
+                saved_onion_key,
             )?;
+            // First run: arti generated the identity, so capture it into our sealed store. Without
+            // this the in-memory keystore forgets it and the next start is a different address.
+            if saved_onion_key.is_none() {
+                if let (Some(dir), Some((_, key))) = (state_dir.as_deref(), persist.as_ref()) {
+                    let material = transport.onion_key_material().ok_or_else(|| {
+                        anyhow::anyhow!("onion service started without an identity key")
+                    })?;
+                    write_onion_key(dir, key, &material)?;
+                }
+            }
             // Reach the relay over Tor: build a dialer from the transport's arti client before it
             // is moved into the node (a relay `.onion` can't be reached over plain TCP).
             let relay = relay_addr
                 .map(|onion| RelayClient::with_dialer(transport.make_relay_dialer(onion)));
-
-            let persist = match (persist_path, persist_key) {
-                (Some(path), Some(key)) => Some((path, decode_store_key(&key)?)),
-                _ => None,
-            };
             // Restore from the existing file, or start a fresh identity.
             let restore = persist
                 .as_ref()
@@ -836,6 +853,9 @@ impl NightdropCore {
             // If our onion changed since last run (rebuilt keystore), tell contacts the new
             // address in-band so they can still reach us (#11). No-op on first run / no change.
             me.announce_address_if_changed();
+            // The keystore is in memory now, so the per-peer client keys have to be put back
+            // before any connection is attempted (`onion-key-at-rest.md`).
+            me.restore_client_keys();
 
             let inner = Arc::new(Mutex::new(Inner {
                 me,
@@ -891,6 +911,9 @@ impl NightdropCore {
                     .as_deref()
                     .map(|s| format!("{s}/client-auth"))
                     .as_deref(),
+                // Restore paths write the backup's keystore files to disk just above, so the
+                // identity is read from there for this run and sealed afterwards.
+                None,
             )?;
             // Build the relay dialer over Tor before the transport is moved into the node.
             let relay = relay_addr
@@ -971,6 +994,9 @@ impl NightdropCore {
                     .as_deref()
                     .map(|s| format!("{s}/client-auth"))
                     .as_deref(),
+                // Restore paths write the backup's keystore files to disk just above, so the
+                // identity is read from there for this run and sealed afterwards.
+                None,
             )?;
             // Build the relay dialer before the transport is moved into the node; it both
             // fetches the backup and stays attached for store-and-forward afterwards.
@@ -989,6 +1015,9 @@ impl NightdropCore {
             me.set_media_store(dir.to_string_lossy().into_owned(), key);
             // We came up on a new onion (see above) — announce it so contacts can still reach us.
             me.announce_address_if_changed();
+            // The keystore is in memory now, so the per-peer client keys have to be put back
+            // before any connection is attempted (`onion-key-at-rest.md`).
+            me.restore_client_keys();
             let inner = Arc::new(Mutex::new(Inner {
                 me,
                 demo: None,
@@ -1692,6 +1721,42 @@ pub fn clear_store_passphrase(dir: String, passphrase: String) -> Result<String>
 }
 
 /// Decode a base64 32-byte at-rest key.
+/// Where the onion identity lives now: sealed under the store key, beside the state file, instead
+/// of unencrypted in arti's keystore (`docs/design/onion-key-at-rest.md`).
+#[cfg(feature = "tor")]
+const ONION_KEY_FILE: &str = "onion-key.sealed";
+
+/// Read the saved onion identity, or `None` on a first run.
+///
+/// An unreadable file is **not** treated as absent: returning `None` there would let the caller
+/// start with a fresh identity and silently change our address, stranding every contact. That case
+/// is an error, and callers must fail on it.
+#[cfg(feature = "tor")]
+fn read_onion_key(dir: &str, key: &crate::storage::StoreKey) -> Result<Option<[u8; 64]>> {
+    let path = format!("{dir}/{ONION_KEY_FILE}");
+    let Ok(blob) = std::fs::read(&path) else {
+        return Ok(None); // genuinely absent — first run
+    };
+    let plain = crate::storage::open(key, &blob)
+        .map_err(|_| anyhow::anyhow!("onion identity is unreadable"))?;
+    let bytes: [u8; 64] = plain
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("onion identity is the wrong length"))?;
+    Ok(Some(bytes))
+}
+
+/// Seal the onion identity beside the state file. Called once, after a first-run bootstrap.
+#[cfg(feature = "tor")]
+fn write_onion_key(dir: &str, key: &crate::storage::StoreKey, bytes: &[u8; 64]) -> Result<()> {
+    let sealed = crate::storage::seal(key, bytes)?;
+    std::fs::create_dir_all(dir).ok();
+    let path = format!("{dir}/{ONION_KEY_FILE}");
+    let tmp = format!("{path}.tmp");
+    std::fs::write(&tmp, &sealed)?;
+    std::fs::rename(&tmp, &path)?; // atomic: a torn write here would lose the identity
+    Ok(())
+}
+
 fn decode_store_key(b64: &str) -> Result<crate::storage::StoreKey> {
     use base64::Engine as _;
     use zeroize::Zeroize as _;

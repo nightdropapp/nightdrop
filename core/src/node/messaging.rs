@@ -893,6 +893,50 @@ impl Node {
         true
     }
 
+    /// Put every saved per-peer client key back into the (in-memory) keystore, and mint one for any
+    /// chat that has none (#22, `docs/design/onion-key-at-rest.md`).
+    ///
+    /// Called once at startup, before anything tries to reach a peer. Without it a restricted
+    /// peer's descriptor is unfetchable and every chat quietly degrades to relay-only.
+    ///
+    /// A chat with no saved key is one paired before the keys were persisted. Minting a fresh one
+    /// and announcing it is enough — `Frame::ClientKey` is accepted on an existing chat, and the
+    /// announcement falls back to the relay — so nothing has to be re-paired by hand. Returns how
+    /// many were re-announced, for the diagnostics.
+    // Only the Tor construction paths call this; a non-Tor build has no keystore to restore into.
+    #[cfg_attr(not(feature = "tor"), allow(dead_code))]
+    pub(crate) fn restore_client_keys(&mut self) -> usize {
+        let saved: Vec<(String, Option<[u8; 32]>, String)> = self
+            .chats
+            .iter()
+            .map(|(id, c)| (id.clone(), c.client_key, c.peer_address.clone()))
+            .collect();
+        let mut reannounced = 0usize;
+        for (id, key, addr) in saved {
+            if addr.is_empty() {
+                continue;
+            }
+            match key {
+                Some(secret) => {
+                    let _ = self.transport.insert_client_key(&addr, &secret);
+                }
+                None => {
+                    // Pre-existing chat: mint, keep, and tell them. They authorize the new key and
+                    // direct connectivity resumes without either side re-pairing.
+                    self.announce_client_key(&id, &addr);
+                    reannounced += 1;
+                }
+            }
+        }
+        if reannounced > 0 {
+            crate::diag!(
+                "keys: re-announced {reannounced} client key(s) to peers — they will be reachable \
+                 directly again once each authorizes it (relay works meanwhile)"
+            );
+        }
+        reannounced
+    }
+
     /// Tell every established contact our current advertised extra relay set (#17), so their
     /// offline mail to us fans out to those relays too. E2E `Relays` frame, best-effort (relay
     /// fallback). Called after the user edits their relays.

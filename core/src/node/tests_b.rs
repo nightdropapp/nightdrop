@@ -694,8 +694,10 @@ impl Transport for AuthTransport {
     fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
         self.inner.try_recv()
     }
-    fn make_client_key(&self, peer_onion: &str) -> Option<Result<String>> {
-        Some(Ok(Self::fake_key(peer_onion)))
+    fn make_client_key(&self, peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
+        // The secret is what the node persists; a fixed one is enough for the auth-dir assertions
+        // this fake exists for.
+        Some(Ok((Self::fake_key(peer_onion), [7u8; 32])))
     }
     fn authorize_client(&self, contact_id: &str, key: &str) -> Result<()> {
         crate::transport::client_auth::authorize(&self.auth_dir, contact_id, key)
