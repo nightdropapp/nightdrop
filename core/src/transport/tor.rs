@@ -354,6 +354,18 @@ impl Transport for TorTransport {
         }
     }
 
+    fn forget_peer_key(&self, peer_onion: &str) -> Result<()> {
+        // Best-effort: an unparseable address or a key that was never generated is not an error
+        // worth failing a chat deletion over. What must not happen is the key silently staying.
+        let Ok(hsid) = HsId::from_str(peer_onion) else {
+            return Ok(());
+        };
+        let _ = self
+            .client
+            .remove_service_discovery_key(KeystoreSelector::Primary, hsid);
+        Ok(())
+    }
+
     fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
         let client = Arc::clone(&self.client);
         let peer = peer.to_string();

@@ -86,6 +86,20 @@ pub trait Transport: Send + Sync {
     fn revoke_client(&self, _contact_id: &str) -> Result<()> {
         Ok(())
     }
+
+    /// Forget the client key we hold for reaching `peer_onion`'s restricted service (#22) — the
+    /// *other* direction from [`revoke_client`](Self::revoke_client), which only drops their
+    /// permission to reach us.
+    ///
+    /// This matters beyond tidiness: arti stores that key in a directory **named after the peer's
+    /// onion address**, so leaving it behind means a deleted chat's address stays on disk, and a
+    /// wiped identity leaves a recoverable contact list. The key is re-derivable by re-pairing, so
+    /// there is nothing to preserve and nothing to back up.
+    ///
+    /// No-op where client auth isn't configured.
+    fn forget_peer_key(&self, _peer_onion: &str) -> Result<()> {
+        Ok(())
+    }
 }
 
 /// The inert transport a node is left with after [`crate::node::Node::close_transport`]: it

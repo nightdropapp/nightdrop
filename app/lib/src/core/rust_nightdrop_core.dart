@@ -862,10 +862,17 @@ class RustNightdropCore extends NightdropCore {
       if (state.existsSync()) state.deleteSync();
       final media = Directory('$support/nightdrop-media');
       if (media.existsSync()) media.deleteSync(recursive: true);
-      if (Platform.isAndroid || Platform.isIOS) {
-        final artiState = Directory('$support/arti-state');
-        if (artiState.existsSync()) artiState.deleteSync(recursive: true);
-      }
+      // Every platform, not just mobile. This used to be Android/iOS only, which left desktop
+      // logouts holding the whole Tor state: the onion identity key we were supposedly deleting,
+      // and one keystore directory per peer *named after their onion address* — a contact list
+      // that outlived the identity. The core drops those keys individually as chats are cleared,
+      // but removing the directory is what guarantees nothing is left behind.
+      final artiState = Directory('$support/arti-state');
+      if (artiState.existsSync()) artiState.deleteSync(recursive: true);
+      // Authorized-client files (#22) name one file per contact. They hold public keys, so nothing
+      // secret, but the count is still a contact list and it has no reason to outlive the identity.
+      final clientAuth = Directory('$support/client-auth');
+      if (clientAuth.existsSync()) clientAuth.deleteSync(recursive: true);
     } catch (_) {
       // Ignore wipe failures — the in-memory identity is already gone.
     }

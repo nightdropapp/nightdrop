@@ -698,10 +698,22 @@ impl Node {
                 });
             }
         }
+        // Read the address out before the chat goes: forgetting our client key needs it, and it is
+        // the only place we hold it.
+        let peer_onion = self
+            .chats
+            .get(contact_id)
+            .map(|c| c.peer_address.clone())
+            .unwrap_or_default();
         self.chats.remove(contact_id);
-        // Onion client auth (#22): drop their authorized-client key so they can no longer fetch our
-        // (restricted) descriptor or reach our onion. No-op off Tor.
+        // Onion client auth (#22), both directions. `revoke_client` drops *their* permission to
+        // reach us. `forget_peer_key` drops *our* key for reaching them — which arti stores in a
+        // directory named after their onion address, so skipping it leaves a deleted contact's
+        // address on disk indefinitely. No-op off Tor.
         let _ = self.transport.revoke_client(contact_id);
+        if !peer_onion.is_empty() {
+            let _ = self.transport.forget_peer_key(&peer_onion);
+        }
         Ok(())
     }
 
@@ -838,9 +850,14 @@ impl Node {
                 failed += 1;
             }
         }
-        // Onion client auth (#22): revoke every contact's reachability to our onion on logout.
-        for id in self.chats.keys() {
+        // Onion client auth (#22), both directions, for every chat. Dropping only their
+        // permission would leave *our* client keys behind — one directory per peer, named by their
+        // onion address — so a wiped identity would still yield a recoverable contact list.
+        for (id, chat) in &self.chats {
             let _ = self.transport.revoke_client(id);
+            if !chat.peer_address.is_empty() {
+                let _ = self.transport.forget_peer_key(&chat.peer_address);
+            }
         }
         self.chats.clear();
         // §1.4: wipe any decrypted-media scratch so plaintext attachments don't outlive the wiped

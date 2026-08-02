@@ -1351,3 +1351,102 @@ fn cover_traffic_is_indistinguishable_mail_that_never_surfaces() {
         "cover creates no phantom contact"
     );
 }
+
+/// A transport that records the client-auth calls, so the *cleanup* can be asserted rather than
+/// assumed. Wraps a [`MemoryTransport`] so pairing and delivery still work normally; the recorders
+/// are shared with the test rather than reached through the node, which would need an accessor that
+/// exists only for tests.
+struct AuthSpyTransport {
+    inner: crate::transport::MemoryTransport,
+    revoked: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+    forgotten: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl crate::transport::Transport for AuthSpyTransport {
+    fn address(&self) -> String {
+        self.inner.address()
+    }
+    fn is_synchronous(&self) -> bool {
+        self.inner.is_synchronous()
+    }
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        self.inner.send(peer, frame)
+    }
+    fn try_recv(&self) -> Option<(String, Vec<u8>)> {
+        self.inner.try_recv()
+    }
+    fn revoke_client(&self, contact_id: &str) -> Result<()> {
+        self.revoked.lock().unwrap().push(contact_id.to_string());
+        Ok(())
+    }
+    fn forget_peer_key(&self, peer_onion: &str) -> Result<()> {
+        self.forgotten.lock().unwrap().push(peer_onion.to_string());
+        Ok(())
+    }
+}
+
+#[test]
+fn deleting_a_chat_and_logging_out_forget_the_peer_in_both_directions() {
+    // Field finding (2026-08-02): arti stores our client key for a restricted onion in a directory
+    // *named after the peer's onion address*. Nothing removed it, so deleted chats — and wiped
+    // identities — left a recoverable contact list on disk. Nine such directories had accumulated
+    // on the dev desktop, four of them from a single day's re-pairings.
+    let net = MemoryNetwork::new();
+    let revoked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let forgotten = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut alice = Node::new(Box::new(AuthSpyTransport {
+        inner: net.endpoint("alice"),
+        revoked: std::sync::Arc::clone(&revoked),
+        forgotten: std::sync::Arc::clone(&forgotten),
+    }));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    alice.delete_chat(&bob_contact).unwrap();
+
+    // Both directions: their permission to reach us, and our key for reaching them. The second is
+    // the one that was missing, and it is keyed by the ADDRESS, not the contact id.
+    assert_eq!(
+        revoked.lock().unwrap().as_slice(),
+        std::slice::from_ref(&bob_contact)
+    );
+    assert_eq!(
+        forgotten.lock().unwrap().as_slice(),
+        &["bob".to_string()],
+        "our client key for the peer's onion must be dropped too"
+    );
+}
+
+#[test]
+fn logout_forgets_every_peer_key() {
+    // The wipe path matters most: a duress wipe that left a contact list behind would undo the
+    // point of it. logout() drives both, so covering it covers duress_logout too.
+    let net = MemoryNetwork::new();
+    let revoked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let forgotten = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut alice = Node::new(Box::new(AuthSpyTransport {
+        inner: net.endpoint("alice"),
+        revoked: std::sync::Arc::clone(&revoked),
+        forgotten: std::sync::Arc::clone(&forgotten),
+    }));
+    for peer in ["bob", "carol"] {
+        let mut p = Node::new(Box::new(net.endpoint(peer)));
+        let bundle = p.publish_bundle();
+        alice.connect_with_bundle(peer, &bundle).unwrap();
+        p.pump().unwrap();
+    }
+    assert_eq!(alice.contacts().len(), 2);
+
+    alice.logout();
+
+    let mut got = forgotten.lock().unwrap().clone();
+    got.sort();
+    assert_eq!(
+        got,
+        vec!["bob".to_string(), "carol".to_string()],
+        "every peer's client key goes, not just the last one"
+    );
+    assert_eq!(revoked.lock().unwrap().len(), 2);
+}

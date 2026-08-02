@@ -1,6 +1,8 @@
 # Design draft — Keeping the onion identity off disk
 
-**Status:** 🟡 design, not started.
+**Status:** 🟡 partly done. The **cleanup half is implemented** (2026-08-02): deleted chats and
+logout now drop the peer client keys, and logout clears the Tor state on every platform. The
+**ephemeral-keystore half is still design** — see §3.
 **Relates to:** `docs/design/app-lock.md` §8 (which lists arti's state as out of scope — this
 revisits that), `docs/multiple-identities.md` §1, and `ARCHITECTURE.md` §4.
 
@@ -106,8 +108,24 @@ protection, not anti-forensics against a live device.
 by grepping for any 56-character v3 address: none. So with the keystore in memory the address really
 is off disk, and what remains is only "a hidden service runs here".
 
-**Still open:** the restricted-discovery directory (#22) is **not** part of the keystore and is not
-covered by this change. `client-auth/<id>.auth` is one file per authorized contact, written by us
-into the Tor state dir. Those hold *public* client keys, so the material is not secret — but the
-**count of contacts** still leaks, and the filenames are per-contact ids. Worth a follow-up decision
-once this lands; it is a smaller leak than plaintext addresses but the same class.
+**Closed 2026-08-02:** `client-auth/` is now removed wholesale on logout, alongside `arti-state`.
+It was only ever public client keys, but one file per contact is still a contact count, and it had
+no reason to outlive the identity.
+
+## 8. The cleanup half, as implemented
+
+Independent of the ephemeral keystore, and worth having regardless — the keys had no removal path at
+all:
+
+* `Transport::forget_peer_key(peer_onion)`, implemented for Tor via
+  `remove_service_discovery_key`. Deliberately keyed by the **address**, not the contact id, because
+  that is how arti names the directory.
+* `delete_chat` reads the peer address out *before* dropping the chat (it is the only place we hold
+  it) and forgets the key alongside the existing `revoke_client` — the two directions of #22.
+* `logout` does the same for every chat, so the duress wipe inherits it.
+* The Dart wipe deletes `arti-state` on **every platform**. It was Android/iOS only, which meant a
+  desktop logout kept the onion identity key it was supposedly deleting, plus one directory per peer
+  named by their address.
+
+Two tests, both confirmed to fail with the calls removed: a deleted chat forgets both directions,
+and logout forgets *every* peer rather than the last one.
