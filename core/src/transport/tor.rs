@@ -63,6 +63,18 @@ fn install_arti_tracing() {
     });
 }
 
+/// Per-`connect()` chatter with no diagnostic value, dropped before it reaches the log.
+///
+/// Every relay request opens a fresh stream, and arti logs both of these each time — so while a
+/// short-code invite is outstanding (rendezvous polling every 2s, several requests per poll) they
+/// arrive in a steady stream and bury everything else. Filtered by message rather than by lowering
+/// `arti_client`/`tor_dirmgr` to `info`, because their debug output is precisely what explains a
+/// stuck bootstrap, which is what this log exists for. Seen flooding a device log 2026-08-02.
+const ARTI_NOISE: [&str; 2] = [
+    "Attempted to bootstrap twice; ignoring",
+    "It appears we have the lock on our state files",
+];
+
 /// A `std::io::Write` that turns each completed line from the tracing formatter into one
 /// [`crate::diag::emit_tor`] call. A fresh instance is made per event (one line ending in `\n`).
 #[derive(Default)]
@@ -74,7 +86,11 @@ impl std::io::Write for ArtiDiagWriter {
         self.buf.extend_from_slice(data);
         while let Some(nl) = self.buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = self.buf.drain(..=nl).collect();
-            crate::diag::emit_tor(String::from_utf8_lossy(&line).trim_end());
+            let line = String::from_utf8_lossy(&line);
+            let line = line.trim_end();
+            if !ARTI_NOISE.iter().any(|n| line.contains(n)) {
+                crate::diag::emit_tor(line);
+            }
         }
         Ok(data.len())
     }

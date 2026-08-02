@@ -245,12 +245,24 @@ fn relay_is_reachable_over_tor() {
             Ok(_) => eprintln!("CONTROL: reached a known public onion (client Tor path OK)"),
             Err(e) => {
                 let s = format!("{e:#}");
-                // A protocol/parse error means the circuit OPENED (good); a circuit/timeout error
-                // means the client can't reach onions at all right now.
-                if s.contains("circuit") || s.contains("timed out") || s.contains("not found") {
-                    eprintln!("CONTROL: client CANNOT reach a known public onion either: {s}");
+                // Classify on what the message MEANS, not on whether the word "circuit" appears in
+                // it. We dial this onion on the relay's port, which it does not serve, so the
+                // healthy outcome here is the service refusing the stream — which arti reports as
+                // "Received an END cell with reason DONE", wrapped in text that mentions building a
+                // circuit. The old check keyed on "circuit" and so reported the exact success case
+                // as a failure. On 2026-08-02 that sent an hour of debugging at the network and the
+                // Tor stack while the real fault (the relay's descriptor not published for one time
+                // period) sat untouched. A control that lies is worse than no control at all.
+                //
+                // Reaching the service at all is the whole question, so anything that proves the
+                // rendezvous completed counts as reachable, however the stream then ended.
+                let reached = s.contains("END cell")
+                    || s.contains("remote stream closed")
+                    || s.contains("Protocol error");
+                if reached {
+                    eprintln!("CONTROL: reached a known public onion — stream refused at the service, which is expected on this port (client Tor path OK)");
                 } else {
-                    eprintln!("CONTROL: known public onion circuit opened (client Tor path OK)");
+                    eprintln!("CONTROL: client CANNOT reach a known public onion either: {s}");
                 }
             }
         }
