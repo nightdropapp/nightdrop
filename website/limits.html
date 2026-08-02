@@ -205,6 +205,18 @@
            has, we won't claim more than that — and we'll publish the audit and its fixes when it's
            done. Treat Night Drop as promising and improving, not battle-tested.</p>
       </div>
+      <div class="callout warn" style="margin-top: 20px;">
+        <h3>A seized phone still reveals who you talk to</h3>
+        <p>The app lock encrypts your messages. It does <strong>not</strong> yet cover the file that
+           holds your own Tor address, or the one folder Tor keeps per contact — each named after
+           <em>their</em> address. Someone who takes your phone and copies its storage can read that
+           list without breaking any encryption, and without your PIN.</p>
+        <p>As of 0.1.15 those entries no longer pile up: deleting a chat removes that person, and
+           logging out or using the wipe code clears the lot. What remains exposed is the identity
+           you are using right now, and the contacts you currently have. We are working on moving
+           those into the encrypted store too; until that ships, assume a seized phone shows who
+           you have been talking to.</p>
+      </div>
       <div class="grid" style="margin-top: 28px;">
         <article class="card">
           <h3>🧪 Real-world Tor testing is ongoing <span class="pill">in progress</span></h3>

@@ -1,0 +1,3 @@
+Tor keeps one folder per contact, named after their address, outside the encrypted store. Those used to pile up forever: deleting a chat left the person behind, and on desktop even logging out kept them. Now deleting a chat removes that contact, and logging out or using the wipe code clears the whole lot on every platform.
+
+Still exposed, and being worked on: the identity you're using now, and your current contacts. A seized phone can still show who you talk to, even with an app lock set.

@@ -162,6 +162,23 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   the wipe — it is addressed by a handle derived from the recovery password, which is never
   persisted, so nothing on the device can find it. It stays opaque and expires within its TTL
   (24h default, 36h max), but a written-down recovery password can be compelled inside that window.
+- **The app lock does not cover your onion identity, or who you talk to.** *(Known limit, being
+  worked on.)* The message store is sealed under the app-lock secret. **arti's keystore is not**,
+  and it lives in the same app-private directory: `ks_hs_id.ed25519_expanded_private` is the key
+  that *is* your address, and there is one directory per contact **named after their onion
+  address**. So someone who images the device gets your identity and your current contact list,
+  with no crypto broken and regardless of any lock you set.
+
+  What is fixed as of 0.1.15: those per-contact entries no longer *accumulate*. Deleting a chat
+  drops the peer's key, and logging out or wiping clears the whole Tor state on every platform —
+  previously that only happened on Android, so a desktop logout kept the identity key it was
+  supposedly deleting plus every address it had ever paired with, going back months.
+
+  What is **not** fixed: a live identity's own key, and the contacts it currently has, are still on
+  disk unencrypted. Closing that means moving arti's keystore in-memory and persisting both the
+  identity and every contact key in our sealed store — the design and the reason it is not a small
+  change are in `docs/design/onion-key-at-rest.md`. Until then, treat device seizure as exposing
+  who you talk to, even with an app lock set.
 - **Store-key zeroization.** *(Addressed.)* The long-lived at-rest key is now wiped on drop and the
   transient decode/generate buffers are zeroized; a live-memory/cold-boot attacker still sees
   plaintext history in RAM, so this is hygiene, not a fix for a disclosure bug.
