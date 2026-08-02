@@ -77,6 +77,14 @@ high-level calls like `createIdentity`, `beginPairing`, `acceptPairing`,
   **per-chat** display name (their own name, scoped to that conversation).
 - Identities are **device-held**. Losing the device means losing the identity and
   history unless the optional encrypted backup (§7) is enabled.
+- **One identity per install**, deliberately. Compartmentalisation — separate identities for
+  separate contexts — is delegated to the operating system: a second copy of the app in an isolated
+  profile (Samsung Secure Folder, an Android work profile, or a second user) gets its own storage,
+  its own onion and its own contacts, protected by hardware-backed keys we cannot match in-app. An
+  in-app switcher could not have offered deniability either, since arti stores the onion secret key
+  as a plaintext file outside anything we encrypt, so a second identity is visible to anyone who
+  images the device. Tested, with the one real limitation (no background delivery while the profile
+  is locked, and mail expiring after 24h): `docs/multiple-identities.md`.
 
 ---
 
