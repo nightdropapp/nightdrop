@@ -168,9 +168,24 @@ impl Node {
                     return Ok(None);
                 };
                 if !chat.authorized {
-                    return Ok(None); // ignore messages from a not-yet-authorized contact
+                    // Dropped for good: the sender's side already showed it as sent, and nothing
+                    // asks for it again. Said out loud because a message that vanishes with no
+                    // trace on either device is the hardest kind of report to act on.
+                    crate::diag!(
+                        "recv: message from a contact still awaiting approval — DROPPED (the \
+                         sender believes it was delivered)"
+                    );
+                    return Ok(None);
                 }
-                let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
+                // Same reasoning: a ratchet that can't open this frame loses it permanently, and
+                // `pump`'s `?` means the rest of this batch waits for the next tick. Never logs the
+                // frame, the session, or any key material — only that it happened, and for whom.
+                let plaintext = crypto::decrypt(&mut chat.session, &olm).inspect_err(|_| {
+                    crate::diag!(
+                        "recv: a message from a paired contact FAILED TO DECRYPT — DROPPED (their \
+                         side shows it as sent; sessions have diverged)"
+                    );
+                })?;
                 // Decrypting on their ratchet is proof it was them (silence-detection design).
                 chat.last_seen = Some(crate::api::now_secs());
                 let text = String::from_utf8_lossy(&plaintext).into_owned();

@@ -322,8 +322,13 @@ class RustNightdropCore extends NightdropCore {
     final stateDir = await _torStateDir();
     if (stateDir == null) return; // no writable Tor state dir — nothing to reset
     _guardHealDone = true;
-    await rust.resetTorGuards(stateDir: stateDir);
+    // Shut the core down BEFORE touching the guard files. `resetTorGuards` says so in its own doc
+    // ("Call this with the core shut down, then build a fresh core") and this called it the other
+    // way round: the live arti client can re-persist the guards we just deleted, so the heal
+    // quietly undoes itself and the next launch inherits the same wedged set. Seen on a desktop
+    // 2026-08-02, healing repeatedly with no improvement.
     await _closeCore();
+    await rust.resetTorGuards(stateDir: stateDir);
     _core = await rust.NightdropCore.newTor(
       stateDir: stateDir,
       relayAddr: _relayAddr,
