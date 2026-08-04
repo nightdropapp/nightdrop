@@ -1,0 +1,5 @@
+Fixed: Night Drop kept resetting its own Tor connection on devices that were working perfectly — about once every launch — and the replacement was slower than what it threw away. Connecting should be quicker and steadier now.
+
+A pairing code no longer stops working if the app rebuilds its connection while someone is joining.
+
+Setup now offers background delivery, so messages can arrive while Night Drop is off screen. Deleting your identity turns it back off.
