@@ -1,6 +1,5 @@
 Categories:
-  - Internet
-  - Security
+  - Messaging
 License: AGPL-3.0-or-later
 AuthorName: Night Drop
 AuthorEmail: security@nightdrop.app
@@ -182,7 +181,7 @@ MaintainerNotes: |
   Flutter UI over a cross-compiled Rust core (libnightdrop.so, built by cargokit through the
   NDK), so the recipe provisions both toolchains.
 
-  Only 0.1.15 is offered. 0.1.0-0.1.3 shipped without the Android INTERNET permission and cannot
+  Only 0.1.16 is offered. 0.1.0-0.1.3 shipped without the Android INTERNET permission and cannot
   connect; 0.1.4 embedded AGP's opaque "dependency metadata" signing block, which check-apk
   rejects (fixed in 0.1.5); 0.1.6 and 0.1.7 predate the build fixes below, so their published
   APKs cannot be byte-matched. From 0.1.8 every release is built by this recipe exactly as it
@@ -211,12 +210,18 @@ MaintainerNotes: |
 
   core/fuzz/seeds is a binary fuzz corpus that trips the source scanner; not needed to build.
 
+  Version codes are versionCode * 10 + ABI (1 armeabi-v7a, 2 arm64-v8a, 3 x86_64), set in
+  app/android/app/build.gradle.kts, which is why VercodeOperation multiplies rather than adds.
+  The pubspec base jumped to 402 when the scheme changed: Flutter's own --split-per-abi offsets
+  had already published 1016/2016/4016, and every new code has to stay above those or Android
+  refuses the update.
+
 AutoUpdateMode: Version
 UpdateCheckMode: Tags ^v[\d.]+$
 VercodeOperation:
-  - '%c + 1000'
-  - '%c + 2000'
-  - '%c + 4000'
+  - '%c * 10 + 1'
+  - '%c * 10 + 2'
+  - '%c * 10 + 3'
 UpdateCheckData: app/pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
 CurrentVersion: 0.1.16
 CurrentVersionCode: 4023

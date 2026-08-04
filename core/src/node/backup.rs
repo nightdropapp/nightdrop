@@ -2,6 +2,15 @@
 //! onion-keystore bundling, and server backup. Split out of `node.rs`.
 use super::*;
 
+/// Wall-clock time in unix seconds, for expiries that have to survive a process restart
+/// (`Instant` is monotonic and means nothing across one). Saturates to 0 on a pre-epoch clock.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 impl Node {
     /// Capture the full device state for at-rest persistence (`storage::`). Identity and
     /// sessions are vodozemac-encrypted under `key`; the rest is sealed by the caller.
@@ -82,7 +91,55 @@ impl Node {
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
             pending_control: self.export_pending_control(),
+            pending_invites: self.export_pending_invites(),
         }
+    }
+
+    /// Serialize the in-flight short-code invites (§5b). The monotonic `Instant` expiry becomes
+    /// wall-clock unix seconds — the only form that means anything after a rebuild. Invites that
+    /// have already run out are dropped here rather than written and skipped on the way back in.
+    fn export_pending_invites(&self) -> Vec<crate::storage::PersistedInvite> {
+        let now = Instant::now();
+        self.pending_invites
+            .iter()
+            .filter_map(|p| {
+                let remaining = p.expiry.checked_duration_since(now)?;
+                if remaining.is_zero() {
+                    return None;
+                }
+                Some(crate::storage::PersistedInvite {
+                    slot: p.slot.clone(),
+                    secret: p.secret.clone(),
+                    payload: p.payload.clone(),
+                    ttl_secs: p.ttl.as_secs(),
+                    expires_unix: now_unix().saturating_add(remaining.as_secs()),
+                })
+            })
+            .collect()
+    }
+
+    /// Rebuild the short-code invites we're still hosting. Anything already expired is dropped, so
+    /// a device that was off past the code's TTL comes back up hosting nothing. The remaining time
+    /// is clamped to the invite's own TTL: a backwards clock jump must not resurrect a code for
+    /// longer than it was ever meant to live.
+    fn import_pending_invites(persisted: &[crate::storage::PersistedInvite]) -> Vec<PendingInvite> {
+        let now_unix = now_unix();
+        persisted
+            .iter()
+            .filter_map(|p| {
+                let remaining = p.expires_unix.saturating_sub(now_unix).min(p.ttl_secs);
+                if remaining == 0 {
+                    return None;
+                }
+                Some(PendingInvite {
+                    slot: p.slot.clone(),
+                    secret: p.secret.clone(),
+                    payload: p.payload.clone(),
+                    ttl: Duration::from_secs(p.ttl_secs),
+                    expiry: Instant::now() + Duration::from_secs(remaining),
+                })
+            })
+            .collect()
     }
 
     /// Serialize the undelivered chat-delete `Closed` queue (§11.6) for persistence: the sealed
@@ -234,6 +291,7 @@ impl Node {
         node.discovered_relays = state.discovered_relays.clone();
         node.directory_version = state.directory_version;
         node.pending_control = Self::import_pending_control(&state.pending_control);
+        node.pending_invites = Self::import_pending_invites(&state.pending_invites);
         for chat in &state.chats {
             let session = Session::from_pickle(
                 SessionPickle::from_encrypted(&chat.session_pickle, key)

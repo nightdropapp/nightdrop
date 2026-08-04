@@ -289,9 +289,24 @@ class RustNightdropCore extends NightdropCore {
   /// at a time. Clearing `_core` is not enough: the Rust object is freed by a Dart finalizer at
   /// an unpredictable time, and its poller thread keeps the transport alive regardless — so the
   /// lock outlives the reference and the next bootstrap dies with "State already locked".
-  /// `shutdown()` releases it synchronously. No-op when there is no core.
+  ///
+  /// `shutdown()` releases it synchronously: it stops the poller, tears the transport down, and
+  /// **waits** (bounded, a few seconds at worst) for the poller to actually let go. Awaiting it is
+  /// therefore load-bearing — a caller that fires it off and rebuilds immediately gets the
+  /// read-only arti client this is here to prevent. No-op when there is no core.
   Future<void> _closeCore() async {
-    await _events?.cancel();
+    // Drop the Rust `StreamSink` FIRST. Cancelling the Dart subscription waits for the stream to
+    // close, and only dropping the sink closes it — so awaiting the cancel while the sink is still
+    // held in the `EVENTS` static waits for something that can never happen. That is a deadlock on
+    // every teardown path there is: the guard heal, the manual reset, logout and restore all come
+    // through here. Measured on a phone (2026-08-03): "Reset Tor connection" logged "closing the
+    // core" and then nothing, forever, with no error and a still-running old client.
+    //
+    // Bounded as well as ordered: this is teardown, and no event-stream quirk is worth wedging it.
+    rust.unsubscribe();
+    await _events
+        ?.cancel()
+        .timeout(const Duration(seconds: 2), onTimeout: () {});
     _events = null;
     final core = _core;
     _core = null;
@@ -305,20 +320,60 @@ class RustNightdropCore extends NightdropCore {
   }
 
   /// Automatically recover from a wedged Tor entry-guard set — the in-app equivalent of deleting
-  /// `guards.json` by hand. If the onion hasn't published within [_guardHealTimeout], the guards
-  /// have almost certainly churned out of the network: the device can neither publish its onion nor
-  /// reach the relay, and a plain re-bootstrap reuses the same guards, so it can't recover. Reset
-  /// the guard state (keeping the .onion identity) and rebuild the core with fresh guards. Guarded
-  /// so it runs at most once per launch and only while the onion is genuinely unpublished — so it
-  /// can never disrupt a working session (a stuck onion means the app is non-functional anyway).
+  /// `guards.json` by hand. A guard set that has churned out of the network can't be recovered by a
+  /// plain re-bootstrap, because that reuses the same guards; only resetting them (keeping the
+  /// `.onion` identity) breaks the loop. Runs at most once per launch.
+  ///
+  /// **What counts as evidence, and what does not.** Two triggers have been removed from here
+  /// after being measured on hardware, and both were removed for the same reason: they inferred
+  /// "the guards must be bad" from something that was not evidence of that.
+  ///
+  ///  * `!onionReady()` — arti's aggregate onion-service state is *bootstrap progress*, not
+  ///    liveness. A phone with its descriptor on 8/8 HSDirs for both time periods, 4/4 introduction
+  ///    points and zero upload failures reported not-published for eight minutes (2026-08-03), so
+  ///    this destroyed a healthy guard set 2.5 minutes into every session.
+  ///  * arti's `bootstrap_status()` — `BlockageKind::CantReachTor` turns out to be unreachable in
+  ///    arti 0.43 (its `_` arm has no matching `ConnBlockage` variant), and the kinds that *are*
+  ///    reachable can't be acted on: `online` is derived from connections to relays, so a dead
+  ///    guard set and a dead network are indistinguishable, and rotating guards because the device
+  ///    is offline burns anonymity margin for someone else's problem.
+  ///
+  /// What survives is the one signal that is positive, end-to-end evidence rather than inference:
+  /// [`NightdropCore.directPathWedged`] — several sends failed and *neither* the direct path nor
+  /// the relay has ever succeeded this run. It is self-corroborating, because a working relay means
+  /// Tor works and the problem is the peer.
+  ///
+  /// The bar is high on purpose. Entry guards are meant to be sticky for weeks, and arti repairs a
+  /// bad set by itself: with a router dropping every packet to all four of a device's confirmed
+  /// guards, a cold start still reached `Running` and published in ~80 s by sampling a replacement
+  /// (2026-08-04). Anything automatic here has to beat that, and only user-visible failure does.
   Future<void> _scheduleGuardHeal(String statePath, String key) async {
     if (!_tor || _guardHealDone) return;
     final core = _core;
     await Future.delayed(_guardHealTimeout);
-    // Bail if anything changed meanwhile: already healed, no longer Tor, the core was replaced
-    // (logout/restore), or the onion published fine.
-    if (_guardHealDone || !_tor || !identical(_core, core) || core == null) return;
-    if (await onionReady()) return;
+    while (!_guardHealDone && _tor && identical(_core, core) && core != null) {
+      if (await core.directPathWedged()) {
+        // Measurement build (`NIGHTDROP_NO_HEAL=1`): log what the heal would have done and carry
+        // on. This is how the false triggers above were caught; keep it.
+        if (_noHeal) {
+          await rust.diagNote(
+              line: 'heal: SUPPRESSED (NIGHTDROP_NO_HEAL) — directWedged=true '
+                  'onionReady=${await onionReady()}');
+          await Future.delayed(_guardHealRecheck);
+          continue;
+        }
+        await rust.diagNote(
+            line: 'heal: resetting guards — no send has reached a peer or a relay this run');
+        await _resetTorConnection(statePath, key);
+        return;
+      }
+      await Future.delayed(_guardHealRecheck);
+    }
+  }
+
+  /// Reset the entry-guard state and rebuild the core on fresh guards, keeping the `.onion`
+  /// identity. Shared by the automatic heal and the manual [resetTorConnection] action.
+  Future<void> _resetTorConnection(String statePath, String key) async {
     final stateDir = await _torStateDir();
     if (stateDir == null) return; // no writable Tor state dir — nothing to reset
     _guardHealDone = true;
@@ -341,6 +396,27 @@ class RustNightdropCore extends NightdropCore {
     _identity = Identity(id: id.id);
     await _refresh();
     notifyListeners();
+  }
+
+  /// Manually reset the Tor connection (menu action). The automatic heal only fires once per
+  /// launch and only on its own evidence; this is the escape hatch for a device that is wedged in
+  /// a way no heuristic caught — previously there was none, and a user in that state had nothing
+  /// to try but reinstalling.
+  @override
+  Future<void> resetTorConnection() async {
+    if (!_tor) {
+      await rust.diagNote(line: 'reset: ignored — not running on Tor');
+      return;
+    }
+    final key = await _readStoreKey();
+    if (key == null) {
+      // Locked, or the key is not retrievable. Said out loud: a menu action that silently does
+      // nothing is indistinguishable from one that ran and failed to help.
+      await rust.diagNote(line: 'reset: no store key available — nothing to rebuild');
+      return;
+    }
+    await rust.diagNote(line: 'reset: user asked for a fresh Tor connection');
+    await _resetTorConnection(await _stateFilePath(), key);
   }
 
   @override
@@ -390,6 +466,12 @@ class RustNightdropCore extends NightdropCore {
   // codes, onion addresses, or names — so it is safe to enable on a build you hand to someone
   // for a repro. Off unless asked for; a normal release is silent.
   static const String _defineDiag = String.fromEnvironment('NIGHTDROP_DIAG');
+  // Measurement-only (NIGHTDROP_NO_HEAL=1): suppress the automatic guard heal so a device that
+  // trips its conditions is observed instead of reset. Exists to answer whether the heal is a net
+  // win or whether it fires on network-wide trouble and makes the next minutes worse. Not a user
+  // setting and not documented in the app — absent from every normal build.
+  static const String _defineNoHeal = String.fromEnvironment('NIGHTDROP_NO_HEAL');
+  static bool get _noHeal => _defineNoHeal == '1';
 
   static String? _config(String key, String define) {
     if (define.isNotEmpty) return define;
@@ -464,6 +546,9 @@ class RustNightdropCore extends NightdropCore {
   // If the onion hasn't published within this long, the entry-guard set is almost certainly wedged
   // (a healthy publish finishes well under it) — the app then resets guards and rebuilds itself.
   static const _guardHealTimeout = Duration(seconds: 150);
+  // How often the health signals are re-read after that first check. Two cheap FFI reads, so the
+  // cost is nil; the point is that a session which wedges an hour in is still noticed.
+  static const _guardHealRecheck = Duration(seconds: 30);
   // At most one automatic guard-heal per launch, so a genuinely offline device can't loop.
   bool _guardHealDone = false;
 
@@ -874,8 +959,20 @@ class RustNightdropCore extends NightdropCore {
     // below, so the next launch finds "saved data, no key" and shows the recovery screen for an
     // identity that was deliberately destroyed. The duress path made this near-certain, since
     // `duressLogout()` marks the state dirty immediately beforehand.
+    //
+    // Under duress, stop *awaiting* it after a couple of seconds. `shutdown()` waits for the poller
+    // to release everything, and on Tor the tail of that is arti's runtime shutting down — seconds
+    // of task unwinding whose only purpose is releasing the state lock for a core we are not going
+    // to rebuild. The part the wipe actually needs (the poller stopped, its last save done) is over
+    // well inside this window; the rest finishes on its own while the files are deleted. A coerced
+    // user must not be left watching a spinner.
     try {
-      await core?.shutdown();
+      final stopping = core?.shutdown();
+      if (stopping != null) {
+        await (duress
+            ? stopping.timeout(const Duration(seconds: 2), onTimeout: () {})
+            : stopping);
+      }
     } catch (_) {
       // Best-effort: a core that won't stop cleanly must not block the wipe.
     }

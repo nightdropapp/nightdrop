@@ -1100,7 +1100,12 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => Icons.cloud_upload_outlined,
                           'expired' => Icons.error_outline,
-                          'sent' => Icons.done, // one tick: handed over, not confirmed
+                          // Deliberately not a tick. A tick reads as "done", and this state means
+                          // only that the peer's onion answered — the message can still be lost
+                          // there, which is exactly what happened on 2026-08-02. The core puts a
+                          // relay copy behind it if no receipt names it, so this resolves on its
+                          // own to "Held for delivery" and then "Delivered".
+                          'sent' => Icons.schedule,
                           _ => Icons.done_all,
                         },
                         size: 12,

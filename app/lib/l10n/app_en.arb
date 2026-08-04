@@ -549,6 +549,26 @@
   "@myRelaysMenu": {
     "description": "Menu item opening the relay editor."
   },
+  "resetTorMenu": "Reset Tor connection…",
+  "@resetTorMenu": {
+    "description": "Menu item that drops the Tor entry guards and reconnects."
+  },
+  "resetTorTitle": "Reset Tor connection?",
+  "@resetTorTitle": {
+    "description": "Title of the reset-Tor confirmation dialog."
+  },
+  "resetTorBody": "If messages keep being held for delivery instead of arriving directly, this device's route into Tor may be stuck. This picks a fresh route and reconnects.\n\nYour identity, your address and your chats are not affected. Reconnecting takes a minute or two.",
+  "@resetTorBody": {
+    "description": "Explains what resetting the Tor connection does, and that nothing is lost."
+  },
+  "resetTorConfirm": "Reset",
+  "@resetTorConfirm": {
+    "description": "Confirm button on the reset-Tor dialog."
+  },
+  "resetTorRunning": "Reconnecting to Tor — this takes a minute or two.",
+  "@resetTorRunning": {
+    "description": "Snackbar shown while the Tor connection is being reset."
+  },
   "aboutMenu": "About Night Drop",
   "@aboutMenu": {
     "description": "Menu item opening the about dialog (app name, version, license)."
@@ -627,6 +647,22 @@
   "backgroundDeliveryBody": "Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.",
   "@backgroundDeliveryBody": {
     "description": "Explanation in the background-delivery dialog."
+  },
+  "onboardingBackgroundTitle": "Receive messages in the background?",
+  "@onboardingBackgroundTitle": {
+    "description": "Title of the background-delivery offer shown during onboarding."
+  },
+  "onboardingBackgroundBody": "Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.",
+  "@onboardingBackgroundBody": {
+    "description": "Explanation of what background delivery does, its privacy properties and its costs, shown during onboarding."
+  },
+  "onboardingBackgroundEnable": "Turn on",
+  "@onboardingBackgroundEnable": {
+    "description": "Button accepting background delivery during onboarding."
+  },
+  "onboardingBackgroundSkip": "Not now",
+  "@onboardingBackgroundSkip": {
+    "description": "Button declining background delivery during onboarding."
   },
   "notificationPermissionRequired": "Notification permission is required for background delivery.",
   "@notificationPermissionRequired": {
@@ -974,9 +1010,9 @@
   "@deliveryDelivered": {
     "description": "Delivery status: delivered."
   },
-  "deliverySent": "Sent",
+  "deliverySent": "Not confirmed yet",
   "@deliverySent": {
-    "description": "Delivery status: handed to the peer's device but not yet confirmed by it. Distinct from Delivered, which means their device confirmed this exact message."
+    "description": "Delivery status: handed to the peer's onion service, which is not the same as their device having the message. Deliberately not the word 'Sent': that reads as a completed step, and a message can still be lost at this point. It resolves to Delivered when their device confirms this exact message, or to 'Held for delivery' when it goes to a relay instead."
   },
   "imageUnavailable": "Image unavailable",
   "@imageUnavailable": {

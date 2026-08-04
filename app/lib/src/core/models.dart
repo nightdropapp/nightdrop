@@ -225,13 +225,17 @@ class Message {
   /// Delivery state of an outgoing message. Drives the sender badge:
   ///
   /// * `"sent"` — handed to the peer's onion. Their device has **not** confirmed it: the dial
-  ///   succeeding says the service answered, not that the app processed the frame.
-  /// * `"queued"` — held on a relay for an offline peer.
+  ///   succeeding says the service answered, not that the app processed the frame. Shown as a
+  ///   clock, never a tick, and it does not last — the core puts a relay copy behind an
+  ///   unacknowledged message, which moves it to `"queued"`.
+  /// * `"queued"` — held on a relay for a peer who has not collected it.
   /// * `"delivered"` — their device sent a receipt naming *this* message (`Frame::Delivered`).
-  /// * `"expired"` — reaped from the relay unread.
+  ///   The only state that means arrival.
+  /// * `"expired"` — reaped from the relay uncollected.
   ///
-  /// The `"sent"`/`"delivered"` split is load-bearing: `"sent"` used to be terminal and drew no
-  /// badge, so a message lost in flight was indistinguishable from one that arrived.
+  /// The split is load-bearing. `"sent"` used to be terminal and drew no badge, so a message lost
+  /// in flight looked exactly like one that arrived; and three separate signals that only meant
+  /// "the peer is alive" used to promote messages straight to `"delivered"`.
   final String delivery;
 
   /// True for a locally-shown optimistic media message that is still uploading over Tor.

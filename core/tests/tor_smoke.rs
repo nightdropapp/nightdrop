@@ -104,14 +104,24 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
     let b_state = scratch("b-state");
     let c_state = scratch("c-state");
 
-    // 1. A as a public onion first, to learn its (stable, keystore-backed) address.
-    let a_addr = {
+    // 1. A as a public onion first, to learn its address — and to take custody of the identity
+    //    behind it, since nothing else will.
+    let (a_addr, a_onion_key) = {
         let a = TorTransport::bootstrap("nightdropauth-a", Some(&a_state), Some(&a_auth), None)
             .expect("bootstrap A (public)");
         let addr = a.address();
+        // Read the generated identity back out of the in-memory keystore, exactly as the app does
+        // after a first run (`docs/design/onion-key-at-rest.md`). Since that change, arti's
+        // keystore is **Ephemeral** unless we hand it a saved key, so it persists nothing: without
+        // this, the relaunch at step 3 mints a brand-new identity and A is simply a different
+        // service. This test asserted the address survived while guaranteeing it could not —
+        // it compiled, and failed on every run. Caught 2026-08-02.
+        let key = a
+            .onion_key_material()
+            .expect("read back A's generated onion identity");
         assert!(client_auth::authorized_count(Path::new(&a_auth)) == 0);
         eprintln!("A public onion: {addr}");
-        addr
+        (addr, key)
         // A dropped here: its onion service stops so the re-launch below owns the identity.
     };
     std::thread::sleep(Duration::from_secs(3));
@@ -130,9 +140,16 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
         .expect("A authorizes B's client key");
     assert_eq!(client_auth::authorized_count(Path::new(&a_auth)), 1);
 
-    // 3. Re-launch A on the SAME keystore + now-non-empty auth dir → restricted onion, same address.
-    let a = TorTransport::bootstrap("nightdropauth-a", Some(&a_state), Some(&a_auth), None)
-        .expect("re-bootstrap A (restricted)");
+    // 3. Re-launch A on its OWN saved identity + the now-non-empty auth dir → restricted onion at
+    //    the same address. Handing the key back is what makes the address survive; it is also
+    //    precisely what the app does on every start after the first.
+    let a = TorTransport::bootstrap(
+        "nightdropauth-a",
+        Some(&a_state),
+        Some(&a_auth),
+        Some(a_onion_key),
+    )
+    .expect("re-bootstrap A (restricted)");
     assert_eq!(
         a.address(),
         a_addr,
@@ -285,4 +302,191 @@ fn relay_is_reachable_over_tor() {
         Ok(r) => eprintln!("POST OK — msg_id {}", r.msg_id),
         Err(e) => panic!("POST FAILED (peek worked): {e:#}"),
     }
+}
+
+/// Poll `cond` until it holds or `bound` elapses. `false` on timeout.
+fn wait_until(bound: std::time::Duration, mut cond: impl FnMut() -> bool) -> bool {
+    let deadline = std::time::Instant::now() + bound;
+    while std::time::Instant::now() < deadline {
+        if cond() {
+            return true;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(200));
+    }
+    cond()
+}
+
+/// Where arti actually left `guards.json`, used only to explain a failure. `reset_tor_guards`
+/// hard-codes `<base>/arti-state/state/`, so if arti ever moves the file the in-app guard heal
+/// silently stops resetting anything — and this is the only test that would notice.
+fn find_guards(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let mut stack = vec![dir.to_path_buf()];
+    while let Some(next) = stack.pop() {
+        let Ok(entries) = std::fs::read_dir(&next) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+            } else if path.file_name().is_some_and(|n| n == "guards.json") {
+                return Some(path);
+            }
+        }
+    }
+    None
+}
+
+/// The client rebuilt by a **guard heal** must come up *writable*.
+///
+/// arti holds an exclusive on-disk lock on its state dir. If anything from the old core still
+/// holds it when the replacement bootstraps, arti logs "Another process has the lock on our state
+/// files" and proceeds **read-only** — so it cannot persist the fresh guards the heal just picked,
+/// the next launch inherits the same wedged set, and it heals again. That looped for an afternoon
+/// on a desktop, 2026-08-02.
+///
+/// The lock itself isn't observable from here, but its consequence is: a read-only client never
+/// rewrites `guards.json`. So this deletes that file exactly as the in-app heal does and asserts
+/// the replacement puts it back.
+///
+/// The teardown is staged at the worst possible moment on purpose — the background poller blocked
+/// inside a relay round-trip, holding a dialer that clones the arti client *and* the tokio runtime.
+/// That is the handle that used to outlive the swap, and `shutdown()` waiting for it is the fix.
+#[test]
+#[ignore = "needs network; bootstraps Tor twice over one state dir (very slow)"]
+fn a_core_rebuilt_over_the_same_state_dir_can_still_persist_its_guards() {
+    use nightdrop::api::{reset_tor_guards, NightdropCore};
+    use nightdrop::relay_client::{RelayClient, RelayDialer};
+    use std::path::Path;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
+
+    const NICKNAME: &str = "nightdropheal";
+    // Nowhere in particular: the dial fails fast, which is fine. What this test needs is that the
+    // poller is *holding* a Tor-backed dialer when the teardown lands, not that it hangs in one.
+    const RELAY: &str = "nightdrop-test-relay.onion";
+
+    let base = scratch("heal-state");
+    let guards = Path::new(&base)
+        .join("arti-state")
+        .join("state")
+        .join("guards.json");
+
+    let transport =
+        TorTransport::bootstrap(NICKNAME, Some(&base), None, None).expect("bootstrap the client");
+    let first_addr = transport.address();
+    // The app holds the onion identity in its own sealed store (arti's keystore is ephemeral here)
+    // and hands it back on every later start. Do the same, so this is the rebuild the app performs
+    // — and so the address assertion below means something.
+    let onion_key = transport
+        .onion_key_material()
+        .expect("read back the generated onion identity");
+    eprintln!("first client is up (onion: {first_addr})");
+
+    assert!(
+        wait_until(Duration::from_secs(120), || guards.exists()),
+        "arti never wrote {} — {}",
+        guards.display(),
+        match find_guards(Path::new(&base)) {
+            Some(found) => format!(
+                "it is at {} instead, so reset_tor_guards deletes the wrong path",
+                found.display()
+            ),
+            None => "and there is no guards.json anywhere under the state dir".to_string(),
+        }
+    );
+
+    let entered = Arc::new(AtomicBool::new(false));
+    let release = Arc::new(AtomicBool::new(false));
+    let relay = {
+        // Built before the transport moves into the core: this closure clones the arti client and
+        // the tokio runtime, which is precisely what kept the state lock alive past a teardown.
+        let tor_dialer = transport.make_relay_dialer(RELAY.to_string());
+        let (entered, release) = (Arc::clone(&entered), Arc::clone(&release));
+        let start = Instant::now();
+        let dialer: RelayDialer = Arc::new(move |request: &str| {
+            eprintln!(
+                "[{:?}] poller entered the relay round-trip",
+                start.elapsed()
+            );
+            entered.store(true, Ordering::Relaxed);
+            while !release.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            eprintln!("[{:?}] released; dialing over Tor", start.elapsed());
+            let outcome = tor_dialer(request);
+            eprintln!(
+                "[{:?}] dial returned: {}",
+                start.elapsed(),
+                match &outcome {
+                    Ok(_) => "ok".to_string(),
+                    Err(e) => format!("{e:#}"),
+                }
+            );
+            outcome
+        });
+        RelayClient::with_dialer(dialer)
+    };
+    let core = NightdropCore::new_with_transport(Box::new(transport), Some(relay), true);
+
+    assert!(
+        wait_until(Duration::from_secs(60), || entered.load(Ordering::Relaxed)),
+        "the background poller never started a relay drain, so this test would prove nothing"
+    );
+
+    // Let go shortly after the teardown begins, so `shutdown` is genuinely waiting on a poller
+    // that is holding arti handles rather than on an idle one.
+    let releaser = {
+        let release = Arc::clone(&release);
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(500));
+            release.store(true, Ordering::Relaxed);
+        })
+    };
+    eprintln!("calling shutdown with the poller inside the round-trip");
+    let started = Instant::now();
+    core.shutdown();
+    let waited = started.elapsed();
+    releaser.join().unwrap();
+    drop(core);
+    eprintln!("shutdown returned after {waited:?}");
+    assert!(
+        waited >= Duration::from_millis(250),
+        "shutdown returned in {waited:?} — it did not wait for the in-flight relay drain"
+    );
+    // Under, not at, `POLLER_EXIT_TIMEOUT` (8s): landing *on* the bound means the wait expired
+    // rather than observing the poller exit, which is a silent half-fix — the lock is released
+    // whenever it is released, and a rebuild right after can still race it. An early version of
+    // this bound was 3s and expired 200ms short of a ~3.2s teardown; this assertion is what
+    // caught it.
+    assert!(
+        waited < Duration::from_secs(7),
+        "shutdown took {waited:?} — it hit its own timeout instead of seeing the poller exit"
+    );
+
+    // The heal itself: reset the guards with the core down, then rebuild over the same state dir.
+    reset_tor_guards(base.clone());
+    assert!(
+        !guards.exists(),
+        "reset_tor_guards left {} in place",
+        guards.display()
+    );
+
+    let rebuilt = TorTransport::bootstrap(NICKNAME, Some(&base), None, Some(onion_key))
+        .expect("bootstrap the replacement client");
+    assert_eq!(
+        rebuilt.address(),
+        first_addr,
+        "the heal must keep the .onion — a new address strands every contact with no notice"
+    );
+    assert!(
+        wait_until(Duration::from_secs(120), || guards.exists()),
+        "the replacement client never persisted guards.json, so it came up read-only: something \
+         from the first core still held arti's state lock. This is the guard heal that healed \
+         forever (2026-08-02)."
+    );
+
+    drop(rebuilt);
+    let _ = std::fs::remove_dir_all(&base);
 }

@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
@@ -25,12 +25,36 @@ Future<void> unsubscribe() => RustLib.instance.api.crateApiUnsubscribe();
 Future<void> setDiagnostics({required bool enabled}) =>
     RustLib.instance.api.crateApiSetDiagnostics(enabled: enabled);
 
-/// Delete arti's entry-guard + circuit-timing state under `state_dir` — but NOT the onion keystore,
-/// so the device keeps its stable `.onion`. The next Tor bootstrap then picks fresh entry guards.
-/// This is the recovery for a **wedged guard set** (guards that have churned out of the network):
-/// a client stuck on them can neither publish its own onion nor reach the relay, and a plain
-/// re-bootstrap reuses the same guards, so it can't recover on its own (§6). Call this with the
-/// core shut down, then build a fresh core. No-op if the files are absent.
+/// Write one line to the diagnostics channel from the **app layer**.
+///
+/// Without this the Dart side is invisible in a field log: the core narrates what it does, while
+/// the decisions *around* it — a heal declining to fire, a menu action taking an early return —
+/// leave no trace at all, so a feature that silently does nothing looks identical to one that ran
+/// and didn't help. Same rules as any other diagnostic: outcomes only, never keys, codes, names or
+/// addresses (onion addresses are redacted here regardless), and silent unless diagnostics are on.
+Future<void> diagNote({required String line}) =>
+    RustLib.instance.api.crateApiDiagNote(line: line);
+
+/// Delete arti's entry-guard state under `state_dir` — but NOT the onion keystore, so the device
+/// keeps its stable `.onion`. The next Tor bootstrap then picks fresh entry guards. This is the
+/// recovery for a **wedged guard set** (guards that have churned out of the network): a client
+/// stuck on them can neither publish its own onion nor reach the relay, and a plain re-bootstrap
+/// reuses the same guards, so it can't recover on its own (§6). Call this with the core shut down,
+/// then build a fresh core. No-op if the file is absent.
+///
+/// **`circuit_timeouts.json` is deliberately left alone.** It holds arti's *learned* circuit-build
+/// time distribution, which has nothing to do with which guards we use; deleting it dropped the
+/// replacement client onto conservative defaults until it re-measured, so a reset made the next
+/// several minutes slower — the opposite of the intent, and precisely when the network was already
+/// bad. It was being deleted only because it sits in the same directory.
+///
+/// This is a **last resort**. Entry guards exist to bound the chance that a hostile relay ever
+/// becomes our entry, so they are meant to be sticky for weeks; C-tor keeps one for months.
+/// Rotating them spends real anonymity margin, and anything that can cause unreachability can
+/// force rotation. arti already recovers from a single unreachable guard on its own — measured
+/// 2026-08-03: it added a fresh guard to the sample 0.7 s after the failure and had it usable 79 s
+/// later, without discarding the persisted set. Only reach for this when the client is stuck in a
+/// way that persists (see [`NightdropCore::tor_client_wedged`]).
 Future<void> resetTorGuards({required String stateDir}) =>
     RustLib.instance.api.crateApiResetTorGuards(stateDir: stateDir);
 
@@ -200,6 +224,17 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Delete a chat (TODO #1): signal the peer (who then sees a "chat deleted" notice) and
   /// remove it locally. Creating a new chat is required to talk again.
   Future<void> deleteChat({required String contactId});
+
+  /// Whether the **direct** onion-to-onion path looks wedged: several sends in a row have failed
+  /// to reach a peer and none has ever succeeded this run.
+  ///
+  /// The companion to [`onion_ready`](Self::onion_ready), and the half that was missing. That one
+  /// only asks whether *our* service published; a device can do that perfectly while being unable
+  /// to reach anybody, because every circuit it builds dies in its guard set. Seen on a phone
+  /// (2026-08-03): descriptor uploaded 8/8, and simultaneously 417 circuit builds with 61 hard
+  /// timeouts and `Unable to build circuit to introduction point`. By the old health check that
+  /// device was fine, so nothing healed and every message silently went by relay instead.
+  Future<bool> directPathWedged();
 
   /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
   /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
@@ -466,12 +501,30 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
   /// the core stays readable afterwards but can no longer send or receive.
   ///
-  /// Call this before building a second core over the same `state_dir` — restoring a backup
-  /// does exactly that, and arti refuses to launch a second onion service while the first
-  /// instance still holds the lock. Dropping the core is **not** enough on its own: the poller
-  /// thread holds its own handle on the same state and only notices the stop flag on its next
-  /// tick (up to 2s later, backgrounded), so the lock would still be held when the new instance
-  /// tried to start. Tearing the transport down here makes the release synchronous.
+  /// Call this before building a second core over the same `state_dir` — restoring a backup and
+  /// the guard heal both do exactly that, and arti refuses to launch a second onion service while
+  /// the first instance still holds the lock. Dropping the core is **not** enough on its own: the
+  /// poller thread holds handles on the same state, so the lock would still be held when the new
+  /// instance tried to start.
+  ///
+  /// Nor is *asking* the poller to stop enough, which is what this used to do. The poller
+  /// snapshots [`RelayClient`]s and drains them off the core lock (§1.5.2), and on Tor each clone
+  /// carries an `Arc<TorClient>` + the tokio runtime — so a poller still inside a drain keeps
+  /// arti's lock alive past the teardown. The replacement client then logs "Another process has
+  /// the lock on our state files" and runs **read-only**: it cannot persist the fresh guards a
+  /// heal just picked, so the next heal inherits the same wedged set and heals again, forever.
+  /// Seen looping all afternoon on a desktop, 2026-08-02.
+  ///
+  /// So: stop the poller, tear the transport down (which also aborts an in-flight relay dial —
+  /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to actually
+  /// exit. The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this same path runs the duress
+  /// wipe, where hanging the app is worse than the bug being fixed; on expiry it says so in the
+  /// diagnostics and carries on.
+  ///
+  /// Idempotent; the core stays readable afterwards but can no longer send or receive.
+  ///
+  /// [`RelayClient`]: crate::relay_client::RelayClient
+  /// [`TorTransport::make_relay_dialer`]: crate::transport::tor::TorTransport::make_relay_dialer
   Future<void> shutdown();
 
   /// Unsend ("delete for both") one of our own messages (`msg_id` from [`ChatMessage`]).
@@ -546,10 +599,19 @@ class ChatMessage {
   /// in transit, the UI shows this with a spinner until `media_id` is filled.
   final String thumbId;
 
-  /// Delivery state of an outgoing (`from_me`) message: "" (n/a — incoming/system),
-  /// "sent" (handed to the peer directly), "queued" (held on the relay until they're
-  /// online), "delivered" (the peer has since been seen online), or "expired" (sat
-  /// queued past the relay's 24h TTL without an ack — never delivered, §11.3).
+  /// Delivery state of an outgoing (`from_me`) message:
+  ///
+  /// * `""` — n/a (incoming or system).
+  /// * `"sent"` — handed to the peer's onion, which answered. **Not** a claim that their device
+  ///   has it: the frame can still be lost there. Transient — if no receipt names it within
+  ///   `RECEIPT_TIMEOUT` the core puts a relay copy behind it and it becomes `"queued"`.
+  /// * `"queued"` — held on a relay until they collect it.
+  /// * `"delivered"` — **only** state that means arrival, and only ever set by a
+  ///   [`Frame::Delivered`](crate::wire::Frame::Delivered) naming this message. A dial
+  ///   succeeding, a message arriving from them, and their relay `Ack` all used to set it; each
+  ///   means "they are alive", which is not the same thing and was wrong often enough to lose a
+  ///   message in the field (2026-08-02).
+  /// * `"expired"` — sat queued past the relay's 24h TTL uncollected (§11.3).
   final String delivery;
 
   /// Random per-message token shared by both sides (rides inside the wire frame), so an

@@ -414,6 +414,23 @@ class AppLocalizationsEn extends AppLocalizations {
   String get myRelaysMenu => 'My relays…';
 
   @override
+  String get resetTorMenu => 'Reset Tor connection…';
+
+  @override
+  String get resetTorTitle => 'Reset Tor connection?';
+
+  @override
+  String get resetTorBody =>
+      'If messages keep being held for delivery instead of arriving directly, this device\'s route into Tor may be stuck. This picks a fresh route and reconnects.\n\nYour identity, your address and your chats are not affected. Reconnecting takes a minute or two.';
+
+  @override
+  String get resetTorConfirm => 'Reset';
+
+  @override
+  String get resetTorRunning =>
+      'Reconnecting to Tor — this takes a minute or two.';
+
+  @override
   String get aboutMenu => 'About Night Drop';
 
   @override
@@ -472,6 +489,19 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get backgroundDeliveryBody =>
       'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.';
+
+  @override
+  String get onboardingBackgroundTitle => 'Receive messages in the background?';
+
+  @override
+  String get onboardingBackgroundBody =>
+      'Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.';
+
+  @override
+  String get onboardingBackgroundEnable => 'Turn on';
+
+  @override
+  String get onboardingBackgroundSkip => 'Not now';
 
   @override
   String get notificationPermissionRequired =>
@@ -735,7 +765,7 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deliveryDelivered => 'Delivered';
 
   @override
-  String get deliverySent => 'Sent';
+  String get deliverySent => 'Not confirmed yet';
 
   @override
   String get imageUnavailable => 'Image unavailable';

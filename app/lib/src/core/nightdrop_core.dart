@@ -78,6 +78,15 @@ abstract class NightdropCore extends ChangeNotifier {
   /// reach us to pair. Always true for the mock/non-Tor cores.
   Future<bool> onionReady();
 
+  /// Reset the Tor connection: drop the entry guards (keeping the `.onion` identity) and rebuild
+  /// on fresh ones. The remedy for a device whose guard set has churned out of the network, which
+  /// a plain restart cannot fix because it reuses the same guards.
+  ///
+  /// Offered manually because the automatic heal fires at most once per launch and only on
+  /// evidence it can see; a device can be unable to reach anyone while believing itself healthy.
+  /// No-op on the mock/non-Tor cores.
+  Future<void> resetTorConnection() async {}
+
   /// All 1:1 contacts.
   List<Contact> get contacts;
 

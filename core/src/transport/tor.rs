@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -36,6 +35,7 @@ use tor_keymgr::KeystoreSelector;
 use tor_llcrypto::pk::ed25519;
 use tor_rtcompat::PreferredRuntime;
 
+use crate::lifecycle::{ExitGuard, StopSignal};
 use crate::transport::{client_auth, Address, Transport};
 use crate::Result;
 
@@ -121,6 +121,20 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(120);
 /// circuit-isolated by arti's per-`.onion` routing).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// How often the reaper looks for streams that have gone idle. Interruptible (it sleeps on the
+/// transport's [`StopSignal`]), so this only sets how *late* a stream is closed, never how long a
+/// teardown waits.
+const IDLE_SWEEP: Duration = Duration::from_secs(30);
+
+/// How long [`TorTransport`]'s drop waits for the idle reaper to let go of the tokio runtime.
+/// The reaper wakes from the stop signal immediately, so reaching this bound means it is stuck
+/// closing a stream; we log and move on rather than block a logout or a wipe.
+const REAPER_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// How often an in-flight relay request re-checks whether the transport is closing. Only ticks
+/// while a request is actually outstanding, and 100ms is far below every timeout it races.
+const CLOSE_CHECK_INTERVAL: Duration = Duration::from_millis(100);
+
 /// Cap a single **direct peer** dial. `send` runs while the core lock is held, so an unbounded
 /// dial to an offline peer would freeze every other UI call (and the poller) for as long as arti
 /// keeps retrying — up to minutes with a high `HS_CONNECT_ATTEMPTS`. An online peer connects well
@@ -144,7 +158,9 @@ pub struct TorTransport {
     inbound: Mutex<Receiver<(Address, Vec<u8>)>>,
     /// Warm outbound streams, one per peer `.onion` (reused across frames, idle-closed).
     out_streams: OutStreams,
-    running: Arc<AtomicBool>,
+    /// Raised when this transport is dropped. Stops the idle reaper *and* cancels any relay
+    /// request in flight on a dialer we handed out — see [`Self::make_relay_dialer`].
+    closing: Arc<StopSignal>,
     /// Directory of authorized-client keys backing onion client authorization (restricted
     /// discovery, #22). The node writes/removes `<nickname>.auth` files here as contacts are
     /// added/deleted (see [`client_auth`]); arti watches it. `None` = client auth not in use.
@@ -154,11 +170,30 @@ pub struct TorTransport {
     /// The service nickname, kept so [`onion_key_material`](Self::onion_key_material) can name the
     /// identity key in the keystore after launch.
     nickname: HsNickname,
+    /// Last onion-service state seen by [`published`](Transport::published), so only transitions
+    /// are logged rather than one line per poll.
+    last_state: Mutex<String>,
+    /// Whether the service has ever been fully reachable this run — see
+    /// [`published`](Transport::published) for why that answer is monotonic.
+    ever_published: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for TorTransport {
     fn drop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
+        // Stop the idle reaper and wait for it, bounded. The reaper holds an `Arc<Runtime>`, and
+        // arti's own background tasks live on that runtime holding the state manager that owns the
+        // exclusive on-disk lock — so a reaper still asleep keeps that lock held after the
+        // transport is otherwise gone. It used to sleep a flat 30s between sweeps, which is a
+        // 30-second window in which a rebuilt client (guard heal, restore) comes up read-only.
+        self.closing.stop();
+        if !self.closing.wait_for_exit(REAPER_EXIT_TIMEOUT) {
+            crate::diag!(
+                "tor: the idle-stream reaper is still running {}s after the transport was \
+                 dropped — arti's state lock is released late, so a client rebuilt right now may \
+                 come up read-only",
+                REAPER_EXIT_TIMEOUT.as_secs()
+            );
+        }
     }
 }
 
@@ -289,11 +324,11 @@ impl TorTransport {
         })?;
 
         let out_streams: OutStreams = Arc::new(Mutex::new(HashMap::new()));
-        let running = Arc::new(AtomicBool::new(true));
+        let closing = StopSignal::new();
         spawn_idle_reaper(
             Arc::clone(&runtime),
             Arc::clone(&out_streams),
-            Arc::clone(&running),
+            Arc::clone(&closing),
         );
 
         Ok(Self {
@@ -302,10 +337,12 @@ impl TorTransport {
             client,
             inbound: Mutex::new(inbound_rx),
             out_streams,
-            running,
+            closing,
             auth_dir,
             _service: service,
             nickname: nickname_owned,
+            last_state: Mutex::new(String::from("<start>")),
+            ever_published: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -350,9 +387,19 @@ impl TorTransport {
     /// request to `relay_onion` over this Tor client. Build it **before** the transport is moved
     /// into the node (it captures clones of the arti client + runtime), then hand it to
     /// `RelayClient::with_dialer`. This is how the relay is reached over Tor (§11.2).
+    ///
+    /// The request is raced against this transport's `closing` signal, so a dial in flight when the
+    /// transport is dropped gives up within [`CLOSE_CHECK_INTERVAL`] instead of holding the arti
+    /// client for the rest of its [`RELAY_DIAL_TIMEOUT`]. That matters because the background
+    /// poller runs these off the core lock: without the cancellation, a teardown during a relay
+    /// poll leaves the poller — and therefore arti's on-disk state lock — alive for up to 30s, and
+    /// a core rebuilt in that window comes up read-only (see [`NightdropCore::shutdown`]).
+    ///
+    /// [`NightdropCore::shutdown`]: crate::api::NightdropCore::shutdown
     pub fn make_relay_dialer(&self, relay_onion: String) -> crate::relay_client::RelayDialer {
         let client = Arc::clone(&self.client);
         let runtime = Arc::clone(&self.runtime);
+        let closing = Arc::clone(&self.closing);
         Arc::new(move |request_line: &str| -> Result<String> {
             let req = if request_line.ends_with('\n') {
                 request_line.to_string()
@@ -360,29 +407,57 @@ impl TorTransport {
                 format!("{request_line}\n")
             };
             runtime.block_on(async {
-                let mut stream = tokio::time::timeout(
-                    RELAY_DIAL_TIMEOUT,
-                    client.connect((relay_onion.as_str(), RELAY_PORT)),
-                )
-                .await
-                .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
-                .with_context(|| format!("relay connect {relay_onion}"))?;
-                stream.write_all(req.as_bytes()).await?;
-                stream.flush().await?;
-                let mut reader = futures::io::BufReader::new(stream);
-                let mut line = String::new();
-                reader.read_line(&mut line).await?;
-                Ok(line)
+                let exchange = async {
+                    let mut stream = tokio::time::timeout(
+                        RELAY_DIAL_TIMEOUT,
+                        client.connect((relay_onion.as_str(), RELAY_PORT)),
+                    )
+                    .await
+                    .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
+                    .with_context(|| format!("relay connect {relay_onion}"))?;
+                    stream.write_all(req.as_bytes()).await?;
+                    stream.flush().await?;
+                    let mut reader = futures::io::BufReader::new(stream);
+                    let mut line = String::new();
+                    reader.read_line(&mut line).await?;
+                    Ok(line)
+                };
+                // `futures::select` rather than `tokio::select!` so this needs no new dependency
+                // (tokio's `macros` feature); the two futures are pinned locally and neither is
+                // resumed after the race, so dropping the loser is the cancellation.
+                let exchange = std::pin::pin!(exchange);
+                let closed = std::pin::pin!(transport_closed(&closing));
+                match futures::future::select(exchange, closed).await {
+                    futures::future::Either::Left((result, _)) => result,
+                    futures::future::Either::Right(((), _)) => Err(anyhow::anyhow!(
+                        "relay request abandoned: the transport is closing"
+                    )),
+                }
             })
         })
     }
 }
 
+/// Completes once the transport that owns `closing` has been dropped. Polled rather than awaited
+/// on a channel so it can be raced against any request future without threading a cancellation
+/// token through arti; it only runs while a request is outstanding.
+async fn transport_closed(closing: &StopSignal) {
+    while !closing.stopped() {
+        tokio::time::sleep(CLOSE_CHECK_INTERVAL).await;
+    }
+}
+
 /// Periodically close outbound streams that have been idle past [`IDLE_TIMEOUT`].
-fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, running: Arc<AtomicBool>) {
+///
+/// Sleeps on `closing` rather than the clock so that dropping the transport ends this thread at
+/// once: it holds the tokio runtime the arti client runs on, and [`Drop for TorTransport`] waits
+/// for it before returning.
+///
+/// [`Drop for TorTransport`]: TorTransport
+fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, closing: Arc<StopSignal>) {
     std::thread::spawn(move || {
-        while running.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_secs(30));
+        let _exit = ExitGuard::new(Arc::clone(&closing));
+        while closing.sleep(IDLE_SWEEP) {
             let stale: Vec<DataStream> = {
                 let mut map = streams.lock().unwrap();
                 let now = Instant::now();
@@ -399,6 +474,11 @@ fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, running: Arc<At
                 let _ = runtime.block_on(async { s.close().await });
             }
         }
+        // Release the runtime — and with it arti's tasks and its state lock — *before* the exit
+        // guard fires, since the guard's promise to `wait_for_exit` is "this thread holds nothing
+        // any more". A closure's captures outlive its body, so this has to be explicit.
+        drop(streams);
+        drop(runtime);
     });
 }
 
@@ -409,8 +489,39 @@ impl Transport for TorTransport {
 
     /// True once the onion descriptor is published and the service is reachable (arti reports
     /// `Running`/`DegradedReachable`). False during the ~1–3 min republish window after launch.
+    ///
+    /// **Monotonic within a run.** A published descriptor stays valid on the HSDirs for hours, so
+    /// once we have seen the service reachable, a later dip in arti's aggregate state does not mean
+    /// peers can no longer find us — it usually means an introduction point is being replaced. This
+    /// used to un-publish us on every such dip, which told the user "others can't pair with you yet"
+    /// about a service that was serving fine.
+    ///
+    /// The state is logged on every **change**, because getting this boolean wrong was expensive:
+    /// a device measured on 2026-08-03 published 8/8 HSDirs on both time periods with 4/4 good IPTs
+    /// and zero upload failures, and still reported not-ready for eight minutes. Only transitions
+    /// are logged, so this is a handful of lines per session, not a poll-rate firehose.
     fn published(&self) -> bool {
-        self._service.status().state().is_fully_reachable()
+        let state = self._service.status().state();
+        let ready = state.is_fully_reachable()
+            || self
+                .ever_published
+                .load(std::sync::atomic::Ordering::Relaxed);
+        if state.is_fully_reachable() {
+            self.ever_published
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if crate::diag::enabled() {
+            let seen = format!("{state:?}");
+            let mut last = self.last_state.lock().unwrap_or_else(|e| e.into_inner());
+            if *last != seen {
+                crate::diag!(
+                    "tor: onion service state {} -> {seen} (ready={ready})",
+                    *last
+                );
+                *last = seen;
+            }
+        }
+        ready
     }
 
     /// Reach any relay `.onion` over this Tor client — lets the node fan out to a recipient's

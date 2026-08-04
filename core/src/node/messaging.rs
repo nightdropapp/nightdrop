@@ -2,6 +2,24 @@
 //! per-chat setters + time sweep. Split out of `node.rs` (IMPROVEMENT_PLAN.md §2.1).
 use super::*;
 
+/// How long a directly-sent message may sit unconfirmed before [`Node::sweep_unconfirmed`] stops
+/// trusting the dial and puts a copy on the relay.
+///
+/// Long enough that an ordinary receipt beats it — the peer has to notice the frame (their poller
+/// ticks at 80ms in the foreground, 2s backgrounded) and dial us back over Tor, which is seconds.
+/// Short enough that a message lost to a torn-down core is on its way again while the conversation
+/// is still live. Every expiry costs one relay round-trip and, for a peer that already has the
+/// message, a duplicate it discards — so erring long is cheap and erring short is merely wasteful.
+pub(crate) const RECEIPT_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Consecutive failed direct sends — with none ever succeeding this run — before the direct path is
+/// treated as wedged (see [`Node::direct_path_wedged`]).
+///
+/// Three, not one: a single failure is an offline peer, which is ordinary and must not provoke a
+/// teardown. Three in a row with nothing ever getting through is a device that cannot reach the
+/// network, and the remedy it unlocks is capped at once per launch anyway.
+pub(crate) const DIRECT_WEDGED_THRESHOLD: u32 = 3;
+
 /// Refused-send reason while short-code pairing is still waiting on the invitee. Matched by the
 /// UI to show a "wait for them to accept" toast rather than a generic failure.
 pub(crate) const AWAITING_APPROVAL: &str =
@@ -70,8 +88,10 @@ impl Node {
     /// Deliver an already-stored, already-sealed message (opaque bytes): directly to the peer, with
     /// the relay set as offline fallback / server-storage copy (§6). Updates the stored message's
     /// delivery status and relay receipts in place. Shared by the inline path (synchronous
-    /// transports) and the poller's deferred delivery ([`flush_pending_sends`]), so both take the
-    /// exact same code path. No-op if the chat was deleted before delivery ran.
+    /// transports only — the deferred path now plans, dials off the lock, and applies
+    /// ([`plan_pending_sends`](Self::plan_pending_sends) / [`execute_sends`] /
+    /// [`apply_send_outcomes`](Self::apply_send_outcomes)), because dialling here holds the core
+    /// lock. No-op if the chat was deleted before delivery ran.
     pub(crate) fn attempt_delivery(&mut self, contact_id: &str, msg_id: &str, bytes: &[u8]) {
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
@@ -95,6 +115,7 @@ impl Node {
                 bytes,
             ) {
                 Ok(copies) => {
+                    self.relay_ever_succeeded = true;
                     // Keep the receipts while the message is queued: an edit/unsend can then
                     // recall every undelivered copy and replace it outright.
                     if !delivered {
@@ -113,16 +134,26 @@ impl Node {
                 Err(_) => chat.remote_storage_healthy = false,
             }
         }
-        if delivered {
-            flip_queued_delivered(&mut chat.history); // peer is reachable now
-        }
-        // Set THIS message's authoritative status (the flip above may have moved it to "delivered").
+        // A successful dial says the peer's onion service answered — NOT that their app processed
+        // the frame, and nothing at all about messages sent earlier. This used to promote every
+        // queued message on that basis. Only a receipt naming a message may confirm it.
         if let Some(m) = chat
             .history
             .iter_mut()
             .find(|m| m.from_me && m.msg_id == msg_id)
         {
             m.delivery = if delivered { "sent" } else { "queued" }.to_string();
+        }
+        // Whether the direct path is working at all, for the guard heal's client-side check.
+        self.note_direct_result(delivered);
+        // Handed over but unconfirmed: start the clock. If no receipt names it before
+        // [`RECEIPT_TIMEOUT`], the poller re-queues it on the relay — see `sweep_unconfirmed`.
+        if delivered {
+            self.awaiting_receipt.push(AwaitingReceipt {
+                contact_id: contact_id.to_string(),
+                msg_id: msg_id.to_string(),
+                since: crate::api::now_secs(),
+            });
         }
         if needs_relay_retry {
             self.pending_relay.push(PendingRelaySend {
@@ -133,15 +164,258 @@ impl Node {
         }
     }
 
-    /// Deliver messages composed while a **non-synchronous** transport was in use — `send` stored
-    /// them "queued" and deferred the network so the UI wasn't blocked. Run on the poll cadence;
-    /// each attempt also warms arti. Returns the contact ids whose messages changed status.
-    pub(crate) fn flush_pending_sends(&mut self) -> Vec<String> {
-        let mut affected = Vec::new();
+    /// Put a relay copy behind any directly-sent message that no receipt has confirmed within
+    /// [`RECEIPT_TIMEOUT`]. Returns the contact ids whose messages changed status.
+    ///
+    /// A successful dial means the peer's onion service answered — not that their app processed the
+    /// frame. On 2026-08-02 a core was torn down mid-flight and the message simply vanished: the
+    /// sender's side said sent, the receiver never had it, and nothing asked again. Now nothing is
+    /// trusted until a [`Frame::Delivered`] names it, and when none arrives the message goes to the
+    /// relay, where it survives the peer being offline, restarted, or rebuilt.
+    ///
+    /// Runs **once** per message: the retry moves it to "queued", and from there the ordinary relay
+    /// lifecycle owns it (drained → receipted → "delivered", or reaped at 24h → "expired"). A peer
+    /// that already has the message discards the copy as a duplicate and receipts it, which is what
+    /// settles the sender. A peer too old to send receipts never confirms, so each of its messages
+    /// takes one relay copy — a duplicate on their screen, which is the safe direction to be wrong
+    /// in and the reason receipts exist.
+    ///
+    /// Media is not covered: its id lives inside the encrypted envelope, so it carries no receipt
+    /// to wait for (`ARCHITECTURE.md`, delivery receipts).
+    pub(crate) fn sweep_unconfirmed(&mut self) -> Vec<String> {
+        if self.awaiting_receipt.is_empty() {
+            return Vec::new();
+        }
+        let now = crate::api::now_secs();
+        let from = self.identity_key();
+        let mut still_waiting = Vec::new();
+        let mut affected: Vec<String> = Vec::new();
+        for a in std::mem::take(&mut self.awaiting_receipt) {
+            if now.saturating_sub(a.since) < RECEIPT_TIMEOUT.as_secs() {
+                still_waiting.push(a);
+                continue;
+            }
+            let Some(chat) = self.chats.get_mut(&a.contact_id) else {
+                continue; // chat deleted while we waited
+            };
+            if chat.closed {
+                continue;
+            }
+            // Still unconfirmed *and* still present: an edit, an unsend or a receipt that landed
+            // between the sweep and now all mean there is nothing to re-queue.
+            let Some(text) = chat
+                .history
+                .iter()
+                .find(|m| m.from_me && m.msg_id == a.msg_id && m.delivery == "sent")
+                .map(|m| m.text.clone())
+            else {
+                continue;
+            };
+            // Re-sealed rather than re-posted verbatim: the original bytes are long gone, and the
+            // ratchet advancing again is harmless — the id is what the peer dedups on.
+            let message = crypto::encrypt(&mut chat.session, text.as_bytes());
+            let frame = Frame::Message {
+                from: from.clone(),
+                id: a.msg_id.clone(),
+                message: WireOlm::from_olm(&message),
+            };
+            let bytes = wire::encode(&frame);
+            let mut targets = chat.contact.peer_relays.clone();
+            for r in &self.discovered_relays {
+                if !targets.contains(r) {
+                    targets.push(r.clone());
+                }
+            }
+            match queue_on_relays(
+                self.transport.as_ref(),
+                &self.relay,
+                &targets,
+                &a.contact_id,
+                &bytes,
+            ) {
+                Ok(copies) => {
+                    chat.relay_receipts.insert(a.msg_id.clone(), copies);
+                    if let Some(m) = chat
+                        .history
+                        .iter_mut()
+                        .find(|m| m.from_me && m.msg_id == a.msg_id)
+                    {
+                        m.delivery = "queued".to_string();
+                    }
+                    if !affected.contains(&a.contact_id) {
+                        affected.push(a.contact_id.clone());
+                    }
+                    crate::diag!(
+                        "send: no delivery receipt within {}s — put a relay copy behind it",
+                        RECEIPT_TIMEOUT.as_secs()
+                    );
+                }
+                // No relay took it. Keep waiting rather than dropping the retry: the next sweep
+                // tries again, and a receipt may still arrive in the meantime.
+                Err(_) => still_waiting.push(a),
+            }
+        }
+        self.awaiting_receipt = still_waiting;
+        affected
+    }
+
+    /// Record the outcome of a direct (onion-to-onion) send, feeding
+    /// [`direct_path_wedged`](Self::direct_path_wedged).
+    pub(crate) fn note_direct_result(&mut self, delivered: bool) {
+        if delivered {
+            self.direct_failures = 0;
+            self.direct_ever_succeeded = true;
+        } else {
+            self.direct_failures = self.direct_failures.saturating_add(1);
+        }
+    }
+
+    /// Whether the direct path looks **wedged**: several sends in a row have failed to reach a peer
+    /// and not one has ever succeeded this run.
+    ///
+    /// This is the client-side counterpart to "our onion won't publish". A device can publish its
+    /// own descriptor perfectly while being unable to *reach* anybody — 417 circuit builds, 61
+    /// timeouts and `Unable to build circuit to introduction point`, all through a handful of guard
+    /// channels opened at startup and never replaced (observed on a phone, 2026-08-03). Nothing
+    /// noticed, because the only health signal was our own publication, so the app fell back to the
+    /// relay for every message, indefinitely, and called that healthy.
+    ///
+    /// Two guards keep this from firing on an ordinary offline contact. `direct_ever_succeeded`:
+    /// once *any* direct send has worked this run the path is demonstrably fine. And
+    /// `relay_ever_succeeded`, which is the stronger one — the relay is dialled over the **same
+    /// Tor path**, so a relay that answers proves our circuits work and an unreachable peer is
+    /// their problem, not ours. Without it, one offline contact plus three messages on a fresh
+    /// launch would provoke a pointless teardown. Only when nothing at all answers — no peer, no
+    /// relay — after [`DIRECT_WEDGED_THRESHOLD`] tries is this device the suspect.
+    pub(crate) fn direct_path_wedged(&self) -> bool {
+        !self.direct_ever_succeeded
+            && !self.relay_ever_succeeded
+            && self.direct_failures >= DIRECT_WEDGED_THRESHOLD
+    }
+
+    /// Whether this exact frame has already been taken in, by either intake path — and record it if
+    /// not. Applies **only to frames carrying user content**, which is deliberate.
+    ///
+    /// Those are the frames whose payload is sealed on the ratchet, so a second copy is not merely
+    /// redundant but undecryptable: its message key was spent by the first. Control frames are the
+    /// opposite — several carry no per-instance ciphertext at all, so a legitimate repeat is
+    /// byte-identical to the original. `Frame::Approved` is exactly that: re-pairing an already
+    /// approved chat echoes the same approval, and swallowing it as a "duplicate" leaves the other
+    /// side waiting to be accepted forever.
+    fn is_duplicate_user_frame(&mut self, frame: &Frame, bytes: &[u8]) -> bool {
+        use sha2::{Digest, Sha256};
+        if user_frame_sender(frame).is_none() {
+            return false;
+        }
+        if self.seen_frames.len() > 8192 {
+            self.seen_frames.clear(); // bound memory; a rare re-dup is acceptable
+        }
+        let digest: [u8; 32] = Sha256::digest(bytes).into();
+        !self.seen_frames.insert(digest)
+    }
+
+    /// Test hook: pretend the unconfirmed sends have been waiting `secs` longer, so a sweep can be
+    /// exercised without a test that sleeps for [`RECEIPT_TIMEOUT`].
+    #[cfg(test)]
+    pub(crate) fn backdate_unconfirmed(&mut self, secs: u64) {
+        for a in &mut self.awaiting_receipt {
+            a.since = a.since.saturating_sub(secs);
+        }
+    }
+
+    /// Snapshot the deferred sends so [`execute_sends`] can perform them **off** the core lock, the
+    /// way [`relay_drain_plan`](Self::relay_drain_plan) does for the relay drain (§1.5.2). `None`
+    /// when there is nothing waiting.
+    ///
+    /// Cheap: clones of already-sealed bytes and a handle on the transport. The expensive part —
+    /// the dial, and any relay posts behind it — is what moves out from under the lock.
+    pub(crate) fn plan_pending_sends(&mut self) -> Option<SendPlan> {
+        if self.pending_sends.is_empty() {
+            return None;
+        }
+        let mut items = Vec::new();
         for p in std::mem::take(&mut self.pending_sends) {
-            self.attempt_delivery(&p.contact_id, &p.msg_id, &p.bytes);
-            if !affected.contains(&p.contact_id) {
-                affected.push(p.contact_id);
+            // Drop anything whose chat went away while it waited.
+            let Some(chat) = self.chats.get(&p.contact_id) else {
+                continue;
+            };
+            let mut relay_targets = chat.contact.peer_relays.clone();
+            for r in &self.discovered_relays {
+                if !relay_targets.contains(r) {
+                    relay_targets.push(r.clone());
+                }
+            }
+            items.push(PlannedSend {
+                contact_id: p.contact_id,
+                msg_id: p.msg_id,
+                bytes: p.bytes,
+                peer_address: chat.peer_address.clone(),
+                relay_targets,
+                remote_storage: chat.contact.remote_storage,
+            });
+        }
+        if items.is_empty() {
+            return None;
+        }
+        Some(SendPlan {
+            transport: Arc::clone(&self.transport),
+            primary: self.relay.clone(),
+            items,
+        })
+    }
+
+    /// Fold the results of an off-lock send batch back into the node: delivery status, relay
+    /// receipts, server-storage health, the unconfirmed-receipt clock, and a retry for anything
+    /// that reached neither the peer nor a relay. Returns the contacts whose chats changed.
+    ///
+    /// Deliberately mirrors what [`attempt_delivery`](Self::attempt_delivery) does inline for
+    /// synchronous transports, so both paths end in the same state.
+    pub(crate) fn apply_send_outcomes(&mut self, outcomes: SendOutcomes) -> Vec<String> {
+        let mut affected = Vec::new();
+        for o in outcomes.items {
+            self.note_direct_result(o.delivered);
+            if let Some(chat) = self.chats.get_mut(&o.contact_id) {
+                if let Some(copies) = o.copies {
+                    self.relay_ever_succeeded = true;
+                    // Receipts are only useful while the message is still sitting on a relay: an
+                    // edit/unsend recalls those copies. A directly-delivered one has nothing to
+                    // recall.
+                    if !o.delivered {
+                        chat.relay_receipts.insert(o.msg_id.clone(), copies);
+                    }
+                    if chat.contact.remote_storage {
+                        chat.remote_storage_healthy = true;
+                    }
+                } else if o.relay_failed && o.delivered && chat.contact.remote_storage {
+                    // Delivered, but server storage is on and no relay took the copy — say so
+                    // rather than implying a copy exists.
+                    chat.remote_storage_healthy = false;
+                }
+                if let Some(m) = chat
+                    .history
+                    .iter_mut()
+                    .find(|m| m.from_me && m.msg_id == o.msg_id)
+                {
+                    m.delivery = if o.delivered { "sent" } else { "queued" }.to_string();
+                }
+            }
+            if o.delivered {
+                self.awaiting_receipt.push(AwaitingReceipt {
+                    contact_id: o.contact_id.clone(),
+                    msg_id: o.msg_id.clone(),
+                    since: crate::api::now_secs(),
+                });
+            } else if o.relay_failed {
+                // Reached neither the peer nor any relay: keep the sealed bytes for the poller's
+                // slower retry rather than dropping the message.
+                self.pending_relay.push(PendingRelaySend {
+                    contact_id: o.contact_id.clone(),
+                    msg_id: o.msg_id.clone(),
+                    bytes: o.bytes,
+                });
+            }
+            if !affected.contains(&o.contact_id) {
+                affected.push(o.contact_id);
             }
         }
         affected
@@ -539,6 +813,7 @@ impl Node {
         };
 
         let delivered = self.transport.send(&peer_address, &media_bytes).is_ok();
+        self.note_direct_result(delivered);
         devlog!(
             "[nightdrop] send_media: {} bytes ({kind}) to {peer_address} -> wire {} bytes, delivered={delivered}",
             data.len(),
@@ -568,9 +843,8 @@ impl Node {
             }
         }
         if let Some(chat) = self.chats.get_mut(contact_id) {
-            if delivered {
-                flip_queued_delivered(&mut chat.history);
-            }
+            // No promotion on a successful dial (see `attempt_delivery`): media carries no receipt
+            // yet, so it stays "sent" — unconfirmed and honestly so — rather than claiming arrival.
             let mut msg = ChatMessage::media(
                 true,
                 kind.to_string(),
@@ -655,23 +929,27 @@ impl Node {
     /// for each received user message (the empty handshake is consumed silently).
     pub fn pump(&mut self) -> Result<Vec<(String, String)>> {
         let mut received = Vec::new();
-        let mut receipts: Vec<(String, String)> = Vec::new();
         while let Some((from_address, bytes)) = self.transport.try_recv() {
             let frame = wire::decode(&bytes)?;
-            // Note the receipt BEFORE processing: `process_frame` consumes the frame, and a
-            // receipt is only honest once the message is actually in the history below.
-            let receipt = user_frame_receipt(&frame);
+            // Same set the relay drain uses, so whichever copy of a message lands second is
+            // recognised rather than handed to a ratchet that has already spent its key.
+            if self.is_duplicate_user_frame(&frame, &bytes) {
+                continue;
+            }
             if let Some(msg) = self.process_frame(Some(from_address), frame)? {
                 received.push(msg);
-                if let Some(r) = receipt {
-                    receipts.push(r);
-                }
             }
         }
         // Per-message delivery receipts for anything that arrived over the DIRECT path. Without
         // these a directly-sent message reached "sent" and stopped there forever — no frame ever
         // promoted it — so the sender's UI showed a plain bubble that meant "we dialled their onion
         // successfully", while looking exactly like a message that had arrived (2026-08-02).
+        //
+        // The handlers themselves record what they accepted, *after* decrypting it (see
+        // `Node::pending_receipts`) — the caller cannot: half these frames keep their id inside the
+        // encrypted envelope, and reading it off the frame beforehand also risks receipting
+        // something that is then dropped.
+        let receipts = std::mem::take(&mut self.pending_receipts);
         self.send_receipts(&receipts);
         Ok(received)
     }
@@ -724,24 +1002,15 @@ impl Node {
         &mut self,
         harvest: RelayHarvest,
     ) -> Result<Vec<(String, String)>> {
-        use sha2::{Digest, Sha256};
         let me = self.identity_key();
         // Fold each addressed relay's reachability into relay-health (the "your relay is offline"
         // warning); the primary is untracked (baked-in default).
         for (addr, reachable) in harvest.reachability {
             self.relay_reachable.insert(addr, reachable);
         }
-        if self.seen_relay_blobs.len() > 8192 {
-            self.seen_relay_blobs.clear(); // bound memory; a rare re-dup is acceptable
-        }
         let mut received = Vec::new();
         let mut to_ack: Vec<String> = Vec::new(); // senders whose user messages we drained
-        let mut receipts: Vec<(String, String)> = Vec::new(); // and the exact messages, per sender
         for blob in harvest.blobs {
-            let digest: [u8; 32] = Sha256::digest(&blob).into();
-            if !self.seen_relay_blobs.insert(digest) {
-                continue; // a fan-out duplicate we already handled
-            }
             // Unseal the relay envelope (see `relay_wrap`). A blob not sealed to our key is
             // garbage someone posted to our mailbox — skip it, never abort the whole drain.
             let Ok(bytes) = relay_unwrap(&me, &blob) else {
@@ -750,17 +1019,41 @@ impl Node {
             let Ok(frame) = wire::decode(&bytes) else {
                 continue;
             };
-            if let Some(from) = user_frame_sender(&frame) {
-                if !to_ack.contains(&from) {
-                    to_ack.push(from);
-                }
+            // Dedup on the frame within, not the envelope, so a copy we already took *directly*
+            // is recognised here too — otherwise it reaches the ratchet as a replay of a message
+            // key that is already spent, and fails.
+            if self.is_duplicate_user_frame(&frame, &bytes) {
+                continue; // a fan-out duplicate, or one this device already has
             }
-            let receipt = user_frame_receipt(&frame);
+            // Read before `process_frame` consumes the frame, but recorded only if it actually
+            // produced a message. Taking a blob off the relay is not the same as accepting it: an
+            // unapproved sender's message and one whose ratchet won't open are both dropped (see
+            // `process_frame`), and acking those told the sender "delivered" about a message their
+            // peer will never see — the precise lie `Frame::Delivered` was added to end, arriving
+            // instead by the back door. Every user frame returns `Some` on its success path and
+            // `None` on every drop path, so this gates exactly on "landed".
+            let sender = user_frame_sender(&frame);
             // Relay-delivered frames carry their own sender id (no transport address).
-            if let Some(msg) = self.process_frame(None, frame)? {
-                received.push(msg);
-                if let Some(r) = receipt {
-                    receipts.push(r);
+            //
+            // A frame that will not process must NOT abort the drain. These blobs have already
+            // been `take`n — destructively — so everything after the failure would be lost for
+            // good rather than retried, which turns one undecryptable message into silent data
+            // loss for every *other* sender in the same batch.
+            match self.process_frame(None, frame) {
+                Ok(Some(msg)) => {
+                    received.push(msg);
+                    if let Some(from) = sender {
+                        if !to_ack.contains(&from) {
+                            to_ack.push(from);
+                        }
+                    }
+                }
+                Ok(None) => {}
+                Err(_) => {
+                    crate::diag!(
+                        "recv: a relay blob could not be processed — skipped, and the rest of the \
+                         drain continues (it cannot be fetched again)"
+                    );
                 }
             }
         }
@@ -773,9 +1066,10 @@ impl Node {
                 let _ = self.deliver(&addr, &from, &frame);
             }
         }
-        // …and a precise receipt per message on top. The coarse `Ack` above stays because a peer
-        // running an older build understands only that one; a current peer uses these to promote
-        // exactly the messages that arrived, and nothing else.
+        // …and a precise receipt per message on top. The coarse `Ack` above stays on the wire for
+        // peers on older builds, but confirms nothing here any more: only these do. Duplicates are
+        // receipted too, so a sender's relay retry settles instead of repeating.
+        let receipts = std::mem::take(&mut self.pending_receipts);
         self.send_receipts(&receipts);
         Ok(received)
     }

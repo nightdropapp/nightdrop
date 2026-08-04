@@ -1017,8 +1017,13 @@ fn a_non_synchronous_transport_defers_delivery_to_the_poller() {
         "the peer must NOT have the message before the poller delivers it"
     );
 
-    // The poller runs: now it delivers, and the peer receives it.
-    let affected = alice.flush_pending_sends();
+    // The poller runs: plan under the lock, dial off it, apply the result — the same three
+    // phases the background poller uses.
+    let plan = alice
+        .plan_pending_sends()
+        .expect("a deferred send is waiting");
+    let outcomes = crate::node::execute_sends(&plan);
+    let affected = alice.apply_send_outcomes(outcomes);
     assert_eq!(affected, vec![bob_contact.clone()]);
     assert_eq!(
         alice.messages(&bob_contact).last().unwrap().delivery,
@@ -1030,5 +1035,226 @@ fn a_non_synchronous_transport_defers_delivery_to_the_poller() {
         bob.messages(&alice_contact).last().unwrap().text,
         "deferred hi",
         "the peer receives the message once the poller has delivered it"
+    );
+}
+
+/// An attachment must be confirmable like any other message.
+///
+/// Media carries no `msg_id` — the id both sides share is the `transfer_id`, and it lives inside
+/// the encrypted envelope, so nothing upstream of the decrypt can name it. Receipts used to be
+/// built from the frame *before* it was opened, which is why photos had no way to be confirmed and
+/// (once a dial stopped counting as delivery) sat at "not confirmed" for good.
+#[test]
+fn an_attachment_is_confirmed_by_a_receipt_naming_its_transfer_id() {
+    let key: StoreKey = [4u8; 32];
+    let dir = std::env::temp_dir().join(format!("nightdrop-mediareceipt-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}-a", dir.display()), key);
+    bob.set_media_store(format!("{}-b", dir.display()), key);
+
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    alice
+        .send_media(&bob_contact, &[1u8, 2, 3, 4], "image/png", "image", &[])
+        .unwrap();
+    let sent = alice.messages(&bob_contact).into_iter().last().unwrap();
+    assert!(
+        sent.msg_id.is_empty(),
+        "media has no msg_id — only a transfer_id"
+    );
+    assert_eq!(
+        sent.delivery, "sent",
+        "the dial succeeded, which is not the same as it having arrived"
+    );
+
+    // Bob opens the envelope, learns the transfer_id, and receipts it.
+    bob.pump().unwrap();
+    assert!(
+        bob.messages(&alice_contact)
+            .into_iter()
+            .any(|m| !m.from_me && !m.media_id.is_empty()),
+        "precondition: Bob actually has the attachment"
+    );
+    alice.pump().unwrap();
+    assert_eq!(
+        alice
+            .messages(&bob_contact)
+            .into_iter()
+            .last()
+            .unwrap()
+            .delivery,
+        "delivered",
+        "the receipt names the attachment's transfer_id, so it is confirmed like any message"
+    );
+
+    let _ = std::fs::remove_dir_all(format!("{}-a", dir.display()));
+    let _ = std::fs::remove_dir_all(format!("{}-b", dir.display()));
+}
+
+/// With server storage on, every message is sent directly **and** copied to the relay, so both
+/// arrive. Text is deduped by `msg_id`; an attachment has none, and its completed placeholder no
+/// longer matches the "still receiving" lookup — so the photo was added a second time.
+#[test]
+fn an_attachment_that_arrives_twice_is_shown_once_and_still_receipted() {
+    let key: StoreKey = [5u8; 32];
+    let dir = std::env::temp_dir().join(format!("nightdrop-mediadup-{}", std::process::id()));
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}-a", dir.display()), key);
+    bob.set_media_store(format!("{}-b", dir.display()), key);
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    // Server storage on: the attachment goes direct AND to the relay, so both copies arrive.
+    alice.set_remote_storage(&bob_contact, true).unwrap();
+    alice
+        .send_media(&bob_contact, &[7u8, 8, 9], "image/png", "image", &[])
+        .unwrap();
+
+    bob.pump().unwrap(); // the direct copy
+    bob.poll_relay().unwrap(); // …and the stored one
+    let photos: Vec<_> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.from_me && !m.media_id.is_empty())
+        .collect();
+    assert_eq!(
+        photos.len(),
+        1,
+        "the same attachment arrived by two paths and must be shown once"
+    );
+    // …and stored once. `store_media` seals a fresh file per call, so a duplicate that is decided
+    // only after storing leaves an orphaned copy of every attachment on disk, which nothing
+    // references and nothing ever deletes — the wipe included.
+    let sealed = std::fs::read_dir(format!("{}-b", dir.display()))
+        .map(|d| d.filter_map(|e| e.ok()).count())
+        .unwrap_or(0);
+    assert_eq!(
+        sealed, 1,
+        "the duplicate must not leave a second sealed copy behind"
+    );
+
+    alice.pump().unwrap();
+    assert_eq!(
+        alice
+            .messages(&bob_contact)
+            .into_iter()
+            .last()
+            .unwrap()
+            .delivery,
+        "delivered",
+        "the duplicate is still receipted, so the sender settles"
+    );
+
+    let _ = std::fs::remove_dir_all(format!("{}-a", dir.display()));
+    let _ = std::fs::remove_dir_all(format!("{}-b", dir.display()));
+}
+
+#[test]
+fn a_short_code_invite_survives_a_core_rebuild() {
+    // §5b: the invite used to live only in memory, so anything that rebuilt the core mid-pairing —
+    // the guard heal, "Reset Tor connection", a restore — silently stopped answering the joiner,
+    // who then saw "the inviter never answered". The inviter's screen still showed the code.
+    let live = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();
+    let key: crate::storage::StoreKey = [7u8; 32];
+    let net = MemoryNetwork::new();
+    let slot = "77";
+    let secret = "willow-cinder-marble-thistle";
+
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_relay(RelayClient::new(live.clone()));
+    alice
+        .stage_short_code_invite(slot, secret, Duration::from_secs(600))
+        .unwrap();
+
+    // Rebuild the core while the code is still on screen and nobody has joined yet.
+    let path = std::env::temp_dir().join(format!("nightdrop-invite-{}.bin", std::process::id()));
+    let path = path.to_str().unwrap().to_string();
+    crate::storage::save_to_file(&path, &key, &alice.export(&key)).unwrap();
+    drop(alice);
+    let state = crate::storage::load_from_file(&path, &key).unwrap();
+    let mut alice2 = Node::restore(&state, Box::new(net.endpoint("alice")), &key).unwrap();
+    alice2.set_relay(RelayClient::new(live.clone()));
+    assert!(
+        alice2.has_pending_invites(),
+        "the rebuilt core is still hosting the code the user is looking at"
+    );
+
+    // The joiner, who knows nothing of the rebuild, types the same code and completes.
+    let joiner_relays = {
+        let mut bob = Node::new(Box::new(net.endpoint("bob")));
+        bob.set_relay(RelayClient::new(live.clone()));
+        bob.rendezvous_relays()
+    };
+    let (slot_s, secret_s) = (slot.to_string(), secret.to_string());
+    let joiner = std::thread::spawn(move || {
+        run_join_handshake(&joiner_relays, &slot_s, &secret_s, Duration::from_secs(10))
+    });
+    let payload = loop {
+        alice2.service_pending_invites();
+        if joiner.is_finished() {
+            break joiner.join().unwrap().unwrap();
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    };
+    assert!(
+        payload.contains("addr=alice"),
+        "the joiner still recovers the inviter's payload across the rebuild: {payload}"
+    );
+
+    std::fs::remove_file(&path).ok();
+}
+
+#[test]
+fn a_stale_persisted_invite_is_not_resurrected() {
+    // Two ways a persisted expiry can lie: the device was simply off past the code's TTL, or the
+    // wall clock moved backwards. Neither may leave a dead code answering.
+    let key: crate::storage::StoreKey = [8u8; 32];
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_relay(RelayClient::new(
+        RelayServer::spawn("127.0.0.1:0").unwrap().to_string(),
+    ));
+    alice
+        .stage_short_code_invite(
+            "77",
+            "willow-cinder-marble-thistle",
+            Duration::from_secs(600),
+        )
+        .unwrap();
+    let state = alice.export(&key);
+    assert_eq!(state.pending_invites.len(), 1, "the invite was persisted");
+
+    // Off for longer than the code's life: it is gone, not hosted forever.
+    let mut expired = state.clone();
+    expired.pending_invites[0].expires_unix = 1;
+    let alice2 = Node::restore(&expired, Box::new(net.endpoint("alice")), &key).unwrap();
+    assert!(
+        !alice2.has_pending_invites(),
+        "an invite that ran out while the device was off is dropped on load"
+    );
+
+    // Clock jumped backwards a year: the remaining time is clamped to the TTL the code was
+    // created with, so a skewed clock can't extend a short code's window.
+    let mut skewed = state;
+    skewed.pending_invites[0].expires_unix = u64::MAX;
+    let alice3 = Node::restore(&skewed, Box::new(net.endpoint("alice")), &key).unwrap();
+    let hosted = &alice3.pending_invites[0];
+    assert!(
+        hosted.expiry <= Instant::now() + Duration::from_secs(600),
+        "the restored expiry is clamped to the invite's own TTL"
     );
 }

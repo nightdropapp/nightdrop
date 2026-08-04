@@ -189,6 +189,32 @@ pub struct PersistedPendingControl {
     pub bytes: String,
 }
 
+/// A short-code invite this device is hosting, persisted so it survives a **core rebuild**.
+///
+/// It used to live only in memory, and a rebuild is not rare: the guard heal does one, so does
+/// "Reset Tor connection", so does a restore. The inviter's screen kept showing a code that
+/// nothing was listening for any more, so the joiner got "the inviter never answered" and the
+/// blame landed on the wrong side. Observed on 2026-08-03 with two fresh identities, where it is
+/// worst — a new identity's first descriptor publish is slow enough that the 150 s heal reliably
+/// fires *during* pairing, so the people most likely to hit it are new users on their first try.
+///
+/// The secret words are moderate-entropy and live at most [`SHORT_CODE_TTL`]; they sit inside the
+/// same sealed state file as the ratchet sessions, so this adds no new class of at-rest secret.
+///
+/// [`SHORT_CODE_TTL`]: crate::api
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedInvite {
+    pub slot: String,
+    pub secret: String,
+    /// The `nightdrop://pair?…` payload handed to the joiner.
+    pub payload: String,
+    /// TTL for the sealed response posted back to the joiner, in seconds.
+    pub ttl_secs: u64,
+    /// Wall-clock expiry. Stored as unix seconds because the in-memory form is an `Instant`,
+    /// which is monotonic and meaningless across a process restart.
+    pub expires_unix: u64,
+}
+
 /// The full device state written to disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedState {
@@ -218,6 +244,10 @@ pub struct PersistedState {
     /// restart before the retry lands. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_control: Vec<PersistedPendingControl>,
+    /// Short-code invites still being hosted (§5b), persisted so a core rebuild mid-pairing does
+    /// not silently strand the joiner. `#[serde(default)]` for forward-compat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_invites: Vec<PersistedInvite>,
 }
 
 fn is_zero_u64(n: &u64) -> bool {
@@ -350,6 +380,7 @@ mod tests {
             discovered_relays: Vec::new(),
             directory_version: 0,
             pending_control: Vec::new(),
+            pending_invites: Vec::new(),
         };
 
         // A stale temp from a previously-crashed write must not break the next save.

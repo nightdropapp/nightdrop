@@ -137,6 +137,17 @@ offline-attackable for low-entropy codes; `TODO.md` #3 replaced it.) The tradeof
 pairing is now **interactive**: the inviter must be reachable to answer, which the poller
 handles automatically while a code is outstanding.
 
+Because it is interactive, **the outstanding invite is persisted** (`pending_invites`, alongside
+`pending_control`), not merely held in memory. Anything that rebuilds the core mid-pairing — the
+guard heal, "Reset Tor connection", a restore — otherwise stops answering the rendezvous while the
+inviter's screen still shows the code, so the joiner times out with "the inviter never answered"
+and blames the wrong side. That was observed on 2026-08-03 between two fresh identities, which is
+the worst case: a new identity's first descriptor publish is slow enough that the 150 s heal
+reliably fires *during* pairing, so the people most exposed were new users on their first attempt.
+The monotonic `Instant` expiry persists as unix seconds; on load, expired invites are dropped and
+the remaining time is clamped to the invite's own TTL so a backwards clock jump cannot extend a
+code's window. Side benefit: a short code now also survives an ordinary app restart within its TTL.
+
 In both flows the recipient sees an explicit **authorization prompt** before the
 first message is delivered.
 
@@ -229,23 +240,93 @@ on a re-pair (new session) exactly like `verified`.
   Tor state dir, arti's confirmed entry guards can churn out of the network; a client stuck on them
   can neither publish its onion nor reach the relay, and a plain re-bootstrap reuses the same
   guards, so it can't recover — this is the state that once had to be cleared by hand. Recovery is
-  to delete the guard/circuit state (`guards.json`, `circuit_timeouts.json`) while **keeping the
-  onion keystore** (stable `.onion`), so the next bootstrap picks fresh guards. The relay escalates
-  to this automatically: the watchdog counts consecutive unhealthy restarts and, after a plain
-  restart (which preserves guard stickiness and fixes intro-point wedges) fails to restore
-  reachability, resets guards on the next start. The app does the same in-process: if its onion
-  hasn't published within ~150 s (a healthy publish finishes well under that), it resets guards and
-  rebuilds the core with fresh ones — at most once per launch, and only while the onion is
-  unpublished, so a working session is never disrupted.
+  to delete `guards.json` while **keeping the onion keystore** (stable `.onion`) so the next
+  bootstrap picks fresh guards, and **keeping `circuit_timeouts.json`**, which holds arti's learned
+  circuit-build-time distribution and has nothing to do with guard choice — deleting it only drops
+  the replacement client onto conservative defaults until it re-measures. The relay escalates to
+  this automatically: the watchdog counts consecutive unhealthy restarts and, after a plain restart
+  (which preserves guard stickiness and fixes intro-point wedges) fails to restore reachability,
+  resets guards on the next start. The app does the same in-process, at most once per launch.
+
+  **A guard reset is a last resort, and almost nothing is allowed to trigger one.** Entry guards
+  bound the probability that a hostile relay ever becomes our entry, so they are meant to be sticky
+  for weeks; rotating them spends real anonymity margin, and anything that can *cause*
+  unreachability could otherwise force rotation.
+
+  More to the point, arti repairs a bad guard set by itself. Measured 2026-08-04 with a router
+  dropping every packet to all four of a device's confirmed guards while the rest of the internet
+  stayed up: a cold start still bootstrapped, sampled a replacement guard, reached `Running` and
+  published its descriptor — in about 80 seconds. An earlier measurement saw the incremental case,
+  a single guard going unreachable and being replaced in 79 s without discarding the persisted set.
+
+  So the only automatic trigger is `direct_path_wedged`: several sends have failed and *neither* the
+  direct path nor the relay has ever succeeded this run. That is positive, end-to-end evidence that
+  messages are not moving, and it is self-corroborating — a working relay proves Tor works, which
+  makes the problem the peer rather than us. Everything else is the user's explicit
+  "Reset Tor connection" action.
+
+  **Two triggers were tried and removed, both for inferring "the guards must be bad" from something
+  that was not evidence of it.** The first was "our onion descriptor hasn't published": arti's
+  aggregate onion-service state is *bootstrap progress*, with `Bootstrapping` and `Recovering`
+  outranking the reachable states in its combination rules, and `Recovering` documented there as a
+  state in which the service "may be reachable". A phone with its descriptor on 8/8 HSDirs for both
+  time periods, 4/4 introduction points and zero upload failures read as not-published for eight
+  minutes, so the heal destroyed a healthy guard set 2.5 minutes into every session — and the
+  replacement client, with no guards and no learned circuit timings, was slower than the one it
+  replaced.
+
+  The second was arti's own `bootstrap_status()`. It cannot answer this question either.
+  `BlockageKind::CantReachTor` is unreachable in arti 0.43 — its match arm has no corresponding
+  `ConnBlockage` variant — and the kinds that *are* reachable cannot be acted on, because `online`
+  is derived from `last_tcp_success` across relay connections only. A dead guard set and a dead
+  network are therefore indistinguishable from inside arti, and rotating guards because the device
+  is in a lift spends anonymity margin on someone else's problem. The obvious discriminator —
+  probing some non-Tor host to see whether the internet works — is barred by §6's own rule against
+  hardcoding a non-anonymized network path. Since we cannot distinguish, we do not guess.
+
+  `Transport::published` therefore answers a UI question only ("can others pair with me yet"), and
+  is monotonic within a run, since a published descriptor stays valid on the HSDirs for hours.
+
 - **One Tor instance per state dir.** arti takes an **exclusive on-disk lock** on its state
   directory, so at most one core may be live at a time. Any path that replaces a running core
-  — restoring a backup, retrying a failed launch, creating a new identity after one — must call
-  `NightdropCore::shutdown()` first, which drops the transport *and* the relay (its dialer holds
-  a clone of the same arti client) and so releases the lock synchronously. Dropping the core is
-  not sufficient: the poller thread keeps the transport alive until its next tick, and across the
-  FFI boundary the Rust object is only freed by a Dart finalizer at an unpredictable time. Two
-  live instances fail with `State already locked`, which must never be reported to the user as a
-  bad password.
+  — restoring a backup, retrying a failed launch, creating a new identity after one, the guard
+  heal above — must call `NightdropCore::shutdown()` first, which drops the transport *and* the
+  relay (its dialer holds a clone of the same arti client) and so releases the lock
+  synchronously. Dropping the core is not sufficient: the poller thread keeps the transport alive
+  until its next tick, and across the FFI boundary the Rust object is only freed by a Dart
+  finalizer at an unpredictable time. Two live instances fail with `State already locked`, which
+  must never be reported to the user as a bad password.
+- **Shutdown waits for the background threads, it does not just signal them.** Releasing the lock
+  means *every* handle is gone, and two threads hold one past a teardown: the poller, which
+  snapshots `RelayClient`s and drains them off the core lock (§1.5.2) — each clone carrying an
+  `Arc<TorClient>` + the tokio runtime — and the Tor transport's idle-stream reaper, which holds
+  that runtime (and therefore the arti tasks that own the lock) between sweeps. A replacement
+  client built while either is alive comes up **read-only** ("Another process has the lock on our
+  state files"), and a read-only client cannot persist the fresh guards a heal just picked — so
+  the heal repeats, indefinitely. Both threads therefore sleep on a `StopSignal` (`lifecycle.rs`)
+  and signal their exit, and both teardown paths wait for that exit **with a bound**: the same
+  code runs the duress wipe, where hanging the app is worse than a late lock release, so an
+  expiry is logged to diagnostics and execution continues. To keep the bound honest, an in-flight
+  relay request is cancelled when the transport closes rather than running out its 30 s dial
+  timeout.
+- **No network I/O while holding the core lock.** Every blocking network step runs in three phases:
+  snapshot what it needs under a brief lock, do the I/O with the lock released, re-acquire only to
+  apply the result. That was true of the relay drain (§1.5.2) and is now true of **sends**
+  (`plan_pending_sends` → `execute_sends` → `apply_send_outcomes`).
+
+  A send is a peer dial (up to `PEER_DIAL_TIMEOUT`) plus, on failure, a relay post per target (up
+  to `RELAY_DIAL_TIMEOUT` each), and it used to run inside `apply_tick` with the lock held. On a
+  healthy network that is invisible. On a device whose circuits are timing out it pins the lock for
+  minutes, and *everything* queues behind it — UI reads, and the teardown itself. Measured on a
+  phone (2026-08-03): the user tapped "Reset Tor connection" and nothing happened at all, because
+  `shutdown` could not take the lock the poller was holding for a dial that would never complete.
+  The app was least able to recover exactly when it most needed to.
+
+  Two consequences worth keeping: `shutdown` **tries** for the lock with a bound and proceeds
+  without it rather than waiting (an unbounded acquire made "bounded shutdown" a lie), and the
+  transport is held as an `Arc` so a send can carry a handle across the unlocked window.
+  `service_pending_invites`, `flush_pending_control` and `refresh_directory` still do their I/O
+  under the lock — the same treatment is owed to them.
 - **Offline / space-saving path:** a **minimal relay** stores **E2E-encrypted blobs
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.
@@ -634,21 +715,54 @@ Operations (idempotent, authenticated only by capability tokens, never identity)
   insert into chat → **local generic notification** ("New message" — no content leaves the
   device) → send a **silent delivery `ack`** back (E2E control frame, itself store-and-forwarded;
   acks raise no notification and are never acked).
-- **Send while peer reachable:** the direct dial succeeds → mark message **sent**, badge "Sent"
-  (one tick). This is *not* delivery: the dial proves their onion service answered, not that their
-  app processed the frame.
-- **Sender gets ack:** badge `queued → delivered`.
+- **Send while peer reachable:** the direct dial succeeds → mark message **sent**, badge "Not
+  confirmed yet" (a clock, never a tick). This is *not* delivery: the dial proves their onion
+  service answered, not that their app processed the frame.
 - **Sender gets a per-message receipt (`Frame::Delivered`):** badge `sent|queued → delivered`, for
-  **that message id only**.
+  **that message id only**. This is the *only* transition into `delivered`.
+- **No receipt within `RECEIPT_TIMEOUT` (30 s):** the sender re-seals the message under the **same
+  id** and queues it on the relay → badge `sent → queued`, and the ordinary relay lifecycle takes
+  over. Once per message. A peer that already has it discards the copy as a duplicate **and
+  receipts it**, which is what settles the sender; a peer too old to send receipts never confirms,
+  so each of its messages costs one relay copy and shows twice on their screen — the safe direction
+  to be wrong in.
+- **Sender gets `Ack`:** nothing. See below.
 
-**Why receipts name a message id (2026-08-02).** `sent` used to be terminal and drew no badge, so a
-message that was merely dialled looked exactly like one that had arrived — and on a device, one was
-lost when the core was torn down with the frame still buffered, while the *next* message arrived
-normally. A coarse "everything up to now" ack would have marked the lost one delivered too. Olm
-decrypts out of order and a gap does not block later messages, so a later frame is no evidence about
-an earlier one. `Ack` (mailbox-drained, no id) is still sent alongside, because a peer on an older
-build understands only that.
-- **24h passes, no ack:** badge `queued → expired` ("not delivered").
+**Only a named receipt confirms a message (2026-08-02, revised on review).** `sent` used to be
+terminal and drew no badge, so a message that was merely dialled looked exactly like one that had
+arrived — and on a device, one was lost when the core was torn down with the frame still buffered,
+while the *next* message arrived normally. Olm decrypts out of order and a gap does not block later
+messages, so a later frame is no evidence about an earlier one.
+
+Naming the message in the receipt was necessary but not sufficient: **three** other signals were
+still promoting messages to `delivered` on the strength of "the peer is alive" — a direct dial
+succeeding, a message arriving from them, and their relay `Ack`. Each could mark a message the peer
+had dropped or never collected. All three are gone; `Frame::Delivered` is the sole confirmation.
+`Ack` (mailbox-drained, no id) is still **sent**, because a peer on an older build understands only
+that, and still **received** as proof of life — but it confirms nothing.
+
+An unconfirmed message is never simply abandoned, either: that is what the relay fallback above is
+for. The end state of a message is always one the sender can trust — `delivered` (receipted),
+`queued`/`expired` (the relay's own lifecycle), or visibly unconfirmed.
+
+**Receipts are built after decryption, by the handler that accepted the frame** — not from the frame
+beforehand. Only `Frame::Message` carries its id in the clear; an attachment's lives inside the
+envelope, which is why media had nothing to confirm it. An attachment is receipted by its
+`transfer_id` (the id both sides already share, tagged `t:` so it cannot be mistaken for a text
+`msg_id`); putting a `msg_id` into the media envelope instead would corrupt every attachment for
+peers on older builds, since the payload is trailing data after three length-prefixed fields.
+Edits and unsends still carry no receipt — they have no badge of their own.
+
+**A message can arrive twice.** With server storage on, every message is sent directly *and* copied
+to the relay, so both reach the receiver; a relay fallback resend is a second copy by construction.
+Two layers handle it: identical frames are recognised by hash across **both** intake paths (a replay
+of a spent Olm message key cannot decrypt, so this must happen before the ratchet sees it), and a
+re-sealed resend — different bytes, same id — is caught by id at the point of acceptance and
+receipted without being shown. Frame-hash dedup applies only to user-content frames: several control
+frames carry no per-instance ciphertext, so a legitimate repeat is byte-identical (`Approved` on a
+re-pair is the one that bites). And a frame that will not process never aborts a relay drain — those
+blobs are already destructively taken, so failing the batch loses the rest for good.
+- **24h passes, never collected:** badge `queued → expired` ("not delivered").
 - **Sender recall:** `recall()` while unfetched → blob gone, receiver never notified; badge
   `queued → recalled` ("unsent"); the "stored on relay" indicator disappears on the sender.
 - The "stored on relay / queued" indicator also disappears once **delivered** or **expired**.

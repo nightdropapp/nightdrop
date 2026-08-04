@@ -784,6 +784,36 @@ abstract class AppLocalizations {
   /// **'My relays…'**
   String get myRelaysMenu;
 
+  /// Menu item that drops the Tor entry guards and reconnects.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset Tor connection…'**
+  String get resetTorMenu;
+
+  /// Title of the reset-Tor confirmation dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset Tor connection?'**
+  String get resetTorTitle;
+
+  /// Explains what resetting the Tor connection does, and that nothing is lost.
+  ///
+  /// In en, this message translates to:
+  /// **'If messages keep being held for delivery instead of arriving directly, this device\'s route into Tor may be stuck. This picks a fresh route and reconnects.\n\nYour identity, your address and your chats are not affected. Reconnecting takes a minute or two.'**
+  String get resetTorBody;
+
+  /// Confirm button on the reset-Tor dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get resetTorConfirm;
+
+  /// Snackbar shown while the Tor connection is being reset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting to Tor — this takes a minute or two.'**
+  String get resetTorRunning;
+
   /// Menu item opening the about dialog (app name, version, license).
   ///
   /// In en, this message translates to:
@@ -879,6 +909,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.'**
   String get backgroundDeliveryBody;
+
+  /// Title of the background-delivery offer shown during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Receive messages in the background?'**
+  String get onboardingBackgroundTitle;
+
+  /// Explanation of what background delivery does, its privacy properties and its costs, shown during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.'**
+  String get onboardingBackgroundBody;
+
+  /// Button accepting background delivery during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get onboardingBackgroundEnable;
+
+  /// Button declining background delivery during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get onboardingBackgroundSkip;
 
   /// Snackbar when notification permission is missing.
   ///
@@ -1282,10 +1336,10 @@ abstract class AppLocalizations {
   /// **'Delivered'**
   String get deliveryDelivered;
 
-  /// Delivery status: handed to the peer's device but not yet confirmed by it. Distinct from Delivered, which means their device confirmed this exact message.
+  /// Delivery status: handed to the peer's onion service, which is not the same as their device having the message. Deliberately not the word 'Sent': that reads as a completed step, and a message can still be lost at this point. It resolves to Delivered when their device confirms this exact message, or to 'Held for delivery' when it goes to a relay instead.
   ///
   /// In en, this message translates to:
-  /// **'Sent'**
+  /// **'Not confirmed yet'**
   String get deliverySent;
 
   /// Shown when an image attachment can't be decoded.

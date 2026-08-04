@@ -1695,3 +1695,317 @@ fn a_direct_message_is_only_delivered_once_the_peer_receipts_it() {
          messages succeed — this is the whole reason receipts name a message id"
     );
 }
+
+/// Taking a blob off the relay is not the same as accepting it, and the delivery ack must say so.
+///
+/// `Ack` means "I drained your mailbox" and `flip_queued_delivered` promotes every queued message
+/// on it, so acking a frame we then DROPPED reports "Delivered" for a message the peer will never
+/// see. The sender's own diagnostics call this out — "DROPPED (the sender believes it was
+/// delivered)" — and it is the exact lie `Frame::Delivered` was added to end, arriving by the back
+/// door. The ack is now sent only for frames that actually produced a message.
+#[test]
+fn a_dropped_relay_message_is_not_acked_as_delivered() {
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+
+    // Alice screens strangers; Bob opens the chat from her published bundle, so his side is
+    // authorized at once and he may send while hers is still an unapproved request.
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_require_authorization(true);
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.pending_authorizations().len(),
+        1,
+        "Bob should be an unapproved request on Alice's side"
+    );
+
+    // Alice offline: Bob's message goes to the relay and sits there.
+    net.disconnect("alice");
+    bob.send(&alice_contact, "hello stranger").unwrap();
+    let queued = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .next_back()
+        .unwrap();
+    assert_eq!(queued.delivery, "queued");
+    let dropped_id = queued.msg_id.clone();
+
+    // Alice drains it — and drops it, because Bob is not approved. (Only Alice's endpoint is
+    // deregistered, so she can still reach Bob: exactly the shape where a wrong ack gets out.)
+    let bob_contact = alice.pending_authorizations()[0].id.clone();
+    alice.poll_relay().unwrap();
+    assert!(
+        alice.messages(&bob_contact).is_empty(),
+        "the unapproved sender's message must not land in a chat"
+    );
+
+    // Bob picks up whatever Alice sent back. There must be no ack among it.
+    bob.pump().unwrap();
+    let after = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .find(|m| m.msg_id == dropped_id)
+        .expect("Bob still has his own message");
+    assert_ne!(
+        after.delivery, "delivered",
+        "Alice dropped this message — reporting it delivered is the lie the receipts exist to end"
+    );
+    assert_eq!(after.delivery, "queued", "it is still sitting on the relay");
+
+    // Control: once Bob is approved, a message that really lands still flips to delivered, so the
+    // assertion above is about the drop and not about acks being broken outright.
+    //
+    // NOTE: this also promotes the dropped message above, because `Ack` carries no message id and
+    // `flip_queued_delivered` promotes the lot. That residual is inherent to the coarse ack and is
+    // why `Frame::Delivered` exists; see TODO.txt.
+    alice.authorize(&bob_contact, true).unwrap();
+    bob.pump().unwrap();
+    bob.send(&alice_contact, "second try").unwrap();
+    let second_id = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .next_back()
+        .unwrap()
+        .msg_id;
+    alice.poll_relay().unwrap();
+    bob.pump().unwrap();
+    let second = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .find(|m| m.msg_id == second_id)
+        .unwrap();
+    assert_eq!(
+        second.delivery, "delivered",
+        "an approved contact's message that actually landed must still be acked"
+    );
+}
+
+/// A successful dial is not delivery, and nothing but a receipt naming the message may say it is.
+///
+/// Three things used to claim it without evidence: a direct send succeeding, a message arriving
+/// from the peer, and their relay `Ack`. All three mean only "they are alive" — which is exactly
+/// what the message lost on 2026-08-02 looked like from the sender's side, right up until it turned
+/// out the peer never had it.
+#[test]
+fn nothing_but_a_receipt_marks_a_message_delivered() {
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    // Bob is unreachable, so Alice's message goes to the relay and waits there.
+    net.disconnect("bob");
+    alice.send(&bob_contact, "are you there").unwrap();
+    let queued_id = alice
+        .messages(&bob_contact)
+        .into_iter()
+        .next_back()
+        .unwrap()
+        .msg_id;
+    let status = |n: &Node, id: &str| {
+        n.messages(&bob_contact)
+            .into_iter()
+            .find(|m| m.msg_id == id)
+            .unwrap()
+            .delivery
+    };
+    assert_eq!(status(&alice, &queued_id), "queued");
+
+    // Bob — still able to reach Alice — sends her something. That proves he is alive and proves
+    // nothing about the message sitting on the relay, which he has not collected.
+    bob.send(&alice_contact, "different conversation").unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        status(&alice, &queued_id),
+        "queued",
+        "hearing from the peer is not them collecting your mail"
+    );
+
+    // Now he collects it. The receipt he sends back names it, and only then is it delivered.
+    bob.poll_relay().unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        status(&alice, &queued_id),
+        "delivered",
+        "a receipt naming the message is what confirms it"
+    );
+}
+
+/// A message the peer's onion accepted but never receipted must not simply be forgotten: it goes
+/// on the relay, where it survives the peer being offline, restarted or torn down mid-flight.
+///
+/// Also covers the other half — the peer eventually getting *both* copies must not show the message
+/// twice, and must still receipt the duplicate, or the sender would retry a message it already has.
+#[test]
+fn an_unacknowledged_message_is_re_queued_on_the_relay_and_deduped_on_arrival() {
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    // The dial succeeds — but Bob never pumps, so the frame sits in his transport unread, exactly
+    // as it does when a core is torn down between accepting the stream and processing the frame.
+    alice.send(&bob_contact, "did this survive?").unwrap();
+    let msg_id = alice
+        .messages(&bob_contact)
+        .into_iter()
+        .next_back()
+        .unwrap()
+        .msg_id;
+    let alice_status = |n: &Node| {
+        n.messages(&bob_contact)
+            .into_iter()
+            .find(|m| m.msg_id == msg_id)
+            .unwrap()
+            .delivery
+    };
+    assert_eq!(
+        alice_status(&alice),
+        "sent",
+        "handed over, and honestly not more than that"
+    );
+
+    // Nothing receipted it, so the sweep puts a copy on the relay.
+    alice.backdate_unconfirmed(crate::node::messaging::RECEIPT_TIMEOUT.as_secs() + 1);
+    let affected = alice.sweep_unconfirmed();
+    assert_eq!(affected, vec![bob_contact.clone()]);
+    assert_eq!(
+        alice_status(&alice),
+        "queued",
+        "an unacknowledged message belongs on the relay, not in limbo"
+    );
+
+    // Bob collects the relay copy and receipts it.
+    bob.poll_relay().unwrap();
+    let seen: Vec<_> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.from_me && !m.system)
+        .collect();
+    assert_eq!(seen.len(), 1, "the relay copy arrives once");
+    assert_eq!(seen[0].text, "did this survive?");
+    alice.pump().unwrap();
+    assert_eq!(alice_status(&alice), "delivered");
+
+    // …and now the original direct frame finally gets processed. Same id: it must not appear a
+    // second time, and Bob must still receipt it so a sender in this position stops retrying.
+    bob.pump().unwrap();
+    let seen_after: Vec<_> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.from_me && !m.system)
+        .collect();
+    assert_eq!(
+        seen_after.len(),
+        1,
+        "the message arrived twice by two paths and must be shown once"
+    );
+    alice.pump().unwrap();
+    assert_eq!(alice_status(&alice), "delivered", "still settled");
+}
+
+/// The direct path is "wedged" only when this device can reach **nothing** — never because one
+/// contact happens to be offline.
+///
+/// This is the client-side health signal the guard heal was missing. A phone (2026-08-03) published
+/// its own descriptor to 8/8 HSDirs while 245 circuit builds died in its guard set, so `onion_ready`
+/// said healthy, no heal ever fired, and every message went by relay instead — silently, forever.
+///
+/// The discriminator is the relay: it is dialled over the *same* Tor path, so a relay that answers
+/// proves the circuits work. Each case gets its own node because the signals are deliberately
+/// once-per-run — a path that has proven itself once is not re-suspected later in the same session.
+#[test]
+fn the_direct_path_is_wedged_only_when_nothing_ever_gets_through() {
+    // A paired node whose peer is unreachable, with `relay` attached as given.
+    fn offline_peer_node(
+        net: &MemoryNetwork,
+        tag: &str,
+        relay: Option<RelayClient>,
+    ) -> (Node, String) {
+        let mut alice = Node::new(Box::new(net.endpoint(&format!("alice{tag}"))));
+        let mut bob = Node::new(Box::new(net.endpoint(&format!("bob{tag}"))));
+        let bundle = alice.publish_bundle();
+        bob.connect_with_bundle(&format!("alice{tag}"), &bundle)
+            .unwrap();
+        alice.pump().unwrap();
+        let bob_contact = alice.contacts()[0].id.clone();
+        if let Some(r) = relay {
+            alice.set_relay(r);
+        }
+        net.disconnect(&format!("bob{tag}"));
+        (alice, bob_contact)
+    }
+
+    let net = MemoryNetwork::new();
+
+    // 1. Peer offline, RELAY REACHABLE — the everyday case. However many messages pile up, this
+    //    device's Tor path is demonstrably fine and tearing it down would help nobody.
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let (mut alice, contact) =
+        offline_peer_node(&net, "1", Some(RelayClient::new(relay_addr.to_string())));
+    for i in 0..(crate::node::messaging::DIRECT_WEDGED_THRESHOLD + 3) {
+        alice.send(&contact, &format!("relay is up {i}")).unwrap();
+    }
+    assert!(
+        !alice.direct_path_wedged(),
+        "a reachable relay proves the circuits work — an offline contact is not ours to heal"
+    );
+
+    // 2. Peer offline AND no relay answers — nothing at all gets through, so this device is the
+    //    suspect. Exactly the phone's state.
+    let (mut alice, contact) =
+        offline_peer_node(&net, "2", Some(RelayClient::new("127.0.0.1:1".to_string())));
+    assert!(!alice.direct_path_wedged(), "no evidence yet");
+    for i in 0..crate::node::messaging::DIRECT_WEDGED_THRESHOLD {
+        alice.send(&contact, &format!("into the void {i}")).unwrap();
+    }
+    assert!(
+        alice.direct_path_wedged(),
+        "with neither a peer nor a relay reachable, repeated failures are the device's own fault"
+    );
+
+    // 3. …and a single delivered message clears the suspicion for the rest of the run, so a peer
+    //    that goes offline later never looks like a broken transport.
+    let net3 = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net3.endpoint("alice3")));
+    let mut bob = Node::new(Box::new(net3.endpoint("bob3")));
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice3", &bundle).unwrap();
+    alice.pump().unwrap();
+    let contact = alice.contacts()[0].id.clone();
+    alice.set_relay(RelayClient::new("127.0.0.1:1".to_string())); // no relay either
+    alice.send(&contact, "this one lands").unwrap();
+    net3.disconnect("bob3");
+    for i in 0..(crate::node::messaging::DIRECT_WEDGED_THRESHOLD + 5) {
+        alice.send(&contact, &format!("gone now {i}")).unwrap();
+    }
+    assert!(
+        !alice.direct_path_wedged(),
+        "one delivered message proves the path; an offline contact must not trigger a teardown"
+    );
+}

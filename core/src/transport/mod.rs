@@ -43,6 +43,10 @@ pub trait Transport: Send + Sync {
     /// Whether our address is published/reachable so peers can actually reach us. For Tor this
     /// is false for the ~1–3 min after launch while the onion descriptor (re)publishes; other
     /// transports are reachable immediately (default `true`).
+    ///
+    /// This is a **UI-facing** question ("can others pair with me yet") and nothing more. It is
+    /// deliberately not used to decide that anything is broken: it was measured reading false on a
+    /// fully published service, and a guard heal keyed off it destroyed healthy guard sets.
     fn published(&self) -> bool {
         true
     }
@@ -147,6 +151,27 @@ impl Transport for ClosedTransport {
     fn published(&self) -> bool {
         false
     }
+
+    /// A dialer that always fails — deliberately **not** `None`.
+    ///
+    /// `None` means "this transport has no relay dialer of its own", and `node::build_relay` reads
+    /// that as permission to fall back to a plain **TCP** relay client. For the `.onion` addresses
+    /// this app actually uses, that client would
+    /// hand the hostname to `TcpStream::connect`, which resolves it through the **system DNS
+    /// resolver** — announcing to the resolver, and to anyone watching it, exactly which hidden
+    /// service this device is trying to reach. Off Tor entirely.
+    ///
+    /// Reachable because a closed transport is still consulted: the poller can build a drain plan,
+    /// and a send can fall back to the relay, in the window between `close_transport` and the
+    /// poller's exit — and any FFI call made against a core that has been shut down.
+    ///
+    /// A closed Tor transport must **fail**, never downgrade. See `CLAUDE.md`: never a
+    /// non-anonymized network path.
+    fn relay_dialer(&self, _addr: &str) -> Option<crate::relay_client::RelayDialer> {
+        Some(Arc::new(|_request: &str| {
+            anyhow::bail!("transport is closed")
+        }))
+    }
 }
 
 type Inbox = Sender<(Address, Vec<u8>)>;
@@ -247,5 +272,59 @@ mod tests {
         net.endpoint("bob.onion");
         net.disconnect("bob.onion");
         assert!(alice.send("bob.onion", b"anyone?").is_err());
+    }
+
+    /// A closed transport must hand back a **failing** relay dialer, not `None`.
+    ///
+    /// `None` sends `build_relay` down its plain-TCP fallback, and a TCP connect to a `.onion`
+    /// resolves the name through the system DNS resolver — telling it which hidden service this
+    /// device wants. The closed transport is still consulted (a poller tick or a relay-fallback
+    /// send between `close_transport` and the poller's exit, or any call against a shut-down
+    /// core), so "no dialer" here is a silent way off Tor.
+    #[test]
+    fn a_closed_transport_fails_relay_dials_rather_than_falling_back_off_tor() {
+        let closed = ClosedTransport::new("me.onion".to_string());
+        let dialer = closed
+            .relay_dialer("somerelay.onion")
+            .expect("a closed transport must not report 'no dialer' — that means plain TCP");
+        assert!(
+            dialer("{\"op\":\"peek\"}").is_err(),
+            "a closed transport's dialer must fail rather than reach the network"
+        );
+    }
+
+    /// `published()` answers a UI question and nothing else.
+    ///
+    /// It used to double as the guard-heal trigger, which cost a healthy guard set on every launch
+    /// (TODO.txt item 00): arti's aggregate onion-service state is bootstrap *progress*, so it read
+    /// false on a service sitting on 8/8 HSDirs. The trigger that replaced it — asking arti whether
+    /// its client was stuck — was then removed too, once a router-level block of every confirmed
+    /// guard showed arti cold-bootstrapping back to `Running` in ~80 s on its own. Nothing in the
+    /// transport layer should grow a "therefore the guards are bad" inference again.
+    struct Quiet;
+    impl Transport for Quiet {
+        fn address(&self) -> Address {
+            Address::new()
+        }
+        fn send(&self, _peer: &str, _frame: &[u8]) -> Result<()> {
+            Ok(())
+        }
+        fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
+            None
+        }
+        fn published(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn an_unpublished_transport_exposes_no_brokenness_signal() {
+        // The only thing an unpublished transport says is "not published yet". If some future
+        // health check wants to act on it, that has to be a deliberate new decision with its own
+        // evidence — not something silently inherited from this bit.
+        let t = Quiet;
+        assert!(!t.published());
+        assert!(!ClosedTransport::new("me.onion".to_string()).published());
+        assert!(MemoryNetwork::new().endpoint("alice").published());
     }
 }

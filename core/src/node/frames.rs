@@ -189,9 +189,26 @@ impl Node {
                 // Decrypting on their ratchet is proof it was them (silence-detection design).
                 chat.last_seen = Some(crate::api::now_secs());
                 let text = String::from_utf8_lossy(&plaintext).into_owned();
-                flip_queued_delivered(&mut chat.history); // they're online → queued msgs delivered
+                // Their message proves they are alive; it says nothing whatever about whether they
+                // picked up OUR earlier queued ones, which is what promoting those claimed.
+                //
+                // A message id we already hold is a resend of one that reached us by another path
+                // (the sender re-queues on the relay when no receipt comes back). Do not show it
+                // twice — but do let the caller receipt it, or the sender keeps retrying a message
+                // we have had all along.
+                let duplicate = !id.is_empty()
+                    && chat
+                        .history
+                        .iter()
+                        .any(|m| !m.from_me && m.msg_id == id && !m.system);
+                if duplicate {
+                    self.pending_receipts.push((from.clone(), id));
+                    return Ok(None);
+                }
                 chat.history
-                    .push(ChatMessage::text(false, text.clone(), id));
+                    .push(ChatMessage::text(false, text.clone(), id.clone()));
+                // Accepted: owe them a receipt naming it.
+                self.pending_receipts.push((from.clone(), id));
                 // First real message from the peer → the transient pairing/approval notices have
                 // served their purpose; drop them so they don't linger above the conversation.
                 self.clear_system_notices(&from, &["await_approval", "approved"]);
@@ -446,8 +463,13 @@ impl Node {
                 if !self.verify_control(&from, &message, MARK_ACK) {
                     return Ok(None);
                 }
+                // Deliberately promotes nothing. `Ack` names no message — it means only "I drained
+                // your mailbox" — so honouring it flipped messages it could not vouch for,
+                // including ones dropped on arrival and ones queued after the drain. Kept on the
+                // wire (peers on older builds still send it) as proof of life; `Frame::Delivered`
+                // is what confirms a message.
                 if let Some(chat) = self.chats.get_mut(&from) {
-                    flip_queued_delivered(&mut chat.history);
+                    chat.last_seen = Some(crate::api::now_secs());
                 }
                 Ok(None)
             }
@@ -462,19 +484,37 @@ impl Node {
                 let Ok(plaintext) = crypto::decrypt(&mut chat.session, &olm) else {
                     return Ok(None);
                 };
-                let msg_id = String::from_utf8_lossy(&plaintext).into_owned();
+                let named = String::from_utf8_lossy(&plaintext).into_owned();
                 // Proof of life, exactly like any other authenticated frame from them.
                 chat.last_seen = Some(crate::api::now_secs());
+                // An empty payload names nothing. It would otherwise match the first attachment in
+                // the chat, since media carries no `msg_id` — a wildcard, and the one shape of this
+                // frame that could confirm a message nobody vouched for.
+                if named.is_empty() {
+                    return Ok(None);
+                }
                 // ONLY the named message. Not "everything older": a message can be lost while a
                 // later one arrives (a core torn down mid-flight, 2026-08-02), and promoting its
                 // neighbours would restore the very lie this frame exists to end.
-                if let Some(m) = chat
-                    .history
-                    .iter_mut()
-                    .find(|m| m.from_me && m.msg_id == msg_id)
-                {
+                //
+                // `t:` marks an attachment, identified by the `transfer_id` both sides hold — the
+                // id media has instead of a `msg_id`.
+                let found = match named.strip_prefix("t:") {
+                    Some(transfer_id) => chat.history.iter_mut().find(|m| {
+                        m.from_me && !m.transfer_id.is_empty() && m.transfer_id == transfer_id
+                    }),
+                    None => chat
+                        .history
+                        .iter_mut()
+                        .find(|m| m.from_me && !m.msg_id.is_empty() && m.msg_id == named),
+                };
+                if let Some(m) = found {
                     m.delivery = "delivered".to_string();
                 }
+                let msg_id = named;
+                // Confirmed, so stop the relay-fallback clock for it (`sweep_unconfirmed`).
+                self.awaiting_receipt
+                    .retain(|a| !(a.contact_id == from && a.msg_id == msg_id));
                 Ok(None)
             }
             Frame::Name { from, message } => {
@@ -616,29 +656,57 @@ impl Node {
                 };
                 let (transfer_id, kind, mime, data) = unpack_media(&envelope)?;
                 let size = data.len() as u64;
-                let media_id = self.store_media(&data)?;
-                if let Some(chat) = self.chats.get_mut(&from) {
-                    // Complete a matching "incoming" placeholder, else add a fresh message.
-                    let placeholder = chat.history.iter_mut().find(|m| {
-                        !m.transfer_id.is_empty()
+                // Have we already completed this attachment? With server storage on, every message
+                // is sent directly *and* copied to the relay, so both arrive — and a completed
+                // message no longer matches the placeholder lookup below, which used to add the
+                // photo a second time.
+                //
+                // Decided BEFORE the payload is written: `store_media` seals a fresh file per call,
+                // so storing first and discarding the duplicate afterwards would strand one
+                // orphaned copy of every attachment on disk, referenced by nothing and removed by
+                // nothing.
+                let duplicate = self.chats.get(&from).is_some_and(|c| {
+                    c.history.iter().any(|m| {
+                        !m.from_me
+                            && !m.transfer_id.is_empty()
                             && m.transfer_id == transfer_id
-                            && m.media_id.is_empty()
-                    });
-                    if let Some(m) = placeholder {
-                        m.media_id = media_id;
-                    } else {
-                        chat.history.push(ChatMessage::media(
-                            false,
-                            kind,
-                            mime,
-                            media_id,
-                            size,
-                            transfer_id,
-                            String::new(),
-                        ));
+                            && !m.media_id.is_empty()
+                    })
+                });
+                if !duplicate {
+                    let media_id = self.store_media(&data)?;
+                    if let Some(chat) = self.chats.get_mut(&from) {
+                        // Complete a matching "incoming" placeholder, else add a fresh message.
+                        let placeholder = chat.history.iter_mut().find(|m| {
+                            !m.transfer_id.is_empty()
+                                && m.transfer_id == transfer_id
+                                && m.media_id.is_empty()
+                        });
+                        if let Some(m) = placeholder {
+                            m.media_id = media_id;
+                        } else {
+                            chat.history.push(ChatMessage::media(
+                                false,
+                                kind,
+                                mime,
+                                media_id,
+                                size,
+                                transfer_id.clone(),
+                                String::new(),
+                            ));
+                        }
                     }
                 }
+                // Attachments have no `msg_id` — the id both sides share is the `transfer_id`, and
+                // it is only legible here, after the envelope is open. Tagged so the sender cannot
+                // confuse it with a text `msg_id`; an older sender simply ignores what it can't
+                // match, which is a safe no-op.
+                self.pending_receipts
+                    .push((from.clone(), format!("t:{transfer_id}")));
                 devlog!("[nightdrop] received {size}-byte attachment from {from}");
+                if duplicate {
+                    return Ok(None);
+                }
                 Ok(Some((from, String::new())))
             }
             // Short-code SPAKE2 runs over the rendezvous mailbox before any transport session

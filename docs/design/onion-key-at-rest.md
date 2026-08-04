@@ -88,6 +88,21 @@ pinned by `a_stale_onion_key_blocks_a_restore_but_never_a_new_identity`, confirm
 the fix. The general lesson: a fail-closed rule protecting an existing identity must not also guard
 the path that exists precisely because there is no identity worth protecting.
 
+**Amended again, on review of the same change.** Scoping the *sealed* key to restores left the
+other source of an identity unscoped: arti's **on-disk keystore**. A new identity consulted no
+sealed key, but `keystore_is_on_disk` still answered "yes" for any leftover `arti-state/keystore`,
+so arti launched the new identity on the **old** `.onion` — reachable by everyone who knew the
+address the user was walking away from, linkable to the identity they believed they had left, and
+then sealed into the new store as if it were the new one. Two ways to reach it: an install from
+before this design whose user picks "set up a new identity" before the migration has ever run (the
+load-error screen is exactly where they land), and any wipe that fails to delete `arti-state`,
+which has been observed on Android.
+
+The rule is therefore symmetric, and lives in `drop_superseded_keystore`: the on-disk keystore may
+speak for us **only while restoring an identity we have no sealed key for** — the migration run,
+and the run after a backup restore. In every other case it is removed *before* bootstrap. Pinned by
+`a_leftover_arti_keystore_is_never_inherited_by_a_new_identity`.
+
 ## 5. What it does and does not buy
 
 **Does:** a cloned device no longer yields our onion secret key, our address, or our contacts'

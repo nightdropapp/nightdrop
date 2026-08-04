@@ -130,11 +130,15 @@ pub enum Frame {
     /// `MARK_UNVERIFIED`, and *which one* carries the state — so it can't be forged, replayed, or
     /// have its state flipped in transit.
     Verified { from: String, message: WireOlm },
-    /// Silent **delivery ack** (§11.3): the receiver drained one or more of our messages from
-    /// the relay, so flip their "Held for delivery" to "Delivered". `from` is the acking peer's
-    /// identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
-    /// (`node::MARK_ACK`) so a forged/replayed ack can't falsely flip our messages to
-    /// "delivered" — decrypting on the session proves the real peer drained them.
+    /// Silent **mailbox ack** (§11.3): the receiver drained our mailbox. `from` is the acking
+    /// peer's identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
+    /// (`node::MARK_ACK`) so it can't be forged or replayed.
+    ///
+    /// **Confirms nothing on its own, by design.** It names no message, so honouring it meant
+    /// promoting every queued message — including ones the receiver dropped on arrival and ones
+    /// queued after the drain — to "Delivered". Still sent, because peers on older builds
+    /// understand only this; still received, as proof of life. What actually confirms a message is
+    /// [`Delivered`](Self::Delivered), which names one.
     Ack { from: String, message: WireOlm },
     /// The sender changed their display name in this chat (§4). The new name is carried
     /// **E2E-encrypted** on the established session (so the relay sees only ciphertext); the
