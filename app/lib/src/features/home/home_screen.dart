@@ -741,7 +741,6 @@ Future<void> _confirmLogout(BuildContext context, NightdropCore core) async {
     ),
   );
   if (confirmed != true) return;
-  await BackgroundDelivery.stop(); // no identity left to watch for
   // _Root routes back to onboarding; logout returns how many contacts couldn't be told the chat
   // was deleted (§1.3) so we can be honest that a few peers may still message a dead identity.
   final notNotified = await core.logout();

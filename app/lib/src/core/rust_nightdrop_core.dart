@@ -933,6 +933,20 @@ class RustNightdropCore extends NightdropCore {
     _countsReady = false;
     notifyListeners(); // _Root -> onboarding now
 
+    // Stop background delivery and FORGET the preference, on every path that destroys an
+    // identity — not just the menu one, which is where the `stop()` used to live alone.
+    //
+    // The duress wipe (§ app-lock #3) went through `logout` without ever touching this, so the
+    // foreground service kept running and its permanent notification stayed up until the
+    // lifecycle handler happened to notice there was no identity left. For a wipe whose whole
+    // purpose is that the app looks untouched, that is backwards.
+    //
+    // Clearing the flag, not merely stopping the service, is deliberate: identity is
+    // one-per-install here and a wipe is meant to be a clean break, so a device preference that
+    // silently spans two identities the user believes are unrelated is the wrong default. The
+    // cost is one prompt at the next setup — exactly the moment to reconsider it.
+    unawaited(BackgroundDelivery.setEnabled(false)); // also stops a running service
+
     // Best-effort cleanup, after the UI has already moved on.
     unawaited(events?.cancel());
     // Peer-facing logout (#7 / §11.6): tell un-backed chats' peers the chat closed (so their
