@@ -186,3 +186,23 @@ footer .muted { font-size: 0.9rem; }
   .hero-content h1 { font-size: 2.2rem; }
   .nav-links { display: none; }
 }
+
+/* Security notice — used for the "update, this build is superseded" banner on the download
+   section. Amber rather than red: this is a "you should act" message, not a breach report. */
+.notice {
+  margin: 0 0 24px;
+  padding: 16px 18px;
+  border: 1px solid #6b5a2a;
+  border-left: 3px solid #d0a13a;
+  border-radius: 8px;
+  background: #1e1a12;
+  color: var(--text);
+}
+.notice h3 {
+  margin: 0 0 8px;
+  font-size: 1rem;
+  color: #f0c464;
+}
+.notice p { margin: 0 0 8px; }
+.notice p:last-child { margin-bottom: 0; }
+.notice .muted { color: var(--muted); }
