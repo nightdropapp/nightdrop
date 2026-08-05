@@ -230,12 +230,56 @@ on a re-pair (new session) exactly like `verified`.
 - **The relay self-heals; it is not babysat.** arti can keep the relay process alive while its
   descriptor publisher or introduction points wedge (seen after multi-day uptime: process up,
   onion dark, clients get "could not reach relay") — so `Restart=always` alone never recovers it,
-  because nothing crashed. The relay therefore watches its **own** onion reachability
-  (`RunningOnionService::status`) and exits after a sustained outage so systemd restarts it fresh
-  (re-establishing intro points, republishing). A weekly `RuntimeMaxSec` backstops any slow
-  degradation the watchdog misses. The onion keystore is preserved across restarts, so the address
-  never changes. The relay runs **6 introduction points** (vs arti's default 3) and device onions
-  run **4**, so losing an intro point to relay churn leaves the service reachable instead of dark.
+  because nothing crashed. The relay therefore proves its own reachability and exits after a
+  sustained outage so systemd restarts it fresh (re-establishing intro points, republishing). A
+  weekly `RuntimeMaxSec` backstops any slow degradation the watchdog misses. The onion keystore is
+  preserved across restarts, so the address never changes. The relay runs **6 introduction points**
+  (vs arti's default 3) and device onions run **4**, so losing an intro point to relay churn leaves
+  the service reachable instead of dark.
+
+  **Reachability is proved two ways, because one failure mode is invisible to each.**
+
+  *An end-to-end self-dial.* The watchdog dials its own `.onion` over Tor every 5 minutes and runs
+  one real `GetDirectory` through its own accept loop — HSDir lookup, introduction, rendezvous,
+  response. Each probe uses a **freshly isolated client**, because arti caches a fetched descriptor
+  per (service, client isolation): reusing the main client would answer probe after probe out of
+  cache, and skipping the lookup is skipping the failure being hunted.
+
+  *The publisher's ring check.* A probe resolves the service under the one time period its own
+  consensus calls current, so a descriptor published to one HsDir ring and missing from the other
+  is invisible to it — the probe reaches us over the ring that works while clients on the other
+  ring find nothing. arti computes exactly this (`upload_result_state`) and reports it as
+  `State::DegradedUnreachable`: "definitely not reachable by all clients". The watchdog reads that
+  **one variant only**, never the aggregate's `is_fully_reachable()`.
+
+  That distinction is the whole lesson. `is_fully_reachable()` is arti's summary of *bootstrap
+  progress* and is wrong in both directions — it read healthy for ~90 minutes on 2026-08-02 while
+  every client timed out, and it reads false on services that are serving perfectly, which is what
+  drove the systemd restart counter into the thirties. But it was also *accidentally carrying a
+  real signal*: on 2026-08-05 this relay restarted itself twice, and both times the journal shows a
+  genuine one-sided outage (8/8 and 5/5 on one period, 0/2 on the other). Replacing the aggregate
+  wholesale with a self-dial would have discarded a true positive. Reading `DegradedUnreachable`
+  narrowly keeps it without the noise: `Bootstrapping` and `Recovering` — the states behind the
+  false readings — are matched *ahead* of it during aggregation, so they can only ever mask it,
+  never manufacture it.
+
+  **A restart must be paid for with corroborated evidence**, because it rotates the introduction
+  points and strands every client holding the current descriptor until it refetches. Two things
+  veto one: a real client's stream served since the dark spell began (the service is live, so our
+  probe is what's broken — and a failing probe can't forge this, since a success would end the
+  spell), and arti reporting our own Tor client offline/filtered/unbootstrapped (a dial made
+  through a broken client says nothing about our descriptor, and a restart can't fix someone
+  else's outage). That client-status signal is read in this direction *only* — as a reason to do
+  nothing, never as a reason to act; using it as a trigger is the same mistake in a different place.
+
+  Both vetoes apply to the **self-dial only**. Neither may excuse the publisher's ring check: it is
+  arti's account of its own uploads rather than a guess about the network, and clients still being
+  served is precisely what a one-sided outage looks like from the inside — so honouring the veto
+  there would mask the failure permanently. Either signal, sustained past `WATCHDOG_MAX_DARK`,
+  restarts. The threshold is several probes wide because probe latency is genuinely high-variance
+  (measured 3.4s to 56.8s on a healthy relay, and a cold start can time out entirely once before
+  settling), so `PROBE_TIMEOUT` is set well past the worst healthy sample: a tight cap would not
+  detect an outage sooner, only invent failures on a relay that is fine.
 - **Wedged entry guards self-recover, on both the relay and the app.** After weeks of a persistent
   Tor state dir, arti's confirmed entry guards can churn out of the network; a client stuck on them
   can neither publish its onion nor reach the relay, and a plain re-bootstrap reuses the same

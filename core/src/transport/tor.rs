@@ -36,6 +36,9 @@ use tor_llcrypto::pk::ed25519;
 use tor_rtcompat::PreferredRuntime;
 
 use crate::lifecycle::{ExitGuard, StopSignal};
+// The virtual port a relay's onion is dialed on lives with the protocol, so the core's transport
+// and the relay binary's own self-dial watchdog cannot drift apart on it.
+use crate::relay_client::RELAY_PORT;
 use crate::transport::{client_auth, Address, Transport};
 use crate::Result;
 
@@ -105,9 +108,6 @@ impl std::io::Write for ArtiDiagWriter {
 
 /// The virtual port our onion service exposes (peers dial `<onion>:NIGHTDROP_PORT`).
 const NIGHTDROP_PORT: u16 = 9001;
-
-/// The virtual port the relay's onion service is dialed on (it accepts any rendezvous stream).
-const RELAY_PORT: u16 = 9001;
 
 /// Upper bound on the initial Tor bootstrap. Tor normally connects in well under a minute, but on a
 /// blocked/censored or dead network `create_bootstrapped` would otherwise wait indefinitely, leaving

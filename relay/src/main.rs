@@ -22,7 +22,7 @@
 mod tui;
 
 use std::path::Path;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -48,7 +48,7 @@ use anyhow::Context as _;
 use arti_client::config::TorClientConfigBuilder;
 use arti_client::{DataStream, TorClient, TorClientConfig};
 use futures::{AsyncBufReadExt, AsyncWriteExt, StreamExt};
-use nightdrop::relay_client::{RelayCore, RelayEvent, RelayLimits, RelayLogger};
+use nightdrop::relay_client::{RelayCore, RelayEvent, RelayLimits, RelayLogger, Request};
 use safelog::DisplayRedacted as _;
 use tokio::runtime::Runtime;
 use tor_cell::relaycell::msg::Connected;
@@ -149,43 +149,120 @@ fn main() -> anyhow::Result<()> {
         // Write the address to `<state>/onion` so dev tooling can read it without scraping logs.
         let _ = std::fs::write(format!("{state_dir}/onion"), &onion);
 
+        // Seconds since `start` at which we last served a real client's rendezvous stream. Written
+        // by the accept loop below, read by the watchdog as independent proof of reachability.
+        let last_served = Arc::new(AtomicU64::new(0));
+
         // Self-healing watchdog. arti keeps this process alive even when its descriptor publisher
         // or introduction points wedge (observed after multi-day uptime: the process runs, the
         // onion goes dark, clients get "could not reach relay"). `Restart=always` can't recover
-        // that — nothing crashed. So we watch the service's own reachability and exit when it has
-        // been unreachable long enough to warrant a fresh start; systemd then restarts us, which
-        // re-establishes intro points and republishes the descriptor. A brief unreachable window
-        // is normal during startup and intro-point rotation, so we only act on a sustained outage.
+        // that — nothing crashed. So we prove reachability ourselves and exit when the onion has
+        // been *demonstrably* dark long enough to warrant a fresh start; systemd then restarts us,
+        // re-establishing intro points and republishing the descriptor.
+        //
+        // Reachability is proved TWO ways each cycle, because each one is blind to a failure the
+        // other catches (the reasoning lives on `Cycle::verdict`):
+        //   1. an end-to-end self-dial over Tor — the only thing that actually answers "can a
+        //      client reach this relay", but it resolves us under a single time period, so it is
+        //      blind to a descriptor that made it onto one HsDir ring and not the other;
+        //   2. the publisher's own `DegradedUnreachable`, which is exactly that ring check.
+        //
+        // What this watchdog no longer asks is `is_fully_reachable()`. That is arti's summary of
+        // its bootstrap PROGRESS and is wrong in both directions: on 2026-08-02 this relay read
+        // healthy for ~90 minutes while every client timed out, and it reads false on services
+        // that are serving perfectly — which is what put the systemd restart counter in the
+        // thirties. But it was also carrying (2) inside it, so replacing it with (1) alone would
+        // have quietly dropped a true signal; hence both, with the aggregate itself read narrowly.
         {
+            let probe_client = client.clone();
+            let probe_onion = onion.clone();
             let watched = Arc::clone(&service);
+            let max_line = core.max_line_bytes();
+            let served = Arc::clone(&last_served);
             let sd = state_dir.clone();
             tokio::spawn(async move {
-                let mut unreachable_since: Option<Instant> = None;
+                let mut dark_since: Option<Instant> = None;
                 let mut cleared = false;
                 loop {
-                    tokio::time::sleep(WATCHDOG_INTERVAL).await;
-                    if watched.status().state().is_fully_reachable() {
-                        unreachable_since = None;
-                        // Reachable: clear the escalation counter once, so a *later* independent
-                        // outage starts its own plain-restart-then-guard-reset sequence from zero.
-                        if !cleared {
-                            write_unhealthy(&sd, 0);
-                            cleared = true;
+                    tokio::time::sleep(PROBE_INTERVAL).await;
+                    let began = Instant::now();
+                    let dial = probe_self(&probe_client, &probe_onion, max_line).await;
+                    // `{e:#}`, not `{e}`: anyhow's plain Display shows only the outermost context,
+                    // which here is the bare label "self-dial connect" — it cannot tell a
+                    // descriptor that was never found from intro points that are gone from a dial
+                    // that timed out, and that distinction is the entire diagnostic value of the
+                    // line. The alternate form prints the whole cause chain.
+                    let how = match &dial {
+                        Ok(()) => format!("reached in {}ms", began.elapsed().as_millis()),
+                        Err(e) => format!("self-dial failed: {e:#}"),
+                    };
+                    let publisher_dark = watched.status().state()
+                        == tor_hsservice::status::State::DegradedUnreachable;
+
+                    let since = *dark_since.get_or_insert_with(Instant::now);
+                    let cycle = Cycle {
+                        dial_failed: dial.is_err(),
+                        publisher_dark,
+                        served_since_dark: served.load(Ordering::Relaxed)
+                            > since.duration_since(start).as_secs(),
+                        client_unusable: tor_client_unusable(&probe_client),
+                        dark_for: since.elapsed(),
+                    };
+                    let dark_for = cycle.dark_for;
+                    match cycle.verdict() {
+                        Verdict::Healthy => {
+                            dark_since = None;
+                            // A heartbeat, deliberately logged every time. It is the only line that
+                            // proves this relay was reachable at a given moment, and the counters
+                            // around it are worthless without evidence that the log is still
+                            // growing — an idle onion service leaves every other number frozen.
+                            // Silent under the TUI, which owns the terminal (the dev dashboard
+                            // routes its own output to relay.log for exactly this reason); the
+                            // failure lines below still print, being rare and worth the mess.
+                            if !tui {
+                                eprintln!("nightdrop-relay: self-dial {how}");
+                            }
+                            // Reached: clear the escalation counter once, so a *later* independent
+                            // outage starts its own plain-restart-then-guard-reset sequence from
+                            // zero.
+                            if !cleared {
+                                write_unhealthy(&sd, 0);
+                                cleared = true;
+                            }
                         }
-                        continue;
-                    }
-                    let since = *unreachable_since.get_or_insert_with(Instant::now);
-                    if since.elapsed() >= WATCHDOG_MAX_UNREACHABLE {
-                        // Record this unhealthy cycle so the next start can escalate to a guard
-                        // reset if plain restarts keep failing, then exit for systemd to restart us.
-                        let n = read_unhealthy(&sd) + 1;
-                        write_unhealthy(&sd, n);
-                        eprintln!(
-                            "nightdrop-relay: onion unreachable for {}s (unhealthy cycle {n}) — \
-                             exiting for a fresh restart (systemd Restart=always)",
-                            since.elapsed().as_secs()
-                        );
-                        std::process::exit(1);
+                        Verdict::Inconclusive(why) => {
+                            // arti's own words for the blockage, when it is the blockage we're
+                            // deferring to — "Offline" and "Filtering" call for very different
+                            // follow-up from whoever reads this.
+                            let detail = cycle
+                                .client_unusable
+                                .as_deref()
+                                .map(|d| format!(" ({d})"))
+                                .unwrap_or_default();
+                            eprintln!(
+                                "nightdrop-relay: {how} — {why}{detail}, so this says nothing \
+                                 about the onion; not restarting"
+                            );
+                            dark_since = None;
+                        }
+                        Verdict::Dark(why) => eprintln!(
+                            "nightdrop-relay: {how} — {why}; dark for {}s of {}s before a restart",
+                            dark_for.as_secs(),
+                            WATCHDOG_MAX_DARK.as_secs()
+                        ),
+                        Verdict::Restart(why) => {
+                            // Record this unhealthy cycle so the next start can escalate to a guard
+                            // reset if plain restarts keep failing, then exit for systemd to
+                            // restart us.
+                            let n = read_unhealthy(&sd) + 1;
+                            write_unhealthy(&sd, n);
+                            eprintln!(
+                                "nightdrop-relay: {how} — {why}, sustained for {}s (unhealthy \
+                                 cycle {n}) — exiting for a fresh restart (systemd Restart=always)",
+                                dark_for.as_secs()
+                            );
+                            std::process::exit(1);
+                        }
                     }
                 }
             });
@@ -230,9 +307,16 @@ fn main() -> anyhow::Result<()> {
             }
             let core = Arc::clone(&core);
             let guard = ConnGuard(Arc::clone(&active));
+            let served = Arc::clone(&last_served);
             tokio::spawn(async move {
                 let _guard = guard; // decrements the counter when this task ends
                 if let Ok(stream) = request.accept(Connected::new_empty()).await {
+                    // Someone reached this onion. The watchdog reads this as proof that the
+                    // service is live even when its own self-dial is failing. Our own probe lands
+                    // here too, which is harmless: the watchdog only consults this while a dark
+                    // spell is running, and every probe during one has failed — a probe that
+                    // reached us would have ended the spell instead.
+                    served.store(start.elapsed().as_secs(), Ordering::Relaxed);
                     let _ = serve_stream(stream, core).await;
                 }
             });
@@ -289,6 +373,160 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
         }
     }
     Ok(())
+}
+
+/// What one watchdog cycle observed.
+struct Cycle {
+    /// The end-to-end self-dial did not reach us this cycle.
+    dial_failed: bool,
+    /// arti's descriptor publisher reports the descriptor present on one of the two HsDir rings
+    /// and absent from the other — `State::DegradedUnreachable`, in its own words "definitely not
+    /// reachable by all clients".
+    publisher_dark: bool,
+    /// A real client's rendezvous stream was served *after* we started counting this dark spell.
+    served_since_dark: bool,
+    /// arti's reason, if any, that our own Tor client cannot currently work.
+    client_unusable: Option<String>,
+    /// How long the onion has been continuously dark.
+    dark_for: Duration,
+}
+
+/// What to do about it.
+#[derive(Debug, PartialEq, Eq)]
+enum Verdict {
+    /// Reached, and publishing to both rings. Nothing to do.
+    Healthy,
+    /// The probe failed for a reason that is not the onion being dark; carries the reason. The
+    /// dark spell is abandoned rather than extended — the clock restarts if it fails again.
+    Inconclusive(&'static str),
+    /// The onion really does look dark, but not yet for long enough to restart over.
+    Dark(&'static str),
+    /// Sustained, corroborated darkness: exit and let systemd bring us back.
+    Restart(&'static str),
+}
+
+impl Cycle {
+    /// A restart is destructive — it rotates the introduction points, so every client holding the
+    /// current descriptor fails until it refetches. That is worth doing to a relay that is dark
+    /// (those clients are already stranded) and never worth doing to one that is merely failing our
+    /// own probe. So each piece of counter-evidence is spent before the restart is.
+    ///
+    /// Two independent things can make us dark, and they catch different failures. The order below
+    /// is load-bearing: a veto may only be spent against a signal it actually explains.
+    fn verdict(&self) -> Verdict {
+        // Nothing is wrong, so nothing needs excusing. Checked first so that a transient reading
+        // from `client_unusable` can never downgrade a cycle that both reached us and published.
+        if !self.dial_failed && !self.publisher_dark {
+            return Verdict::Healthy;
+        }
+        // Something IS wrong — but if our own Tor client cannot use the network, that one fact
+        // explains BOTH of the signals below: a dial cannot complete without a working client, and
+        // neither can a descriptor upload. Restarting cannot fix someone else's outage, and doing
+        // it in a loop while the box is offline is the "reset because the device is OFFLINE"
+        // mistake that cost real anonymity margin the last time it was made. So this veto outranks
+        // both signals, and is the only one that does.
+        if self.client_unusable.is_some() {
+            return Verdict::Inconclusive("our own Tor client is unusable");
+        }
+        // arti's own account of its own descriptor uploads. Not a guess about the network — the
+        // publisher reporting which of the two HsDir rings it managed to upload to — so the
+        // served-clients veto below does NOT apply to it: clients reaching us over the ring that IS
+        // published is exactly what a one-sided outage looks like from the inside, which is why the
+        // self-dial cannot see this case (it resolves us under one time period, its own).
+        //
+        // This is the signal the old `is_fully_reachable()` check was accidentally carrying, and
+        // losing it would have been a real regression: it is what fired on this relay at 09:46 on
+        // 2026-08-05, when it sat at 8/8 HSDirs on period 20670 and 0/2 on 20669. Read narrowly —
+        // only `DegradedUnreachable`, never the aggregate's opinion of "fully reachable" — it has
+        // no false positives from IPT churn, because `Bootstrapping` and `Recovering` (the states
+        // that produced the old thrashing) are matched *ahead* of it and can only ever mask it.
+        if self.publisher_dark {
+            return self.escalate("the descriptor is missing from one of the two HsDir rings");
+        }
+        // The end-to-end self-dial — a guess about the network, so it has to survive counter-
+        // evidence. Someone reached this onion while we could not: the service is live and the
+        // fault is in our probe, so restarting would strand clients that are working right now.
+        // Our own probes cannot forge this — every probe since the dark spell began has failed, and
+        // a success would have ended the spell outright.
+        if self.served_since_dark {
+            return Verdict::Inconclusive("clients are still being served");
+        }
+        self.escalate("the self-dial could not reach this relay")
+    }
+
+    /// Darkness is only ever acted on once it has lasted; a single bad cycle is not an outage.
+    fn escalate(&self, why: &'static str) -> Verdict {
+        if self.dark_for < WATCHDOG_MAX_DARK {
+            Verdict::Dark(why)
+        } else {
+            Verdict::Restart(why)
+        }
+    }
+}
+
+/// Prove this relay is reachable the way a client would: dial our own `.onion` over Tor and run one
+/// real request through the accept loop. Returns `Ok(())` only if a response line came back.
+///
+/// `GetDirectory` is the request because it is read-only and storeless — it touches no mailbox and
+/// leaves nothing behind — while still exercising the whole path a client depends on: HSDir lookup,
+/// introduction, rendezvous, our accept loop, [`RelayCore::handle_line`], and the response.
+async fn probe_self<R: tor_rtcompat::Runtime>(
+    client: &TorClient<R>,
+    onion: &str,
+    max_line: usize,
+) -> anyhow::Result<()> {
+    // A freshly isolated client per probe, because arti's onion-service client caches a fetched
+    // descriptor per (service, client isolation). Reusing the main client would let probe after
+    // probe be answered out of that cache — and "clients can no longer look us up" is exactly the
+    // failure being hunted, so a probe that skips the lookup cannot see it. A new isolation gets a
+    // new cache entry, which forces a real HSDir fetch. It shares the bootstrapped internals, so
+    // this costs a circuit, not a second Tor client. (Confirmed by tracing: four probes produced
+    // four `HS desc fetch` lines, one apiece.)
+    //
+    // KNOWN LIMIT, worth stating rather than overclaiming: a probe looks the service up under the
+    // ONE time period its own consensus says is current, exactly as a co-located client would. A
+    // service published for one period but not the other is therefore only caught while the
+    // *broken* period is the one being looked up — which is the case that matters (that is what
+    // "clients found nothing" means), but a distant client whose consensus points at the other
+    // period can be stranded during a rollover window without this seeing it. arti exposes no
+    // per-period publication state to check instead, and the daily rollover bounds how long such a
+    // one-sided outage can hide from a probe running every few minutes.
+    let probe = client.isolated_client();
+    let exchange = async {
+        let mut stream = probe
+            .connect((onion, nightdrop::relay_client::RELAY_PORT))
+            .await
+            .context("self-dial connect")?;
+        let line = nightdrop::relay_client::request_line(&Request::GetDirectory)?;
+        stream.write_all(line.as_bytes()).await?;
+        stream.flush().await?;
+        let mut reader = futures::io::BufReader::new(stream);
+        let response = read_line_capped(&mut reader, max_line)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("relay closed the probe stream without answering"))?;
+        let response = nightdrop::relay_client::parse_response_line(&response)?;
+        if !response.ok {
+            anyhow::bail!("relay refused the probe: {:?}", response.error);
+        }
+        Ok(())
+    };
+    tokio::time::timeout(PROBE_TIMEOUT, exchange)
+        .await
+        .map_err(|_| anyhow::anyhow!("self-dial timed out after {}s", PROBE_TIMEOUT.as_secs()))?
+}
+
+/// Why arti says our own Tor client cannot currently work, if it says so at all.
+///
+/// Used only to *suppress* a restart: a failed self-dial made through a client that is offline,
+/// filtered, or still bootstrapping says nothing about whether our onion is published. The
+/// signal is imprecise (`ready_for_traffic` reports that arti cannot act without saying why), which
+/// is why it is read in this direction only — as a reason to do nothing, never as a reason to act.
+fn tor_client_unusable<R: tor_rtcompat::Runtime>(client: &TorClient<R>) -> Option<String> {
+    let status = client.bootstrap_status();
+    if let Some(blockage) = status.blocked() {
+        return Some(blockage.to_string());
+    }
+    (!status.ready_for_traffic()).then(|| "not ready for traffic".to_string())
 }
 
 /// Async twin of the core's line-capped reader: read one newline-terminated line, bounding the
@@ -390,12 +628,32 @@ fn auth_dir() -> String {
 /// of dark. Well under arti's max of 20.
 const RELAY_INTRO_POINTS: u8 = 6;
 
-/// How often the self-healing watchdog samples the onion's reachability.
-const WATCHDOG_INTERVAL: Duration = Duration::from_secs(30);
-/// How long the onion may stay unreachable before the watchdog exits for a fresh restart. Long
-/// enough to ride out normal startup bootstrapping (~1–3 min) and intro-point rotation without a
-/// spurious restart; short enough that a real wedge self-corrects in minutes, not days.
-const WATCHDOG_MAX_UNREACHABLE: Duration = Duration::from_secs(8 * 60);
+/// How often the watchdog proves reachability with an end-to-end self-dial. Each probe costs one
+/// descriptor fetch and one rendezvous circuit, so this is deliberately minutes rather than the
+/// 30s of the old status poll — a status read was free, evidence is not.
+const PROBE_INTERVAL: Duration = Duration::from_secs(5 * 60);
+/// Cap on a single self-dial, and deliberately far larger than a probe should ever need.
+///
+/// Measured on a healthy relay over six consecutive probes: 3.4s, 3.5s, 14.1s, 20.3s, 40.6s,
+/// 56.8s. A full HSDir lookup plus introduction and rendezvous is simply high-variance, and each
+/// probe pays for all of it (see [`probe_self`] on why it must). A tight cap here would not detect
+/// a real outage any sooner — `WATCHDOG_MAX_DARK` sets that — it would only manufacture failures on
+/// a relay that is fine, and each one is a step toward a restart that strands clients. So the cap
+/// exists to stop a hung dial from wedging the loop, nothing more; it stays well under
+/// `PROBE_INTERVAL` so cycles cannot overlap.
+const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
+/// How long the onion may stay *demonstrably* dark before the watchdog exits for a fresh restart.
+/// Several probes' worth, so a single unlucky circuit can't trigger it. A restart rotates the
+/// introduction points and strands clients holding the old descriptor, so it is worth being slow
+/// and sure: the cost of restarting a relay that was fine is real, while a relay that is genuinely
+/// dark is already stranding everyone.
+///
+/// The margin is not theoretical. A freshly launched relay was measured failing its very first
+/// probe outright — a full 180s timeout, five minutes after launch, with the descriptor evidently
+/// still settling — and then reaching itself in 4.8s and 3.9s on the two cycles that followed. One
+/// early failure like that is normal and must not cost a restart; only a spell that outlives
+/// several probes means anything.
+const WATCHDOG_MAX_DARK: Duration = Duration::from_secs(15 * 60);
 
 /// Consecutive unhealthy (sustained-unreachable) restart cycles after which the guard state is
 /// reset on the next start. The first restart is plain — it re-establishes introduction points and
@@ -583,4 +841,155 @@ fn now_hms() -> String {
         .unwrap_or(0)
         % 86_400;
     format!("{:02}:{:02}:{:02}", s / 3600, (s % 3600) / 60, s % 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A cycle in which everything is fine.
+    fn healthy(dark_for: Duration) -> Cycle {
+        Cycle {
+            dial_failed: false,
+            publisher_dark: false,
+            served_since_dark: false,
+            client_unusable: None,
+            dark_for,
+        }
+    }
+
+    /// A failed self-dial with no counter-evidence at all.
+    fn uncorroborated(dark_for: Duration) -> Cycle {
+        Cycle {
+            dial_failed: true,
+            ..healthy(dark_for)
+        }
+    }
+
+    #[test]
+    fn a_reached_relay_that_is_publishing_to_both_rings_is_healthy() {
+        assert_eq!(healthy(Duration::ZERO).verdict(), Verdict::Healthy);
+        assert_eq!(
+            healthy(WATCHDOG_MAX_DARK * 10).verdict(),
+            Verdict::Healthy,
+            "a successful cycle is healthy regardless of how long a previous spell ran"
+        );
+    }
+
+    #[test]
+    fn a_sustained_dark_spell_with_no_counter_evidence_restarts() {
+        // Below the threshold the watchdog keeps watching rather than acting: one unlucky circuit
+        // is not an outage.
+        assert!(matches!(
+            uncorroborated(WATCHDOG_MAX_DARK - Duration::from_secs(1)).verdict(),
+            Verdict::Dark(_)
+        ));
+        assert!(matches!(
+            uncorroborated(WATCHDOG_MAX_DARK).verdict(),
+            Verdict::Restart(_)
+        ));
+    }
+
+    #[test]
+    fn a_relay_that_is_still_serving_clients_is_never_restarted() {
+        // The regression that matters most: a restart rotates the introduction points and strands
+        // every client holding the current descriptor. If even one client got through since the
+        // dark spell started, the service is live and our probe is the thing that is broken — so no
+        // length of dark spell may justify restarting on top of working clients.
+        let cycle = Cycle {
+            served_since_dark: true,
+            ..uncorroborated(WATCHDOG_MAX_DARK * 10)
+        };
+        assert_eq!(
+            cycle.verdict(),
+            Verdict::Inconclusive("clients are still being served")
+        );
+    }
+
+    #[test]
+    fn a_dial_made_through_a_broken_tor_client_is_not_evidence_about_the_onion() {
+        // Our client being offline/filtered says nothing about whether our descriptor is published,
+        // and a restart cannot fix someone else's outage.
+        let cycle = Cycle {
+            client_unusable: Some("offline".into()),
+            ..uncorroborated(WATCHDOG_MAX_DARK * 10)
+        };
+        assert_eq!(
+            cycle.verdict(),
+            Verdict::Inconclusive("our own Tor client is unusable")
+        );
+    }
+
+    #[test]
+    fn a_descriptor_missing_from_one_hsdir_ring_is_dark_even_though_the_self_dial_succeeds() {
+        // The case the self-dial structurally cannot see, and the one that actually restarted this
+        // relay at 09:46 on 2026-08-05 (8/8 HSDirs on one period, 0/2 on the other). The probe
+        // looks the service up under its own time period, so it reaches us over the ring that IS
+        // published while clients on the other ring find nothing. Losing this signal when the old
+        // is_fully_reachable() check was removed would have been a silent regression.
+        let cycle = Cycle {
+            publisher_dark: true,
+            ..healthy(WATCHDOG_MAX_DARK)
+        };
+        assert!(matches!(cycle.verdict(), Verdict::Restart(_)));
+    }
+
+    #[test]
+    fn serving_clients_does_not_excuse_a_descriptor_missing_from_a_ring() {
+        // The served-clients veto second-guesses the self-dial, which is a guess about the network.
+        // It must not apply to the publisher, which is arti reporting its own uploads: clients
+        // reaching us over the published ring is exactly what a one-sided outage looks like from
+        // in here, so treating them as counter-evidence would mask the failure permanently.
+        let cycle = Cycle {
+            publisher_dark: true,
+            served_since_dark: true,
+            ..healthy(WATCHDOG_MAX_DARK)
+        };
+        assert!(matches!(cycle.verdict(), Verdict::Restart(_)));
+    }
+
+    #[test]
+    fn an_unusable_tor_client_excuses_the_ring_check_too_and_never_restarts() {
+        // The one veto that outranks BOTH signals, because it explains both: a descriptor upload
+        // needs a working Tor client every bit as much as a dial does. Getting this order wrong
+        // means a box that is merely offline restarts itself in a loop — repeatedly rotating its
+        // introduction points, and on the third cycle wiping its entry guards — over an outage no
+        // restart can fix. That is the "reset because the device is OFFLINE" mistake, and it is
+        // worth a test precisely because the code reads fine either way.
+        let offline = Cycle {
+            publisher_dark: true,
+            dial_failed: true,
+            client_unusable: Some("Offline: we seem to be offline".into()),
+            ..healthy(WATCHDOG_MAX_DARK * 10)
+        };
+        assert_eq!(
+            offline.verdict(),
+            Verdict::Inconclusive("our own Tor client is unusable")
+        );
+    }
+
+    #[test]
+    fn a_transient_client_complaint_cannot_downgrade_a_cycle_that_is_actually_fine() {
+        // `client_unusable` is imprecise by design (`ready_for_traffic` reports that arti cannot
+        // act without saying why). If it were consulted before the healthy check, an arti that
+        // grumbles while everything works would suppress the heartbeat and the counter reset.
+        let fine = Cycle {
+            client_unusable: Some("not ready for traffic".into()),
+            ..healthy(Duration::ZERO)
+        };
+        assert_eq!(fine.verdict(), Verdict::Healthy);
+    }
+
+    #[test]
+    fn the_probe_asks_the_relay_a_question_that_stores_nothing() {
+        // The self-dial has to exercise the real path without leaving anything behind on a relay
+        // whose whole point is holding as little as possible. GetDirectory is read-only and
+        // storeless, and a healthy relay answers ok even when it serves no directory.
+        let core = RelayCore::new(None);
+        let line = nightdrop::relay_client::request_line(&Request::GetDirectory).unwrap();
+        let response =
+            nightdrop::relay_client::parse_response_line(&core.handle_line(line.trim())).unwrap();
+        assert!(response.ok);
+        assert!(core.snapshot().is_empty());
+    }
 }

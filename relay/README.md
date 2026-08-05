@@ -71,6 +71,37 @@ The committed unit lives at [`relay/deploy/nightdrop-relay.service`](deploy/nigh
 and sets neither `NIGHTDROP_RELAY_DEV` nor `NIGHTDROP_RELAY_TUI` — no logs, no dashboard). The
 `--user` mode generates the equivalent unit for the systemd *user* manager and enables linger.
 
+### It watches itself (and will restart itself)
+
+arti can keep the process alive while the onion goes dark underneath it — the descriptor publisher
+or the introduction points wedge, nothing crashes, and `Restart=always` never fires while every
+client times out. So the relay checks itself two ways, every 5 minutes.
+
+**It dials its own `.onion` over Tor** and runs one real (read-only, storeless) request through its
+own accept loop. Each success logs a heartbeat you can watch for:
+
+```
+nightdrop-relay: self-dial reached in 2431ms
+```
+
+**And it checks that its descriptor reached both HsDir rings.** A dial only looks the service up
+under one time period, so a descriptor that published to one ring and not the other would still
+answer our own dial while stranding a share of real clients. arti reports that case directly, and
+the relay treats it as being dark even when the dial succeeds.
+
+If either keeps failing for 15 minutes the relay exits and systemd brings it back, re-establishing
+intro points and republishing. **Expect ~1–3 minutes of downtime** when that happens: a restart
+rotates the introduction points, so clients holding the old descriptor fail until they refetch.
+That cost is why the dial has to survive contradicting evidence first — a client served in the
+meantime, or arti reporting our own Tor client offline, both call it off. It is also why a relay
+that is merely *noisy* gets left alone: arti retrying "could not build circuit to HsDir" is
+routine, and so is a single slow or failed probe (they range from ~3s to ~60s on a healthy relay,
+and a cold start can time one out entirely before settling). The `.onion` address itself never
+changes; the keystore is preserved across restarts.
+
+If restarts don't restore it, the relay escalates once to resetting arti's entry guards (keeping the
+onion identity) on the following start. The counter behind that is `<state>/unhealthy-restarts`.
+
 ## Use it in the app
 
 In **Settings → Relays**, add your relay's `.onion` address to your **extra relays**. Your
