@@ -35,7 +35,9 @@ config:
 	@printf '// GENERATED from config/app_config.json by `make config` — do not edit by hand.\nwindow.NIGHTDROP_CONFIG = %s;\n' "$$(cat config/app_config.json)" > website/config.js
 	@ver="$$(sed -n 's/^version: *//p' app/pubspec.yaml)"; \
 	  printf '// GENERATED from app/pubspec.yaml by `make config` — do not edit by hand.\n/// Full pubspec version string ("versionName+versionCode", e.g. "0.1.2+3").\nconst String kAppVersion = '\''%s'\'';\n' "$$ver" > app/lib/src/core/app_version.dart
-	@echo "config: synced -> app/assets/app_config.json, website/config.js, app/lib/src/core/app_version.dart"
+	@ver="$$(sed -n 's/^version: *//p' app/pubspec.yaml)"; \
+	  printf '{"latest":"%s"}\n' "$${ver%%+*}" > website/update.json
+	@echo "config: synced -> app/assets/app_config.json, website/config.js, app/lib/src/core/app_version.dart, website/update.json"
 app-analyze:  ; cd app && flutter analyze
 gen-bridge:   ; flutter_rust_bridge_codegen generate
 

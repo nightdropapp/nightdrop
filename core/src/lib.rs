@@ -21,6 +21,7 @@ pub mod pqkem;
 pub mod relay_client;
 pub mod storage;
 pub mod transport;
+pub mod update;
 pub mod wire;
 
 /// Crate-wide result type. The FFI surface in [`api`] converts these to messages the

@@ -68,6 +68,21 @@ pub trait Transport: Send + Sync {
         None
     }
 
+    /// Fetch a small static file from an onion service over this transport's anonymized path,
+    /// for the update check (`crate::update`). `Some(bytes)` on success; `None` means **this
+    /// transport cannot fetch anonymously**, and the caller must then do nothing at all.
+    ///
+    /// `None` deliberately does NOT mean "fall back to something else". A closed transport once
+    /// returned `None` from [`relay_dialer`](Transport::relay_dialer) and the node read that as
+    /// "use a direct TCP client", which handed an `.onion` hostname to the system resolver — a
+    /// clearnet leak from a path that was supposed to be anonymous. The update check exists to
+    /// tell users about security fixes; it must never become the thing that deanonymizes them, so
+    /// there is no non-Tor path here by construction and the only correct handling of `None` is to
+    /// skip the check.
+    fn onion_get(&self, _onion: &str, _port: u16, _path: &str) -> Option<Result<Vec<u8>>> {
+        None
+    }
+
     /// Onion client authorization (#22, Tor only). Generate (and store in arti's keymgr) *our*
     /// client descriptor-encryption keypair for connecting to `peer_onion`'s (possibly restricted)
     /// onion, returning the **public** key string (`descriptor:x25519:…`) to hand the peer so they
