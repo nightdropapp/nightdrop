@@ -751,6 +751,22 @@ lie on the one screen where the user deliberately asked, and it hides exactly th
 the feature exists to surface. `checkForUpdateNow()` returns whether the site answered, and the
 UI distinguishes the two.
 
+**One download at a time, and the UI shows it wherever it was started from.** `downloadUpdate` is
+single-flight: a second call joins the running one. The banner and the "Update app" menu item are
+two entry points to a single operation, so neither may hold that state itself — found on hardware
+when a user started a download from the menu and then tapped the banner to *watch* it, which
+started a second concurrent transfer. Both streamed to the same scratch file, and when the first
+verified and renamed it into place the second, whose file descriptor survives a rename, carried on
+writing into the **published** file: bytes landed after verification, defeating the guarantee the
+hash exists to give. It produced a correct APK only because both streams carried identical
+content. Scratch names are now unique per attempt as well, so even a bypassed guard costs a wasted
+download rather than a corrupt one.
+
+Progress reaches the UI as an `update_progress` `AppEvent` carrying bytes-so-far and the server's
+claimed `Content-Length`. The Dart side routes it **away** from its roster/history refresh, which
+reloads every changed chat and would otherwise run several times a second for the length of a
+download. The log gets the same numbers on a slower cadence.
+
 **A download holds the process at foreground priority** for its whole duration
 (`BackgroundDelivery.holdDuring`), because a multi-minute Tor transfer is otherwise fair game for
 Doze and App Standby to freeze partway through. Two details are load-bearing: the hold ignores the

@@ -108,6 +108,11 @@ pub trait Transport: Send + Sync {
     /// `dest` is written as the bytes arrive, so it is **unverified while in flight**. Callers must
     /// hand it a scratch path and only move the result somewhere the user can reach it after the
     /// hash matches — see [`crate::update::download`].
+    ///
+    /// `progress` is called as body bytes land, with `(bytes_so_far, content_length)`. The length
+    /// is what the server claimed and may be `None`; it is for reporting only, never for deciding
+    /// the transfer finished. Implementations should call it on every chunk and leave any
+    /// throttling to the caller, which knows what it wants to do with the numbers.
     fn onion_get_to_file(
         &self,
         _onion: &str,
@@ -115,6 +120,7 @@ pub trait Transport: Send + Sync {
         _path: &str,
         _dest: &std::path::Path,
         _max_bytes: u64,
+        _progress: &dyn Fn(u64, Option<u64>),
     ) -> Option<Result<u64>> {
         None
     }

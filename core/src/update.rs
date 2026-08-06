@@ -197,11 +197,15 @@ pub fn native_abi() -> &'static str {
 /// This does not install anything, and deliberately cannot. Android verifies the signature itself
 /// and will refuse to replace Night Drop with anything not signed by our release key — so the
 /// worst a compromised site can do is waste the download, not swap the app.
+/// `on_progress` is called as the transfer runs, throttled to [`UI_PROGRESS_INTERVAL`], with
+/// `(bytes_so_far, content_length)`. It exists so the UI can show a real bar; the same numbers go
+/// to the log on a slower cadence.
 pub fn download(
     transport: &dyn Transport,
     manifest: &UpdateManifest,
     abi: &str,
     dest: &std::path::Path,
+    on_progress: &dyn Fn(u64, Option<u64>),
 ) -> Result<u64> {
     let Some(entry) = manifest.android.get(abi) else {
         // Names the ABI, because the failure is silent otherwise and the answer is always "the
@@ -218,12 +222,36 @@ pub fn download(
     // must not appear there until it has passed — and the scratch name is what makes that possible
     // without holding the whole build in memory.
     let part = part_path(dest);
+    // Throttled here rather than in the transport: at a 16KiB chunk this fires ~2,800 times for a
+    // 45MB build, and a log line per chunk is not observability. A stall produces silence rather
+    // than a line — but the last line printed then says how far it got and when, which is the
+    // question being asked.
+    let last_log = std::cell::Cell::new(std::time::Instant::now());
+    let last_ui = std::cell::Cell::new(std::time::Instant::now());
+    let progress = |done: u64, total: Option<u64>| {
+        if last_log.get().elapsed() >= PROGRESS_INTERVAL {
+            last_log.set(std::time::Instant::now());
+            match total {
+                Some(t) if t > 0 => {
+                    crate::diag!("update: {done}/{t} bytes ({}%)", done * 100 / t)
+                }
+                _ => crate::diag!("update: {done} bytes so far"),
+            }
+        }
+        // Separate cadence: the log wants a readable handful of lines, the UI wants a bar that
+        // moves. Same source, so they can never disagree about how far along it is.
+        if last_ui.get().elapsed() >= UI_PROGRESS_INTERVAL {
+            last_ui.set(std::time::Instant::now());
+            on_progress(done, total);
+        }
+    };
     let Some(fetched) = transport.onion_get_to_file(
         UPDATE_ONION,
         UPDATE_PORT,
         &entry.url,
         &part,
         MAX_DOWNLOAD_BYTES as u64,
+        &progress,
     ) else {
         crate::diag!("update: download ABORTED — transport cannot fetch anonymously");
         anyhow::bail!("this transport cannot fetch anonymously");
@@ -272,6 +300,27 @@ pub fn download(
     Ok(n)
 }
 
+/// Pull `Content-Length` out of a response head. Case-insensitive on the field name, as HTTP
+/// requires; absent or unparseable simply means progress has no denominator, which is a worse
+/// log line and nothing more.
+fn parse_content_length(head: &[u8]) -> Option<u64> {
+    let head = std::str::from_utf8(head).ok()?;
+    head.lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+        .and_then(|(_, value)| value.trim().parse().ok())
+}
+
+/// How often a running download writes a progress line to the log. Long enough that a
+/// multi-minute transfer produces a readable handful of lines rather than thousands, short enough
+/// to localise a stall.
+const PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// How often a running download tells the **UI** where it has got to. Much faster than the log
+/// cadence — a progress bar that moves four times a minute reads as broken — but still throttled,
+/// because each one crosses the FFI boundary and wakes the Dart side.
+const UI_PROGRESS_INTERVAL: std::time::Duration = std::time::Duration::from_millis(400);
+
 /// Incremental parser for a streamed response head.
 ///
 /// [`body_of`] can read the whole response and split it once; a streamed download cannot, because
@@ -286,6 +335,7 @@ pub fn download(
 pub struct ResponseHead {
     head: Vec<u8>,
     done: bool,
+    content_length: Option<u64>,
 }
 
 impl ResponseHead {
@@ -306,6 +356,7 @@ impl ResponseHead {
         };
         // Same status check as the buffered path: head plus terminator, so the body is empty.
         body_of(&self.head[..end + 4])?;
+        self.content_length = parse_content_length(&self.head[..end]);
         self.done = true;
         // The body bytes sit at the tail of both buffers. At least one byte of the terminator must
         // have arrived in *this* chunk (otherwise it would have been found on an earlier push), so
@@ -313,6 +364,13 @@ impl ResponseHead {
         // the invariant is ever broken.
         let consumed = (self.head.len() - (end + 4)).min(chunk.len());
         Ok(&chunk[chunk.len() - consumed..])
+    }
+
+    /// `Content-Length`, once the head has been seen. Advisory only — it is what the server
+    /// *claims*, so it may be used to report progress but never to decide the download is
+    /// complete or correct. The published SHA-256 is the only thing that settles that.
+    pub fn content_length(&self) -> Option<u64> {
+        self.content_length
     }
 
     /// Whether a complete head was seen. A stream that ends before this did not deliver a response.
@@ -323,9 +381,24 @@ impl ResponseHead {
 
 /// The scratch name a download is streamed to. A sibling of `dest`, so the rename that follows
 /// stays within one filesystem and is therefore atomic.
+///
+/// **Unique per attempt**, which is not decoration. Two downloads once ran at the same time (the
+/// banner and the menu are two entry points to one operation, and nothing stopped the second), and
+/// with a shared scratch name they interleaved writes into one file. The first to finish verified
+/// it and renamed it into place — while the second, whose file descriptor survives the rename,
+/// carried on writing into the *published* file. Bytes landed after verification. It produced a
+/// correct file only because both streams happened to carry identical content; a build published
+/// mid-download would have corrupted it silently, with the hash check already satisfied.
+///
+/// Callers should not rely on this alone — [`crate::api::NightdropCore::download_update`] is
+/// single-flight — but a name that cannot collide means the worst case is a wasted download rather
+/// than a corrupt one.
 fn part_path(dest: &std::path::Path) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static SEQ: AtomicU64 = AtomicU64::new(0);
+    let n = SEQ.fetch_add(1, Ordering::Relaxed);
     let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(".part");
+    name.push(format!(".{}-{n}.part", std::process::id()));
     dest.with_file_name(name)
 }
 
@@ -522,6 +595,41 @@ mod tests {
     }
 
     #[test]
+    fn a_streamed_response_reports_the_length_the_server_claimed() {
+        // The denominator for progress. Without it a long download can only say "n bytes so far",
+        // which does not tell a user or a field log whether it is nearly done or barely started.
+        let mut response =
+            b"HTTP/1.0 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: 12\r\n\r\n"
+                .to_vec();
+        response.extend_from_slice(b"hello, build");
+
+        // Must hold however the head is split across reads.
+        for size in 1..=response.len() {
+            let mut head = ResponseHead::default();
+            for piece in response.chunks(size) {
+                head.push(piece).unwrap();
+            }
+            assert_eq!(head.content_length(), Some(12), "at chunk size {size}");
+        }
+
+        // Case-insensitive, as HTTP requires.
+        let lower = b"HTTP/1.0 200 OK\r\ncontent-length: 7\r\n\r\nabcdefg".to_vec();
+        let mut head = ResponseHead::default();
+        head.push(&lower).unwrap();
+        assert_eq!(head.content_length(), Some(7));
+
+        // Absent or junk is not an error — it only costs the denominator.
+        for headless in [
+            &b"HTTP/1.0 200 OK\r\n\r\nbody"[..],
+            &b"HTTP/1.0 200 OK\r\nContent-Length: banana\r\n\r\nbody"[..],
+        ] {
+            let mut head = ResponseHead::default();
+            assert!(head.push(headless).is_ok());
+            assert_eq!(head.content_length(), None);
+        }
+    }
+
+    #[test]
     fn a_streamed_response_rejects_what_the_buffered_one_rejects() {
         // A non-200 must fail before a single byte reaches the file, or a 404 page gets written
         // where a build should be and only the hash catches it.
@@ -548,6 +656,20 @@ mod tests {
         }
         assert!(err.is_some(), "an unterminated head must be rejected");
         assert!(!head.complete());
+    }
+
+    /// How many scratch files are lying around. Counted rather than probed by name, because the
+    /// name is deliberately unique per attempt — and "no .part survives" is the property that
+    /// actually matters, for any name.
+    fn leftover_parts(dir: &std::path::Path) -> usize {
+        std::fs::read_dir(dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+                    .count()
+            })
+            .unwrap_or(0)
     }
 
     fn manifest_with(sha: &str) -> UpdateManifest {
@@ -616,7 +738,9 @@ mod tests {
                 _path: &str,
                 dest: &std::path::Path,
                 _max: u64,
+                progress: &dyn Fn(u64, Option<u64>),
             ) -> Option<Result<u64>> {
+                progress(self.0.len() as u64, Some(self.0.len() as u64));
                 Some(
                     std::fs::write(dest, &self.0)
                         .map(|()| self.0.len() as u64)
@@ -627,7 +751,14 @@ mod tests {
 
         let served = b"not the build you were promised".to_vec();
         let wrong = manifest_with(&"0".repeat(64));
-        let err = download(&Server(served.clone()), &wrong, "arm64-v8a", &dest).unwrap_err();
+        let err = download(
+            &Server(served.clone()),
+            &wrong,
+            "arm64-v8a",
+            &dest,
+            &|_, _| {},
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("did not match"), "{err}");
         assert!(
             !dest.exists(),
@@ -635,23 +766,32 @@ mod tests {
         );
         // And the scratch file goes too. It holds a full-size build that failed verification;
         // leaving it behind would quietly cost the user tens of megabytes per failed attempt.
-        assert!(
-            !part_path(&dest).exists(),
+        assert_eq!(
+            leftover_parts(&dir),
+            0,
             "a rejected download must not be left as a .part either"
         );
 
         // The same bytes with the right hash do land.
         let right = manifest_with(&sha256_hex(&served));
-        let n = download(&Server(served.clone()), &right, "arm64-v8a", &dest).unwrap();
+        let n = download(
+            &Server(served.clone()),
+            &right,
+            "arm64-v8a",
+            &dest,
+            &|_, _| {},
+        )
+        .unwrap();
         assert_eq!(n as usize, served.len());
         assert_eq!(std::fs::read(&dest).unwrap(), served);
-        assert!(
-            !part_path(&dest).exists(),
+        assert_eq!(
+            leftover_parts(&dir),
+            0,
             "the scratch file must be renamed, not copied and left"
         );
 
         // An ABI we publish nothing for is an error, not a silent empty file.
-        assert!(download(&Server(served), &right, "riscv64", &dest).is_err());
+        assert!(download(&Server(served), &right, "riscv64", &dest, &|_, _| {}).is_err());
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -687,6 +827,7 @@ mod tests {
                 _path: &str,
                 target: &std::path::Path,
                 _max: u64,
+                _progress: &dyn Fn(u64, Option<u64>),
             ) -> Option<Result<u64>> {
                 assert_ne!(target, self.dest, "a download must not stream to dest");
                 assert!(
@@ -714,7 +855,7 @@ mod tests {
             dest: dest.clone(),
         };
         assert_eq!(
-            download(&t, &m, "arm64-v8a", &dest).unwrap(),
+            download(&t, &m, "arm64-v8a", &dest, &|_, _| {}).unwrap(),
             body.len() as u64
         );
         assert_eq!(std::fs::read(&dest).unwrap(), body);

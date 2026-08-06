@@ -3418,9 +3418,11 @@ impl SseDecode for crate::api::AppEvent {
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
         let mut var_kind = <String>::sse_decode(deserializer);
         let mut var_contacts = <Vec<String>>::sse_decode(deserializer);
+        let mut var_progress = <Option<crate::api::TransferProgress>>::sse_decode(deserializer);
         return crate::api::AppEvent {
             kind: var_kind,
             contacts: var_contacts,
+            progress: var_progress,
         };
     }
 }
@@ -3606,6 +3608,28 @@ impl SseDecode for Option<crate::api::AppUpdate> {
     }
 }
 
+impl SseDecode for Option<crate::api::TransferProgress> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<crate::api::TransferProgress>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
+impl SseDecode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        if (<bool>::sse_decode(deserializer)) {
+            return Some(<u64>::sse_decode(deserializer));
+        } else {
+            return None;
+        }
+    }
+}
+
 impl SseDecode for crate::api::PairingInvite {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -3650,6 +3674,18 @@ impl SseDecode for crate::api::StoreUnlock {
         return crate::api::StoreUnlock {
             duress: var_duress,
             key_b64: var_keyB64,
+        };
+    }
+}
+
+impl SseDecode for crate::api::TransferProgress {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_done = <u64>::sse_decode(deserializer);
+        let mut var_total = <Option<u64>>::sse_decode(deserializer);
+        return crate::api::TransferProgress {
+            done: var_done,
+            total: var_total,
         };
     }
 }
@@ -3889,6 +3925,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::AppEvent {
         [
             self.kind.into_into_dart().into_dart(),
             self.contacts.into_into_dart().into_dart(),
+            self.progress.into_into_dart().into_dart(),
         ]
         .into_dart()
     }
@@ -4049,6 +4086,24 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::StoreUnlock> for crate::api::
         self
     }
 }
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::TransferProgress {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.done.into_into_dart().into_dart(),
+            self.total.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive for crate::api::TransferProgress {}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::TransferProgress>
+    for crate::api::TransferProgress
+{
+    fn into_into_dart(self) -> crate::api::TransferProgress {
+        self
+    }
+}
 
 impl SseEncode for flutter_rust_bridge::for_generated::anyhow::Error {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -4094,6 +4149,7 @@ impl SseEncode for crate::api::AppEvent {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <String>::sse_encode(self.kind, serializer);
         <Vec<String>>::sse_encode(self.contacts, serializer);
+        <Option<crate::api::TransferProgress>>::sse_encode(self.progress, serializer);
     }
 }
 
@@ -4229,6 +4285,26 @@ impl SseEncode for Option<crate::api::AppUpdate> {
     }
 }
 
+impl SseEncode for Option<crate::api::TransferProgress> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <crate::api::TransferProgress>::sse_encode(value, serializer);
+        }
+    }
+}
+
+impl SseEncode for Option<u64> {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <bool>::sse_encode(self.is_some(), serializer);
+        if let Some(value) = self {
+            <u64>::sse_encode(value, serializer);
+        }
+    }
+}
+
 impl SseEncode for crate::api::PairingInvite {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
@@ -4258,6 +4334,14 @@ impl SseEncode for crate::api::StoreUnlock {
     fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
         <bool>::sse_encode(self.duress, serializer);
         <String>::sse_encode(self.key_b64, serializer);
+    }
+}
+
+impl SseEncode for crate::api::TransferProgress {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <u64>::sse_encode(self.done, serializer);
+        <Option<u64>>::sse_encode(self.total, serializer);
     }
 }
 

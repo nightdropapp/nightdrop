@@ -2364,11 +2364,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AppEvent dco_decode_app_event(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 2)
-      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    if (arr.length != 3)
+      throw Exception('unexpected arr length: expect 3 but see ${arr.length}');
     return AppEvent(
       kind: dco_decode_String(arr[0]),
       contacts: dco_decode_list_String(arr[1]),
+      progress: dco_decode_opt_box_autoadd_transfer_progress(arr[2]),
     );
   }
 
@@ -2395,6 +2396,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AppUpdate dco_decode_box_autoadd_app_update(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return dco_decode_app_update(raw);
+  }
+
+  @protected
+  TransferProgress dco_decode_box_autoadd_transfer_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_transfer_progress(raw);
+  }
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return dco_decode_u_64(raw);
   }
 
   @protected
@@ -2504,6 +2517,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  TransferProgress? dco_decode_opt_box_autoadd_transfer_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_transfer_progress(raw);
+  }
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_box_autoadd_u_64(raw);
+  }
+
+  @protected
   PairingInvite dco_decode_pairing_invite(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2548,6 +2573,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return StoreUnlock(
       duress: dco_decode_bool(arr[0]),
       keyB64: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  TransferProgress dco_decode_transfer_progress(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return TransferProgress(
+      done: dco_decode_u_64(arr[0]),
+      total: dco_decode_opt_box_autoadd_u_64(arr[1]),
     );
   }
 
@@ -2640,7 +2677,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     final var_kind = sse_decode_String(deserializer);
     final var_contacts = sse_decode_list_String(deserializer);
-    return AppEvent(kind: var_kind, contacts: var_contacts);
+    final var_progress =
+        sse_decode_opt_box_autoadd_transfer_progress(deserializer);
+    return AppEvent(
+        kind: var_kind, contacts: var_contacts, progress: var_progress);
   }
 
   @protected
@@ -2665,6 +2705,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   AppUpdate sse_decode_box_autoadd_app_update(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_app_update(deserializer));
+  }
+
+  @protected
+  TransferProgress sse_decode_box_autoadd_transfer_progress(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_transfer_progress(deserializer));
+  }
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    return (sse_decode_u_64(deserializer));
   }
 
   @protected
@@ -2826,6 +2879,29 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  TransferProgress? sse_decode_opt_box_autoadd_transfer_progress(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_transfer_progress(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_box_autoadd_u_64(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   PairingInvite sse_decode_pairing_invite(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     final var_shortCode = sse_decode_String(deserializer);
@@ -2856,6 +2932,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_duress = sse_decode_bool(deserializer);
     final var_keyB64 = sse_decode_String(deserializer);
     return StoreUnlock(duress: var_duress, keyB64: var_keyB64);
+  }
+
+  @protected
+  TransferProgress sse_decode_transfer_progress(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    final var_done = sse_decode_u_64(deserializer);
+    final var_total = sse_decode_opt_box_autoadd_u_64(deserializer);
+    return TransferProgress(done: var_done, total: var_total);
   }
 
   @protected
@@ -2960,6 +3044,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.kind, serializer);
     sse_encode_list_String(self.contacts, serializer);
+    sse_encode_opt_box_autoadd_transfer_progress(self.progress, serializer);
   }
 
   @protected
@@ -2981,6 +3066,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       AppUpdate self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_app_update(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_transfer_progress(
+      TransferProgress self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_transfer_progress(self, serializer);
+  }
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self, serializer);
   }
 
   @protected
@@ -3103,6 +3201,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_box_autoadd_transfer_progress(
+      TransferProgress? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_transfer_progress(self, serializer);
+    }
+  }
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_box_autoadd_u_64(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_pairing_invite(PairingInvite self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.shortCode, serializer);
@@ -3129,6 +3248,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_bool(self.duress, serializer);
     sse_encode_String(self.keyB64, serializer);
+  }
+
+  @protected
+  void sse_encode_transfer_progress(
+      TransferProgress self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_64(self.done, serializer);
+    sse_encode_opt_box_autoadd_u_64(self.total, serializer);
   }
 
   @protected

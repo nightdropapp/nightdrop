@@ -640,6 +640,11 @@
   "@updateHide": { "description": "Button that hides the update banner until a newer version exists." },
   "updateDownloading": "Downloading over Tor…",
   "@updateDownloading": { "description": "Shown while the update APK is downloading." },
+  "updateDownloadingPercent": "Downloading over Tor…{percent}",
+  "@updateDownloadingPercent": {
+    "description": "Shown while the update APK is downloading, with a percentage once one is known. The placeholder already includes its leading space and is empty until the first bytes arrive, so the string must read correctly without it.",
+    "placeholders": { "percent": { "type": "String" } }
+  },
   "updateDownloaded": "Downloaded and verified. Open it to install.",
   "@updateDownloaded": { "description": "Shown when the update APK finished downloading and its hash matched." },
   "updateFailed": "Could not download the update.",

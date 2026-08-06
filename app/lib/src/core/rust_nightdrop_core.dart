@@ -393,7 +393,7 @@ class RustNightdropCore extends NightdropCore {
       persistKey: key,
     );
     _tor = true;
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
@@ -531,6 +531,28 @@ class RustNightdropCore extends NightdropCore {
   @override
   String? get updateAvailable => _updateAvailable;
 
+  double? _downloadProgress;
+
+  @override
+  double? get downloadProgress => _downloadProgress;
+
+  /// Handle one `update_progress` event.
+  ///
+  /// Kept off [_refresh] on purpose: that reloads the roster and every changed chat's history,
+  /// and these arrive several times a second for the length of a download. Routing them through
+  /// it would turn a progress bar into hundreds of full reloads.
+  void _onDownloadProgress(rust.AppEvent e) {
+    final p = e.progress;
+    final total = p?.total;
+    // No total means no determinate figure — the bar goes indeterminate rather than guessing.
+    final next = (p == null || total == null || total == BigInt.zero)
+        ? null
+        : (p.done / total).clamp(0.0, 1.0);
+    if (next == _downloadProgress) return;
+    _downloadProgress = next;
+    notifyListeners();
+  }
+
   @override
   Future<void> hideUpdateBanner() async {
     final v = _updateAvailable;
@@ -540,17 +562,42 @@ class RustNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
+  Future<String?>? _downloadInFlight;
+
   @override
-  Future<String?> downloadUpdate() async {
-    // Held for the whole download, not just the fetch: tens of megabytes over Tor takes minutes,
-    // and Doze/App Standby are free to freeze the process partway through. Taken here, while the
-    // app is still foreground from the tap that got us here — Android 12+ refuses to start a
-    // foreground service once the app has already left.
-    return BackgroundDelivery.holdDuring(
-      _downloadUpdate,
-      notificationText: 'Downloading update',
-    );
+  bool get downloadInProgress => _downloadInFlight != null;
+
+  /// Single-flight. A second call joins the running download instead of starting another.
+  ///
+  /// Observed on hardware before this existed: the user started a download from the menu, then
+  /// tapped the banner to watch it, which started a second one. Both streamed over Tor at once,
+  /// both wrote to the same scratch file, and when the first finished it verified and renamed that
+  /// file into place — while the second, whose descriptor survives a rename, went on writing into
+  /// the file that had just been published. Bytes landed *after* verification. It only produced a
+  /// correct APK because both streams carried identical content.
+  @override
+  Future<String?> downloadUpdate() {
+    final running = _downloadInFlight;
+    if (running != null) return running;
+    final started = _downloadHeld();
+    _downloadInFlight = started.whenComplete(() {
+      _downloadInFlight = null;
+      _downloadProgress = null;
+      notifyListeners();
+    });
+    // Tell the UI immediately, so the banner shows a bar for a download the menu started.
+    notifyListeners();
+    return _downloadInFlight!;
   }
+
+  /// Held for the whole download, not just the fetch: tens of megabytes over Tor takes minutes,
+  /// and Doze/App Standby are free to freeze the process partway through. Taken while the app is
+  /// still foreground from the tap that got us here — Android 12+ refuses to start a foreground
+  /// service once the app has already left.
+  Future<String?> _downloadHeld() => BackgroundDelivery.holdDuring(
+        _downloadUpdate,
+        notificationText: 'Downloading update',
+      );
 
   Future<String?> _downloadUpdate() async {
     try {
@@ -717,7 +764,7 @@ class RustNightdropCore extends NightdropCore {
               persistKey: key,
             );
             _tor = true;
-            _events = rust.subscribe().listen((e) => _refresh(e));
+            _events = rust.subscribe().listen(_onEvent);
             final id = await _core!.identity();
             _identity = Identity(id: id.id);
             await _refresh();
@@ -830,7 +877,7 @@ class RustNightdropCore extends NightdropCore {
       _core = await rust.NightdropCore.newInstance();
     }
     // Subscribe to push events from Rust; refresh our view whenever state changes.
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     notifyListeners();
@@ -992,7 +1039,7 @@ class RustNightdropCore extends NightdropCore {
       );
       _networked = listen != null && relay != null;
     }
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
@@ -1018,7 +1065,7 @@ class RustNightdropCore extends NightdropCore {
       persistKey: key,
     );
     _tor = true;
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
@@ -1291,6 +1338,16 @@ class RustNightdropCore extends NightdropCore {
   Future<void> setDisappearing(String contactId, int secs) async {
     await _core!.setDisappearing(contactId: contactId, secs: BigInt.from(secs));
     await _refresh();
+  }
+
+  /// The single entry point for core events, so the cheap high-frequency ones cannot accidentally
+  /// be routed through the expensive refresh.
+  void _onEvent(rust.AppEvent e) {
+    if (e.kind == 'update_progress') {
+      _onDownloadProgress(e);
+      return;
+    }
+    unawaited(_refresh(e));
   }
 
   Future<void> _refresh([rust.AppEvent? event]) async {

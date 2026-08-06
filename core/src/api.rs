@@ -42,6 +42,19 @@ use crate::Result;
 pub struct AppEvent {
     pub kind: String,
     pub contacts: Vec<String>,
+    /// Set only on `update_progress`. `None` on every other event, which is most of them.
+    pub progress: Option<TransferProgress>,
+}
+
+/// Bytes moved so far by a long-running transfer, for a progress indicator.
+///
+/// `total` is what the server claimed and may be absent, so the UI must be able to show progress
+/// without it. It is advisory in the strong sense: nothing decides a transfer is finished or
+/// correct from it — the published SHA-256 does that.
+#[derive(Clone, Debug)]
+pub struct TransferProgress {
+    pub done: u64,
+    pub total: Option<u64>,
 }
 
 /// The UI event sink, kept OUTSIDE the `NightdropCore` opaque on purpose: a streaming
@@ -194,6 +207,23 @@ fn emit_chats(kind: &str, contacts: Vec<String>) {
         let _ = sink.add(AppEvent {
             kind: kind.to_string(),
             contacts,
+            progress: None,
+        });
+    }
+}
+
+/// Report how far a running download has got, so the UI can show a real progress bar rather than
+/// a spinner that says nothing for two minutes.
+///
+/// Deliberately carries no contacts: the Dart side must route this **away** from its roster/history
+/// refresh, which reloads every chat and would otherwise run on every tick of a download.
+fn emit_progress(done: u64, total: Option<u64>) {
+    let guard = EVENTS.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some(sink) = guard.as_ref() {
+        let _ = sink.add(AppEvent {
+            kind: "update_progress".to_string(),
+            contacts: Vec::new(),
+            progress: Some(TransferProgress { done, total }),
         });
     }
 }
@@ -1448,6 +1478,7 @@ impl NightdropCore {
             &manifest,
             crate::update::native_abi(),
             std::path::Path::new(&dest_path),
+            &emit_progress,
         )
     }
 

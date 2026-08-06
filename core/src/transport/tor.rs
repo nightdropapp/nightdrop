@@ -604,6 +604,7 @@ impl Transport for TorTransport {
         path: &str,
         dest: &std::path::Path,
         max_bytes: u64,
+        progress: &dyn Fn(u64, Option<u64>),
     ) -> Option<Result<u64>> {
         use std::io::Write as _;
 
@@ -641,6 +642,9 @@ impl Transport for TorTransport {
                         anyhow::bail!("update fetch of {path} exceeded the size cap");
                     }
                     file.write_all(body)?;
+                    // Reported after the write, so a number that appears in the log is a number of
+                    // bytes actually on disk. Throttling is the caller's business.
+                    progress(written, head.content_length());
                 }
                 if !head.complete() {
                     anyhow::bail!("update fetch of {path} ended before its headers did");

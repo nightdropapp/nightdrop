@@ -6,9 +6,9 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
 
 /// Subscribe to push events from the core (flutter_rust_bridge stream). Call once at
@@ -578,13 +578,17 @@ class AppEvent {
   final String kind;
   final List<String> contacts;
 
+  /// Set only on `update_progress`. `None` on every other event, which is most of them.
+  final TransferProgress? progress;
+
   const AppEvent({
     required this.kind,
     required this.contacts,
+    this.progress,
   });
 
   @override
-  int get hashCode => kind.hashCode ^ contacts.hashCode;
+  int get hashCode => kind.hashCode ^ contacts.hashCode ^ progress.hashCode;
 
   @override
   bool operator ==(Object other) =>
@@ -592,7 +596,8 @@ class AppEvent {
       other is AppEvent &&
           runtimeType == other.runtimeType &&
           kind == other.kind &&
-          contacts == other.contacts;
+          contacts == other.contacts &&
+          progress == other.progress;
 }
 
 /// Result of the update check (`crate::update`), for the UI's "a newer release exists" notice.
@@ -965,4 +970,30 @@ class StoreUnlock {
           runtimeType == other.runtimeType &&
           duress == other.duress &&
           keyB64 == other.keyB64;
+}
+
+/// Bytes moved so far by a long-running transfer, for a progress indicator.
+///
+/// `total` is what the server claimed and may be absent, so the UI must be able to show progress
+/// without it. It is advisory in the strong sense: nothing decides a transfer is finished or
+/// correct from it — the published SHA-256 does that.
+class TransferProgress {
+  final BigInt done;
+  final BigInt? total;
+
+  const TransferProgress({
+    required this.done,
+    this.total,
+  });
+
+  @override
+  int get hashCode => done.hashCode ^ total.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is TransferProgress &&
+          runtimeType == other.runtimeType &&
+          done == other.done &&
+          total == other.total;
 }

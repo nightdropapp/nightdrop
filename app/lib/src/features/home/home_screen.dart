@@ -454,11 +454,24 @@ class _UpdateBanner extends StatefulWidget {
 class _UpdateBannerState extends State<_UpdateBanner> {
   bool _busy = false;
 
+  /// True while *any* download runs, including one the menu started. Asking the core rather than
+  /// only tracking our own tap is what stops the banner offering to start a second one — tapping
+  /// it to watch a download in progress used to do exactly that.
+  bool get _downloading => _busy || widget.core.downloadInProgress;
+
+  /// "45%" once there is a figure, empty until then. Empty rather than "0%" on purpose: a Tor
+  /// circuit can take tens of seconds to produce the first byte, and "0%" for half a minute reads
+  /// as stuck where a bare "Downloading…" reads as starting.
+  String get _percentLabel {
+    final p = widget.core.downloadProgress;
+    return p == null ? '' : ' ${(p * 100).round()}%';
+  }
+
   /// Tapping the banner downloads; it never installs. The file is verified against the hash the
   /// onion site published, then handed to the user — Android decides whether it may replace the
   /// app, and it refuses anything not signed by our release key.
   Future<void> _download() async {
-    if (_busy) return;
+    if (_downloading) return;
     setState(() => _busy = true);
     final l10n = AppLocalizations.of(context)!;
     final path = await widget.core.downloadUpdate();
@@ -479,7 +492,7 @@ class _UpdateBannerState extends State<_UpdateBanner> {
     return Material(
       color: scheme.secondaryContainer,
       child: InkWell(
-        onTap: _busy ? null : _download,
+        onTap: _downloading ? null : _download,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
           child: Row(
@@ -488,18 +501,40 @@ class _UpdateBannerState extends State<_UpdateBanner> {
                   size: 18, color: scheme.onSecondaryContainer),
               const SizedBox(width: 10),
               Expanded(
-                child: Text(
-                  _busy
-                      ? l10n.updateDownloading
-                      : l10n.updateAvailableBody(version),
-                  style: TextStyle(
-                      color: scheme.onSecondaryContainer, fontSize: 12.5),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _downloading
+                          ? l10n.updateDownloadingPercent(_percentLabel)
+                          : l10n.updateAvailableBody(version),
+                      style: TextStyle(
+                          color: scheme.onSecondaryContainer, fontSize: 12.5),
+                    ),
+                    // Only while downloading, and only then: a bar sitting under a plain notice
+                    // would read as progress toward something the user has not started.
+                    if (_downloading) ...[
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        // A null value renders the indeterminate animation, which is the honest
+                        // display when the server did not say how big the file is.
+                        child: LinearProgressIndicator(
+                          value: widget.core.downloadProgress,
+                          minHeight: 3,
+                          backgroundColor:
+                              scheme.onSecondaryContainer.withValues(alpha: 0.15),
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
               ),
               // Hiding is scoped to this version: a later release shows again, so a hidden
               // banner can never swallow the notice that actually matters.
               TextButton(
-                onPressed: _busy ? null : widget.core.hideUpdateBanner,
+                onPressed: _downloading ? null : widget.core.hideUpdateBanner,
                 child: Text(l10n.updateHide),
               ),
             ],

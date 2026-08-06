@@ -922,6 +922,12 @@ abstract class AppLocalizations {
   /// **'Downloading over Tor…'**
   String get updateDownloading;
 
+  /// Shown while the update APK is downloading, with a percentage once one is known. The placeholder already includes its leading space and is empty until the first bytes arrive, so the string must read correctly without it.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading over Tor…{percent}'**
+  String updateDownloadingPercent(String percent);
+
   /// Shown when the update APK finished downloading and its hash matched.
   ///
   /// In en, this message translates to:

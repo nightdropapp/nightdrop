@@ -497,6 +497,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get updateDownloading => 'Downloading over Tor…';
 
   @override
+  String updateDownloadingPercent(String percent) {
+    return 'Downloading over Tor…$percent';
+  }
+
+  @override
   String get updateDownloaded => 'Downloaded and verified. Open it to install.';
 
   @override

@@ -59,6 +59,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppUpdate dco_decode_box_autoadd_app_update(dynamic raw);
 
   @protected
+  TransferProgress dco_decode_box_autoadd_transfer_progress(dynamic raw);
+
+  @protected
+  BigInt dco_decode_box_autoadd_u_64(dynamic raw);
+
+  @protected
   ChatMessage dco_decode_chat_message(dynamic raw);
 
   @protected
@@ -92,6 +98,12 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppUpdate? dco_decode_opt_box_autoadd_app_update(dynamic raw);
 
   @protected
+  TransferProgress? dco_decode_opt_box_autoadd_transfer_progress(dynamic raw);
+
+  @protected
+  BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
+
+  @protected
   PairingInvite dco_decode_pairing_invite(dynamic raw);
 
   @protected
@@ -102,6 +114,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   StoreUnlock dco_decode_store_unlock(dynamic raw);
+
+  @protected
+  TransferProgress dco_decode_transfer_progress(dynamic raw);
 
   @protected
   int dco_decode_u_16(dynamic raw);
@@ -159,6 +174,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppUpdate sse_decode_box_autoadd_app_update(SseDeserializer deserializer);
 
   @protected
+  TransferProgress sse_decode_box_autoadd_transfer_progress(
+      SseDeserializer deserializer);
+
+  @protected
+  BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
   ChatMessage sse_decode_chat_message(SseDeserializer deserializer);
 
   @protected
@@ -193,6 +215,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       SseDeserializer deserializer);
 
   @protected
+  TransferProgress? sse_decode_opt_box_autoadd_transfer_progress(
+      SseDeserializer deserializer);
+
+  @protected
+  BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
+
+  @protected
   PairingInvite sse_decode_pairing_invite(SseDeserializer deserializer);
 
   @protected
@@ -203,6 +232,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   StoreUnlock sse_decode_store_unlock(SseDeserializer deserializer);
+
+  @protected
+  TransferProgress sse_decode_transfer_progress(SseDeserializer deserializer);
 
   @protected
   int sse_decode_u_16(SseDeserializer deserializer);
@@ -265,6 +297,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       AppUpdate self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_transfer_progress(
+      TransferProgress self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
+
+  @protected
   void sse_encode_chat_message(ChatMessage self, SseSerializer serializer);
 
   @protected
@@ -302,6 +341,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       AppUpdate? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_box_autoadd_transfer_progress(
+      TransferProgress? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_pairing_invite(PairingInvite self, SseSerializer serializer);
 
   @protected
@@ -313,6 +359,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_store_unlock(StoreUnlock self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_transfer_progress(
+      TransferProgress self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_16(int self, SseSerializer serializer);

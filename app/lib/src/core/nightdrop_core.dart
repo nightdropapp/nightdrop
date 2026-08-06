@@ -91,6 +91,21 @@ abstract class NightdropCore extends ChangeNotifier {
   /// check hasn't run, or it failed. Never a reason to block the user — only to tell them.
   String? get updateAvailable => null;
 
+  /// Whether an update download is running, whichever screen started it.
+  ///
+  /// The banner and the "Update app" menu item are two entry points to one operation, so neither
+  /// may keep this state itself: a banner that only knew about its own tap once let a user start a
+  /// second concurrent download by tapping it to *watch* the first.
+  bool get downloadInProgress => false;
+
+  /// How far a running update download has got, 0.0–1.0, or `null` when nothing is downloading
+  /// **or** the server did not say how big the file is.
+  ///
+  /// Null therefore means "no determinate figure", not "no download" — a caller showing a bar
+  /// should treat it as indeterminate rather than as finished. The download is minutes long over
+  /// Tor, so a spinner alone leaves the user unable to tell progress from a stall.
+  double? get downloadProgress => null;
+
   /// Ask the onion site whether a newer release exists — over Tor, at most once a day.
   ///
   /// Safe to call on every launch: it returns immediately when a check isn't due, so the caller

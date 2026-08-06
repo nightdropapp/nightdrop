@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:night_drop/src/app.dart';
@@ -26,9 +27,28 @@ class _UpdateCore extends MockNightdropCore {
     return reachable;
   }
 
+  /// Holds a download open so the in-flight UI can be inspected, the way a real one is open for
+  /// minutes over Tor.
+  Completer<String?>? gate;
+
+  double? progress;
+  bool running = false;
+
+  @override
+  bool get downloadInProgress => running;
+
+  @override
+  double? get downloadProgress => progress;
+
+  void setProgress(double? p) {
+    progress = p;
+    notifyListeners();
+  }
+
   @override
   Future<String?> downloadUpdate() async {
     downloads++;
+    if (gate != null) return gate!.future;
     return '/tmp/NightDrop-update.apk';
   }
 
@@ -115,6 +135,67 @@ void main() {
       expect(find.text(word), findsNothing,
           reason: '"$word" implies the app acts on the user\'s behalf');
     }
+  });
+
+  testWidgets('the banner shows how far the download has got', (tester) async {
+    // A ~45MB fetch over Tor runs for minutes. Without a figure the user cannot tell a slow
+    // download from a stalled one, which is the whole complaint a spinner leaves unanswered.
+    final core = await pumpHome(tester);
+    core.report('0.1.18');
+    await tester.pumpAndSettle();
+
+    // No download, no bar: a progress bar under a plain notice would read as progress toward
+    // something the user never started.
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+
+    final gate = Completer<String?>();
+    core.gate = gate;
+    await tester.tap(find.byIcon(Icons.system_update_alt));
+    // pump, not pumpAndSettle: an in-flight download is exactly what must NOT settle, and the
+    // indeterminate indicator animates forever.
+    await tester.pump();
+
+    // Before the first byte there is a bar but deliberately no "0%" — a Tor circuit can take tens
+    // of seconds to produce anything, and "0%" for half a minute reads as stuck.
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    expect(find.textContaining('%'), findsNothing);
+
+    core.setProgress(0.42);
+    await tester.pump();
+    expect(find.textContaining('42%'), findsOneWidget);
+
+    // And it goes away when the download does, rather than sitting frozen at some percentage.
+    gate.complete('/tmp/NightDrop-update.apk');
+    await tester.pumpAndSettle();
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(find.textContaining('%'), findsNothing);
+  });
+
+  testWidgets('tapping the banner during a download watches it, it does not start another', (tester) async {
+    // Exactly the sequence that broke it on hardware: start a download from the "Update app" menu,
+    // then tap the banner to see how it is going. The banner only knew about its own tap, so it
+    // started a SECOND concurrent download. Both wrote to the same scratch file, and when the
+    // first verified and renamed that file into place the second — whose descriptor survives a
+    // rename — kept writing into the published APK. Bytes landed after verification.
+    final core = await pumpHome(tester);
+    core.report('0.1.18');
+    // A download the banner did not start.
+    core.running = true;
+    core.setProgress(0.3);
+    await tester.pump();
+
+    // It shows the download rather than an offer to begin one.
+    expect(find.textContaining('30%'), findsOneWidget);
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.system_update_alt));
+    await tester.pump();
+    expect(core.downloads, 0, reason: 'the banner must not start a second download');
+
+    // Hide is out too: dismissing the banner mid-download would strand the only progress display.
+    await tester.tap(find.text('Hide'));
+    await tester.pump();
+    expect(core.hidden, isNull);
   });
 
   testWidgets('a check that could not reach the site is never reported as up to date', (tester) async {
