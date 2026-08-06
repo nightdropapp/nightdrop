@@ -1417,8 +1417,13 @@ impl NightdropCore {
         }
     }
 
-    /// Download the published build for `abi` over Tor and write it to `dest_path`, verifying its
-    /// SHA-256 against the manifest first. Returns the byte count.
+    /// Download the published build **for this device** over Tor and write it to `dest_path`,
+    /// verifying its SHA-256 against the manifest first. Returns the byte count.
+    ///
+    /// The ABI is not a parameter on purpose: it comes from
+    /// [`update::native_abi`](crate::update::native_abi), which reads the architecture this core
+    /// was compiled for. The caller cannot know better, and getting it wrong produces a build
+    /// Android will refuse to install after the user has waited out the whole download.
     ///
     /// Nothing is installed: the file is handed to the user, who chooses. Android verifies the
     /// signature itself and refuses to replace Night Drop with anything not signed by our release
@@ -1426,7 +1431,7 @@ impl NightdropCore {
     ///
     /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
     /// take minutes on a poor circuit.
-    pub fn download_update(&self, dest_path: String, abi: String) -> Result<u64> {
+    pub fn download_update(&self, dest_path: String) -> Result<u64> {
         // Same rule as check_for_update, and it matters far more here: this can run for minutes.
         // Holding the core lock across it would freeze the entire app for the whole download.
         let transport = self.lock().me.transport_handle();
@@ -1441,7 +1446,7 @@ impl NightdropCore {
         crate::update::download(
             transport.as_ref(),
             &manifest,
-            &abi,
+            crate::update::native_abi(),
             std::path::Path::new(&dest_path),
         )
     }

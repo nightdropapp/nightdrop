@@ -803,7 +803,6 @@ fn wire__crate__api__NightdropCore_download_update_impl(
                 flutter_rust_bridge::for_generated::RustAutoOpaqueInner<NightdropCore>,
             >>::sse_decode(&mut deserializer);
             let api_dest_path = <String>::sse_decode(&mut deserializer);
-            let api_abi = <String>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -825,7 +824,6 @@ fn wire__crate__api__NightdropCore_download_update_impl(
                         let output_ok = crate::api::NightdropCore::download_update(
                             &*api_that_guard,
                             api_dest_path,
-                            api_abi,
                         )?;
                         Ok(output_ok)
                     })(),

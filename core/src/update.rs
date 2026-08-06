@@ -115,6 +115,31 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
     Ok(Some(compare(current_version, &manifest.latest)))
 }
 
+/// Which published build belongs on **this** device.
+///
+/// Taken from the architecture this copy of the core was compiled for, which is the most reliable
+/// signal available: Android picked one ABI's native library at install time, and this *is* that
+/// library asking.
+///
+/// It must not be the universal build, even though one file running everywhere is tempting.
+/// `--split-per-abi` gives the per-ABI APKs a versionCode of `base*10 + abi` (4031/4032/4033)
+/// while the universal one keeps the bare base (403), so handing the universal APK to anyone
+/// running a per-ABI install is a **downgrade by versionCode** and Android refuses to install it.
+/// F-Droid ships per-ABI, so that is most users: they would wait out the whole download and then
+/// be told "App not installed". The per-ABI build is also less than half the size, which over Tor
+/// is the difference between a slow download and one that risks [`DOWNLOAD_TIMEOUT`].
+pub fn native_abi() -> &'static str {
+    match std::env::consts::ARCH {
+        "aarch64" => "arm64-v8a",
+        "arm" => "armeabi-v7a",
+        "x86_64" => "x86_64",
+        "x86" => "x86",
+        // Not an Android ABI name; no entry will match and the download reports that honestly
+        // rather than fetching a build for the wrong machine.
+        other => other,
+    }
+}
+
 /// Download the build for `abi` over Tor and write it to `dest`, but **only** if its SHA-256
 /// matches what the manifest published.
 ///
@@ -294,6 +319,27 @@ mod tests {
         let m: UpdateManifest = serde_json::from_str(r#"{"latest":"0.1.18"}"#).unwrap();
         assert_eq!(m.latest, "0.1.18");
         assert!(m.android.is_empty());
+    }
+
+    #[test]
+    fn the_build_offered_is_this_devices_abi_and_never_the_universal_one() {
+        // Not cosmetic, and not a size optimisation. --split-per-abi numbers the per-ABI APKs
+        // base*10+abi (4031/4032/4033) and leaves the universal APK on the bare base (403), so
+        // offering "universal" to anyone running a per-ABI install is a downgrade by versionCode
+        // and Android refuses it. F-Droid ships per-ABI, so that is most users — they would wait
+        // out ~119MB over Tor and then be told "App not installed".
+        assert_ne!(native_abi(), "universal");
+        // The names are MediaStore-free platform constants; they have to match what
+        // scripts/gen-update-manifest.sh publishes as keys, or nothing is ever found.
+        for (arch, abi) in [
+            ("aarch64", "arm64-v8a"),
+            ("arm", "armeabi-v7a"),
+            ("x86_64", "x86_64"),
+        ] {
+            if std::env::consts::ARCH == arch {
+                assert_eq!(native_abi(), abi);
+            }
+        }
     }
 
     #[test]

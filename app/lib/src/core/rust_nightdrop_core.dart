@@ -548,9 +548,9 @@ class RustNightdropCore extends NightdropCore {
       // after it has passed — there is no window where a file manager can offer a bad build.
       final dir = await PublicDownloads.staging();
       final dest = '${dir.path}/NightDrop-update.apk';
-      // "universal" so we need no ABI detection: one file runs on every phone. Bigger than a
-      // per-ABI build, but this is a rare, deliberate download.
-      final n = await _core?.downloadUpdate(destPath: dest, abi: 'universal');
+      // Which ABI's build to fetch is Rust's call, not ours — it reads the architecture the core
+      // was compiled for, which is the one Android actually chose. See `update::native_abi`.
+      final n = await _core?.downloadUpdate(destPath: dest);
       if (n == null || n <= BigInt.zero) return null;
       // Named for the version it actually is. "NightDrop-update.apk" tells a user nothing months
       // later, and collides with the last one they downloaded.

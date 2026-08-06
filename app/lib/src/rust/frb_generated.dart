@@ -128,9 +128,7 @@ abstract class RustLibApi extends BaseApi {
       {required NightdropCore that});
 
   Future<BigInt> crateApiNightdropCoreDownloadUpdate(
-      {required NightdropCore that,
-      required String destPath,
-      required String abi});
+      {required NightdropCore that, required String destPath});
 
   Future<int> crateApiNightdropCoreDuressLogout({required NightdropCore that});
 
@@ -741,16 +739,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<BigInt> crateApiNightdropCoreDownloadUpdate(
-      {required NightdropCore that,
-      required String destPath,
-      required String abi}) {
+      {required NightdropCore that, required String destPath}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         sse_encode_String(destPath, serializer);
-        sse_encode_String(abi, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 15, port: port_);
       },
@@ -759,7 +754,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_AnyhowException,
       ),
       constMeta: kCrateApiNightdropCoreDownloadUpdateConstMeta,
-      argValues: [that, destPath, abi],
+      argValues: [that, destPath],
       apiImpl: this,
     ));
   }
@@ -767,7 +762,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiNightdropCoreDownloadUpdateConstMeta =>
       const TaskConstMeta(
         debugName: "NightdropCore_download_update",
-        argNames: ["that", "destPath", "abi"],
+        argNames: ["that", "destPath"],
       );
 
   @override
@@ -3313,8 +3308,13 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
         that: this,
       );
 
-  /// Download the published build for `abi` over Tor and write it to `dest_path`, verifying its
-  /// SHA-256 against the manifest first. Returns the byte count.
+  /// Download the published build **for this device** over Tor and write it to `dest_path`,
+  /// verifying its SHA-256 against the manifest first. Returns the byte count.
+  ///
+  /// The ABI is not a parameter on purpose: it comes from
+  /// [`update::native_abi`](crate::update::native_abi), which reads the architecture this core
+  /// was compiled for. The caller cannot know better, and getting it wrong produces a build
+  /// Android will refuse to install after the user has waited out the whole download.
   ///
   /// Nothing is installed: the file is handed to the user, who chooses. Android verifies the
   /// signature itself and refuses to replace Night Drop with anything not signed by our release
@@ -3322,10 +3322,9 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   ///
   /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
   /// take minutes on a poor circuit.
-  Future<BigInt> downloadUpdate(
-          {required String destPath, required String abi}) =>
-      RustLib.instance.api.crateApiNightdropCoreDownloadUpdate(
-          that: this, destPath: destPath, abi: abi);
+  Future<BigInt> downloadUpdate({required String destPath}) =>
+      RustLib.instance.api
+          .crateApiNightdropCoreDownloadUpdate(that: this, destPath: destPath);
 
   /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
   /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
