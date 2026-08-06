@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 
 import '../rust/api.dart' as rust;
 import 'background_delivery.dart';
+import 'app_version.dart';
 import 'nightdrop_core.dart';
 import 'media_cache.dart';
 import 'models.dart';
@@ -516,6 +517,89 @@ class RustNightdropCore extends NightdropCore {
 
   static const _kBackedUp = 'nightdrop_backed_up';
   static const _kBackupSnoozeUntil = 'nightdrop_backup_snooze_until';
+  static const _kUpdateCheckedAt = 'nightdrop_update_checked_at';
+  static const _kUpdateHidden = 'nightdrop_update_hidden_version';
+
+  /// How often we ask the onion site. Daily is often enough to matter for a security fix and
+  /// rare enough that the request is not a heartbeat: a beacon every launch would let anyone
+  /// counting requests infer how many installs exist and how often they run.
+  static const _updateCheckInterval = Duration(hours: 24);
+
+  String? _updateAvailable;
+
+  @override
+  String? get updateAvailable => _updateAvailable;
+
+  @override
+  Future<void> hideUpdateBanner() async {
+    final v = _updateAvailable;
+    if (v == null) return;
+    await _secure.write(key: _kUpdateHidden, value: v);
+    _updateAvailable = null;
+    notifyListeners();
+  }
+
+  @override
+  Future<String?> downloadUpdate() async {
+    try {
+      final dir = await getApplicationSupportDirectory();
+      final dest = '${dir.path}/NightDrop-update.apk';
+      // "universal" so we need no ABI detection: one file runs on every phone. Bigger than a
+      // per-ABI build, but this is a rare, deliberate download.
+      final n = await _core?.downloadUpdate(destPath: dest, abi: 'universal');
+      return (n != null && n > BigInt.zero) ? dest : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> checkForUpdateNow() async {
+    // Clear both gates: the daily timer and the hidden-version marker. Asking explicitly is the
+    // user overriding both, and a menu item that answers "nothing" because of a hide they forgot
+    // about is worse than useless.
+    await _secure.delete(key: _kUpdateCheckedAt);
+    await _secure.delete(key: _kUpdateHidden);
+    return _check();
+  }
+
+  @override
+  Future<void> maybeCheckForUpdate() async {
+    await _check();
+  }
+
+  /// The check itself. Returns whether the onion site answered.
+  Future<bool> _check() async {
+    // Never let this fail a launch. Every branch below is best-effort: no answer is the normal
+    // outcome on a slow or offline network, and it must look exactly like "nothing to report".
+    try {
+      final last = int.tryParse(await _secure.read(key: _kUpdateCheckedAt) ?? '') ?? 0;
+      final since = DateTime.now().millisecondsSinceEpoch - last;
+      if (last != 0 && since < _updateCheckInterval.inMilliseconds) return false;
+
+      final result = await _core?.checkForUpdate(currentVersion: kAppVersion);
+      // Record the attempt, not the success: a site that is down must not turn into a retry on
+      // every launch, which is the beacon we are avoiding.
+      await _secure.write(
+        key: _kUpdateCheckedAt,
+        value: '${DateTime.now().millisecondsSinceEpoch}',
+      );
+      // Null means the site did not answer (down, slow, or no anonymized path). Do NOT let that
+      // read as "no update": the caller reports it separately.
+      if (result == null) return false;
+      var next = result.updateAvailable ? result.latest : null;
+      // Respect a hide, but only for the exact version that was hidden — a later release, which
+      // may be the one carrying a fix that matters, shows again.
+      if (next != null && await _secure.read(key: _kUpdateHidden) == next) next = null;
+      if (next != _updateAvailable) {
+        _updateAvailable = next;
+        notifyListeners();
+      }
+      return true;
+    } catch (_) {
+      return false; // Silence for the banner; the menu turns this into a real message.
+    }
+  }
 
   @override
   Future<bool> shouldSuggestBackup() async {
@@ -634,6 +718,10 @@ class RustNightdropCore extends NightdropCore {
     } finally {
       _booting = false;
       notifyListeners();
+      // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
+      // this one dials Tor. It self-limits to one check a day, so calling it on every start is
+      // free after the first.
+      unawaited(maybeCheckForUpdate());
     }
   }
 

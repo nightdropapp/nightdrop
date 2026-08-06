@@ -1165,6 +1165,15 @@ impl Node {
         self.my_relays.clone()
     }
 
+    /// A handle to our transport, so a caller can do bounded network work **after releasing the
+    /// core lock**. Network I/O under the lock freezes every other FFI call and the poller for as
+    /// long as the dial takes (§6), and the update check is a Tor fetch bounded at
+    /// [`update::FETCH_TIMEOUT`](crate::update::FETCH_TIMEOUT) — long enough that holding the lock
+    /// across it would be felt as the app hanging.
+    pub fn transport_handle(&self) -> std::sync::Arc<dyn Transport> {
+        std::sync::Arc::clone(&self.transport)
+    }
+
     /// Reachability of each of **our** advertised extra relays (#17), as observed on the last
     /// [`poll_relay`](Self::poll_relay): `(address, reachable)`. A relay not yet probed reports
     /// `true` (optimistic — don't cry wolf before the first poll). Lets the UI warn "your relay is

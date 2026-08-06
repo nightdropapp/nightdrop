@@ -87,6 +87,38 @@ abstract class NightdropCore extends ChangeNotifier {
   /// No-op on the mock/non-Tor cores.
   Future<void> resetTorConnection() async {}
 
+  /// The newer release our onion site advertises, or `null` when this build is current, the
+  /// check hasn't run, or it failed. Never a reason to block the user — only to tell them.
+  String? get updateAvailable => null;
+
+  /// Ask the onion site whether a newer release exists — over Tor, at most once a day.
+  ///
+  /// Safe to call on every launch: it returns immediately when a check isn't due, so the caller
+  /// doesn't need its own timer. Never throws and never blocks startup; a site that is down, or
+  /// a transport with no anonymized path, is silence rather than an error the user must dismiss.
+  ///
+  /// This matters most for the desktop AppImage, which has no auto-update — a user there can be
+  /// months behind a security fix with nothing in the app to say so.
+  Future<void> maybeCheckForUpdate() async {}
+
+  /// Download the published build over Tor, verifying its hash, and return the file path.
+  ///
+  /// Nothing is installed — the caller shows the user where it landed and they decide. Slow (tens
+  /// of megabytes over Tor), so callers must not block the UI on it. Returns null on failure.
+  Future<String?> downloadUpdate() async => null;
+
+  /// Check now, ignoring the once-a-day limit and any earlier "hide". For the menu item: a user
+  /// who deliberately asks must get a fresh answer, not yesterday's cached one.
+  ///
+  /// Returns whether the site actually answered. This is NOT the same question as
+  /// [updateAvailable]: a check that could not reach the site must never be reported as "you are
+  /// up to date", which is the one wrong answer this feature exists to prevent.
+  Future<bool> checkForUpdateNow() async => false;
+
+  /// Hide the update banner until a *newer* version than this one is published. Deliberately
+  /// version-scoped: hiding 0.1.18 must not also hide 0.1.19 and its security fixes.
+  Future<void> hideUpdateBanner() async {}
+
   /// All 1:1 contacts.
   List<Contact> get contacts;
 

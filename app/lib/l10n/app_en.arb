@@ -623,6 +623,33 @@
   "@backupReminderBody": {
     "description": "Body of the dismissible backup-reminder banner."
   },
+  "updateAvailableBody": "Version {version} is available. This build is out of date.",
+  "@updateAvailableBody": {
+    "description": "Body of the update-available banner. {version} is the newer release, e.g. 0.1.18.",
+    "placeholders": { "version": { "type": "String", "example": "0.1.18" } }
+  },
+  "updateChecking": "Checking for updates…",
+  "@updateChecking": { "description": "Shown while the on-demand update check runs." },
+  "updateCheckFailed": "Could not reach the update site. Try again later.",
+  "@updateCheckFailed": { "description": "Shown when the on-demand update check could not reach the onion site — deliberately distinct from being up to date." },
+  "updateUpToDate": "Night Drop is up to date.",
+  "@updateUpToDate": { "description": "Shown when the on-demand check finds no newer release." },
+  "updateDownload": "Download",
+  "@updateDownload": { "description": "Button that starts the verified download of a newer build." },
+  "updateHide": "Hide",
+  "@updateHide": { "description": "Button that hides the update banner until a newer version exists." },
+  "updateDownloading": "Downloading over Tor…",
+  "@updateDownloading": { "description": "Shown while the update APK is downloading." },
+  "updateDownloaded": "Downloaded and verified. Open it to install.",
+  "@updateDownloaded": { "description": "Shown when the update APK finished downloading and its hash matched." },
+  "updateFailed": "Could not download the update.",
+  "@updateFailed": { "description": "Shown when the update download failed or its hash did not match." },
+  "updateApp": "Update app",
+  "@updateApp": { "description": "Menu item that checks for and downloads an update." },
+  "updateHow": "How",
+  "@updateHow": {
+    "description": "Button on the update banner; opens instructions for updating."
+  },
   "deleteThisChat": "Delete this chat?",
   "@deleteThisChat": {
     "description": "Title of the delete-chat confirmation."

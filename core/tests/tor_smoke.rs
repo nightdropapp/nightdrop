@@ -490,3 +490,35 @@ fn a_core_rebuilt_over_the_same_state_dir_can_still_persist_its_guards() {
     drop(rebuilt);
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// The update check, end to end over real Tor against our real onion site.
+///
+/// Everything else about this feature is tested with stubs; this is the only thing that proves
+/// the actual path — Tor circuit, HTTP/1.0 request, our server, the response parse. Run it before
+/// trusting a release to it, because the first real exercise otherwise happens in front of users.
+///
+/// Point `NIGHTDROP_TEST_UPDATE_EXPECT` at the version the site is currently serving.
+#[test]
+#[ignore = "needs network; fetches our onion site over a real Tor circuit (slow)"]
+fn the_update_check_reaches_our_onion_site_over_tor() {
+    let expect = std::env::var("NIGHTDROP_TEST_UPDATE_EXPECT").unwrap_or_else(|_| "0.1.17".into());
+    let transport = TorTransport::bootstrap("nightdropupd", None, None, None)
+        .expect("bootstrap Tor and launch onion service");
+
+    let status = nightdrop::update::check(&transport, "0.1.17")
+        .expect("the update check should not error")
+        .expect("Tor transport must be able to fetch, so this must not be None");
+    eprintln!("update check -> {status:?}");
+
+    assert_eq!(
+        status.latest, expect,
+        "the site should be serving {expect}; is nightdrop-onion running and update.json current?"
+    );
+    assert_eq!(status.current, "0.1.17");
+    // The interesting half: a strictly newer published version must actually raise the flag.
+    assert_eq!(
+        status.update_available,
+        expect.as_str() > "0.1.17",
+        "update_available disagreed with the versions it was given"
+    );
+}

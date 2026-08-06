@@ -50,15 +50,45 @@ pub const UPDATE_PORT: u16 = 80;
 /// `app/pubspec.yaml`, so the published version cannot drift from the released one.
 pub const MANIFEST_PATH: &str = "/update.json";
 
+/// Cap on reaching the site for the manifest. Far larger than it "should" need, for the reason
+/// measured on the relay watchdog the same day: onion connect latency on a healthy network ranged
+/// 3.4s to 56.8s, and a cold start can exceed even that. A tight cap here does not fail faster in
+/// any useful sense — it just turns a slow circuit into "no update exists", which is the one
+/// answer this feature must never give wrongly.
+pub const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
+
+/// Cap on downloading a build. Tens of megabytes over Tor is genuinely slow; this is a stop for a
+/// hung transfer, not a performance target.
+pub const DOWNLOAD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(20 * 60);
+
+/// Hard cap on a downloaded build. Comfortably above a real APK (~45 MB) and far below
+/// anything that would hurt: a cap is what stops a hostile or broken server streaming until the
+/// device runs out of storage.
+pub const MAX_DOWNLOAD_BYTES: usize = 200 * 1024 * 1024;
+
 /// Hard cap on the manifest. It is a handful of bytes of JSON; anything larger is not ours, and
 /// an unbounded read from a remote host is how a small feature becomes an OOM.
 pub const MAX_MANIFEST_BYTES: usize = 8 * 1024;
+
+/// One downloadable build, as published for a specific Android ABI.
+#[derive(Debug, Clone, Deserialize)]
+pub struct UpdateDownload {
+    /// Path on the onion site. A path, not a URL: there is nowhere else it may point.
+    pub url: String,
+    /// SHA-256 of the exact bytes served. Generated from the file itself
+    /// (`scripts/gen-update-manifest.sh`), so it cannot drift from what is downloaded.
+    pub sha256: String,
+}
 
 /// What the onion site publishes.
 #[derive(Debug, Deserialize)]
 pub struct UpdateManifest {
     /// The current release, as a bare `MAJOR.MINOR.PATCH` string.
     pub latest: String,
+    /// Per-ABI downloads, when the site is serving any. Absent is normal and means "there is a
+    /// newer version, but no download to offer" — tell the user, promise nothing.
+    #[serde(default)]
+    pub android: std::collections::HashMap<String, UpdateDownload>,
 }
 
 /// The answer for the UI.
@@ -83,6 +113,53 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
     };
     let manifest: UpdateManifest = serde_json::from_slice(&fetched?)?;
     Ok(Some(compare(current_version, &manifest.latest)))
+}
+
+/// Download the build for `abi` over Tor and write it to `dest`, but **only** if its SHA-256
+/// matches what the manifest published.
+///
+/// The write happens after verification, never during: a file that exists is a file the user may
+/// be about to install, so a partial or wrong download must never reach that path. Returns the
+/// number of bytes written.
+///
+/// This does not install anything, and deliberately cannot. Android verifies the signature itself
+/// and will refuse to replace Night Drop with anything not signed by our release key — so the
+/// worst a compromised site can do is waste the download, not swap the app.
+pub fn download(
+    transport: &dyn Transport,
+    manifest: &UpdateManifest,
+    abi: &str,
+    dest: &std::path::Path,
+) -> Result<u64> {
+    let entry = manifest
+        .android
+        .get(abi)
+        .ok_or_else(|| anyhow::anyhow!("no published build for {abi}"))?;
+    let Some(fetched) =
+        transport.onion_get_capped(UPDATE_ONION, UPDATE_PORT, &entry.url, MAX_DOWNLOAD_BYTES)
+    else {
+        anyhow::bail!("this transport cannot fetch anonymously");
+    };
+    let bytes = fetched?;
+    let got = sha256_hex(&bytes);
+    if !got.eq_ignore_ascii_case(entry.sha256.trim()) {
+        // Not "corrupt download, retry". We asked an authenticated onion for a file it told us
+        // the hash of; a mismatch means something is wrong that a retry will not fix.
+        anyhow::bail!(
+            "downloaded build did not match the published hash (expected {}, got {got})",
+            entry.sha256
+        );
+    }
+    std::fs::write(dest, &bytes)?;
+    Ok(bytes.len() as u64)
+}
+
+/// Lowercase hex SHA-256.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(bytes);
+    h.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
 /// Compare two versions, ignoring build metadata on either side.
@@ -201,6 +278,73 @@ mod tests {
         ] {
             assert!(body_of(bad).is_err(), "should have rejected {bad:?}");
         }
+    }
+
+    fn manifest_with(sha: &str) -> UpdateManifest {
+        serde_json::from_str(&format!(
+            r#"{{"latest":"0.1.18","android":{{"arm64-v8a":{{"url":"/applications/android/NightDrop-arm64-v8a.apk","sha256":"{sha}"}}}}}}"#
+        ))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_manifest_without_downloads_still_reports_the_version() {
+        // The site may publish a version before the APKs are in place. That must still tell the
+        // user something; it just cannot offer a download.
+        let m: UpdateManifest = serde_json::from_str(r#"{"latest":"0.1.18"}"#).unwrap();
+        assert_eq!(m.latest, "0.1.18");
+        assert!(m.android.is_empty());
+    }
+
+    #[test]
+    fn a_build_whose_hash_does_not_match_is_never_written() {
+        // The whole point of the hash. If a mismatched download reached the destination path, the
+        // user could be one tap from installing it — so the file must not exist at all.
+        let dir = std::env::temp_dir().join(format!("nd-update-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("bad.apk");
+        let _ = std::fs::remove_file(&dest);
+
+        struct Server(Vec<u8>);
+        impl Transport for Server {
+            fn address(&self) -> crate::transport::Address {
+                "srv".into()
+            }
+            fn send(&self, _p: &str, _f: &[u8]) -> Result<()> {
+                Ok(())
+            }
+            fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
+                None
+            }
+            fn onion_get_capped(
+                &self,
+                _o: &str,
+                _p: u16,
+                _path: &str,
+                _max: usize,
+            ) -> Option<Result<Vec<u8>>> {
+                Some(Ok(self.0.clone()))
+            }
+        }
+
+        let served = b"not the build you were promised".to_vec();
+        let wrong = manifest_with(&"0".repeat(64));
+        let err = download(&Server(served.clone()), &wrong, "arm64-v8a", &dest).unwrap_err();
+        assert!(err.to_string().contains("did not match"), "{err}");
+        assert!(
+            !dest.exists(),
+            "a mismatched download must not be left on disk"
+        );
+
+        // The same bytes with the right hash do land.
+        let right = manifest_with(&sha256_hex(&served));
+        let n = download(&Server(served.clone()), &right, "arm64-v8a", &dest).unwrap();
+        assert_eq!(n as usize, served.len());
+        assert_eq!(std::fs::read(&dest).unwrap(), served);
+
+        // An ABI we publish nothing for is an error, not a silent empty file.
+        assert!(download(&Server(served), &right, "riscv64", &dest).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

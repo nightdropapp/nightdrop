@@ -8,6 +8,20 @@ See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design and threat model, a
 [`MAINTENANCE.md`](MAINTENANCE.md) for how to update, verify, and release the app
 (toolchain, dependency upgrades, rename variables, release checklist).
 
+## Where to get it
+
+- **Web:** [nightdrop.app](https://nightdrop.app/)
+- **Onion:** `z6xw2ywlybjeskki4jons5ujepc2pedp5qkgvtbyxorie46qnjpnzqqd.onion`
+
+The onion site serves the same pages and the same builds, over Tor, with no exit node in the
+path — open it in Tor Browser. Reaching a v3 `.onion` at all proves you reached *us*: the
+address **is** the site's public key, so there is no certificate authority to trust and nothing
+to spoof. Prefer it if you would rather not tell your network, your ISP, or a CDN that you are
+downloading a privacy tool.
+
+Downloads on both are the same artifacts, and every release is signed — see
+[`docs/reproducible-builds.md`](docs/reproducible-builds.md) to verify a build yourself.
+
 ## Status
 
 **Feature-complete and verified end to end** (82 Rust tests + 9 Flutter tests; `cargo

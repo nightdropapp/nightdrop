@@ -530,6 +530,62 @@ impl Transport for TorTransport {
         Some(self.make_relay_dialer(addr.to_string()))
     }
 
+    /// Fetch a small static file from an onion over Tor (the update check, `crate::update`).
+    ///
+    /// Isolated from every other stream we open: this request is not associated with our identity,
+    /// our peers, or our relay traffic, and arti must not reuse a circuit across that boundary.
+    fn onion_get_capped(
+        &self,
+        onion: &str,
+        port: u16,
+        path: &str,
+        max_bytes: usize,
+    ) -> Option<Result<Vec<u8>>> {
+        let client = Arc::clone(&self.client);
+        let runtime = Arc::clone(&self.runtime);
+        // A manifest is a few bytes and a build is tens of megabytes; one timeout cannot serve
+        // both. Derived from the cap the caller asked for so the two cannot drift apart.
+        let budget = if max_bytes <= crate::update::MAX_MANIFEST_BYTES {
+            crate::update::FETCH_TIMEOUT
+        } else {
+            crate::update::DOWNLOAD_TIMEOUT
+        };
+        let request = crate::update::request_line(onion, path);
+        let (onion, path) = (onion.to_string(), path.to_string());
+        Some(runtime.block_on(async move {
+            let fetch = async {
+                let mut stream = tokio::time::timeout(
+                    budget,
+                    client.isolated_client().connect((onion.as_str(), port)),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out dialing {onion}"))?
+                .with_context(|| format!("update fetch connect {onion}"))?;
+                stream.write_all(request.as_bytes()).await?;
+                stream.flush().await?;
+                // Bounded read: the server closes the stream after the body (HTTP/1.0 +
+                // `Connection: close`), but a hostile or broken one could stream forever, so stop
+                // at the cap rather than trusting the peer to end.
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    let n = futures::AsyncReadExt::read(&mut stream, &mut chunk).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if buf.len() > max_bytes {
+                        anyhow::bail!("update fetch of {path} exceeded the size cap");
+                    }
+                }
+                Ok(crate::update::body_of(&buf)?.to_vec())
+            };
+            tokio::time::timeout(budget, fetch)
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out"))?
+        }))
+    }
+
     /// Mint our client descriptor-encryption key for `peer_onion` (onion client auth, #22).
     fn make_client_key(&self, peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
         Some(self.make_service_discovery_key(peer_onion))

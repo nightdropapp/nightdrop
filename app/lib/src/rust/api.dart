@@ -8,7 +8,7 @@ import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
 // These functions are ignored because they are not marked as `pub`: `apply_tick`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
 
 /// Subscribe to push events from the core (flutter_rust_bridge stream). Call once at
@@ -169,6 +169,20 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Leaves the pending blob in place so a cancelled save can be retried.
   Future<Uint8List> backupBytes();
 
+  /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
+  /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
+  /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
+  /// backup relay. A not-yet-polled relay reports `true` (optimistic).
+  /// Ask our onion site whether a newer release exists (`crate::update`).
+  ///
+  /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
+  /// the site did not respond. Both are silence, never a warning — a user who is taught to
+  /// dismiss update notices will dismiss the one that matters.
+  ///
+  /// Pass the app's own version (the pubspec string, `"0.1.17+403"`, is fine — the build suffix
+  /// is ignored). Call it at most daily; it is a network round trip, not a getter.
+  Future<AppUpdate?> checkForUpdate({required String currentVersion});
+
   /// Join from a scanned QR payload (pre-authorized, §5a):
   /// `nightdrop://pair?addr=...&ik=...&otk=...`. Opens a session and sends the Hello. This
   /// is the relay-free pairing path used over Tor (the QR carries the inviter's `.onion`).
@@ -235,6 +249,18 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// timeouts and `Unable to build circuit to introduction point`. By the old health check that
   /// device was fine, so nothing healed and every message silently went by relay instead.
   Future<bool> directPathWedged();
+
+  /// Download the published build for `abi` over Tor and write it to `dest_path`, verifying its
+  /// SHA-256 against the manifest first. Returns the byte count.
+  ///
+  /// Nothing is installed: the file is handed to the user, who chooses. Android verifies the
+  /// signature itself and refuses to replace Night Drop with anything not signed by our release
+  /// key, so the app never becomes the thing that decides what code runs.
+  ///
+  /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
+  /// take minutes on a poor circuit.
+  Future<BigInt> downloadUpdate(
+      {required String destPath, required String abi});
 
   /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
   /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
@@ -369,10 +395,6 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// core, which has no demo harness — real chats are opened by pairing (QR / short code).
   Future<Contact> openChat({String? code});
 
-  /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
-  /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
-  /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
-  /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   Future<List<RelayHealth>> relayHealth();
 
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
@@ -567,6 +589,37 @@ class AppEvent {
           runtimeType == other.runtimeType &&
           kind == other.kind &&
           contacts == other.contacts;
+}
+
+/// Result of the update check (`crate::update`), for the UI's "a newer release exists" notice.
+class AppUpdate {
+  /// The version this build reports itself as.
+  final String current;
+
+  /// The version our onion site publishes.
+  final String latest;
+
+  /// Whether `latest` is strictly newer. `false` means say nothing at all.
+  final bool updateAvailable;
+
+  const AppUpdate({
+    required this.current,
+    required this.latest,
+    required this.updateAvailable,
+  });
+
+  @override
+  int get hashCode =>
+      current.hashCode ^ latest.hashCode ^ updateAvailable.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AppUpdate &&
+          runtimeType == other.runtimeType &&
+          current == other.current &&
+          latest == other.latest &&
+          updateAvailable == other.updateAvailable;
 }
 
 /// One message in a conversation (UI-facing).

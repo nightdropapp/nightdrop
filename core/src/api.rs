@@ -283,6 +283,17 @@ pub struct RelayHealth {
     pub reachable: bool,
 }
 
+/// Result of the update check (`crate::update`), for the UI's "a newer release exists" notice.
+#[derive(Clone, Debug)]
+pub struct AppUpdate {
+    /// The version this build reports itself as.
+    pub current: String,
+    /// The version our onion site publishes.
+    pub latest: String,
+    /// Whether `latest` is strictly newer. `false` means say nothing at all.
+    pub update_available: bool,
+}
+
 /// One message in a conversation (UI-facing).
 #[derive(Clone, Debug)]
 pub struct ChatMessage {
@@ -1377,6 +1388,64 @@ impl NightdropCore {
     /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
     /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
     /// backup relay. A not-yet-polled relay reports `true` (optimistic).
+    /// Ask our onion site whether a newer release exists (`crate::update`).
+    ///
+    /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
+    /// the site did not respond. Both are silence, never a warning — a user who is taught to
+    /// dismiss update notices will dismiss the one that matters.
+    ///
+    /// Pass the app's own version (the pubspec string, `"0.1.17+403"`, is fine — the build suffix
+    /// is ignored). Call it at most daily; it is a network round trip, not a getter.
+    pub fn check_for_update(&self, current_version: String) -> Option<AppUpdate> {
+        // Take a transport handle under the lock, then DROP the lock before any network I/O. A
+        // Tor fetch bounded at 30s would otherwise pin the core lock for 30s and freeze every
+        // other FFI call and the poller behind it (§6).
+        let transport = self.lock().me.transport_handle();
+        match crate::update::check(transport.as_ref(), &current_version) {
+            Ok(Some(s)) => Some(AppUpdate {
+                current: s.current,
+                latest: s.latest,
+                update_available: s.update_available,
+            }),
+            // Site down, Tor slow, malformed JSON, or a transport that cannot fetch anonymously.
+            // All the same to the user: nothing to report.
+            Ok(None) => None,
+            Err(e) => {
+                crate::diag!("update check failed (ignored): {e:#}");
+                None
+            }
+        }
+    }
+
+    /// Download the published build for `abi` over Tor and write it to `dest_path`, verifying its
+    /// SHA-256 against the manifest first. Returns the byte count.
+    ///
+    /// Nothing is installed: the file is handed to the user, who chooses. Android verifies the
+    /// signature itself and refuses to replace Night Drop with anything not signed by our release
+    /// key, so the app never becomes the thing that decides what code runs.
+    ///
+    /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
+    /// take minutes on a poor circuit.
+    pub fn download_update(&self, dest_path: String, abi: String) -> Result<u64> {
+        // Same rule as check_for_update, and it matters far more here: this can run for minutes.
+        // Holding the core lock across it would freeze the entire app for the whole download.
+        let transport = self.lock().me.transport_handle();
+        let Some(fetched) = transport.onion_get(
+            crate::update::UPDATE_ONION,
+            crate::update::UPDATE_PORT,
+            crate::update::MANIFEST_PATH,
+        ) else {
+            anyhow::bail!("this transport cannot fetch anonymously");
+        };
+        let manifest: crate::update::UpdateManifest = serde_json::from_slice(&fetched?)?;
+        crate::update::download(
+            transport.as_ref(),
+            &manifest,
+            &abi,
+            std::path::Path::new(&dest_path),
+        )
+    }
+
     pub fn relay_health(&self) -> Vec<RelayHealth> {
         self.lock()
             .me

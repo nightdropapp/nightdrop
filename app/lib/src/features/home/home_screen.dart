@@ -58,6 +58,7 @@ class HomeScreen extends StatelessWidget {
               if (value == 'cover') _coverTrafficSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'resettor') _confirmResetTor(context, core);
+              if (value == 'update') _updateApp(context, core);
               if (value == 'about') _showAbout(context);
               if (value == 'logout') _confirmLogout(context, core);
             },
@@ -74,6 +75,7 @@ class HomeScreen extends StatelessWidget {
               PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
               PopupMenuItem(value: 'resettor', child: Text(l10n.resetTorMenu)),
+              PopupMenuItem(value: 'update', child: Text(l10n.updateApp)),
               PopupMenuItem(value: 'about', child: Text(l10n.aboutMenu)),
               PopupMenuItem(
                   value: 'logout', child: Text(l10n.logoutDeleteMenu)),
@@ -93,6 +95,7 @@ class HomeScreen extends StatelessWidget {
           _OnionBanner(core: core),
           _RelayHealthBanner(core: core),
           _BackupReminderBanner(core: core),
+          _UpdateBanner(core: core),
           Expanded(
             child: ListenableBuilder(
         listenable: core,
@@ -387,6 +390,126 @@ class _RelayHealthBannerState extends State<_RelayHealthBanner> {
 /// Gentle, dismissible reminder to back up once there are chats worth losing and no backup has
 /// been made yet (lost backup / password = lost data, by design — §7). "Back up" opens the file
 /// backup; "Later" snoozes it. Hidden entirely once a backup succeeds or while snoozed.
+/// "A newer release exists" — shown only when our onion site says so (see `core/src/update.rs`).
+///
+/// Deliberately not dismissible-with-memory and deliberately quiet: it carries no urgency styling
+/// and no download button. The app never fetches or installs a build; the user goes and gets it.
+/// It disappears by itself once the running version matches, so there is nothing to dismiss.
+/// "Update app" — the way back to an update the user hid, and the way to ask on demand rather
+/// than waiting for the daily check.
+///
+/// Downloads and verifies; it never installs. Forces a check first, because the point of asking
+/// is not to be told what yesterday's check thought.
+Future<void> _updateApp(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.showSnackBar(SnackBar(content: Text(l10n.updateChecking)));
+  final answered = await core.checkForUpdateNow();
+  final version = core.updateAvailable;
+  if (!context.mounted) return;
+  if (!answered) {
+    // The site did not answer. Saying "up to date" here would be a confident lie on the one
+    // screen where the user deliberately asked.
+    messenger.showSnackBar(SnackBar(content: Text(l10n.updateCheckFailed)));
+    return;
+  }
+  if (version == null) {
+    messenger.showSnackBar(SnackBar(content: Text(l10n.updateUpToDate)));
+    return;
+  }
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      content: Text(l10n.updateAvailableBody(version)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(l10n.close),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(l10n.updateDownload),
+        ),
+      ],
+    ),
+  );
+  if (go != true) return;
+  messenger.showSnackBar(SnackBar(content: Text(l10n.updateDownloading)));
+  final path = await core.downloadUpdate();
+  messenger.showSnackBar(SnackBar(
+    content: Text(path == null ? l10n.updateFailed : '${l10n.updateDownloaded}\n$path'),
+    duration: const Duration(seconds: 8),
+  ));
+}
+
+class _UpdateBanner extends StatefulWidget {
+  const _UpdateBanner({required this.core});
+
+  final NightdropCore core;
+
+  @override
+  State<_UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends State<_UpdateBanner> {
+  bool _busy = false;
+
+  /// Tapping the banner downloads; it never installs. The file is verified against the hash the
+  /// onion site published, then handed to the user — Android decides whether it may replace the
+  /// app, and it refuses anything not signed by our release key.
+  Future<void> _download() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final l10n = AppLocalizations.of(context)!;
+    final path = await widget.core.downloadUpdate();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(path == null ? l10n.updateFailed : '${l10n.updateDownloaded}\n$path'),
+      duration: const Duration(seconds: 8),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final version = widget.core.updateAvailable;
+    if (version == null) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: InkWell(
+        onTap: _busy ? null : _download,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          child: Row(
+            children: [
+              Icon(Icons.system_update_alt,
+                  size: 18, color: scheme.onSecondaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  _busy
+                      ? l10n.updateDownloading
+                      : l10n.updateAvailableBody(version),
+                  style: TextStyle(
+                      color: scheme.onSecondaryContainer, fontSize: 12.5),
+                ),
+              ),
+              // Hiding is scoped to this version: a later release shows again, so a hidden
+              // banner can never swallow the notice that actually matters.
+              TextButton(
+                onPressed: _busy ? null : widget.core.hideUpdateBanner,
+                child: Text(l10n.updateHide),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _BackupReminderBanner extends StatefulWidget {
   const _BackupReminderBanner({required this.core});
 

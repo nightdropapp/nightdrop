@@ -671,6 +671,55 @@ competitors**. Hosts the donation addresses and download links.
 Addresses/copy/links come from one source of truth, `config/app_config.json`, synced to
 `app/assets/app_config.json` and `website/config.js` by `make config`.
 
+### 10a. In-app update check — over Tor, to our own onion
+
+Users who install from the onion site or from GitHub have **no update channel**: F-Droid and
+Play users get told about a security fix, and everyone else does not. That is the gap this
+closes, and it dictates the whole shape of the feature — it exists to carry security fixes, so
+it must never become the thing that deanonymizes the user it is trying to protect.
+
+**The path is Tor or nothing.** The app asks *our own* `.onion` for `/update.json`
+(`core/src/update.rs`, `UPDATE_ONION`/`MANIFEST_PATH`) through
+`Transport::onion_get`. The trait's default implementation returns `None`, and **`None` means
+skip the check** — never fall back. There is no clearnet path to disable because there is no
+clearnet path to begin with. Reaching a v3 onion authenticates the site by construction: the
+address *is* the public key, so there is no CA in the trust path and nothing to spoof.
+
+**The manifest cannot drift from what is served.** `scripts/gen-update-manifest.sh` (run by
+`make config`) takes the version from `app/pubspec.yaml` and each APK's SHA-256 from the file
+actually sitting in `website/applications/android/`. An APK that is not present is simply
+omitted, which the app reads as "a newer version exists, but there is no download to offer" —
+tell the user something, promise nothing.
+
+**Downloads are verified before they land.** `update::download` fetches the per-ABI build,
+hashes it, and writes to the destination **only** on a match. A file that exists is a file the
+user may be one tap from installing, so a partial or mismatched download must never reach that
+path. A mismatch is a hard error, not a retry: we asked an authenticated onion for a file it
+told us the hash of.
+
+**The app never installs.** Android verifies signatures itself and refuses to replace Night Drop
+with anything not signed by our release key, so the worst a compromised site achieves is a
+wasted download — not a swapped app. Adding an in-app installer would mean
+`REQUEST_INSTALL_PACKAGES` on a privacy tool for a small delta; declined for now.
+
+**Bounds and lock discipline.** The manifest read is capped at `MAX_MANIFEST_BYTES` (8 KiB) so a
+routine background fetch can never OOM the app; the build download has its own, much larger cap
+(`MAX_DOWNLOAD_BYTES`) via `onion_get_capped`, kept separate precisely so one cap large enough
+for an APK does not silently unbound the every-24h fetch. Timeouts are generous, not tight
+(§6: measured onion connect latency ranged 3.4s–56.8s on a healthy network) — a tight cap does
+not fail faster in any useful sense, it just turns a slow circuit into "no update exists", which
+is the one answer this must never give wrongly. All of it runs off the core lock via
+`Node::transport_handle`.
+
+**A failed check says so.** Reporting "up to date" when the site did not answer is a confident
+lie on the one screen where the user deliberately asked, and it hides exactly the security fix
+the feature exists to surface. `checkForUpdateNow()` returns whether the site answered, and the
+UI distinguishes the two.
+
+Known limits, in the order they are worth fixing: the download buffers in memory rather than
+streaming to a `.part` file (so it cannot resume, and holds tens of MB while backgrounded), and
+it is not yet wrapped in a foreground service, so Doze can freeze a long transfer.
+
 ---
 
 ## 11. Relay store-and-forward & backup evolution — implementation plan

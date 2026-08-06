@@ -79,7 +79,21 @@ pub trait Transport: Send + Sync {
     /// tell users about security fixes; it must never become the thing that deanonymizes them, so
     /// there is no non-Tor path here by construction and the only correct handling of `None` is to
     /// skip the check.
-    fn onion_get(&self, _onion: &str, _port: u16, _path: &str) -> Option<Result<Vec<u8>>> {
+    fn onion_get(&self, onion: &str, port: u16, path: &str) -> Option<Result<Vec<u8>>> {
+        self.onion_get_capped(onion, port, path, crate::update::MAX_MANIFEST_BYTES)
+    }
+
+    /// As [`onion_get`](Transport::onion_get) but with an explicit size cap, for the one caller
+    /// that fetches something big (a build, `crate::update::download`). Split out so the manifest
+    /// path keeps its tiny bound by default — a shared cap large enough for an APK would silently
+    /// make the every-24h fetch unbounded too.
+    fn onion_get_capped(
+        &self,
+        _onion: &str,
+        _port: u16,
+        _path: &str,
+        _max_bytes: usize,
+    ) -> Option<Result<Vec<u8>>> {
         None
     }
 

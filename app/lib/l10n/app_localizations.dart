@@ -880,6 +880,72 @@ abstract class AppLocalizations {
   /// **'Back up your identity so you don’t lose your chats. There’s no account to recover from — if you lose this device without a backup, it’s gone.'**
   String get backupReminderBody;
 
+  /// Body of the update-available banner. {version} is the newer release, e.g. 0.1.18.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version} is available. This build is out of date.'**
+  String updateAvailableBody(String version);
+
+  /// Shown while the on-demand update check runs.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking for updates…'**
+  String get updateChecking;
+
+  /// Shown when the on-demand update check could not reach the onion site — deliberately distinct from being up to date.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not reach the update site. Try again later.'**
+  String get updateCheckFailed;
+
+  /// Shown when the on-demand check finds no newer release.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop is up to date.'**
+  String get updateUpToDate;
+
+  /// Button that starts the verified download of a newer build.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get updateDownload;
+
+  /// Button that hides the update banner until a newer version exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide'**
+  String get updateHide;
+
+  /// Shown while the update APK is downloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading over Tor…'**
+  String get updateDownloading;
+
+  /// Shown when the update APK finished downloading and its hash matched.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloaded and verified. Open it to install.'**
+  String get updateDownloaded;
+
+  /// Shown when the update download failed or its hash did not match.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not download the update.'**
+  String get updateFailed;
+
+  /// Menu item that checks for and downloads an update.
+  ///
+  /// In en, this message translates to:
+  /// **'Update app'**
+  String get updateApp;
+
+  /// Button on the update banner; opens instructions for updating.
+  ///
+  /// In en, this message translates to:
+  /// **'How'**
+  String get updateHow;
+
   /// Title of the delete-chat confirmation.
   ///
   /// In en, this message translates to:

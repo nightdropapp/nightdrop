@@ -52,7 +52,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppEvent dco_decode_app_event(dynamic raw);
 
   @protected
+  AppUpdate dco_decode_app_update(dynamic raw);
+
+  @protected
   bool dco_decode_bool(dynamic raw);
+
+  @protected
+  AppUpdate dco_decode_box_autoadd_app_update(dynamic raw);
 
   @protected
   ChatMessage dco_decode_chat_message(dynamic raw);
@@ -83,6 +89,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? dco_decode_opt_String(dynamic raw);
+
+  @protected
+  AppUpdate? dco_decode_opt_box_autoadd_app_update(dynamic raw);
 
   @protected
   PairingInvite dco_decode_pairing_invite(dynamic raw);
@@ -143,7 +152,13 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppEvent sse_decode_app_event(SseDeserializer deserializer);
 
   @protected
+  AppUpdate sse_decode_app_update(SseDeserializer deserializer);
+
+  @protected
   bool sse_decode_bool(SseDeserializer deserializer);
+
+  @protected
+  AppUpdate sse_decode_box_autoadd_app_update(SseDeserializer deserializer);
 
   @protected
   ChatMessage sse_decode_chat_message(SseDeserializer deserializer);
@@ -174,6 +189,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
+
+  @protected
+  AppUpdate? sse_decode_opt_box_autoadd_app_update(
+      SseDeserializer deserializer);
 
   @protected
   PairingInvite sse_decode_pairing_invite(SseDeserializer deserializer);
@@ -238,7 +257,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_app_event(AppEvent self, SseSerializer serializer);
 
   @protected
+  void sse_encode_app_update(AppUpdate self, SseSerializer serializer);
+
+  @protected
   void sse_encode_bool(bool self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_box_autoadd_app_update(
+      AppUpdate self, SseSerializer serializer);
 
   @protected
   void sse_encode_chat_message(ChatMessage self, SseSerializer serializer);
@@ -272,6 +298,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_app_update(
+      AppUpdate? self, SseSerializer serializer);
 
   @protected
   void sse_encode_pairing_invite(PairingInvite self, SseSerializer serializer);

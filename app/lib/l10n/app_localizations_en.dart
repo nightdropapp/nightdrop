@@ -473,6 +473,42 @@ class AppLocalizationsEn extends AppLocalizations {
       'Back up your identity so you don’t lose your chats. There’s no account to recover from — if you lose this device without a backup, it’s gone.';
 
   @override
+  String updateAvailableBody(String version) {
+    return 'Version $version is available. This build is out of date.';
+  }
+
+  @override
+  String get updateChecking => 'Checking for updates…';
+
+  @override
+  String get updateCheckFailed =>
+      'Could not reach the update site. Try again later.';
+
+  @override
+  String get updateUpToDate => 'Night Drop is up to date.';
+
+  @override
+  String get updateDownload => 'Download';
+
+  @override
+  String get updateHide => 'Hide';
+
+  @override
+  String get updateDownloading => 'Downloading over Tor…';
+
+  @override
+  String get updateDownloaded => 'Downloaded and verified. Open it to install.';
+
+  @override
+  String get updateFailed => 'Could not download the update.';
+
+  @override
+  String get updateApp => 'Update app';
+
+  @override
+  String get updateHow => 'How';
+
+  @override
   String get deleteThisChat => 'Delete this chat?';
 
   @override
