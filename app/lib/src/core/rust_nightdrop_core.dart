@@ -551,17 +551,34 @@ class RustNightdropCore extends NightdropCore {
       // Which ABI's build to fetch is Rust's call, not ours — it reads the architecture the core
       // was compiled for, which is the one Android actually chose. See `update::native_abi`.
       final n = await _core?.downloadUpdate(destPath: dest);
-      if (n == null || n <= BigInt.zero) return null;
+      if (n == null || n <= BigInt.zero) {
+        // Rust has already said why on its own diag line; this one marks that the UI gave up, so
+        // a log without it means the failure was somewhere after the download.
+        await rust.diagNote(line: 'update: download returned nothing — reporting failure');
+        return null;
+      }
       // Named for the version it actually is. "NightDrop-update.apk" tells a user nothing months
       // later, and collides with the last one they downloaded.
       final version = _updateAvailable;
-      return PublicDownloads.publish(
+      final where = await PublicDownloads.publish(
         File(dest),
         displayName:
             version == null ? 'NightDrop.apk' : 'NightDrop-$version.apk',
         mimeType: 'application/vnd.android.package-archive',
       );
-    } catch (_) {
+      // Which of the three routes ran is invisible otherwise, and it is the difference between a
+      // file the user can find and one they cannot. Paths are app-private or public storage —
+      // nothing identity-linked — but log only the leaf, not the full path.
+      await rust.diagNote(
+        line: where == dest
+            ? 'update: published NOWHERE — file left in app-private storage'
+            : 'update: published to ${where.startsWith('Downloads/') ? 'MediaStore Downloads' : 'external storage'}',
+      );
+      return where;
+    } catch (e) {
+      // This used to swallow everything, so a failure here was indistinguishable from a failed
+      // download and the UI could only ever say "failed".
+      await rust.diagNote(line: 'update: download/publish threw: $e');
       return null;
     }
   }

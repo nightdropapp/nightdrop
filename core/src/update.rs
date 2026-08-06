@@ -1,5 +1,6 @@
-//! Update check (`ARCHITECTURE.md` §6): ask **our own onion site** whether a newer release
-//! exists, over Tor, and tell the user. Nothing here downloads or installs anything.
+//! Update check (`ARCHITECTURE.md` §10a): ask **our own onion site** whether a newer release
+//! exists, over Tor, and tell the user — and, if the user asks for it, fetch that build and verify
+//! it. Nothing here **installs** anything, and nothing downloads without the user saying so.
 //!
 //! ## Why this exists
 //!
@@ -21,8 +22,10 @@
 //!   no cookie, no varying header. The server cannot distinguish one user from another, or a
 //!   first check from a hundredth — it sees an anonymous request for a public file, which is what
 //!   any visitor to the site makes. The comparison happens **here**, on the device.
-//! * **It answers a question, it does not act.** We return a struct; the UI shows a notice; the
-//!   user chooses. Nothing is fetched, written, or executed as a result.
+//! * **It answers a question, it does not act.** The check returns a struct; the UI shows a
+//!   notice; the user chooses. Nothing is fetched as a result of the check itself, and nothing is
+//!   ever executed. [`download`] runs only on an explicit tap, writes only after the published
+//!   hash matches, and hands the file to the user — Android decides what may replace this app.
 //! * **Failure is silence.** The site being down, Tor being slow, or the JSON being malformed are
 //!   all "no answer", never a warning. A user must not learn to dismiss update warnings.
 //!
@@ -109,10 +112,44 @@ pub struct UpdateStatus {
 pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<UpdateStatus>> {
     let Some(fetched) = transport.onion_get(UPDATE_ONION, UPDATE_PORT, MANIFEST_PATH) else {
         // Not an error: this transport has no anonymized path, so there is no check to make.
+        crate::diag!("update: no anonymized path on this transport — check skipped");
         return Ok(None);
     };
-    let manifest: UpdateManifest = serde_json::from_slice(&fetched?)?;
-    Ok(Some(compare(current_version, &manifest.latest)))
+    let started = std::time::Instant::now();
+    let body = match fetched {
+        Ok(b) => b,
+        Err(e) => {
+            // The failure the UI must not round off to "up to date". Timings matter here: onion
+            // connect latency is the usual cause and is measured in tens of seconds.
+            crate::diag!("update: check FAILED after {:?}: {e}", started.elapsed());
+            return Err(e);
+        }
+    };
+    let manifest: UpdateManifest = match serde_json::from_slice(&body) {
+        Ok(m) => m,
+        Err(e) => {
+            crate::diag!(
+                "update: manifest unparseable ({} bytes after {:?}): {e}",
+                body.len(),
+                started.elapsed()
+            );
+            return Err(e.into());
+        }
+    };
+    let status = compare(current_version, &manifest.latest);
+    crate::diag!(
+        "update: site says {}, running {} -> {} (in {:?}, {} build(s) published)",
+        status.latest,
+        status.current,
+        if status.update_available {
+            "UPDATE AVAILABLE"
+        } else {
+            "up to date"
+        },
+        started.elapsed(),
+        manifest.android.len()
+    );
+    Ok(Some(status))
 }
 
 /// Which published build belongs on **this** device.
@@ -128,6 +165,14 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
 /// F-Droid ships per-ABI, so that is most users: they would wait out the whole download and then
 /// be told "App not installed". The per-ABI build is also less than half the size, which over Tor
 /// is the difference between a slow download and one that risks [`DOWNLOAD_TIMEOUT`].
+///
+/// **It does cost one bit of distinguishability**, and that is a deliberate trade rather than an
+/// oversight: the download path now tells the site which of the published ABIs this device runs.
+/// It is accepted because the thing that must not become a beacon is the *recurring* check, which
+/// is unchanged and still byte-identical for every install (see
+/// `the_request_is_identical_for_every_install`). A download is rare, user-initiated, and already
+/// tells the site far more by simply happening. The alternative — a build that cannot install —
+/// is not a privacy win.
 pub fn native_abi() -> &'static str {
     match std::env::consts::ARCH {
         "aarch64" => "arm64-v8a",
@@ -156,27 +201,71 @@ pub fn download(
     abi: &str,
     dest: &std::path::Path,
 ) -> Result<u64> {
-    let entry = manifest
-        .android
-        .get(abi)
-        .ok_or_else(|| anyhow::anyhow!("no published build for {abi}"))?;
+    let Some(entry) = manifest.android.get(abi) else {
+        // Names the ABI, because the failure is silent otherwise and the answer is always "the
+        // manifest does not publish the one this device needs".
+        crate::diag!(
+            "update: download ABORTED — no published build for {abi} (site offers: {})",
+            abi_list(manifest)
+        );
+        anyhow::bail!("no published build for {abi}");
+    };
+    crate::diag!("update: downloading the {abi} build");
+    let started = std::time::Instant::now();
     let Some(fetched) =
         transport.onion_get_capped(UPDATE_ONION, UPDATE_PORT, &entry.url, MAX_DOWNLOAD_BYTES)
     else {
+        crate::diag!("update: download ABORTED — transport cannot fetch anonymously");
         anyhow::bail!("this transport cannot fetch anonymously");
     };
-    let bytes = fetched?;
+    let bytes = match fetched {
+        Ok(b) => b,
+        Err(e) => {
+            // Where a Doze freeze or a dead circuit shows up. The elapsed time is the whole point:
+            // it separates "the network stalled" from "we hit DOWNLOAD_TIMEOUT".
+            crate::diag!("update: download FAILED after {:?}: {e}", started.elapsed());
+            return Err(e);
+        }
+    };
+    let fetched_in = started.elapsed();
     let got = sha256_hex(&bytes);
     if !got.eq_ignore_ascii_case(entry.sha256.trim()) {
         // Not "corrupt download, retry". We asked an authenticated onion for a file it told us
         // the hash of; a mismatch means something is wrong that a retry will not fix.
+        crate::diag!(
+            "update: HASH MISMATCH on {} bytes after {fetched_in:?} — nothing written",
+            bytes.len()
+        );
         anyhow::bail!(
             "downloaded build did not match the published hash (expected {}, got {got})",
             entry.sha256
         );
     }
-    std::fs::write(dest, &bytes)?;
+    if let Err(e) = std::fs::write(dest, &bytes) {
+        // Verified but unwritable — worth distinguishing from a failed download, since the fix is
+        // storage, not the network.
+        crate::diag!(
+            "update: verified {} bytes but the write FAILED: {e}",
+            bytes.len()
+        );
+        return Err(e.into());
+    }
+    crate::diag!(
+        "update: {} bytes verified and written in {fetched_in:?}",
+        bytes.len()
+    );
     Ok(bytes.len() as u64)
+}
+
+/// The ABIs the site currently publishes, sorted so the line is stable between runs. Only ever
+/// used for a diagnostic; these are public artifact names, not anything identity-linked.
+fn abi_list(manifest: &UpdateManifest) -> String {
+    let mut names: Vec<&str> = manifest.android.keys().map(String::as_str).collect();
+    names.sort_unstable();
+    if names.is_empty() {
+        return "none".into();
+    }
+    names.join(", ")
 }
 
 /// Lowercase hex SHA-256.
