@@ -97,6 +97,28 @@ pub trait Transport: Send + Sync {
         None
     }
 
+    /// As [`onion_get_capped`](Transport::onion_get_capped) but **streamed to a file**, returning
+    /// the number of body bytes written. Same `None` contract: no anonymized path, do nothing.
+    ///
+    /// Exists because a build is tens of megabytes and returning it as a `Vec<u8>` means holding
+    /// all of it in memory for the minutes the transfer takes — which on Android is precisely when
+    /// the process is backgrounded and the low-memory killer is choosing a victim. Streaming keeps
+    /// resident memory at one small buffer.
+    ///
+    /// `dest` is written as the bytes arrive, so it is **unverified while in flight**. Callers must
+    /// hand it a scratch path and only move the result somewhere the user can reach it after the
+    /// hash matches — see [`crate::update::download`].
+    fn onion_get_to_file(
+        &self,
+        _onion: &str,
+        _port: u16,
+        _path: &str,
+        _dest: &std::path::Path,
+        _max_bytes: u64,
+    ) -> Option<Result<u64>> {
+        None
+    }
+
     /// Onion client authorization (#22, Tor only). Generate (and store in arti's keymgr) *our*
     /// client descriptor-encryption keypair for connecting to `peer_onion`'s (possibly restricted)
     /// onion, returning the **public** key string (`descriptor:x25519:…`) to hand the peer so they

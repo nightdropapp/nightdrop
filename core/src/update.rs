@@ -212,49 +212,141 @@ pub fn download(
     };
     crate::diag!("update: downloading the {abi} build");
     let started = std::time::Instant::now();
-    let Some(fetched) =
-        transport.onion_get_capped(UPDATE_ONION, UPDATE_PORT, &entry.url, MAX_DOWNLOAD_BYTES)
-    else {
+    // Streamed here, never to `dest`. `dest` is the path the caller will make reachable, so a file
+    // must not appear there until it has passed — and the scratch name is what makes that possible
+    // without holding the whole build in memory.
+    let part = part_path(dest);
+    let Some(fetched) = transport.onion_get_to_file(
+        UPDATE_ONION,
+        UPDATE_PORT,
+        &entry.url,
+        &part,
+        MAX_DOWNLOAD_BYTES as u64,
+    ) else {
         crate::diag!("update: download ABORTED — transport cannot fetch anonymously");
         anyhow::bail!("this transport cannot fetch anonymously");
     };
-    let bytes = match fetched {
-        Ok(b) => b,
+    let n = match fetched {
+        Ok(n) => n,
         Err(e) => {
             // Where a Doze freeze or a dead circuit shows up. The elapsed time is the whole point:
             // it separates "the network stalled" from "we hit DOWNLOAD_TIMEOUT".
             crate::diag!("update: download FAILED after {:?}: {e}", started.elapsed());
+            let _ = std::fs::remove_file(&part);
             return Err(e);
         }
     };
     let fetched_in = started.elapsed();
-    let got = sha256_hex(&bytes);
+
+    // Hashed by reading the file back, not from a buffer we still hold — that is the whole point
+    // of streaming, and it also verifies what actually reached the disk rather than what we
+    // believe we wrote.
+    let got = match sha256_file(&part) {
+        Ok(h) => h,
+        Err(e) => {
+            crate::diag!("update: could not read back the downloaded build: {e}");
+            let _ = std::fs::remove_file(&part);
+            return Err(e);
+        }
+    };
     if !got.eq_ignore_ascii_case(entry.sha256.trim()) {
         // Not "corrupt download, retry". We asked an authenticated onion for a file it told us
         // the hash of; a mismatch means something is wrong that a retry will not fix.
-        crate::diag!(
-            "update: HASH MISMATCH on {} bytes after {fetched_in:?} — nothing written",
-            bytes.len()
-        );
+        crate::diag!("update: HASH MISMATCH on {n} bytes after {fetched_in:?} — discarded");
+        let _ = std::fs::remove_file(&part);
         anyhow::bail!(
             "downloaded build did not match the published hash (expected {}, got {got})",
             entry.sha256
         );
     }
-    if let Err(e) = std::fs::write(dest, &bytes) {
-        // Verified but unwritable — worth distinguishing from a failed download, since the fix is
-        // storage, not the network.
-        crate::diag!(
-            "update: verified {} bytes but the write FAILED: {e}",
-            bytes.len()
-        );
+    // Only now does a file appear at `dest`. Rename is atomic within a filesystem, so there is no
+    // instant where a partial build is visible under the final name.
+    if let Err(e) = std::fs::rename(&part, dest) {
+        crate::diag!("update: verified {n} bytes but could not place the file: {e}");
+        let _ = std::fs::remove_file(&part);
         return Err(e.into());
     }
-    crate::diag!(
-        "update: {} bytes verified and written in {fetched_in:?}",
-        bytes.len()
-    );
-    Ok(bytes.len() as u64)
+    crate::diag!("update: {n} bytes verified and written in {fetched_in:?}");
+    Ok(n)
+}
+
+/// Incremental parser for a streamed response head.
+///
+/// [`body_of`] can read the whole response and split it once; a streamed download cannot, because
+/// the body is precisely the thing that must never be fully resident. This buffers only up to the
+/// `\r\n\r\n` terminator, validates the status line through the same [`body_of`] check, and from
+/// then on hands chunks straight through.
+///
+/// Lives here rather than in the transport so it can be tested against arbitrary chunk boundaries
+/// — including a terminator split across two reads, which is otherwise reachable only with a live
+/// Tor circuit and the right packet timing.
+#[derive(Default)]
+pub struct ResponseHead {
+    head: Vec<u8>,
+    done: bool,
+}
+
+impl ResponseHead {
+    /// Feed one chunk as read from the wire; returns the portion of it that is body, which is
+    /// empty while the head is still arriving.
+    pub fn push<'a>(&mut self, chunk: &'a [u8]) -> Result<&'a [u8]> {
+        if self.done {
+            return Ok(chunk);
+        }
+        self.head.extend_from_slice(chunk);
+        let Some(end) = self.head.windows(4).position(|w| w == b"\r\n\r\n") else {
+            // Bound the head too: a server that never terminates it would otherwise grow this
+            // buffer without limit, which is the same unbounded-read bug in a different place.
+            if self.head.len() > MAX_MANIFEST_BYTES {
+                anyhow::bail!("update: response head had no terminator");
+            }
+            return Ok(&[]);
+        };
+        // Same status check as the buffered path: head plus terminator, so the body is empty.
+        body_of(&self.head[..end + 4])?;
+        self.done = true;
+        // The body bytes sit at the tail of both buffers. At least one byte of the terminator must
+        // have arrived in *this* chunk (otherwise it would have been found on an earlier push), so
+        // this can never exceed the chunk; min() keeps that a wrong answer rather than a panic if
+        // the invariant is ever broken.
+        let consumed = (self.head.len() - (end + 4)).min(chunk.len());
+        Ok(&chunk[chunk.len() - consumed..])
+    }
+
+    /// Whether a complete head was seen. A stream that ends before this did not deliver a response.
+    pub fn complete(&self) -> bool {
+        self.done
+    }
+}
+
+/// The scratch name a download is streamed to. A sibling of `dest`, so the rename that follows
+/// stays within one filesystem and is therefore atomic.
+fn part_path(dest: &std::path::Path) -> std::path::PathBuf {
+    let mut name = dest.file_name().unwrap_or_default().to_os_string();
+    name.push(".part");
+    dest.with_file_name(name)
+}
+
+/// SHA-256 of a file, read in chunks so a large build is never resident in full.
+fn sha256_file(path: &std::path::Path) -> Result<String> {
+    use sha2::{Digest, Sha256};
+    use std::io::Read as _;
+
+    let mut file = std::fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut chunk = vec![0u8; 64 * 1024];
+    loop {
+        let n = file.read(&mut chunk)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&chunk[..n]);
+    }
+    Ok(hasher
+        .finalize()
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect())
 }
 
 /// The ABIs the site currently publishes, sorted so the line is stable between runs. Only ever
@@ -394,6 +486,68 @@ mod tests {
         }
     }
 
+    /// Feed `response` through [`ResponseHead`] in fixed-size pieces, returning the reassembled
+    /// body — i.e. exactly what the streaming download would have written to disk.
+    fn stream_in_chunks(response: &[u8], chunk: usize) -> Result<Vec<u8>> {
+        let mut head = ResponseHead::default();
+        let mut body = Vec::new();
+        for piece in response.chunks(chunk) {
+            body.extend_from_slice(head.push(piece)?);
+        }
+        assert!(
+            head.complete(),
+            "head never completed at chunk size {chunk}"
+        );
+        Ok(body)
+    }
+
+    #[test]
+    fn a_streamed_response_yields_the_same_body_at_every_chunk_boundary() {
+        // The subtle half of streaming. The buffered path could read everything and split once;
+        // this one has to find \r\n\r\n across reads, and the interesting case — the terminator
+        // straddling two chunks — depends on packet timing that a live Tor circuit will not
+        // reproduce on demand. Driving every chunk size covers all four straddle positions.
+        let body = b"MZ\x00\x01 a build with \r\n and \r\n\r\n inside it, deliberately";
+        let mut response = b"HTTP/1.0 200 OK\r\nContent-Length: 57\r\n\r\n".to_vec();
+        response.extend_from_slice(body);
+
+        for size in 1..=response.len() {
+            let got = stream_in_chunks(&response, size).unwrap();
+            assert_eq!(got, body, "chunk size {size} produced the wrong body");
+        }
+        // And it agrees with the buffered parser it shares its status check with.
+        assert_eq!(body_of(&response).unwrap(), body);
+    }
+
+    #[test]
+    fn a_streamed_response_rejects_what_the_buffered_one_rejects() {
+        // A non-200 must fail before a single byte reaches the file, or a 404 page gets written
+        // where a build should be and only the hash catches it.
+        for bad in [
+            &b"HTTP/1.0 404 Not Found\r\n\r\nnope"[..],
+            &b"HTTP/1.0 500 Oops\r\n\r\n"[..],
+        ] {
+            for size in 1..=bad.len() {
+                assert!(
+                    stream_in_chunks(bad, size).is_err(),
+                    "accepted {bad:?} at chunk size {size}"
+                );
+            }
+        }
+        // A head that never terminates must be bounded rather than buffered forever.
+        let endless = vec![b'x'; MAX_MANIFEST_BYTES + 1024];
+        let mut head = ResponseHead::default();
+        let mut err = None;
+        for piece in endless.chunks(1024) {
+            if let Err(e) = head.push(piece) {
+                err = Some(e);
+                break;
+            }
+        }
+        assert!(err.is_some(), "an unterminated head must be rejected");
+        assert!(!head.complete());
+    }
+
     fn manifest_with(sha: &str) -> UpdateManifest {
         serde_json::from_str(&format!(
             r#"{{"latest":"0.1.18","android":{{"arm64-v8a":{{"url":"/applications/android/NightDrop-arm64-v8a.apk","sha256":"{sha}"}}}}}}"#
@@ -451,14 +605,21 @@ mod tests {
             fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
                 None
             }
-            fn onion_get_capped(
+            // Streams like the real one: writes the bytes to the path it is given, which is the
+            // scratch file, and never to `dest`.
+            fn onion_get_to_file(
                 &self,
                 _o: &str,
                 _p: u16,
                 _path: &str,
-                _max: usize,
-            ) -> Option<Result<Vec<u8>>> {
-                Some(Ok(self.0.clone()))
+                dest: &std::path::Path,
+                _max: u64,
+            ) -> Option<Result<u64>> {
+                Some(
+                    std::fs::write(dest, &self.0)
+                        .map(|()| self.0.len() as u64)
+                        .map_err(Into::into),
+                )
             }
         }
 
@@ -470,15 +631,91 @@ mod tests {
             !dest.exists(),
             "a mismatched download must not be left on disk"
         );
+        // And the scratch file goes too. It holds a full-size build that failed verification;
+        // leaving it behind would quietly cost the user tens of megabytes per failed attempt.
+        assert!(
+            !part_path(&dest).exists(),
+            "a rejected download must not be left as a .part either"
+        );
 
         // The same bytes with the right hash do land.
         let right = manifest_with(&sha256_hex(&served));
         let n = download(&Server(served.clone()), &right, "arm64-v8a", &dest).unwrap();
         assert_eq!(n as usize, served.len());
         assert_eq!(std::fs::read(&dest).unwrap(), served);
+        assert!(
+            !part_path(&dest).exists(),
+            "the scratch file must be renamed, not copied and left"
+        );
 
         // An ABI we publish nothing for is an error, not a silent empty file.
         assert!(download(&Server(served), &right, "riscv64", &dest).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_in_flight_download_is_never_visible_at_the_destination() {
+        // The reason streaming needed a scratch path at all. While the bytes are arriving they are
+        // unverified, and `dest` is the path the app will publish to Downloads — so at no point
+        // during the transfer may a file exist there. The transport below asserts that from
+        // *inside* the download, which is the only moment it can be observed.
+        let dir = std::env::temp_dir().join(format!("nd-update-inflight-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("build.apk");
+        let _ = std::fs::remove_file(&dest);
+
+        struct Watcher {
+            body: Vec<u8>,
+            dest: std::path::PathBuf,
+        }
+        impl Transport for Watcher {
+            fn address(&self) -> crate::transport::Address {
+                "srv".into()
+            }
+            fn send(&self, _p: &str, _f: &[u8]) -> Result<()> {
+                Ok(())
+            }
+            fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
+                None
+            }
+            fn onion_get_to_file(
+                &self,
+                _o: &str,
+                _p: u16,
+                _path: &str,
+                target: &std::path::Path,
+                _max: u64,
+            ) -> Option<Result<u64>> {
+                assert_ne!(target, self.dest, "a download must not stream to dest");
+                assert!(
+                    target.to_string_lossy().ends_with(".part"),
+                    "expected a .part scratch file, got {}",
+                    target.display()
+                );
+                // Write half, check, write the rest — mid-transfer is exactly when a crash or a
+                // curious file manager would see the destination.
+                let half = self.body.len() / 2;
+                std::fs::write(target, &self.body[..half]).unwrap();
+                assert!(
+                    !self.dest.exists(),
+                    "the destination existed while bytes were still arriving"
+                );
+                std::fs::write(target, &self.body).unwrap();
+                Some(Ok(self.body.len() as u64))
+            }
+        }
+
+        let body = b"a build long enough to be written in two goes".to_vec();
+        let m = manifest_with(&sha256_hex(&body));
+        let t = Watcher {
+            body: body.clone(),
+            dest: dest.clone(),
+        };
+        assert_eq!(
+            download(&t, &m, "arm64-v8a", &dest).unwrap(),
+            body.len() as u64
+        );
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

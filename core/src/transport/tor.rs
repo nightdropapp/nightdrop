@@ -586,6 +586,81 @@ impl Transport for TorTransport {
         }))
     }
 
+    /// Stream a build from an onion straight to `dest` (`crate::update::download`).
+    ///
+    /// Same isolated circuit as [`onion_get_capped`](Self::onion_get_capped), and the same bounded
+    /// read. The difference is where the bytes go: a build is tens of megabytes, and holding that
+    /// in a `Vec` for the minutes a Tor transfer takes makes the process a low-memory-killer target
+    /// exactly while it is backgrounded.
+    ///
+    /// The response head is parsed incrementally, because it no longer fits the "read everything,
+    /// then split" shape: bytes are accumulated only until the `\r\n\r\n` terminator, after which
+    /// everything goes to the file. The cap counts **body** bytes, which is what the caller means
+    /// by a size limit.
+    fn onion_get_to_file(
+        &self,
+        onion: &str,
+        port: u16,
+        path: &str,
+        dest: &std::path::Path,
+        max_bytes: u64,
+    ) -> Option<Result<u64>> {
+        use std::io::Write as _;
+
+        let client = Arc::clone(&self.client);
+        let runtime = Arc::clone(&self.runtime);
+        let budget = crate::update::DOWNLOAD_TIMEOUT;
+        let request = crate::update::request_line(onion, path);
+        let (onion, path) = (onion.to_string(), path.to_string());
+        let dest = dest.to_path_buf();
+        Some(runtime.block_on(async move {
+            let fetch = async {
+                let mut stream = tokio::time::timeout(
+                    budget,
+                    client.isolated_client().connect((onion.as_str(), port)),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out dialing {onion}"))?
+                .with_context(|| format!("update fetch connect {onion}"))?;
+                stream.write_all(request.as_bytes()).await?;
+                stream.flush().await?;
+
+                let mut file = std::fs::File::create(&dest)
+                    .with_context(|| format!("create {}", dest.display()))?;
+                let mut head = crate::update::ResponseHead::default();
+                let mut written: u64 = 0;
+                let mut chunk = [0u8; 16 * 1024];
+                loop {
+                    let n = futures::AsyncReadExt::read(&mut stream, &mut chunk).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    let body = head.push(&chunk[..n])?;
+                    written += body.len() as u64;
+                    if written > max_bytes {
+                        anyhow::bail!("update fetch of {path} exceeded the size cap");
+                    }
+                    file.write_all(body)?;
+                }
+                if !head.complete() {
+                    anyhow::bail!("update fetch of {path} ended before its headers did");
+                }
+                // Durability is not the point — the caller re-hashes what it reads back — but an
+                // unflushed tail would make the hash fail for a download that actually succeeded.
+                file.flush()?;
+                Ok(written)
+            };
+            let result = tokio::time::timeout(budget, fetch)
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out"))?;
+            if result.is_err() {
+                // Never leave a partial build behind on any failure path, including the timeout.
+                let _ = std::fs::remove_file(&dest);
+            }
+            result
+        }))
+    }
+
     /// Mint our client descriptor-encryption key for `peer_onion` (onion client auth, #22).
     fn make_client_key(&self, peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
         Some(self.make_service_discovery_key(peer_onion))

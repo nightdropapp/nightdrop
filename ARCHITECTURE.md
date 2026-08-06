@@ -726,6 +726,17 @@ with `IS_PENDING` set for the same reason, and a failed copy deletes its row rat
 a truncated entry. If no route works the file stays where it is and the user is told that path —
 a verified build is never discarded over a publishing problem.
 
+**Streamed, not buffered.** `Transport::onion_get_to_file` writes the build to disk as it
+arrives, so resident memory stays at one 16 KiB buffer instead of the whole ~45MB — which
+mattered because those minutes are exactly when the app is backgrounded and the low-memory killer
+is picking a victim. The bytes go to a `<dest>.part` sibling, are hashed by reading the file back,
+and are `rename`d into place only on a match; rename within a filesystem is atomic, so no partial
+build is ever visible under the final name, and every failure path deletes the scratch file rather
+than leaving tens of megabytes behind. Streaming means the response head must be parsed
+incrementally rather than split out of one buffer — `update::ResponseHead` does that, and lives in
+`update` rather than the transport so the chunk-boundary cases (including a `\r\n\r\n` straddling
+two reads) are testable without a live circuit.
+
 **Bounds and lock discipline.** The manifest read is capped at `MAX_MANIFEST_BYTES` (8 KiB) so a
 routine background fetch can never OOM the app; the build download has its own, much larger cap
 (`MAX_DOWNLOAD_BYTES`) via `onion_get_capped`, kept separate precisely so one cap large enough
@@ -740,11 +751,9 @@ lie on the one screen where the user deliberately asked, and it hides exactly th
 the feature exists to surface. `checkForUpdateNow()` returns whether the site answered, and the
 UI distinguishes the two.
 
-Known limits, in the order they are worth fixing: the download buffers in memory rather than
-streaming to a `.part` file (so it cannot resume, and holds tens of MB while backgrounded), and
-it is not yet wrapped in a foreground service, so Doze can freeze a long transfer. The second is
-worth little before the first — a foreground service around an unresumable in-memory download
-buys much less than it costs.
+Known limit: the download is not yet wrapped in a foreground service, so Doze can freeze a long
+transfer. Streaming to `.part` also makes *resume* possible — the partial file is right there —
+but that is not implemented; a failed download currently restarts from zero.
 
 ---
 
