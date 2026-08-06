@@ -110,12 +110,14 @@ pub struct UpdateStatus {
 /// `current_version` accepts the pubspec form (`"0.1.17+403"`); the build metadata is ignored.
 /// Returns `Ok(None)` when the transport cannot fetch anonymously — the caller does nothing.
 pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<UpdateStatus>> {
+    // Started before the fetch, not after: `onion_get` blocks for the whole Tor round trip, so a
+    // timer set on the line below would measure the JSON parse and report a 22µs network fetch.
+    let started = std::time::Instant::now();
     let Some(fetched) = transport.onion_get(UPDATE_ONION, UPDATE_PORT, MANIFEST_PATH) else {
         // Not an error: this transport has no anonymized path, so there is no check to make.
         crate::diag!("update: no anonymized path on this transport — check skipped");
         return Ok(None);
     };
-    let started = std::time::Instant::now();
     let body = match fetched {
         Ok(b) => b,
         Err(e) => {
