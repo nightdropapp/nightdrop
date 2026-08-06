@@ -12,7 +12,7 @@ Repo: https://github.com/nightdropapp/nightdrop.git
 Builds:
   - versionName: 0.1.18
     versionCode: 4041
-    commit: 7ef09fa70f201b1ce7329d36e80e99e3dfe33ace
+    commit: 37cbf9b7c86840136645def21d4a4d4f0963f865
     subdir: app
     sudo:
       - apt-get update
@@ -67,7 +67,7 @@ Builds:
 
   - versionName: 0.1.18
     versionCode: 4042
-    commit: 7ef09fa70f201b1ce7329d36e80e99e3dfe33ace
+    commit: 37cbf9b7c86840136645def21d4a4d4f0963f865
     subdir: app
     sudo:
       - apt-get update
@@ -122,7 +122,7 @@ Builds:
 
   - versionName: 0.1.18
     versionCode: 4043
-    commit: 7ef09fa70f201b1ce7329d36e80e99e3dfe33ace
+    commit: 37cbf9b7c86840136645def21d4a4d4f0963f865
     subdir: app
     sudo:
       - apt-get update
