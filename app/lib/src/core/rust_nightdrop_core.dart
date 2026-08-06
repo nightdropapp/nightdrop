@@ -11,6 +11,7 @@ import 'nightdrop_core.dart';
 import 'media_cache.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'public_downloads.dart';
 
 /// [NightdropCore] backed by the real Rust security core via flutter_rust_bridge.
 ///
@@ -542,12 +543,24 @@ class RustNightdropCore extends NightdropCore {
   @override
   Future<String?> downloadUpdate() async {
     try {
-      final dir = await getApplicationSupportDirectory();
+      // Downloaded and verified app-privately first, then published. Rust writes nothing until the
+      // hash matches what the onion site said, so the file only ever becomes visible to the user
+      // after it has passed — there is no window where a file manager can offer a bad build.
+      final dir = await PublicDownloads.staging();
       final dest = '${dir.path}/NightDrop-update.apk';
       // "universal" so we need no ABI detection: one file runs on every phone. Bigger than a
       // per-ABI build, but this is a rare, deliberate download.
       final n = await _core?.downloadUpdate(destPath: dest, abi: 'universal');
-      return (n != null && n > BigInt.zero) ? dest : null;
+      if (n == null || n <= BigInt.zero) return null;
+      // Named for the version it actually is. "NightDrop-update.apk" tells a user nothing months
+      // later, and collides with the last one they downloaded.
+      final version = _updateAvailable;
+      return PublicDownloads.publish(
+        File(dest),
+        displayName:
+            version == null ? 'NightDrop.apk' : 'NightDrop-$version.apk',
+        mimeType: 'application/vnd.android.package-archive',
+      );
     } catch (_) {
       return null;
     }

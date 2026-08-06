@@ -702,6 +702,22 @@ with anything not signed by our release key, so the worst a compromised site ach
 wasted download — not a swapped app. Adding an in-app installer would mean
 `REQUEST_INSTALL_PACKAGES` on a privacy tool for a small delta; declined for now.
 
+**It lands where the user can find it, without a permission.** Since the app does not install,
+the file has to be reachable by hand — so the verified build is published to the **public
+Downloads folder** via `MediaStore.Downloads` (`Downloads.kt`, `PublicDownloads`), which on API
+29+ costs no permission at all. `getExternalStorageDirectory()` is *not* the cheap answer it
+looks like: it returns a path under `/Android/data/`, which the system Files app and SAF-based
+file managers have refused to navigate since Android 11, so a build written there is no more
+findable than an app-private one. It remains only as the pre-API-29 fallback, where that
+lockdown does not exist and the public folder *would* cost `WRITE_EXTERNAL_STORAGE` — a
+permission the manifest deliberately strips.
+
+The download is staged app-privately and only published after the hash matches, so the ordering
+invariant holds end to end: **nothing the user can see is unverified.** The MediaStore copy runs
+with `IS_PENDING` set for the same reason, and a failed copy deletes its row rather than leaving
+a truncated entry. If no route works the file stays where it is and the user is told that path —
+a verified build is never discarded over a publishing problem.
+
 **Bounds and lock discipline.** The manifest read is capped at `MAX_MANIFEST_BYTES` (8 KiB) so a
 routine background fetch can never OOM the app; the build download has its own, much larger cap
 (`MAX_DOWNLOAD_BYTES`) via `onion_get_capped`, kept separate precisely so one cap large enough
@@ -718,7 +734,9 @@ UI distinguishes the two.
 
 Known limits, in the order they are worth fixing: the download buffers in memory rather than
 streaming to a `.part` file (so it cannot resume, and holds tens of MB while backgrounded), and
-it is not yet wrapped in a foreground service, so Doze can freeze a long transfer.
+it is not yet wrapped in a foreground service, so Doze can freeze a long transfer. The second is
+worth little before the first — a foreground service around an unresumable in-memory download
+buys much less than it costs.
 
 ---
 

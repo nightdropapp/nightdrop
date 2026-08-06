@@ -39,6 +39,10 @@ import io.flutter.plugin.common.MethodChannel
 class MainActivity : FlutterActivity() {
     private var channel: MethodChannel? = null
 
+    // Unrelated to screenshots; registered here only because this is where the engine is configured.
+    // See [Downloads].
+    private var downloads: MethodChannel? = null
+
     // API 34+ only. Held as a field so it can be unregistered in onPause: the callback fires only
     // while the activity is visible, and leaving it registered across the lifecycle leaks it.
     private val screenCaptureCallback =
@@ -64,6 +68,7 @@ class MainActivity : FlutterActivity() {
                 }
             }
         }
+        downloads = Downloads.install(flutterEngine, applicationContext)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -103,6 +108,8 @@ class MainActivity : FlutterActivity() {
     override fun onDestroy() {
         channel?.setMethodCallHandler(null)
         channel = null
+        downloads?.setMethodCallHandler(null)
+        downloads = null
         super.onDestroy()
     }
 
