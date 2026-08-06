@@ -109,37 +109,122 @@ class BackgroundDelivery {
     }
   }
 
+  // Last known lifecycle state, kept so a hold taken or released at any moment can work out what
+  // the service should be doing without waiting for the next lifecycle callback.
+  static bool _foreground = true;
+  static bool _hasIdentity = false;
+
+  /// Outstanding [holdDuring] calls. The service must run while any of them do, **regardless of
+  /// the background-delivery opt-in** — a long job the user explicitly started is not the same
+  /// question as whether they want passive message delivery.
+  static int _holds = 0;
+  static String _holdText = 'Working';
+
   /// React to an app-lifecycle change: start the service when backgrounding (if opted in and an
-  /// identity exists), stop it when returning to the foreground (the UI polls directly then).
+  /// identity exists), stop it when returning to the foreground (the UI polls directly then) —
+  /// unless a hold is keeping it up.
   static Future<void> onLifecycle({
     required bool foreground,
     required bool hasIdentity,
   }) async {
-    if (!supported) return;
-    if (foreground) {
-      await stop();
-    } else if (hasIdentity && await isEnabled()) {
-      await start();
+    _foreground = foreground;
+    _hasIdentity = hasIdentity;
+    await _reconcile();
+  }
+
+  /// Keep the process at foreground priority for as long as [job] runs.
+  ///
+  /// For work that takes minutes and must not be frozen halfway — the update download is the
+  /// case this exists for. Without it, Doze and App Standby are free to freeze the process
+  /// mid-transfer, and the user comes back to a download that silently stopped.
+  ///
+  /// Two things make this more than a call to [start]. It ignores the background-delivery opt-in,
+  /// because a user who declined passive delivery has not thereby declined to finish a download
+  /// they just asked for. And it survives [onLifecycle], which would otherwise stop the service
+  /// the moment they returned to the app to watch the progress.
+  ///
+  /// **Call this while the app is still in the foreground.** Android 12+ forbids starting a
+  /// foreground service from the background, so taking the hold lazily after the user has already
+  /// left would be refused — exactly when it is needed.
+  ///
+  /// Best-effort by design: if the service cannot start (permission declined, plugin missing),
+  /// [job] still runs. A download that would have succeeded must not fail because the
+  /// notification did not.
+  static Future<T> holdDuring<T>(
+    Future<T> Function() job, {
+    required String notificationText,
+  }) async {
+    if (!supported) return job();
+    _holds++;
+    _holdText = notificationText;
+    await _reconcile();
+    try {
+      return await job();
+    } finally {
+      _holds--;
+      await _reconcile();
     }
   }
 
-  /// Start the foreground service (idempotent).
-  static Future<void> start() async {
+  /// Whether the service should be running, given everything that has a say.
+  ///
+  /// Pulled out as a pure function because the interesting case is not obvious and is easy to
+  /// regress: returning to the foreground stops the service, so without the `holds` term a user
+  /// who reopened the app to watch a download would have killed the very thing protecting it.
+  @visibleForTesting
+  static bool shouldRun({
+    required bool foreground,
+    required bool hasIdentity,
+    required bool optedIn,
+    required int holds,
+  }) =>
+      holds > 0 || (!foreground && hasIdentity && optedIn);
+
+  /// Bring the service into line with what the current state calls for. The single place that
+  /// decides, so a hold and a lifecycle change cannot each act on half the picture.
+  static Future<void> _reconcile() async {
+    if (!supported) return;
+    final run = shouldRun(
+      foreground: _foreground,
+      hasIdentity: _hasIdentity,
+      optedIn: await isEnabled(),
+      holds: _holds,
+    );
+    if (run) {
+      await start(text: _holds > 0 ? _holdText : 'Watching for messages');
+    } else {
+      await stop();
+    }
+  }
+
+  /// Start the foreground service, or update its notification if it is already running
+  /// (idempotent either way).
+  static Future<void> start({String text = 'Watching for messages'}) async {
     if (!supported) return;
     try {
-      if (await FlutterForegroundTask.isRunningService) return;
+      if (await FlutterForegroundTask.isRunningService) {
+        // Already up, possibly saying the wrong thing: a persistent notification reading
+        // "Watching for messages" through a ten-minute download tells the user nothing about why
+        // their phone is busy.
+        await FlutterForegroundTask.updateService(
+          notificationTitle: 'Night Drop',
+          notificationText: text,
+        );
+        return;
+      }
       await FlutterForegroundTask.startService(
         serviceId: 424242,
         notificationTitle: 'Night Drop',
-        notificationText: 'Watching for messages',
+        notificationText: text,
         callback: nightdropBackgroundCallback,
       );
     } catch (_) {}
   }
 
-  /// Stop the foreground service (idempotent).
+  /// Stop the foreground service (idempotent). Refuses while a [holdDuring] job is outstanding,
+  /// so an unrelated caller cannot cut a download off at the knees.
   static Future<void> stop() async {
-    if (!supported) return;
+    if (!supported || _holds > 0) return;
     try {
       if (await FlutterForegroundTask.isRunningService) {
         await FlutterForegroundTask.stopService();

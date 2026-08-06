@@ -751,9 +751,16 @@ lie on the one screen where the user deliberately asked, and it hides exactly th
 the feature exists to surface. `checkForUpdateNow()` returns whether the site answered, and the
 UI distinguishes the two.
 
-Known limit: the download is not yet wrapped in a foreground service, so Doze can freeze a long
-transfer. Streaming to `.part` also makes *resume* possible — the partial file is right there —
-but that is not implemented; a failed download currently restarts from zero.
+**A download holds the process at foreground priority** for its whole duration
+(`BackgroundDelivery.holdDuring`), because a multi-minute Tor transfer is otherwise fair game for
+Doze and App Standby to freeze partway through. Two details are load-bearing: the hold ignores the
+background-delivery opt-in, since declining passive message delivery is not declining to finish a
+download the user just started; and it is taken while the app is still foreground from the tap,
+because Android 12+ refuses to start a foreground service once the app has left. It is
+best-effort — if the service cannot start, the download still runs.
+
+Known limit: streaming to `.part` makes *resume* possible — the partial file is right there — but
+that is not implemented, so a failed download restarts from zero.
 
 ---
 

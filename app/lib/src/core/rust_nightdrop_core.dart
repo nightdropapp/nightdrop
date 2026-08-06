@@ -542,6 +542,17 @@ class RustNightdropCore extends NightdropCore {
 
   @override
   Future<String?> downloadUpdate() async {
+    // Held for the whole download, not just the fetch: tens of megabytes over Tor takes minutes,
+    // and Doze/App Standby are free to freeze the process partway through. Taken here, while the
+    // app is still foreground from the tap that got us here — Android 12+ refuses to start a
+    // foreground service once the app has already left.
+    return BackgroundDelivery.holdDuring(
+      _downloadUpdate,
+      notificationText: 'Downloading update',
+    );
+  }
+
+  Future<String?> _downloadUpdate() async {
     try {
       // Downloaded and verified app-privately first, then published. Rust writes nothing until the
       // hash matches what the onion site said, so the file only ever becomes visible to the user
