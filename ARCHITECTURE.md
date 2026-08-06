@@ -691,7 +691,15 @@ actually sitting in `website/applications/android/`. An APK that is not present 
 omitted, which the app reads as "a newer version exists, but there is no download to offer" —
 tell the user something, promise nothing.
 
-**Downloads are verified before they land.** `update::download` fetches the per-ABI build,
+**It must be this device's per-ABI build, never the universal one.** `--split-per-abi` numbers
+the per-ABI APKs `base*10 + abi` (4031/4032/4033) and leaves the universal APK on the bare base
+(403), so offering the universal build to anyone on a per-ABI install is a *downgrade by
+versionCode* and Android refuses to install it — after the whole download, with no way for the
+app to learn why. F-Droid ships per-ABI, so that is most users. `update::native_abi` picks from
+the architecture the core was compiled for, which is by definition the ABI Android chose at
+install time; the Dart side is not consulted because it cannot know better.
+
+**Downloads are verified before they land.** `update::download` fetches that build,
 hashes it, and writes to the destination **only** on a match. A file that exists is a file the
 user may be one tap from installing, so a partial or mismatched download must never reach that
 path. A mismatch is a hard error, not a retry: we asked an authenticated onion for a file it
