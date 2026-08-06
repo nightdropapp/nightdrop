@@ -1,5 +1,5 @@
 # Night Drop — common tasks. Requires the Flutter SDK and the Rust toolchain.
-.PHONY: help app-get app-run app-test app-analyze core-build core-test relay-run fmt clippy bootstrap gen-bridge config hooks
+.PHONY: help app-get app-run app-test app-analyze core-build core-test relay-run fmt clippy bootstrap gen-bridge config update-manifest hooks
 
 help:
 	@echo "App (Flutter, in app/):"
@@ -16,6 +16,9 @@ help:
 	@echo "  make clippy       cargo clippy --all-targets"
 	@echo "  make bootstrap    one-time: populate Flutter platform folders + pub get"
 	@echo "  make hooks        one-time: enable the pre-commit checks in .githooks/"
+	@echo "Release:"
+	@echo "  make update-manifest  regenerate website/update.json from the PUBLISHED APKs"
+	@echo "                        (publish step only — it is served live; see the Makefile note)"
 
 # Git does not share hooks, so they live in .githooks/ and this points git at them. Runs the
 # fast half of CI (fmt, clippy, analyze) before a commit exists.
@@ -35,8 +38,14 @@ config:
 	@printf '// GENERATED from config/app_config.json by `make config` — do not edit by hand.\nwindow.NIGHTDROP_CONFIG = %s;\n' "$$(cat config/app_config.json)" > website/config.js
 	@ver="$$(sed -n 's/^version: *//p' app/pubspec.yaml)"; \
 	  printf '// GENERATED from app/pubspec.yaml by `make config` — do not edit by hand.\n/// Full pubspec version string ("versionName+versionCode", e.g. "0.1.2+3").\nconst String kAppVersion = '\''%s'\'';\n' "$$ver" > app/lib/src/core/app_version.dart
-	@scripts/gen-update-manifest.sh
-	@echo "config: synced -> app/assets/app_config.json, website/config.js, app/lib/src/core/app_version.dart, website/update.json"
+	@echo "config: synced -> app/assets/app_config.json, website/config.js, app/lib/src/core/app_version.dart"
+# website/update.json is DELIBERATELY not part of `config`. It describes builds that are actually
+# published, and the onion site serves it live from disk — so regenerating it from a target every
+# build depends on meant that bumping the version instantly told every user a release existed,
+# offering them the PREVIOUS release's APKs under the new version number (hashes and all, so the
+# download verified). That happened three times in one afternoon. Run this at publish time, after
+# the real APKs are in website/applications/android/, and never before.
+update-manifest: ; @scripts/gen-update-manifest.sh && echo "update.json: $$(head -c 40 website/update.json)"
 app-analyze:  ; cd app && flutter analyze
 gen-bridge:   ; flutter_rust_bridge_codegen generate
 

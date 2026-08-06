@@ -1,7 +1,7 @@
 name: night_drop
 description: "Night Drop — a privacy-first 1:1 messenger."
 publish_to: "none"
-version: 0.1.17+403
+version: 0.1.18+404
 
 environment:
   sdk: ">=3.6.0 <4.0.0"
