@@ -10,8 +10,8 @@ RepoType: git
 Repo: https://github.com/nightdropapp/nightdrop.git
 
 Builds:
-  - versionName: 0.1.18
-    versionCode: 4041
+  - versionName: 0.1.19
+    versionCode: 4051
     commit: 37cbf9b7c86840136645def21d4a4d4f0963f865
     subdir: app
     sudo:
@@ -65,8 +65,8 @@ Builds:
       - mv $repo app.nightdrop
     ndk: r28c
 
-  - versionName: 0.1.18
-    versionCode: 4042
+  - versionName: 0.1.19
+    versionCode: 4052
     commit: 37cbf9b7c86840136645def21d4a4d4f0963f865
     subdir: app
     sudo:
@@ -120,8 +120,8 @@ Builds:
       - mv $repo app.nightdrop
     ndk: r28c
 
-  - versionName: 0.1.18
-    versionCode: 4043
+  - versionName: 0.1.19
+    versionCode: 4053
     commit: 37cbf9b7c86840136645def21d4a4d4f0963f865
     subdir: app
     sudo:
@@ -181,7 +181,7 @@ MaintainerNotes: |
   Flutter UI over a cross-compiled Rust core (libnightdrop.so, built by cargokit through the
   NDK), so the recipe provisions both toolchains.
 
-  Only 0.1.18 is offered. 0.1.0-0.1.3 shipped without the Android INTERNET permission and cannot
+  Only 0.1.19 is offered. 0.1.0-0.1.3 shipped without the Android INTERNET permission and cannot
   connect; 0.1.4 embedded AGP's opaque "dependency metadata" signing block, which check-apk
   rejects (fixed in 0.1.5); 0.1.6 and 0.1.7 predate the build fixes below, so their published
   APKs cannot be byte-matched. From 0.1.8 every release is built by this recipe exactly as it
@@ -223,5 +223,5 @@ VercodeOperation:
   - '%c * 10 + 2'
   - '%c * 10 + 3'
 UpdateCheckData: app/pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
-CurrentVersion: 0.1.18
-CurrentVersionCode: 4043
+CurrentVersion: 0.1.19
+CurrentVersionCode: 4053
