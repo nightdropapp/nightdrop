@@ -83,6 +83,19 @@ android {
                 // works locally. A distributable release REQUIRES key.properties.
                 signingConfigs.getByName("debug")
             }
+            // Requested by the F-Droid reviewer on fdroiddata!43625.
+            //
+            // R8 only touches the Java/Kotlin shim: the Dart code is AOT-compiled into libapp.so
+            // and the security core into libnightdrop.so, neither of which R8 can see. So the
+            // savings come from the plugin layer, and so does all of the risk — a stripped
+            // reflective call fails at RUNTIME, not at build time, and no unit test will catch it.
+            // Anything added here needs a smoke test on hardware, not just a green build.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
