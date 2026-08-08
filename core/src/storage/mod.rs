@@ -51,6 +51,12 @@ pub struct PersistedChat {
     /// design). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]
     pub verified: bool,
+    /// Whether the peer told us their device cannot report screenshots (#1). Persisted so the
+    /// warning survives a restart — recomputing it as "unknown" every launch would drop the signal
+    /// until the peer next announced, which they only do on a change. `#[serde(default)]` (→ None)
+    /// keeps older state files loadable and correctly says "they have not told us".
+    #[serde(default)]
+    pub peer_captures_silent: Option<bool>,
     /// Whether the **peer** signaled that *they* verified this chat's safety number — informational
     /// only (never sets our own `verified`). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]

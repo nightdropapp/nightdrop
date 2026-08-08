@@ -91,6 +91,14 @@ abstract class NightdropCore extends ChangeNotifier {
   /// check hasn't run, or it failed. Never a reason to block the user — only to tell them.
   String? get updateAvailable => null;
 
+  /// Tell peers whether this device can report screenshots at all.
+  ///
+  /// Goes to the peer, never shown to us: we already know when we screenshot. The person who needs
+  /// it is the one deciding what to send, because below Android 14 a capture raises no notice and
+  /// the peer's silence therefore proves nothing. Safe to call every launch — only a change is put
+  /// on the wire.
+  Future<void> setCaptureReporting(bool visible) async {}
+
   /// Whether an update download is running, whichever screen started it.
   ///
   /// The banner and the "Update app" menu item are two entry points to one operation, so neither

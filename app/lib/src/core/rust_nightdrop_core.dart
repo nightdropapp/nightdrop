@@ -12,6 +12,7 @@ import 'media_cache.dart';
 import 'models.dart';
 import 'notifications.dart';
 import 'public_downloads.dart';
+import 'screenshot_detector.dart';
 
 /// [NightdropCore] backed by the real Rust security core via flutter_rust_bridge.
 ///
@@ -562,6 +563,22 @@ class RustNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
+  @override
+  Future<void> setCaptureReporting(bool visible) async {
+    try {
+      await _core?.setCaptureReporting(visible: visible);
+    } catch (_) {
+      // Best-effort: a standing capability is not worth failing a launch over, and the next
+      // change or re-pair re-announces it.
+    }
+  }
+
+  /// Ask the platform what it can actually do and tell peers, once the core is up.
+  Future<void> _announceCaptureReporting() async {
+    if (_core == null) return;
+    await setCaptureReporting(await ScreenshotDetector.canDetect());
+  }
+
   Future<String?>? _downloadInFlight;
 
   @override
@@ -806,6 +823,9 @@ class RustNightdropCore extends NightdropCore {
     } finally {
       _booting = false;
       notifyListeners();
+      // Tell restored contacts whether this device can report screenshots (#1). Unawaited for the
+      // same reason as the update check: it puts a frame on the wire per contact.
+      unawaited(_announceCaptureReporting());
       // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
       // this one dials Tor. It self-limits to one check a day, so calling it on every start is
       // free after the first.
@@ -880,6 +900,9 @@ class RustNightdropCore extends NightdropCore {
     _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
+    // Settle the screenshot capability before anyone pairs, so the first contact is announced to
+    // on pairing rather than left reading our silence as "they'd be told" (#1).
+    unawaited(_announceCaptureReporting());
     notifyListeners();
   }
 
@@ -1417,6 +1440,7 @@ class RustNightdropCore extends NightdropCore {
         peerBackedUp: c.peerBackedUp,
         verified: c.verified,
         peerVerified: c.peerVerified,
+        peerCapturesSilent: c.peerCapturesSilent,
         peerRelays: c.peerRelays,
         remoteStorageHealthy: c.remoteStorageHealthy,
         lastSeenSecs: c.lastSeenSecs.toInt(),

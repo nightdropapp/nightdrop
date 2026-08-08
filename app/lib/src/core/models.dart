@@ -66,6 +66,7 @@ class Contact {
     this.peerBackedUp = false,
     this.verified = false,
     this.peerVerified = false,
+    this.peerCapturesSilent,
     this.peerRelays = const [],
     this.remoteStorageHealthy = true,
     this.lastSeenSecs = 0,
@@ -108,6 +109,13 @@ class Contact {
   /// informational only. Shown as "the other person marked this verified"; it never implies
   /// our own [verified]. Each side must still confirm the number itself. Resets on a re-pair.
   bool peerVerified;
+
+  /// Whether the peer's device cannot tell them about screenshots (Android below 14).
+  ///
+  /// `null` means they have not said — an older build, or a chat predating the signal. It must
+  /// render as unknown and never as "captures are visible": assuming the reassuring answer from
+  /// silence is exactly the false guarantee this exists to remove.
+  bool? peerCapturesSilent;
 
   /// The peer's advertised **extra** relay addresses (#17). We fan offline mail out to these
   /// in addition to the shared primary relay, so a message reaches them even if one relay is

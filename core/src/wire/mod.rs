@@ -130,6 +130,20 @@ pub enum Frame {
     /// `MARK_UNVERIFIED`, and *which one* carries the state — so it can't be forged, replayed, or
     /// have its state flipped in transit.
     Verified { from: String, message: WireOlm },
+    /// Whether the sender's device can tell them when someone screenshots this chat (#1).
+    ///
+    /// Android reports captures only from 14 onwards. Below that a screenshot raises no notice at
+    /// all, so the peer's *silence* means nothing — and silence that looks like "nothing happened"
+    /// is a guarantee the app does not have. This tells the other side which world they are in, so
+    /// the warning lands on the person deciding what to SEND rather than on the person who already
+    /// knows they took a screenshot.
+    ///
+    /// **E2E-authenticated** exactly like [`Verified`](Frame::Verified): the state rides in *which*
+    /// marker decrypts on the session (`node::MARK_CAPTURES_SILENT` / `MARK_CAPTURES_VISIBLE`), so
+    /// it cannot be forged, replayed, or have a plaintext flag flipped in transit. A forged
+    /// "captures are visible" would be the dangerous direction — it would tell someone their
+    /// screenshots are watched when they are not.
+    Captures { from: String, message: WireOlm },
     /// Silent **mailbox ack** (§11.3): the receiver drained our mailbox. `from` is the acking
     /// peer's identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
     /// (`node::MARK_ACK`) so it can't be forged or replayed.

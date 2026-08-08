@@ -59,6 +59,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppUpdate dco_decode_box_autoadd_app_update(dynamic raw);
 
   @protected
+  bool dco_decode_box_autoadd_bool(dynamic raw);
+
+  @protected
   TransferProgress dco_decode_box_autoadd_transfer_progress(dynamic raw);
 
   @protected
@@ -96,6 +99,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AppUpdate? dco_decode_opt_box_autoadd_app_update(dynamic raw);
+
+  @protected
+  bool? dco_decode_opt_box_autoadd_bool(dynamic raw);
 
   @protected
   TransferProgress? dco_decode_opt_box_autoadd_transfer_progress(dynamic raw);
@@ -174,6 +180,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   AppUpdate sse_decode_box_autoadd_app_update(SseDeserializer deserializer);
 
   @protected
+  bool sse_decode_box_autoadd_bool(SseDeserializer deserializer);
+
+  @protected
   TransferProgress sse_decode_box_autoadd_transfer_progress(
       SseDeserializer deserializer);
 
@@ -213,6 +222,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   AppUpdate? sse_decode_opt_box_autoadd_app_update(
       SseDeserializer deserializer);
+
+  @protected
+  bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   TransferProgress? sse_decode_opt_box_autoadd_transfer_progress(
@@ -297,6 +309,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       AppUpdate self, SseSerializer serializer);
 
   @protected
+  void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
+
+  @protected
   void sse_encode_box_autoadd_transfer_progress(
       TransferProgress self, SseSerializer serializer);
 
@@ -339,6 +354,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   @protected
   void sse_encode_opt_box_autoadd_app_update(
       AppUpdate? self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_transfer_progress(

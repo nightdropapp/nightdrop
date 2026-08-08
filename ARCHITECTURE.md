@@ -451,7 +451,7 @@ on a re-pair (new session) exactly like `verified`.
   buckets for media; timing/volume correlation is a separate, harder problem — see the transport
   alternatives note and the mixnet discussion.)
 - **Authenticated control plane:** the peer-state control signals `Closed`, `Ack`, `BackedUp`,
-  `Verified`, and `Screenshot` are **E2E-authenticated** — each carries an encrypted fixed marker on the ratchet, and the
+  `Verified`, `Screenshot`, and `Captures` are **E2E-authenticated** — each carries an encrypted fixed marker on the ratchet, and the
   receiver acts only if it decrypts to the expected value (`node::MARK_*`, `verify_control`). This
   closes a spoofing/replay gap: without it, anyone who knew your identity key could forge a
   "the other person deleted this chat" (`Closed`), a false delivery `Ack`, a fake backup
@@ -461,7 +461,12 @@ on a re-pair (new session) exactly like `verified`.
   **held for retry** (`pending_control`) when neither the peer nor a relay is reachable as they are
   raised: both report a one-off event the user cannot resend by hand. Design record for the
   screenshot signal, including what detection can and cannot see:
-  `docs/design/screenshot-transparency.md`.
+  `docs/design/screenshot-transparency.md`. `Captures` is the same machinery carrying a *capability*
+  rather than an event — whether the sender's device can report screenshots at all — encoded as
+  **which of two markers decrypts**, so the boolean is authenticated rather than carried in the
+  clear. It is shown to the **peer**, who is the one deciding what to send: below Android 14 a
+  capture raises no notice, so the absence of one means nothing. Unknown (`None`) must never render
+  as "captures are visible".
 - **Onion client authorization (reachability gate):** the Tor transport can restrict *who may even
   fetch our onion descriptor* to paired contacts, using v3 **restricted discovery**
   (`core/src/transport/{client_auth,tor}.rs`, `--features tor`). Each side hands the other a **public**
@@ -608,7 +613,7 @@ here weakens the §-level invariants — it states their limits.
   the peer see a `.onion`, not an IP or location.
 - **Frame sizes** — wire v2 pads every frame to a fixed size, so an on-path observer
   learns nothing from length (not message size, not "typing vs. media").
-- **Control-plane authenticity** — `Closed`/`Ack`/`BackedUp`/`Verified`/`Screenshot`/`Approved` carry a
+- **Control-plane authenticity** — `Closed`/`Ack`/`BackedUp`/`Verified`/`Screenshot`/`Captures`/`Approved` carry a
   ratchet-encrypted marker, so they can't be spoofed or replayed by the relay.
 - **Onion reachability** — restricted discovery (#22) gates the onion descriptor to
   authorized contacts, so a stranger cannot even confirm a user's service is online.

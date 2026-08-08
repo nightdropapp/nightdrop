@@ -916,6 +916,12 @@ abstract class AppLocalizations {
   /// **'Hide'**
   String get updateHide;
 
+  /// Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information.
+  ///
+  /// In en, this message translates to:
+  /// **'This person\'s device can\'t tell them about screenshots, so it won\'t tell you either. If they capture what you send, you won\'t hear about it.'**
+  String get peerCapturesSilentBanner;
+
   /// Shown while the update APK is downloading.
   ///
   /// In en, this message translates to:

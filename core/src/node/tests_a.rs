@@ -1096,6 +1096,95 @@ fn double_pairing_the_same_contact_keeps_messaging_working_both_ways() {
 }
 
 #[test]
+fn a_peer_that_cannot_report_screenshots_says_so_and_silence_never_means_yes() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // Nobody has said anything yet, and that must stay UNKNOWN rather than collapsing to the
+    // reassuring answer. Reading silence as "captures are visible" is the false guarantee this
+    // whole signal exists to remove.
+    assert_eq!(
+        bob.contacts()[0].peer_captures_silent,
+        None,
+        "an unannounced peer is unknown, never 'captures are visible'"
+    );
+
+    // Alice is on a device that cannot report captures, and tells Bob — who is the one deciding
+    // what to send her.
+    alice.announce_captures(false);
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.contacts()[0].peer_captures_silent,
+        Some(true),
+        "Bob must learn that a screenshot on Alice's device raises no notice"
+    );
+    // It is told to the peer, not to the person who already knows what they did.
+    assert_eq!(alice.contacts()[0].peer_captures_silent, None);
+
+    // Announced only on a change: re-stating the same value within a session puts nothing on the
+    // wire, so a caller may hand it the OS answer as often as it likes.
+    let before = bob.messages(&alice_contact).len();
+    alice.announce_captures(false);
+    bob.pump().unwrap();
+    assert_eq!(bob.messages(&alice_contact).len(), before);
+
+    // Upgrading across the boundary flips it the other way.
+    alice.announce_captures(true);
+    bob.pump().unwrap();
+    assert_eq!(bob.contacts()[0].peer_captures_silent, Some(false));
+
+    // And it is not a history event either way — it is a standing property of their device, so it
+    // belongs in the chat header, not as a line posted into every existing chat on rollout.
+    assert!(
+        !bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.system && m.text.to_lowercase().contains("screenshot")),
+        "a capability announcement must not post system messages"
+    );
+    let _ = bob_contact;
+}
+
+#[test]
+fn a_contact_paired_after_the_announcement_still_learns_the_capability() {
+    // The broadcast only walks the chats that exist when it runs, and the value then never changes
+    // again — so without a per-chat announce on pairing, everyone met later would read our silence
+    // as "a screenshot would be reported", which is exactly backwards.
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let mut carol = Node::new(Box::new(net.endpoint("carol")));
+
+    // Alice settles her capability with nobody to tell.
+    alice.announce_captures(false);
+
+    // Bob pairs with her afterwards (Alice is the joiner).
+    let bundle = bob.publish_bundle();
+    alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.contacts()[0].peer_captures_silent,
+        Some(true),
+        "a peer paired after the broadcast must still be told"
+    );
+
+    // …and the reverse direction: Carol pairs *to* Alice, so Alice is the one receiving the Hello.
+    let alice_bundle = alice.publish_bundle();
+    carol.connect_with_bundle("alice", &alice_bundle).unwrap();
+    alice.pump().unwrap();
+    carol.pump().unwrap();
+    assert_eq!(
+        carol.contacts()[0].peer_captures_silent,
+        Some(true),
+        "the inviter side must announce to an inbound pairing too"
+    );
+}
+
+#[test]
 fn screenshot_notifies_both_sides_every_time_and_cannot_be_forged() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));

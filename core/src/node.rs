@@ -51,6 +51,10 @@ const MARK_BACKEDUP: &[u8] = b"nightdrop/ctl/backedup/v1";
 const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
 const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
 const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
+/// Two markers for the screenshot-capability signal (#1), same shape as the verification pair: the
+/// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
+const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
+const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
 
 /// Dev-only logging. Identity keys, invite codes, and decrypted display names must never
 /// reach release logs (Android's logcat persists them for any `adb`-connected observer);
@@ -369,6 +373,9 @@ pub struct Node {
     /// The most recently minted invite code (short code), remembered so the approval
     /// signal we send back to a joiner can echo the code they used (§5).
     last_invite_code: Option<String>,
+    /// What we last told peers about whether this device can report screenshots (#1). `None` until
+    /// the UI says; only a change is announced, so a restart does not re-broadcast to every chat.
+    captures_visible: Option<bool>,
     /// Where media attachments are stored at rest: `(dir, key)`. Each attachment is sealed
     /// under `key` into its own file in `dir`, and the message only references its id — so
     /// large media never inflates the JSON state blob. `None` disables media (demo/tests).
@@ -630,6 +637,7 @@ impl Node {
             chats: HashMap::new(),
             require_authorization: false,
             last_invite_code: None,
+            captures_visible: None,
             media_store: None,
             pending_media: Vec::new(),
             tor_state_dir: None,
@@ -879,6 +887,70 @@ impl Node {
             }) {
                 let _ = self.deliver(&addr, id, &frame);
             }
+        }
+    }
+
+    /// Tell every open chat whether this device can report screenshots at all (#1).
+    ///
+    /// Sent to the PEER, not shown to us: we already know whether we took a screenshot. The person
+    /// who needs this is the one deciding what to send, because below Android 14 a capture raises
+    /// no notice and the absence of one therefore means nothing.
+    ///
+    /// Announced only when the value changes from what this node last announced. That state is not
+    /// persisted, so it does go out once per launch — deliberately, since a send is best-effort and
+    /// a peer who missed the first one would otherwise never hear it. Within a session, a repeated
+    /// call is free.
+    ///
+    /// Only reaches chats that exist *now*; [`announce_captures_to`](Self::announce_captures_to)
+    /// covers the ones paired afterwards.
+    pub fn announce_captures(&mut self, visible: bool) {
+        if self.captures_visible == Some(visible) {
+            return;
+        }
+        self.captures_visible = Some(visible);
+        let marker = if visible {
+            MARK_CAPTURES_VISIBLE
+        } else {
+            MARK_CAPTURES_SILENT
+        };
+        let ids: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(_, c)| !c.closed)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some((addr, frame)) = self.authed_control(&id, marker, |from, message| {
+                Frame::Captures { from, message }
+            }) {
+                // Best-effort and deliberately quiet: this is a standing property, not an event, so
+                // a failed send costs nothing that the next change or re-pair will not fix. It must
+                // never block or noisily retry the way a message does.
+                let _ = self.deliver(&addr, &id, &frame);
+            }
+        }
+    }
+
+    /// Tell one freshly paired chat what [`announce_captures`](Self::announce_captures) already told
+    /// the others.
+    ///
+    /// Without this, a contact added *after* the launch-time announce would never hear it at all —
+    /// the broadcast only walks the chats that existed when it ran, and the value never changes
+    /// again. Silent for a node that has not been told its own capability yet: guessing here would
+    /// be the false reassurance the whole signal exists to remove.
+    fn announce_captures_to(&mut self, contact_id: &str) {
+        let Some(visible) = self.captures_visible else {
+            return;
+        };
+        let marker = if visible {
+            MARK_CAPTURES_VISIBLE
+        } else {
+            MARK_CAPTURES_SILENT
+        };
+        if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
+            Frame::Captures { from, message }
+        }) {
+            let _ = self.deliver(&addr, contact_id, &frame);
         }
     }
 

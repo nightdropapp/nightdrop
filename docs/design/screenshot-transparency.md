@@ -1,7 +1,8 @@
 # Design draft — Screenshot transparency (#1)
 
 **Status:** 🟢 **implemented and verified on hardware** (2026-08-01), including delivery to an
-offline peer via the relay; see §7 for what was exercised and §8 for what is still open.
+offline peer via the relay; see §7 for what was exercised and §8 for what is still open. The
+peer-capability signal (§9) was added 2026-08-08 and is covered by tests, not yet by a device run.
 **Relates to:** `ARCHITECTURE.md` §11 (authenticated control plane), the `SECURITY.md` entry on
 detection limits, and the "Only you can control this" section of `website/limits.html`.
 
@@ -129,9 +130,43 @@ Galaxy S25, Android 16 (API 36), release build, against the dev relay and a Linu
   involved, deliberate screenshots keep working. Verified blank on the S25 with the task still
   present in the recents list. Below API 33 the old approach remains the only option and stays a
   best effort — a race we usually win, not a guarantee.
-* **`canDetect` is not surfaced in the UI.** The user is not currently told whether their *own*
-  screenshots will be announced to their peer, which is a consent-relevant fact on Android ≤ 13.
-* **No capability advertisement to the peer.** Considered and dropped for now: it would let a
-  receiver know whether the other side *can* report screenshots, but it also tells a peer what OS
-  version you run, which is a fingerprinting bit for a small privacy gain over simply documenting
-  that the signal is never a guarantee.
+* **`canDetect` is not surfaced to the user about their own device.** They are not told whether
+  their *own* screenshots will be announced to their peer. Deliberate, for now: on Android ≤ 13
+  that reads as "your screenshots are private", which is an invitation, and the person who needs
+  the fact is the one on the other end (§9).
+
+## 9. Capability advertisement (added 2026-08-08)
+
+This was the "not yet done" item above, and it was resolved the other way from the original note.
+
+`Frame::Captures { from, message }` carries the same authenticated-control-frame shape as
+`Screenshot`, but with **two** domain markers rather than one — `MARK_CAPTURES_VISIBLE`
+(`nightdrop/ctl/captures-visible/v1`) and `MARK_CAPTURES_SILENT` (`…/captures-silent/v1`). The value
+is *which marker decrypts*, so a boolean cannot be flipped in transit without breaking
+authentication; there is no plaintext field to tamper with. It sets `peer_captures_silent:
+Option<bool>` on the chat, persisted with `#[serde(default)]`.
+
+**It is shown to the sender, not to the person on the old device.** That was the deciding argument.
+The one who screenshots already knows they did; the one who cannot otherwise know anything is the
+one deciding what to put on the screen, because on a peer below Android 14 the *absence* of a
+notice is uninformative. Warning the ≤ 13 user about their own device would be telling them their
+captures are unobserved — the wrong half of the pair to inform.
+
+`Option<bool>` and not `bool`, throughout, for one reason: **`None` must render as unknown, never as
+"captures are visible"**. Reading silence as the reassuring answer is precisely the false guarantee
+this signal exists to remove, so an unannounced peer shows no banner at all rather than an implied
+all-clear. The Dart banner is gated on `== true` and the Rust test asserts the `None` case
+explicitly.
+
+Announced on change (`Node::announce_captures`) and to each newly paired chat
+(`announce_captures_to`, called from both the joiner and the inviter side of pairing). Node state is
+not persisted, so the value goes out once per launch — deliberate, since a send is best-effort and a
+peer who missed the first one would otherwise never hear it. It is **not** a history event: it is a
+standing property of a device, so a rollout must not post a system message into every existing chat.
+
+**The fingerprinting cost is real and was accepted.** "Cannot report captures" narrows the peer's
+OS to Android ≤ 13 or a desktop — one bit, to a contact who is already paired, already knows the
+platform from a dozen other tells, and is by construction someone the user chose to talk to. Against
+that: without it, every user of an up-to-date phone silently believes an old-device peer's quiet is
+evidence of no screenshot. The bit goes to one authenticated contact; the false belief was going to
+everyone.

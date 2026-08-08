@@ -105,6 +105,7 @@ impl Node {
                                 peer_backed_up: false,
                                 verified: false,
                                 peer_verified: false,
+                                peer_captures_silent: None,
                                 peer_relays: Vec::new(),
                                 remote_storage_healthy: true,
                                 last_seen_secs: 0, // these three are filled in `contacts()` from the chat
@@ -151,6 +152,9 @@ impl Node {
                 // authorize their side implicitly happens when their `ClientKey` arrives. No-op off Tor.
                 if !peer_address.is_empty() {
                     self.announce_client_key(&contact_id, &peer_address);
+                    // Screenshot capability (#1) — same reason as the joiner side: this chat did not
+                    // exist when the launch-time broadcast ran.
+                    self.announce_captures_to(&contact_id);
                 }
                 if accepted.first_plaintext.is_empty() {
                     return Ok(None);
@@ -454,6 +458,33 @@ impl Node {
                     "⚠️ The other person cleared their verification of this chat's safety number."
                 };
                 chat.history.push(ChatMessage::system(note.to_string()));
+                Ok(Some((from, String::new())))
+            }
+            Frame::Captures { from, message } => {
+                // Whether the PEER's device can report screenshots (#1). Same shape as `Verified`:
+                // decrypt once (a ratchet decrypt spends a message key, so we cannot try both
+                // markers) and branch on the plaintext. Nothing here is ever inferred from silence
+                // — a peer on an older build sends nothing and stays `None`, which the UI must show
+                // as "unknown", not as "captures are visible". Claiming the reassuring answer
+                // without evidence is the bug this whole signal exists to remove.
+                let Some(chat) = self.chats.get_mut(&from) else {
+                    return Ok(None);
+                };
+                let Ok(olm) = message.to_olm() else {
+                    return Ok(None);
+                };
+                let visible = match crypto::decrypt(&mut chat.session, &olm) {
+                    Ok(pt) if pt == MARK_CAPTURES_VISIBLE => true,
+                    Ok(pt) if pt == MARK_CAPTURES_SILENT => false,
+                    _ => return Ok(None), // forged, replayed, or spliced — ignore
+                };
+                if chat.contact.peer_captures_silent == Some(!visible) {
+                    return Ok(None);
+                }
+                chat.contact.peer_captures_silent = Some(!visible);
+                // No history entry either way. This is a standing property of their device, not
+                // something that happened, and on rollout it would post a line into every existing
+                // chat at once. The chat header carries it instead.
                 Ok(Some((from, String::new())))
             }
             Frame::Ack { from, message } => {

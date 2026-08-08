@@ -54,6 +54,7 @@ impl Node {
                 peer_backed_up: chat.contact.peer_backed_up,
                 verified: chat.contact.verified,
                 peer_verified: chat.contact.peer_verified,
+                peer_captures_silent: chat.contact.peer_captures_silent,
                 peer_relays: chat.contact.peer_relays.clone(),
                 // Persist recall receipts for still-queued messages so an edit/unsend can pull an
                 // undelivered blob off the relay even after a restart (§1.1). Flatten the
@@ -323,6 +324,7 @@ impl Node {
                         peer_backed_up: chat.peer_backed_up,
                         verified: chat.verified,
                         peer_verified: chat.peer_verified,
+                        peer_captures_silent: chat.peer_captures_silent,
                         peer_relays: chat.peer_relays.clone(),
                         remote_storage_healthy: true,
                         last_seen_secs: 0, // these three are filled in `contacts()` from the chat
@@ -407,6 +409,7 @@ impl Node {
                                 peer_backed_up: pchat.peer_backed_up,
                                 verified: pchat.verified,
                                 peer_verified: pchat.peer_verified,
+                                peer_captures_silent: pchat.peer_captures_silent,
                                 peer_relays: pchat.peer_relays.clone(),
                                 remote_storage_healthy: true,
                                 last_seen_secs: 0, // these three are filled in `contacts()` from the chat

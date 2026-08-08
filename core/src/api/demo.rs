@@ -73,6 +73,13 @@ impl Demo {
         }
         for peer in self.peers.values_mut() {
             for (peer_contact, received) in peer.pump()? {
+                // An empty text is `pump`'s "this chat changed, re-read it" marker, not a message —
+                // control frames that flip peer state (`Verified`, `Captures`) report themselves
+                // that way. Echoing it produced a stray "(echo) " in the demo core the moment a
+                // capability announcement rode along with pairing.
+                if received.is_empty() {
+                    continue;
+                }
                 let _ = peer.send(&peer_contact, &format!("(echo) {received}"));
             }
         }

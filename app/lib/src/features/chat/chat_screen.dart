@@ -702,6 +702,10 @@ class _ChatScreenState extends State<ChatScreen> {
               if (contact.remoteStorage)
                 _RemoteStorageBanner(healthy: contact.remoteStorageHealthy),
               if (contact.peerBackedUp) const _PeerBackupBanner(),
+              // Shown to the SENDER, and only when the peer has actually said so. A null here
+              // means "they have not told us" and deliberately shows nothing — claiming either
+              // answer without evidence is worse than staying quiet.
+              if (contact.peerCapturesSilent == true) const _PeerCapturesSilentBanner(),
               _SilenceBanner(lastSeenSecs: contact.lastSeenSecs),
               Expanded(
                 child: visibleMessages.isEmpty
@@ -881,6 +885,37 @@ class _UnverifiedBanner extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "Screenshots here are silent" — a property of the PEER's device, shown to the person deciding
+/// what to send. They already know when they screenshot; what they cannot otherwise know is that
+/// the other end raises no notice, which makes the peer's silence meaningless.
+class _PeerCapturesSilentBanner extends StatelessWidget {
+  const _PeerCapturesSilentBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.no_photography_outlined,
+              size: 18, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              AppLocalizations.of(context)!.peerCapturesSilentBanner,
+              style:
+                  TextStyle(color: scheme.onSecondaryContainer, fontSize: 12.5),
+            ),
+          ),
+        ],
       ),
     );
   }

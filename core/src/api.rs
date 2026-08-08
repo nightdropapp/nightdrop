@@ -277,6 +277,14 @@ pub struct Contact {
     /// `verified`. Each side must still confirm the number itself, so a compromised device can't
     /// forge a verified badge on the other. Resets on a re-pair (new session), like `verified`.
     pub peer_verified: bool,
+    /// Whether the **peer's** device cannot tell them about screenshots (#1): `Some(true)` means a
+    /// capture on their side raises no notice, so their silence proves nothing about whether what
+    /// you send has been captured.
+    ///
+    /// `None` means they have not said — an older build, or a chat that predates the signal. The UI
+    /// must render that as unknown and NOT as "captures are visible": inferring the reassuring
+    /// answer from silence is precisely the false guarantee this exists to remove.
+    pub peer_captures_silent: Option<bool>,
     /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
     /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
     pub peer_relays: Vec<String>,
@@ -1723,6 +1731,21 @@ impl NightdropCore {
     pub fn report_screenshot(&self, contact_id: String) -> Result<()> {
         let mut g = self.lock();
         g.me.report_screenshot(&contact_id);
+        g.save();
+        Ok(())
+    }
+
+    /// Tell peers whether this device can report screenshots at all (#1).
+    ///
+    /// `visible` is what the platform can actually do — Android 14+ only. It goes to the PEER, not
+    /// to us: we already know when we take a screenshot. The party who needs it is the one deciding
+    /// what to send, because on a device that cannot report captures the peer's silence means
+    /// nothing, and silence reading as "nothing happened" is a guarantee this app does not make.
+    ///
+    /// Safe to call on every launch: only a change is put on the wire.
+    pub fn set_capture_reporting(&self, visible: bool) -> Result<()> {
+        let mut g = self.lock();
+        g.me.announce_captures(visible);
         g.save();
         Ok(())
     }

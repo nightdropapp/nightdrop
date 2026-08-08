@@ -497,6 +497,16 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// immediate relay catch-up so queued offline mail appears right away.
   Future<void> setBackground({required bool background});
 
+  /// Tell peers whether this device can report screenshots at all (#1).
+  ///
+  /// `visible` is what the platform can actually do — Android 14+ only. It goes to the PEER, not
+  /// to us: we already know when we take a screenshot. The party who needs it is the one deciding
+  /// what to send, because on a device that cannot report captures the peer's silence means
+  /// nothing, and silence reading as "nothing happened" is a guarantee this app does not make.
+  ///
+  /// Safe to call on every launch: only a change is put on the wire.
+  Future<void> setCaptureReporting({required bool visible});
+
   /// Set a chat's disappearing-messages timer (`secs`, 0 = off). A shared setting: messages
   /// older than the timer are deleted on both devices, and the new value is synced to the
   /// peer. Common values: 3600 (1h), 86400 (1d), 604800 (1w).
@@ -770,6 +780,15 @@ class Contact {
   /// forge a verified badge on the other. Resets on a re-pair (new session), like `verified`.
   final bool peerVerified;
 
+  /// Whether the **peer's** device cannot tell them about screenshots (#1): `Some(true)` means a
+  /// capture on their side raises no notice, so their silence proves nothing about whether what
+  /// you send has been captured.
+  ///
+  /// `None` means they have not said — an older build, or a chat that predates the signal. The UI
+  /// must render that as unknown and NOT as "captures are visible": inferring the reassuring
+  /// answer from silence is precisely the false guarantee this exists to remove.
+  final bool? peerCapturesSilent;
+
   /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
   /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
   final List<String> peerRelays;
@@ -810,6 +829,7 @@ class Contact {
     required this.peerBackedUp,
     required this.verified,
     required this.peerVerified,
+    this.peerCapturesSilent,
     required this.peerRelays,
     required this.remoteStorageHealthy,
     required this.localName,
@@ -828,6 +848,7 @@ class Contact {
       peerBackedUp.hashCode ^
       verified.hashCode ^
       peerVerified.hashCode ^
+      peerCapturesSilent.hashCode ^
       peerRelays.hashCode ^
       remoteStorageHealthy.hashCode ^
       localName.hashCode ^
@@ -848,6 +869,7 @@ class Contact {
           peerBackedUp == other.peerBackedUp &&
           verified == other.verified &&
           peerVerified == other.peerVerified &&
+          peerCapturesSilent == other.peerCapturesSilent &&
           peerRelays == other.peerRelays &&
           remoteStorageHealthy == other.remoteStorageHealthy &&
           localName == other.localName &&

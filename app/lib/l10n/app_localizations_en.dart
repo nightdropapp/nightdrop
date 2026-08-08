@@ -494,6 +494,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get updateHide => 'Hide';
 
   @override
+  String get peerCapturesSilentBanner =>
+      'This person\'s device can\'t tell them about screenshots, so it won\'t tell you either. If they capture what you send, you won\'t hear about it.';
+
+  @override
   String get updateDownloading => 'Downloading over Tor…';
 
   @override

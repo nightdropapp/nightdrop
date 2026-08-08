@@ -17,6 +17,12 @@ class _RecordingCore extends MockNightdropCore {
   Future<void> reportScreenshot(String contactId) async {
     reported.add(contactId);
   }
+
+  /// Stand in for a `Captures` frame arriving from the peer.
+  void peerSaysCapturesSilent(bool? silent) {
+    contacts.first.peerCapturesSilent = silent;
+    notifyListeners();
+  }
 }
 
 /// Pretend Android fired `ScreenCaptureCallback` — i.e. the user took a screenshot.
@@ -83,5 +89,28 @@ void main() {
     await tester.pump();
 
     expect(core.reported, isEmpty);
+  });
+
+  // The peer-capability banner (#1) is shown to the SENDER — the person deciding what to send —
+  // because on a device that cannot report captures the peer's silence proves nothing.
+  testWidgets('the chat warns when the peer cannot report screenshots', (tester) async {
+    final (core, contact) = await pumpChat(tester);
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+
+    // Nothing said yet: unknown must render as nothing at all. Showing the warning here would cry
+    // wolf; showing a reassurance would be the false guarantee the signal exists to remove.
+    expect(core.contacts.first.peerCapturesSilent, isNull);
+    expect(find.text(l10n.peerCapturesSilentBanner), findsNothing);
+
+    core.peerSaysCapturesSilent(true);
+    await tester.pump();
+    expect(find.text(l10n.peerCapturesSilentBanner), findsOneWidget);
+
+    // A peer that *can* report is the quiet case — no banner, since the ordinary notice covers it.
+    core.peerSaysCapturesSilent(false);
+    await tester.pump();
+    expect(find.text(l10n.peerCapturesSilentBanner), findsNothing);
+
+    expect(contact.id, isNotEmpty);
   });
 }
