@@ -58,6 +58,56 @@ void main() {
     expect(find.text('Create my identity'), findsNothing);
   });
 
+  testWidgets('each wrong secret costs longer, up to a five-second ceiling', (tester) async {
+    // The lockout grows 0.5s per failure and stops at 5s. It only slows someone typing at the
+    // phone — against a copy of the lock file it is worth nothing, which is why the screen never
+    // presents it as protection. Untested until now: the existing wrong-secret test pumps a flat
+    // second to get past it, which passes for any delay under a second and for no delay at all.
+    await tester.pumpWidget(NightdropApp(core: _LockedCore()));
+    await tester.pump();
+
+    Future<void> failOnce() async {
+      await tester.enterText(find.byType(TextField).first, 'not it');
+      await tester.tap(find.byType(FilledButton));
+      await tester.pump(); // start the async unlock
+      await tester.pump(); // let it resolve false and enter the delay
+    }
+
+    // While the delay runs the button is disabled and shows a spinner, so the spinner is the
+    // observable for "still locked out".
+    Future<void> expectBusyFor(Duration d, int attempt) async {
+      await tester.pump(d - const Duration(milliseconds: 50));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget,
+          reason: 'attempt $attempt should still be waiting just before ${d.inMilliseconds}ms');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(CircularProgressIndicator), findsNothing,
+          reason: 'attempt $attempt should be accepting input again after ${d.inMilliseconds}ms');
+    }
+
+    await failOnce();
+    await expectBusyFor(const Duration(milliseconds: 500), 1);
+
+    await failOnce();
+    await expectBusyFor(const Duration(milliseconds: 1000), 2);
+
+    await failOnce();
+    await expectBusyFor(const Duration(milliseconds: 1500), 3);
+
+    // Ceiling: by the tenth failure it is 5s, and it must not keep climbing past that — an
+    // unbounded delay would eventually lock the owner out of their own phone for minutes.
+    for (var i = 4; i <= 12; i++) {
+      await failOnce();
+      await tester.pump(const Duration(seconds: 6));
+    }
+    await failOnce();
+    await tester.pump(const Duration(milliseconds: 4950));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget,
+        reason: 'the 13th failure should still be waiting just before 5s');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(CircularProgressIndicator), findsNothing,
+        reason: 'the delay must be capped at 5s, not grow with every attempt');
+  });
+
   testWidgets('the right secret unlocks through to the app', (tester) async {
     await tester.pumpWidget(NightdropApp(core: _LockedCore()));
     await tester.pump();
