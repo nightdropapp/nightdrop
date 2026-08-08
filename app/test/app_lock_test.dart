@@ -228,6 +228,45 @@ void main() {
     expect(core.deleted, contains('nightdrop-state.bin'));
   });
 
+  // Repro for a red screen seen on hardware 2026-08-08 while enabling a lock:
+  //   framework.dart: Failed assertion: '_dependents.isEmpty': is not true
+  // _askNewSecret disposes its TextEditingControllers and FocusNode the instant showDialog's
+  // future completes — but that future completes when the route is POPPED, while the dialog's
+  // exit animation is still running and its TextFields still reference those objects. Assertions
+  // are stripped from release builds, so this never shows a red screen in a shipped APK; the
+  // lifecycle misuse just happens silently. It matters because the crash aborted the operation
+  // midway: the keystore copy was NOT deleted and no lock file was written.
+  testWidgets('enabling a lock survives the dialog exit animation', (tester) async {
+    final core = _EnableCore();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showAppLockSettings(context, core),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Use a passphrase'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), 'locktest-8aug');
+    await tester.enterText(find.byType(TextField).at(1), 'locktest-8aug');
+    // The exit animation runs inside this settle. If the controllers were disposed too early,
+    // the framework trips on the way out.
+    await tester.tap(find.text('Turn on app lock'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('I understand — turn it on'), findsOneWidget,
+        reason: 'the confirmation gate must be reached, not a crash');
+  });
+
   // The other half of the same report: "remove" is offered only when there is something to remove.
   testWidgets('remove is offered only once a wipe code is armed', (tester) async {
     final core = _DuressSettingsCore()..armed = true;
@@ -363,5 +402,18 @@ class _WipeFilesCore extends MockNightdropCore {
     _wiped = true;
     notifyListeners();
     return true;
+  }
+}
+
+/// A core with no lock set, so the settings entry point takes the "enable" path.
+class _EnableCore extends MockNightdropCore {
+  String? enabledWith;
+
+  @override
+  Future<bool> isStoreLocked() async => false;
+
+  @override
+  Future<void> enableStoreLock(String secret) async {
+    enabledWith = secret;
   }
 }
