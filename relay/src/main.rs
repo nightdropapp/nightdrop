@@ -181,7 +181,7 @@ fn main() -> anyhow::Result<()> {
             let served = Arc::clone(&last_served);
             let sd = state_dir.clone();
             tokio::spawn(async move {
-                let mut dark_since: Option<Instant> = None;
+                let mut clocks = DarkClocks::default();
                 let mut cleared = false;
                 loop {
                     tokio::time::sleep(PROBE_INTERVAL).await;
@@ -199,19 +199,23 @@ fn main() -> anyhow::Result<()> {
                     let publisher_dark = watched.status().state()
                         == tor_hsservice::status::State::DegradedUnreachable;
 
-                    let since = *dark_since.get_or_insert_with(Instant::now);
+                    let now = Instant::now();
+                    clocks.observe(publisher_dark, dial.is_err(), now);
+                    // The served-clients veto is about the dial, so the dial's clock decides what
+                    // "since the darkness began" means for it.
+                    let since = clocks.dial.unwrap_or(now);
                     let cycle = Cycle {
                         dial_failed: dial.is_err(),
                         publisher_dark,
                         served_since_dark: served.load(Ordering::Relaxed)
                             > since.duration_since(start).as_secs(),
                         client_unusable: tor_client_unusable(&probe_client),
-                        dark_for: since.elapsed(),
+                        dark_for: clocks.dark_for(publisher_dark, now),
                     };
                     let dark_for = cycle.dark_for;
                     match cycle.verdict() {
                         Verdict::Healthy => {
-                            dark_since = None;
+                            clocks = DarkClocks::default();
                             // A heartbeat, deliberately logged every time. It is the only line that
                             // proves this relay was reachable at a given moment, and the counters
                             // around it are worthless without evidence that the log is still
@@ -243,7 +247,7 @@ fn main() -> anyhow::Result<()> {
                                 "nightdrop-relay: {how} — {why}{detail}, so this says nothing \
                                  about the onion; not restarting"
                             );
-                            dark_since = None;
+                            clocks.excuse(cycle.client_unusable.is_some());
                         }
                         Verdict::Dark(why) => eprintln!(
                             "nightdrop-relay: {how} — {why}; dark for {}s of {}s before a restart",
@@ -373,6 +377,67 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
         }
     }
     Ok(())
+}
+
+/// How long each watchdog signal has been continuously bad — **one clock per signal**.
+///
+/// [`Cycle::verdict`] is careful that a veto may only be spent against the signal it actually
+/// explains: `served_since_dark` is checked *after* `publisher_dark` so that clients reaching us
+/// over the ring that IS published can never excuse the ring that is not. A single shared clock
+/// defeated that from outside the function — an `Inconclusive` cycle cleared the accumulated
+/// darkness no matter which signal had established it.
+///
+/// Observed on the dev relay 2026-08-08: the publisher's darkness climbed 0s → 302s → 604s and was
+/// reset to 0s by a "clients are still being served" cycle, over and over, for six hours. The
+/// threshold was never reachable, so the restart the watchdog exists to perform could not happen
+/// while any client was still being served — which is exactly the state a one-sided outage
+/// produces, since everyone on the good ring is served throughout.
+#[derive(Default)]
+struct DarkClocks {
+    /// Since when the descriptor has been missing from one of the two HsDir rings.
+    publisher: Option<Instant>,
+    /// Since when the end-to-end self-dial has been failing.
+    dial: Option<Instant>,
+}
+
+impl DarkClocks {
+    /// Start each clock when its own signal first goes bad; stop it the moment that signal is good
+    /// again. The publisher's clock does not care that a dial failed, and vice versa.
+    fn observe(&mut self, publisher_dark: bool, dial_failed: bool, now: Instant) {
+        if publisher_dark {
+            self.publisher.get_or_insert(now);
+        } else {
+            self.publisher = None;
+        }
+        if dial_failed {
+            self.dial.get_or_insert(now);
+        } else {
+            self.dial = None;
+        }
+    }
+
+    /// How long the outage *being judged* has lasted. `verdict` reads `publisher_dark` first, so
+    /// when it is set that is the outage on trial and its clock is the one that counts.
+    fn dark_for(&self, publisher_dark: bool, now: Instant) -> Duration {
+        let clock = if publisher_dark {
+            self.publisher
+        } else {
+            self.dial
+        };
+        clock.map(|t| now.duration_since(t)).unwrap_or_default()
+    }
+
+    /// Spend a veto against only what it is entitled to explain.
+    ///
+    /// An unusable Tor client explains both signals — nothing can dial or upload without one — so
+    /// it clears both. "Clients are still being served" explains the dial and nothing else, so the
+    /// publisher's clock keeps running.
+    fn excuse(&mut self, client_unusable: bool) {
+        self.dial = None;
+        if client_unusable {
+            self.publisher = None;
+        }
+    }
 }
 
 /// What one watchdog cycle observed.
@@ -946,6 +1011,63 @@ mod tests {
             ..healthy(WATCHDOG_MAX_DARK)
         };
         assert!(matches!(cycle.verdict(), Verdict::Restart(_)));
+    }
+
+    #[test]
+    fn a_served_client_cannot_reset_the_clock_on_a_half_published_descriptor() {
+        // The bug this split fixes, and it was live on the dev relay for six hours on 2026-08-08.
+        // `verdict` already refuses to let the served-clients veto excuse `publisher_dark` — but
+        // the clock lived outside `verdict`, and an Inconclusive cycle wiped it whatever had set
+        // it. So a relay alternating between "missing from one ring" and "a client got served"
+        // reset to 0s every other cycle and could never reach the restart threshold. Which is not
+        // an edge case: a one-sided outage serves everyone on the good ring the whole time, so
+        // that alternation IS the failure, not a distraction from it.
+        let start = Instant::now();
+        let mut clocks = DarkClocks::default();
+
+        // Cycle 1: half-published, and the dial fails too.
+        clocks.observe(true, true, start);
+        // Cycle 2: the publisher is still dark; a client was served, so the dial is excused.
+        clocks.excuse(false);
+        let later = start + WATCHDOG_MAX_DARK;
+        clocks.observe(true, true, later);
+
+        assert_eq!(
+            clocks.dark_for(true, later),
+            WATCHDOG_MAX_DARK,
+            "the publisher's darkness must survive a veto that only explains the dial"
+        );
+        assert_eq!(
+            clocks.dark_for(false, later),
+            Duration::ZERO,
+            "the dial's own clock is the one that veto resets"
+        );
+    }
+
+    #[test]
+    fn an_unusable_tor_client_clears_both_clocks() {
+        // The counterpart: this veto really does explain both signals, so it must clear both or a
+        // box that was merely offline would come back to a pre-loaded restart timer and reset its
+        // introduction points over an outage no restart could fix.
+        let start = Instant::now();
+        let mut clocks = DarkClocks::default();
+        clocks.observe(true, true, start);
+        clocks.excuse(true);
+        let later = start + WATCHDOG_MAX_DARK;
+        assert_eq!(clocks.dark_for(true, later), Duration::ZERO);
+        assert_eq!(clocks.dark_for(false, later), Duration::ZERO);
+    }
+
+    #[test]
+    fn a_signal_going_good_stops_its_own_clock_and_leaves_the_other_running() {
+        let start = Instant::now();
+        let mut clocks = DarkClocks::default();
+        clocks.observe(true, true, start);
+        // The dial comes back; the descriptor is still missing from a ring.
+        let later = start + WATCHDOG_MAX_DARK;
+        clocks.observe(true, false, later);
+        assert_eq!(clocks.dark_for(true, later), WATCHDOG_MAX_DARK);
+        assert_eq!(clocks.dark_for(false, later), Duration::ZERO);
     }
 
     #[test]
