@@ -2,7 +2,7 @@
 
 **Status:** 🟢 **implemented and verified on hardware** (2026-08-01), including delivery to an
 offline peer via the relay; see §7 for what was exercised and §8 for what is still open. The
-peer-capability signal (§9) was added 2026-08-08 and is covered by tests, not yet by a device run.
+peer-capability signal (§9) was added 2026-08-08 and verified on hardware the same day.
 **Relates to:** `ARCHITECTURE.md` §11 (authenticated control plane), the `SECURITY.md` entry on
 detection limits, and the "Only you can control this" section of `website/limits.html`.
 
@@ -163,6 +163,17 @@ Announced on change (`Node::announce_captures`) and to each newly paired chat
 not persisted, so the value goes out once per launch — deliberate, since a send is best-effort and a
 peer who missed the first one would otherwise never hear it. It is **not** a history event: it is a
 standing property of a device, so a rollout must not post a system message into every existing chat.
+
+**Verified on hardware (2026-08-08).** Galaxy S25 (Android 16, `canDetect` true) paired to the Linux
+desktop build (`canDetect` false), both already running, pairing by short code so the chat was
+created *after* both had announced:
+
+* the phone showed the banner — "This person's device can't tell them about screenshots, so it
+  won't tell you either" — and showed it **before the desktop approved the request**. That is
+  `announce_captures_to` on the inviter's inbound-`Hello` path, i.e. the half the launch-time
+  broadcast cannot reach and the half most likely to be wrong.
+* the desktop showed **no** capture banner, only its usual "not verified" one. The negative case is
+  the point of the test: a peer that *can* report must produce silence, not a warning.
 
 **The fingerprinting cost is real and was accepted.** "Cannot report captures" narrows the peer's
 OS to Android ≤ 13 or a desktop — one bit, to a contact who is already paired, already knows the
