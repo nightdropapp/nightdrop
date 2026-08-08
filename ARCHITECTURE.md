@@ -263,6 +263,25 @@ on a re-pair (new session) exactly like `verified`.
   false readings — are matched *ahead* of it during aggregation, so they can only ever mask it,
   never manufacture it.
 
+  *Confirmed in production, 2026-08-08.* The mapping from a real one-sided outage to
+  `State::DegradedUnreachable` had never been exercised deliberately — the decision path downstream
+  of it was unit-tested, the arti behaviour feeding it was assumed. The dev relay produced it on its
+  own three times in one afternoon, logging the watchdog's own words, "the descriptor is missing
+  from one of the two HsDir rings", which is reachable only when that variant is read. No staged
+  HSDir block was needed.
+
+  **One clock per signal.** That same journal exposed a bug in the bookkeeping *around* the
+  verdict. `Cycle::verdict` is careful that a veto may only be spent against the signal it actually
+  explains — the served-clients veto is checked *after* the ring check so that clients reaching us
+  over the published ring can never excuse the ring that is not published. The dark-spell clock
+  lived outside that function, and an `Inconclusive` cycle cleared it whatever had established it.
+  So the ordering was defeated from the outside: a relay alternating between "missing from one ring"
+  and "a client got served" reset to 0s every other cycle. That alternation is not noise around the
+  failure, it **is** the failure — a one-sided outage serves everyone on the good ring throughout,
+  so the veto fires forever and the threshold is unreachable. Observed climbing 0s → 302s → 604s and
+  back to 0s for six hours. Each signal now carries its own clock: a good signal stops its own, an
+  unusable Tor client clears both (it explains both), served clients clear only the dial's.
+
   **A restart must be paid for with corroborated evidence**, because it rotates the introduction
   points and strands every client holding the current descriptor until it refetches. Two things
   veto one: a real client's stream served since the dark spell began (the service is live, so our
@@ -713,7 +732,12 @@ told us the hash of.
 **The app never installs.** Android verifies signatures itself and refuses to replace Night Drop
 with anything not signed by our release key, so the worst a compromised site achieves is a
 wasted download — not a swapped app. Adding an in-app installer would mean
-`REQUEST_INSTALL_PACKAGES` on a privacy tool for a small delta; declined for now.
+`REQUEST_INSTALL_PACKAGES` on a privacy tool for a small delta; declined for now, and recorded
+here so it is not re-litigated: F-Droid surfaces that permission to users as "install other apps",
+reviewers of a privacy messenger will ask about it, and it needs a `FileProvider` for the
+`content://` URI on top. Android still shows its own install prompt and still refuses anything not
+signed by our release key, so the security delta is genuinely small — the cost is a visible
+permission. Revisit only if users ask for it.
 
 **It lands where the user can find it, without a permission.** Since the app does not install,
 the file has to be reachable by hand — so the verified build is published to the **public

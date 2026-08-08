@@ -185,6 +185,47 @@ Android's `BiometricPrompt` reports success or failure and nothing else — neve
 matched. There is no API, on any Android version, that exposes finger identity, and this is
 deliberate on Google's part. It cannot be built as specified.
 
+## 8b. Verified on hardware, and the theory that turned out to be wrong (2026-08-08)
+
+A wipe on a device once left the **store key** behind: the key survived, and nothing in the app
+said so. The standing explanation was a `flutter_secure_storage` 10 migration — legacy
+`EncryptedSharedPreferences` entries are migrated "on first access", and a delete against a
+just-migrated entry failing once would mean every user upgrading from an older build had one wipe
+that could half-fail. **That explanation is wrong**, on three independent grounds:
+
+* `app/pubspec.lock` has pinned `flutter_secure_storage` 10.3.1, byte-identical `sha256`, since
+  0.1.12 — well before the install that failed. No plugin upgrade ever happened.
+* the ESP migration path (`FlutterSecureStorage.java`) only runs when
+  `hasDataInEncryptedSharedPreferences()` is true, i.e. data written by plugin **9.2.4 or earlier**.
+  Night Drop has never shipped one.
+* the app passes a bare `const FlutterSecureStorage()`, and `encryptedSharedPreferences` defaults to
+  `false` on both the Dart and Java sides, so nothing was ever written there to migrate.
+
+The `__androidx_security_crypto_encrypted_prefs_*_keyset__` entries that *do* appear in the prefs
+file are a side effect of the plugin initialising ESP merely to run that check — not legacy data.
+
+**What remains plausible, and is still unproven:** the plugin's delete is
+`editor.remove(key).apply()`, an *asynchronous* commit that returns as soon as the in-memory map is
+updated. "The call returned" and "the entry is gone from disk" are different claims, which fits an
+entry surviving with nothing thrown; process death during a wipe is the obvious way to lose the
+flush. The wipe therefore now **reads the key back** and records a survivor as a failed step, so a
+recurrence reports itself instead of being silent. Wait for that diagnostic rather than staging a
+repro — the repro the old theory called for would prove nothing.
+
+**The wipe itself is verified end to end** (Galaxy S25, Android 16, 2026-08-08), on a fresh identity
+with no app lock so the key really was in the keystore rather than derived from a lock secret:
+before, `shared_prefs/FlutterSecureStorage.xml` held `nightdrop_store_key`; after "Log out / delete
+identity" it was gone, along with `nightdrop-state.bin`, `onion-key.sealed`, `arti-state/` (hss
+onion keys included) and `nightdrop-media/`. No `wipe: could not remove` line appeared — and the
+same log carried `diagnostics enabled` and six other diag lines through the wipe window, so that
+silence is evidence rather than a dead channel.
+
+`files/arti-cache/` survived that run and was **added to the wipe afterwards**. It is not a data
+leak — arti's directory cache holds the public Tor consensus and microdescriptors, no key, no
+address, no contact list — but it carries a modification time, and a wipe that leaves "Tor last ran
+at 14:26" beside an app presenting itself as freshly onboarded is a wipe with an asterisk. Removing
+it costs a fresh consensus fetch on the next launch.
+
 ## 9. Status
 
 * ✅ Format, threat model, and behaviour decided (this document).

@@ -134,6 +134,20 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   platform**, **screen recording**, and **a camera pointed at the screen**. So a peer who sees no
   notice has learned nothing, and the UI/website must never imply otherwise. What *is* blocked is
   the Recents thumbnail, since that capture has no user intent behind it.
+- **A copy inside Samsung Secure Folder receives nothing while the folder is locked.** *(Known
+  limit, imposed by the platform.)* Secure Folder is a separate Android user and freezes the apps
+  inside it whenever it is locked, so the inner Night Drop is not running: it holds no circuits,
+  publishes nothing, and drains no relay mailbox. Messages sit undelivered at the sender —
+  correctly marked as such — and arrive only after the folder is authenticated and the app is
+  reopened. The in-app background-delivery toggle has no effect on this; nothing inside the app
+  can override a frozen container. Notifications behave the same way: none reach the outer lock
+  screen, and the one raised after authentication is masked by Secure Folder as "Hidden content"
+  rather than showing our text. Verified on a Galaxy S25, Android 16, 2026-08-08.
+
+  The confidentiality properties are therefore *stronger* inside Secure Folder, not weaker — the
+  trade is availability. Anyone putting Night Drop there for deniability should know they are
+  giving up timely delivery entirely, not merely delaying it, and that a sender sees a message
+  held rather than delivered for as long as the folder stays locked.
 - **App-lock PIN entropy.** *(Known and disclosed, not a bug.)* The opt-in app lock
   (`ARCHITECTURE.md` §7d) accepts either a PIN or a passphrase. A **passphrase** protects the
   history against someone who copies `store-key.lock` off the device; a short **PIN does not**, and
