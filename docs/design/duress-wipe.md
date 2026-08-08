@@ -204,13 +204,34 @@ that could half-fail. **That explanation is wrong**, on three independent ground
 The `__androidx_security_crypto_encrypted_prefs_*_keyset__` entries that *do* appear in the prefs
 file are a side effect of the plugin initialising ESP merely to run that check — not legacy data.
 
-**What remains plausible, and is still unproven:** the plugin's delete is
-`editor.remove(key).apply()`, an *asynchronous* commit that returns as soon as the in-memory map is
-updated. "The call returned" and "the entry is gone from disk" are different claims, which fits an
-entry surviving with nothing thrown; process death during a wipe is the obvious way to lose the
-flush. The wipe therefore now **reads the key back** and records a survivor as a failed step, so a
-recurrence reports itself instead of being silent. Wait for that diagnostic rather than staging a
-repro — the repro the old theory called for would prove nothing.
+**The actual root cause, established 2026-08-08.** It does not need a migration, or a lost write,
+or anything exotic — it is a deduction from the end state that was recorded at the time. The wipe
+was then a *single* `try` with a silent `catch`, and **the first statement in it was the keystore
+delete**. Had that call returned, execution would have continued into the file deletions below it.
+What was observed instead is that the store key, the sealed onion identity, arti's state **and**
+the authorized-client files all survived together. Only one control flow produces that end state:
+the block threw at its first statement, i.e. `_secure.delete` raised — and the silent catch
+swallowed it, skipping every deletion below while onboarding overwrote the state file and made the
+identity *look* destroyed.
+
+So the answer to "how did the store key survive a wipe" is the abort, and it was already fixed by
+the step-by-step wipe (each target removed independently, failures collected and reported) plus
+overwrite-before-delete (what survives a failed delete is a random key that unlocks nothing). Why
+the Android keystore call threw *that particular day* is unknown, and is no longer load-bearing: no
+single failing step can abort the wipe now, and the value left behind if one does is inert.
+
+**The lost-flush theory is not needed and does not fit.** `apply()` is asynchronous, so a window
+does exist in principle — but it was measured on a device (Galaxy S25, 2026-08-08) at **~130 ms
+from the confirm tap to the key leaving the on-disk XML**, with the whole Dart chain, the FFI call
+to mint a random key, and both `apply()`s inside that figure; the gap between the in-memory delete
+and the file changing is below the ~20 ms resolution of the probe. Losing it requires the process
+to be killed inside a sub-frame window. The original incident had no process death at all — the app
+carried on to onboarding — so this cannot be what happened.
+
+It is still worth knowing that the read-back added to the wipe does **not** cover that window:
+`flutter_secure_storage`'s `read`/`containsKey` go to `SharedPreferencesImpl`'s **in-memory** map,
+so the check proves the delete took effect in memory and says nothing about the bytes on disk. It
+catches a delete that silently did nothing — which is what it was added for — and nothing more.
 
 **The wipe itself is verified end to end** (Galaxy S25, Android 16, 2026-08-08), on a fresh identity
 with no app lock so the key really was in the keystore rather than derived from a lock secret:

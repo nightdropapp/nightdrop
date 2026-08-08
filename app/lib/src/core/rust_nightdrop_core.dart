@@ -1227,10 +1227,15 @@ class RustNightdropCore extends NightdropCore {
       }
       await _secure.delete(key: _kStoreKeyName);
       // Read it back. A delete that *throws* is caught above; a delete that returns success and
-      // leaves the entry there is not, and that is the shape of the failure actually seen on a
-      // device — the key survived a wipe with nothing reported. The platform commits its
-      // preferences asynchronously, so "the call returned" is not the same claim as "the entry is
-      // gone", and this is the only place that can tell the difference.
+      // leaves the entry readable is not, and that is closer to the failure seen on a device — the
+      // key survived a wipe with nothing reported.
+      //
+      // Be precise about the reach of this check, because it is easy to credit it with more.
+      // `read` goes to `SharedPreferencesImpl`'s IN-MEMORY map (`preferences.getString`), and the
+      // platform commits to disk asynchronously via `apply()`. So this catches a delete that
+      // did not take effect at all; it CANNOT see a delete that took effect in memory and never
+      // reached storage — process death during a wipe would leave the entry on disk with this
+      // check having passed. Closing that gap needs something that looks at the file.
       if (await _secure.read(key: _kStoreKeyName) != null) {
         throw StateError('store key survived its delete');
       }
