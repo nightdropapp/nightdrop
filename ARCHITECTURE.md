@@ -778,8 +778,16 @@ under forced Doze (screen off, unplugged, `deviceidle force-idle`): a 45MB build
 2m48s with no attempt by the system to freeze the process, against attempts every ~6s while
 backgrounded without the hold.
 
-Known limit: streaming to `.part` makes *resume* possible — the partial file is right there — but
-that is not implemented, so a failed download restarts from zero.
+**An interrupted download resumes.** The scratch file is keyed by the **expected hash**
+(`<dest>.<sha16>.part`), which answers the question a partial otherwise raises — how long is it
+trustworthy? Indefinitely, because a partial for any other build lands in a different slot and is
+swept, and the final SHA-256 over the assembled file is what decides acceptability regardless. A
+failed transfer therefore keeps its bytes and the next attempt sends `Range: bytes=N-`; a server
+that ignores the range replies 200, and the implementation must then discard what was on disk
+rather than append to it, since half a build followed by a whole one is not a build. A hash
+mismatch deletes the partial too — resuming into the same bad result forever is worse than
+starting over. The Range header is used only for builds, never for the manifest, whose request
+must stay byte-identical for every install.
 
 ---
 

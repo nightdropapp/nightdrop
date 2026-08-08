@@ -599,19 +599,27 @@ impl Transport for TorTransport {
     /// by a size limit.
     fn onion_get_to_file(
         &self,
-        onion: &str,
-        port: u16,
-        path: &str,
-        dest: &std::path::Path,
-        max_bytes: u64,
+        req: crate::transport::FileFetch<'_>,
         progress: &dyn Fn(u64, Option<u64>),
     ) -> Option<Result<u64>> {
-        use std::io::Write as _;
+        let crate::transport::FileFetch {
+            onion,
+            port,
+            path,
+            dest,
+            max_bytes,
+            resume_from,
+        } = req;
+        use std::io::{Seek as _, Write as _};
 
         let client = Arc::clone(&self.client);
         let runtime = Arc::clone(&self.runtime);
         let budget = crate::update::DOWNLOAD_TIMEOUT;
-        let request = crate::update::request_line(onion, path);
+        let request = if resume_from > 0 {
+            crate::update::range_request_line(onion, path, resume_from)
+        } else {
+            crate::update::request_line(onion, path)
+        };
         let (onion, path) = (onion.to_string(), path.to_string());
         let dest = dest.to_path_buf();
         Some(runtime.block_on(async move {
@@ -626,10 +634,22 @@ impl Transport for TorTransport {
                 stream.write_all(request.as_bytes()).await?;
                 stream.flush().await?;
 
-                let mut file = std::fs::File::create(&dest)
-                    .with_context(|| format!("create {}", dest.display()))?;
+                // Opened read/write rather than truncating: a resume has to keep what is already
+                // there, and only a 200 (server ignored the range) may throw it away.
+                let mut file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(resume_from == 0)
+                    .open(&dest)
+                    .with_context(|| format!("open {}", dest.display()))?;
+                if resume_from > 0 {
+                    file.seek(std::io::SeekFrom::Start(resume_from))?;
+                }
                 let mut head = crate::update::ResponseHead::default();
+                let mut resumed = resume_from;
                 let mut written: u64 = 0;
+                let mut checked_status = false;
                 let mut chunk = [0u8; 16 * 1024];
                 loop {
                     let n = futures::AsyncReadExt::read(&mut stream, &mut chunk).await?;
@@ -637,14 +657,29 @@ impl Transport for TorTransport {
                         break;
                     }
                     let body = head.push(&chunk[..n])?;
+                    if head.complete() && !checked_status {
+                        checked_status = true;
+                        // 200 to a Range request means the server sent the whole body regardless.
+                        // Appending it to the partial would splice two copies together, so the
+                        // partial goes.
+                        if resumed > 0 && head.status() == 200 {
+                            file.set_len(0)?;
+                            file.seek(std::io::SeekFrom::Start(0))?;
+                            resumed = 0;
+                        }
+                    }
                     written += body.len() as u64;
-                    if written > max_bytes {
+                    if resumed + written > max_bytes {
                         anyhow::bail!("update fetch of {path} exceeded the size cap");
                     }
                     file.write_all(body)?;
                     // Reported after the write, so a number that appears in the log is a number of
-                    // bytes actually on disk. Throttling is the caller's business.
-                    progress(written, head.content_length());
+                    // bytes actually on disk. Resumed bytes count too — a bar that restarted at 0%
+                    // on a resume would say the opposite of what happened.
+                    progress(
+                        resumed + written,
+                        head.content_length().map(|len| resumed + len),
+                    );
                 }
                 if !head.complete() {
                     anyhow::bail!("update fetch of {path} ended before its headers did");
@@ -652,15 +687,15 @@ impl Transport for TorTransport {
                 // Durability is not the point — the caller re-hashes what it reads back — but an
                 // unflushed tail would make the hash fail for a download that actually succeeded.
                 file.flush()?;
-                Ok(written)
+                Ok(resumed + written)
             };
             let result = tokio::time::timeout(budget, fetch)
                 .await
                 .map_err(|_| anyhow::anyhow!("update fetch timed out"))?;
-            if result.is_err() {
-                // Never leave a partial build behind on any failure path, including the timeout.
-                let _ = std::fs::remove_file(&dest);
-            }
+            // The partial is deliberately LEFT on a failure now: it is what the next attempt
+            // resumes from. Discarding it is the caller's decision (crate::update::download drops
+            // it when the completed file fails its hash), because only the caller knows whether the
+            // bytes are still worth anything.
             result
         }))
     }

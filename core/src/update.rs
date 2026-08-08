@@ -221,7 +221,16 @@ pub fn download(
     // Streamed here, never to `dest`. `dest` is the path the caller will make reachable, so a file
     // must not appear there until it has passed — and the scratch name is what makes that possible
     // without holding the whole build in memory.
-    let part = part_path(dest);
+    // A stable, hash-keyed slot rather than a name unique per attempt: resuming needs to find
+    // what the last attempt left. Two downloads must still never share it, which is why
+    // `NightdropCore::download_update` is single-flight — that guard is now load-bearing rather
+    // than defence in depth.
+    let part = part_path(dest, &entry.sha256);
+    sweep_stale_parts(dest, &part);
+    let resume_from = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+    if resume_from > 0 {
+        crate::diag!("update: resuming from {resume_from} bytes already on disk");
+    }
     // Throttled here rather than in the transport: at a 16KiB chunk this fires ~2,800 times for a
     // 45MB build, and a log line per chunk is not observability. A stall produces silence rather
     // than a line — but the last line printed then says how far it got and when, which is the
@@ -246,11 +255,14 @@ pub fn download(
         }
     };
     let Some(fetched) = transport.onion_get_to_file(
-        UPDATE_ONION,
-        UPDATE_PORT,
-        &entry.url,
-        &part,
-        MAX_DOWNLOAD_BYTES as u64,
+        crate::transport::FileFetch {
+            onion: UPDATE_ONION,
+            port: UPDATE_PORT,
+            path: &entry.url,
+            dest: &part,
+            max_bytes: MAX_DOWNLOAD_BYTES as u64,
+            resume_from,
+        },
         &progress,
     ) else {
         crate::diag!("update: download ABORTED — transport cannot fetch anonymously");
@@ -261,8 +273,14 @@ pub fn download(
         Err(e) => {
             // Where a Doze freeze or a dead circuit shows up. The elapsed time is the whole point:
             // it separates "the network stalled" from "we hit DOWNLOAD_TIMEOUT".
-            crate::diag!("update: download FAILED after {:?}: {e}", started.elapsed());
-            let _ = std::fs::remove_file(&part);
+            // The partial stays: a failed 40MB transfer over Tor is worth resuming, and the
+            // final hash is what decides whether the assembled bytes are acceptable, so keeping
+            // them costs nothing but disk.
+            let kept = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
+            crate::diag!(
+                "update: download FAILED after {:?} ({kept} bytes kept to resume from): {e}",
+                started.elapsed()
+            );
             return Err(e);
         }
     };
@@ -281,7 +299,8 @@ pub fn download(
     };
     if !got.eq_ignore_ascii_case(entry.sha256.trim()) {
         // Not "corrupt download, retry". We asked an authenticated onion for a file it told us
-        // the hash of; a mismatch means something is wrong that a retry will not fix.
+        // the hash of; a mismatch means something is wrong that a retry will not fix. The partial
+        // goes with it — resuming into the same bad result forever is worse than starting over.
         crate::diag!("update: HASH MISMATCH on {n} bytes after {fetched_in:?} — discarded");
         let _ = std::fs::remove_file(&part);
         anyhow::bail!(
@@ -298,6 +317,18 @@ pub fn download(
     }
     crate::diag!("update: {n} bytes verified and written in {fetched_in:?}");
     Ok(n)
+}
+
+/// The numeric status from a response head's first line.
+fn parse_status(head: &[u8]) -> Result<u16> {
+    let head = std::str::from_utf8(head)
+        .map_err(|_| anyhow::anyhow!("update: response headers were not text"))?;
+    let status = head.lines().next().unwrap_or_default();
+    status
+        .split_whitespace()
+        .nth(1)
+        .and_then(|c| c.parse().ok())
+        .ok_or_else(|| anyhow::anyhow!("update: unexpected status line {status:?}"))
 }
 
 /// Pull `Content-Length` out of a response head. Case-insensitive on the field name, as HTTP
@@ -336,6 +367,7 @@ pub struct ResponseHead {
     head: Vec<u8>,
     done: bool,
     content_length: Option<u64>,
+    status: u16,
 }
 
 impl ResponseHead {
@@ -354,8 +386,13 @@ impl ResponseHead {
             }
             return Ok(&[]);
         };
-        // Same status check as the buffered path: head plus terminator, so the body is empty.
-        body_of(&self.head[..end + 4])?;
+        // 200, or 206 when we asked to resume from an offset. Anything else is not a body we will
+        // write to disk — a 404 page must never land where a build is expected, and only the hash
+        // would catch it afterwards.
+        self.status = parse_status(&self.head[..end])?;
+        if self.status != 200 && self.status != 206 {
+            anyhow::bail!("update: unexpected status {}", self.status);
+        }
         self.content_length = parse_content_length(&self.head[..end]);
         self.done = true;
         // The body bytes sit at the tail of both buffers. At least one byte of the terminator must
@@ -371,6 +408,13 @@ impl ResponseHead {
     /// complete or correct. The published SHA-256 is the only thing that settles that.
     pub fn content_length(&self) -> Option<u64> {
         self.content_length
+    }
+
+    /// The response status, once the head has been seen. 206 means the server honoured a Range
+    /// request and the body continues an existing file; 200 means it ignored the range and is
+    /// sending the whole thing, so anything already on disk must be thrown away.
+    pub fn status(&self) -> u16 {
+        self.status
     }
 
     /// Whether a complete head was seen. A stream that ends before this did not deliver a response.
@@ -393,13 +437,43 @@ impl ResponseHead {
 /// Callers should not rely on this alone — [`crate::api::NightdropCore::download_update`] is
 /// single-flight — but a name that cannot collide means the worst case is a wasted download rather
 /// than a corrupt one.
-fn part_path(dest: &std::path::Path) -> std::path::PathBuf {
-    use std::sync::atomic::{AtomicU64, Ordering};
-    static SEQ: AtomicU64 = AtomicU64::new(0);
-    let n = SEQ.fetch_add(1, Ordering::Relaxed);
+fn part_path(dest: &std::path::Path, sha256: &str) -> std::path::PathBuf {
+    let tag: String = sha256
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .take(16)
+        .collect();
     let mut name = dest.file_name().unwrap_or_default().to_os_string();
-    name.push(format!(".{}-{n}.part", std::process::id()));
+    name.push(format!(".{tag}.part"));
     dest.with_file_name(name)
+}
+
+/// Drop scratch files for any build other than the one being fetched.
+///
+/// The name carries the expected hash, so a leftover from a superseded release can never be
+/// resumed into this one — but it would sit there forever costing tens of megabytes. Only the slot
+/// currently in use is spared.
+fn sweep_stale_parts(dest: &std::path::Path, keep: &std::path::Path) {
+    let Some(dir) = dest.parent() else { return };
+    let Some(stem) = dest.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for e in entries.flatten() {
+        let p = e.path();
+        if p == keep {
+            continue;
+        }
+        let Some(name) = p.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with(stem) && name.ends_with(".part") {
+            crate::diag!("update: discarding a partial download for a superseded build");
+            let _ = std::fs::remove_file(&p);
+        }
+    }
 }
 
 /// SHA-256 of a file, read in chunks so a large build is never resident in full.
@@ -482,6 +556,17 @@ fn is_newer(a: &str, b: &str) -> bool {
 /// `User-Agent` and no other header, so every install's request is byte-identical.
 pub fn request_line(onion: &str, path: &str) -> String {
     format!("GET {path} HTTP/1.0\r\nHost: {onion}\r\nConnection: close\r\n\r\n")
+}
+
+/// As [`request_line`] but asking for everything from `from` onwards, to resume a partial download.
+///
+/// Only ever used for a build, never for the manifest — the manifest request must stay byte
+/// identical for every install (see `the_request_is_identical_for_every_install`), and a Range
+/// header that varied with local state would make it a beacon.
+pub fn range_request_line(onion: &str, path: &str, from: u64) -> String {
+    format!(
+        "GET {path} HTTP/1.0\r\nHost: {onion}\r\nRange: bytes={from}-\r\nConnection: close\r\n\r\n"
+    )
 }
 
 /// Split an HTTP/1.0 response into its body, rejecting anything that is not a `200`.
@@ -733,13 +818,10 @@ mod tests {
             // scratch file, and never to `dest`.
             fn onion_get_to_file(
                 &self,
-                _o: &str,
-                _p: u16,
-                _path: &str,
-                dest: &std::path::Path,
-                _max: u64,
+                req: crate::transport::FileFetch<'_>,
                 progress: &dyn Fn(u64, Option<u64>),
             ) -> Option<Result<u64>> {
+                let dest = req.dest;
                 progress(self.0.len() as u64, Some(self.0.len() as u64));
                 Some(
                     std::fs::write(dest, &self.0)
@@ -822,13 +904,10 @@ mod tests {
             }
             fn onion_get_to_file(
                 &self,
-                _o: &str,
-                _p: u16,
-                _path: &str,
-                target: &std::path::Path,
-                _max: u64,
+                req: crate::transport::FileFetch<'_>,
                 _progress: &dyn Fn(u64, Option<u64>),
             ) -> Option<Result<u64>> {
+                let target = req.dest;
                 assert_ne!(target, self.dest, "a download must not stream to dest");
                 assert!(
                     target.to_string_lossy().ends_with(".part"),
@@ -859,6 +938,138 @@ mod tests {
             body.len() as u64
         );
         assert_eq!(std::fs::read(&dest).unwrap(), body);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_interrupted_download_resumes_instead_of_starting_over() {
+        // Over Tor a failed transfer is minutes thrown away, and the partial is sitting right
+        // there. The scratch file is keyed by the expected hash, so a partial from a superseded
+        // build can never be resumed into this one, and the final SHA-256 over the assembled file
+        // is what decides acceptability — which is why no expiry is needed on a .part.
+        let dir = std::env::temp_dir().join(format!("nd-update-resume-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("build.apk");
+
+        let body: Vec<u8> = (0u8..=255).cycle().take(5000).collect();
+
+        /// Serves `cut` bytes and then fails; on a later call, honours the offset it is given.
+        struct Flaky {
+            body: Vec<u8>,
+            cut: usize,
+            seen: std::sync::Mutex<Vec<u64>>,
+        }
+        impl Transport for Flaky {
+            fn address(&self) -> crate::transport::Address {
+                "srv".into()
+            }
+            fn send(&self, _p: &str, _f: &[u8]) -> Result<()> {
+                Ok(())
+            }
+            fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
+                None
+            }
+            fn onion_get_to_file(
+                &self,
+                req: crate::transport::FileFetch<'_>,
+                _progress: &dyn Fn(u64, Option<u64>),
+            ) -> Option<Result<u64>> {
+                let (dest, resume_from) = (req.dest, req.resume_from);
+                self.seen.lock().unwrap().push(resume_from);
+                use std::io::Write as _;
+                if resume_from == 0 {
+                    // First attempt: write a prefix, then die.
+                    std::fs::write(dest, &self.body[..self.cut]).unwrap();
+                    return Some(Err(anyhow::anyhow!("connection died")));
+                }
+                // Resume: append exactly what is missing, as a 206 would.
+                let mut f = std::fs::OpenOptions::new().append(true).open(dest).unwrap();
+                f.write_all(&self.body[resume_from as usize..]).unwrap();
+                Some(Ok(self.body.len() as u64))
+            }
+        }
+
+        let t = Flaky {
+            body: body.clone(),
+            cut: 1500,
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let m = manifest_with(&sha256_hex(&body));
+
+        // First attempt fails, and must LEAVE the partial behind — that is the whole point.
+        assert!(download(&t, &m, "arm64-v8a", &dest, &|_, _| {}).is_err());
+        assert_eq!(leftover_parts(&dir), 1, "the partial is the resume state");
+        assert!(!dest.exists(), "nothing lands at dest on a failure");
+
+        // Second attempt resumes from exactly what was kept, and completes.
+        let n = download(&t, &m, "arm64-v8a", &dest, &|_, _| {}).unwrap();
+        assert_eq!(n as usize, body.len());
+        assert_eq!(
+            std::fs::read(&dest).unwrap(),
+            body,
+            "the halves must join cleanly"
+        );
+        assert_eq!(
+            leftover_parts(&dir),
+            0,
+            "a completed download leaves no scratch file"
+        );
+        assert_eq!(
+            *t.seen.lock().unwrap(),
+            vec![0, 1500],
+            "the second attempt must ask for the bytes it does not have, not start over"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_partial_for_a_superseded_build_is_never_resumed_into_this_one() {
+        // The scratch name carries the expected hash. A leftover from an older release therefore
+        // cannot be appended to — it would produce a file that fails its hash after a full
+        // download, wasting the transfer it was supposed to save.
+        let dir = std::env::temp_dir().join(format!("nd-update-stale-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let dest = dir.join("build.apk");
+
+        let old_slot = part_path(&dest, &"a".repeat(64));
+        std::fs::write(&old_slot, b"bytes from a build we no longer want").unwrap();
+
+        let body = b"the build we actually asked for".to_vec();
+        let m = manifest_with(&sha256_hex(&body));
+        let new_slot = part_path(&dest, &sha256_hex(&body));
+        assert_ne!(old_slot, new_slot, "different builds must not share a slot");
+
+        struct Server(Vec<u8>);
+        impl Transport for Server {
+            fn address(&self) -> crate::transport::Address {
+                "srv".into()
+            }
+            fn send(&self, _p: &str, _f: &[u8]) -> Result<()> {
+                Ok(())
+            }
+            fn try_recv(&self) -> Option<(crate::transport::Address, Vec<u8>)> {
+                None
+            }
+            fn onion_get_to_file(
+                &self,
+                req: crate::transport::FileFetch<'_>,
+                _progress: &dyn Fn(u64, Option<u64>),
+            ) -> Option<Result<u64>> {
+                let (dest, resume_from) = (req.dest, req.resume_from);
+                assert_eq!(resume_from, 0, "a stale partial must not be resumed from");
+                std::fs::write(dest, &self.0).unwrap();
+                Some(Ok(self.0.len() as u64))
+            }
+        }
+
+        download(&Server(body.clone()), &m, "arm64-v8a", &dest, &|_, _| {}).unwrap();
+        assert_eq!(std::fs::read(&dest).unwrap(), body);
+        assert!(
+            !old_slot.exists(),
+            "the superseded partial must be swept, not left to rot"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

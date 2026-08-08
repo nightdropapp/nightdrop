@@ -27,6 +27,23 @@ pub mod tor;
 /// arbitrary unique string.
 pub type Address = String;
 
+/// What a streamed onion fetch needs to know.
+///
+/// A struct rather than six positional arguments: `(onion, 80, path, dest, 209715200, 0, &p)` at a
+/// call site says nothing about which number is which, and two adjacent `u64`s meaning "cap" and
+/// "resume offset" are exactly the pair that gets swapped.
+pub struct FileFetch<'a> {
+    pub onion: &'a str,
+    pub port: u16,
+    pub path: &'a str,
+    /// Written as bytes arrive, so **unverified while in flight**. Callers must hand over a scratch
+    /// path and only publish the result once its hash matches.
+    pub dest: &'a std::path::Path,
+    pub max_bytes: u64,
+    /// Continue an existing `dest` from this offset via HTTP Range; 0 starts fresh.
+    pub resume_from: u64,
+}
+
 /// One endpoint on an anonymity network. Frames are opaque, already-encrypted bytes
 /// (see [`crate::wire`]); the transport never inspects them.
 pub trait Transport: Send + Sync {
@@ -113,13 +130,14 @@ pub trait Transport: Send + Sync {
     /// is what the server claimed and may be `None`; it is for reporting only, never for deciding
     /// the transfer finished. Implementations should call it on every chunk and leave any
     /// throttling to the caller, which knows what it wants to do with the numbers.
+    /// `resume_from` asks the server to continue an existing `dest` from that offset (HTTP Range).
+    /// Pass 0 to start fresh. A server that ignores the range answers 200 with the whole body, and
+    /// the implementation must then discard whatever was already on disk rather than appending to
+    /// it — half a build followed by a whole one is not a build. The returned count is the total
+    /// size of `dest` afterwards, resumed bytes included.
     fn onion_get_to_file(
         &self,
-        _onion: &str,
-        _port: u16,
-        _path: &str,
-        _dest: &std::path::Path,
-        _max_bytes: u64,
+        _req: FileFetch<'_>,
         _progress: &dyn Fn(u64, Option<u64>),
     ) -> Option<Result<u64>> {
         None
