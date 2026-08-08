@@ -77,6 +77,7 @@ class RustNightdropCore extends NightdropCore {
   // Security is deprecated); existing entries migrate automatically on first access.
   static const _secure = FlutterSecureStorage();
   static const _kStoreKeyName = 'nightdrop_store_key';
+  static const _kCoverTraffic = 'nightdrop_cover_traffic';
   static const _kStateFile = 'nightdrop-state.bin';
 
   Future<String> _stateFilePath() async =>
@@ -217,7 +218,29 @@ class RustNightdropCore extends NightdropCore {
   @override
   Future<void> setCoverTraffic(bool enabled) async {
     await rust.setCoverTraffic(enabled: enabled);
+    // Remember it. The core holds this in a process-lifetime flag, so without a record here the
+    // setting was lost on every restart — and silently, which is the part that matters: the user
+    // turned on a privacy feature, saw it confirmed, and got no chaff after the next launch with
+    // nothing on screen to say so. Cover traffic is unobservable by design, so it cannot be
+    // noticed missing the way a broken visible feature would be.
+    try {
+      await _secure.write(key: _kCoverTraffic, value: enabled ? '1' : '0');
+    } catch (_) {
+      // Best-effort: failing to persist the preference must not fail turning it on now.
+    }
     notifyListeners();
+  }
+
+  /// Re-apply the saved cover-traffic preference to the freshly built core.
+  Future<void> _restoreCoverTraffic() async {
+    try {
+      if (await _secure.read(key: _kCoverTraffic) == '1') {
+        await rust.setCoverTraffic(enabled: true);
+      }
+    } catch (_) {
+      // A preference we cannot read is left off — the honest default for something the user
+      // cannot see running.
+    }
   }
 
   @override
@@ -826,6 +849,7 @@ class RustNightdropCore extends NightdropCore {
       // Tell restored contacts whether this device can report screenshots (#1). Unawaited for the
       // same reason as the update check: it puts a frame on the wire per contact.
       unawaited(_announceCaptureReporting());
+      unawaited(_restoreCoverTraffic());
       // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
       // this one dials Tor. It self-limits to one check a day, so calling it on every start is
       // free after the first.
@@ -903,6 +927,7 @@ class RustNightdropCore extends NightdropCore {
     // Settle the screenshot capability before anyone pairs, so the first contact is announced to
     // on pairing rather than left reading our silence as "they'd be told" (#1).
     unawaited(_announceCaptureReporting());
+    unawaited(_restoreCoverTraffic());
     notifyListeners();
   }
 

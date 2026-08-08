@@ -523,7 +523,17 @@ impl Node {
         };
         // Our own relay set, exactly as a peer would post to us.
         let targets: Vec<String> = self.my_relays.clone();
-        let _ = queue_on_relays(self.transport.as_ref(), &Some(relay), &targets, &me, &blob);
+        // Logged every time, success or failure. A privacy feature whose whole output is
+        // indistinguishable from real traffic leaves nothing else to observe: without this line
+        // "cover traffic costs nothing measurable" and "cover traffic never ran" are the same
+        // reading, which is exactly the trap the relay watchdog fell into.
+        match queue_on_relays(self.transport.as_ref(), &Some(relay), &targets, &me, &blob) {
+            Ok(receipts) => crate::diag!(
+                "cover: posted a dummy to our own mailbox ({} relay(s))",
+                receipts.len()
+            ),
+            Err(e) => crate::diag!("cover: post failed ({e:#}) — no chaff this interval"),
+        }
     }
 
     /// Fetch the operator-signed relay directory (§3.1), verify it against the baked-in key, and —

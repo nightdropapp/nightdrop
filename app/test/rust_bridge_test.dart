@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:night_drop/src/core/rust_nightdrop_core.dart';
+import 'package:night_drop/src/rust/api.dart' as rust;
 import 'package:night_drop/src/rust/frb_generated.dart';
 
 /// Exercises the real Rust security core through the flutter_rust_bridge bindings by
@@ -127,6 +128,47 @@ void main() {
     expect(support.listSync(), isEmpty,
         reason: 'one failing step must not skip the others — a half-wipe that reports '
             'success is worse than a wipe that fails loudly');
+  });
+
+  // Cover traffic lived only in a process-lifetime flag in the core, so every restart silently
+  // turned it off. Silently is the whole problem: chaff is unobservable by design, so a user cannot
+  // notice its absence the way they would a visible feature that stopped working.
+  test('cover traffic is remembered across a restart', () async {
+    final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final store = <String, String>{};
+    binding.setMockMethodCallHandler(
+      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+      (call) async {
+        final args = (call.arguments as Map).cast<String, Object?>();
+        final key = args['key'] as String?;
+        switch (call.method) {
+          case 'write':
+            store[key!] = args['value'] as String;
+            return null;
+          case 'read':
+            return store[key];
+          case 'delete':
+            store.remove(key);
+            return null;
+          default:
+            return null;
+        }
+      },
+    );
+    addTearDown(() => binding.setMockMethodCallHandler(
+        const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'), null));
+
+    await RustNightdropCore().setCoverTraffic(true);
+    expect(store.values, contains('1'), reason: 'the preference must reach storage');
+
+    // A fresh core, as after a restart: the flag in the Rust process is back to its default, and
+    // only the stored preference can bring it back.
+    await rust.setCoverTraffic(enabled: false);
+    expect(await rust.coverTrafficEnabled(), isFalse);
+    await RustNightdropCore().start();
+    await Future<void>.delayed(const Duration(milliseconds: 200));
+    expect(await rust.coverTrafficEnabled(), isTrue,
+        reason: 'a restart must not silently drop a privacy feature the user turned on');
   });
 
   // The failure actually observed on a device: the store key survived a wipe, and nothing threw.
