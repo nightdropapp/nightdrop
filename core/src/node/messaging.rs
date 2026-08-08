@@ -930,7 +930,17 @@ impl Node {
     pub fn pump(&mut self) -> Result<Vec<(String, String)>> {
         let mut received = Vec::new();
         while let Some((from_address, bytes)) = self.transport.try_recv() {
-            let frame = wire::decode(&bytes)?;
+            // Skip what we cannot parse, exactly as the relay drain does. This used to be `?`,
+            // which aborted the whole pump — and with it that tick's relay harvest and send
+            // bookkeeping — over one frame. A peer running a NEWER build is the ordinary way to
+            // meet an unknown frame: every new control frame added to `Frame` is undecodable to
+            // everyone who has not updated yet, so a version skew must cost that frame and
+            // nothing else. (`Frame::Captures` shipped after 0.1.19 and is announced to every open
+            // chat at launch, so 0.1.19 peers meet one on the direct path routinely.)
+            let Ok(frame) = wire::decode(&bytes) else {
+                crate::diag!("pump: undecodable frame from a peer — skipped (newer build?)");
+                continue;
+            };
             // Same set the relay drain uses, so whichever copy of a message lands second is
             // recognised rather than handed to a ratchet that has already spent its key.
             if self.is_duplicate_user_frame(&frame, &bytes) {

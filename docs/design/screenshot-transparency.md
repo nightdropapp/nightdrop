@@ -32,8 +32,13 @@ opens it. `FLAG_SECURE` is therefore held only while backgrounded (`MainActivity
 
 ## 3. The signal
 
-`Frame::Screenshot { from, message }`, appended at the **end** of the `Frame` enum because variant
-order is wire-visible. It reuses the existing authenticated-control-frame machinery exactly as
+`Frame::Screenshot { from, message }`, appended at the **end** of the `Frame` enum by convention.
+(Checked 2026-08-08: order is *not* in fact wire-visible — `Frame` is
+`#[serde(tag = "t", rename_all = "snake_case")]` over JSON, so variants travel by name and adding
+one mid-enum changes nothing on the wire. The convention is still worth keeping, since a future
+move to a positional format would make order load-bearing overnight. What *does* matter for a new
+variant is that older builds cannot decode it at all — see `an_unparseable_frame_costs_that_frame_
+and_nothing_else`.) It reuses the existing authenticated-control-frame machinery exactly as
 `BackedUp` does: `authed_control` encrypts a fixed domain marker
 (`MARK_SCREENSHOT = b"nightdrop/ctl/screenshot/v1"`) on the chat's ratchet, and `verify_control`
 accepts only a frame that decrypts to precisely that marker.

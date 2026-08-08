@@ -1150,6 +1150,35 @@ fn a_peer_that_cannot_report_screenshots_says_so_and_silence_never_means_yes() {
 }
 
 #[test]
+fn an_unparseable_frame_costs_that_frame_and_nothing_else() {
+    // Version skew is the ordinary way to meet a frame we cannot decode: every control frame added
+    // to `Frame` is undecodable to everyone who has not updated yet, and `Captures` is announced to
+    // every open chat at launch, so an older peer meets one on the direct path routinely.
+    //
+    // `pump` used to `?` on the decode, aborting the whole call — and with it the caller's relay
+    // harvest and send bookkeeping for that tick — over a single frame it did not recognise. The
+    // relay drain has always skipped and continued; the direct path now matches it.
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    // Something Bob's build cannot parse, then a perfectly good message behind it.
+    net.endpoint("garbage")
+        .send("bob", b"not a frame at all")
+        .unwrap();
+    alice.send(&contact, "still here").unwrap();
+
+    let got = bob.pump().expect("one bad frame must not fail the pump");
+    assert!(
+        got.iter().any(|(_, text)| text == "still here"),
+        "the message queued behind an unparseable frame must still arrive"
+    );
+}
+
+#[test]
 fn a_contact_paired_after_the_announcement_still_learns_the_capability() {
     // The broadcast only walks the chats that exist when it runs, and the value then never changes
     // again — so without a per-chat announce on pairing, everyone met later would read our silence
