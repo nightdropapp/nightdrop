@@ -1149,9 +1149,15 @@ impl Node {
                 &bytes,
             )
             .inspect_err(|_| {
+                // States only what THIS attempt observed. `deliver` returns the error and several
+                // callers retry — `pending_control` holds a control frame until a copy lands, and
+                // `flush_pending_relay` re-queues messages once arti has warmed — so it is not in a
+                // position to declare the frame lost. It used to say "the frame is lost and the
+                // peer will never see it", and on 2026-08-08 that sent a device session hunting a
+                // Secure Folder bug over two messages that both arrived a few minutes later.
                 crate::diag!(
-                    "deliver: relay fallback ALSO failed ({} peer relay(s) known) — the frame is \
-                     lost and the peer will never see it",
+                    "deliver: relay fallback also failed this attempt ({} peer relay(s) known) — \
+                     up to the caller whether it retries",
                     peer_relays.len()
                 );
             })?;
