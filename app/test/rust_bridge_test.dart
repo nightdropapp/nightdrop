@@ -129,6 +129,42 @@ void main() {
             'success is worse than a wipe that fails loudly');
   });
 
+  // The failure actually observed on a device: the store key survived a wipe, and nothing threw.
+  // A delete that reports success and leaves the entry behind is invisible to the try/catch above,
+  // so the wipe reads the key back and treats a survivor as a failed step. The rest must still
+  // run — a keystore that will not let go of one entry is no reason to leave the state file,
+  // the sealed onion identity and arti's per-contact directories on disk.
+  test('a delete that silently leaves the store key still wipes everything else', () async {
+    final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    final support = await Directory.systemTemp.createTemp('nd-wipe-silent');
+    addTearDown(() => support.deleteSync(recursive: true));
+
+    binding.setMockMethodCallHandler(
+      const MethodChannel('plugins.flutter.io/path_provider'),
+      (call) async => support.path,
+    );
+    // Accepts the write and the delete without complaint, then hands the value back anyway.
+    binding.setMockMethodCallHandler(
+      const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'),
+      (call) async => call.method == 'read' ? 'the-key-that-would-not-die' : null,
+    );
+    addTearDown(() {
+      binding.setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'), null);
+      binding.setMockMethodCallHandler(
+          const MethodChannel('plugins.it_nomads.com/flutter_secure_storage'), null);
+    });
+
+    File('${support.path}/nightdrop-state.bin').writeAsStringSync('x');
+    File('${support.path}/onion-key.sealed').writeAsStringSync('x');
+    Directory('${support.path}/arti-state').createSync();
+    File('${support.path}/arti-state/f').writeAsStringSync('x');
+
+    await RustNightdropCore().logout();
+
+    expect(support.listSync(), isEmpty);
+  });
+
   // The second half of the same device session. With the sealed-onion-key gate fixed, "set up a
   // new identity" still failed — "wrong key or corrupt store" — because the unreadable state file
   // was only ever COPIED to a sidecar, and the core restores from `persistPath` whenever that path

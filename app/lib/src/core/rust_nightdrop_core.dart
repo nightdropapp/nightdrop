@@ -1226,6 +1226,14 @@ class RustNightdropCore extends NightdropCore {
         // Deletion is still worth attempting on its own.
       }
       await _secure.delete(key: _kStoreKeyName);
+      // Read it back. A delete that *throws* is caught above; a delete that returns success and
+      // leaves the entry there is not, and that is the shape of the failure actually seen on a
+      // device — the key survived a wipe with nothing reported. The platform commits its
+      // preferences asynchronously, so "the call returned" is not the same claim as "the entry is
+      // gone", and this is the only place that can tell the difference.
+      if (await _secure.read(key: _kStoreKeyName) != null) {
+        throw StateError('store key survived its delete');
+      }
     });
     String? support;
     await step('app dir', () async {
