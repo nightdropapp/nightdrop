@@ -117,7 +117,7 @@ void main() {
     ]) {
       File('${support.path}/$name').writeAsStringSync('x');
     }
-    for (final name in ['arti-state', 'client-auth', 'nightdrop-media']) {
+    for (final name in ['arti-state', 'client-auth', 'nightdrop-media', 'arti-cache']) {
       Directory('${support.path}/$name').createSync();
       File('${support.path}/$name/f').writeAsStringSync('x');
     }
@@ -157,8 +157,10 @@ void main() {
 
     File('${support.path}/nightdrop-state.bin').writeAsStringSync('x');
     File('${support.path}/onion-key.sealed').writeAsStringSync('x');
-    Directory('${support.path}/arti-state').createSync();
-    File('${support.path}/arti-state/f').writeAsStringSync('x');
+    for (final name in ['arti-state', 'arti-cache']) {
+      Directory('${support.path}/$name').createSync();
+      File('${support.path}/$name/f').writeAsStringSync('x');
+    }
 
     await RustNightdropCore().logout();
 

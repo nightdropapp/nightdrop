@@ -1256,6 +1256,12 @@ class RustNightdropCore extends NightdropCore {
       // that outlived the identity. The core drops those keys individually as chats are cleared,
       // but removing the directory is what guarantees nothing is left behind.
       await step('arti state', () => rm(Directory('$dir/arti-state')));
+      // Arti's *directory* cache — the Tor consensus and microdescriptors. Public documents, so
+      // unlike `arti-state` it holds no key, no address and no contact list, and it survived the
+      // wipe verified on a device 2026-08-08. It goes anyway: what it does carry is a modification
+      // time, and a wipe that leaves "Tor last ran at 14:26" behind an app that presents itself as
+      // freshly onboarded is a wipe with an asterisk. Costs a fresh consensus fetch on next launch.
+      await step('tor dir cache', () => rm(Directory('$dir/arti-cache')));
       // Authorized-client files (#22) name one file per contact. They hold public keys, so nothing
       // secret, but the count is still a contact list and it has no reason to outlive the identity.
       await step('client auth', () => rm(Directory('$dir/client-auth')));
