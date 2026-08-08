@@ -49,8 +49,14 @@ jobs:
 
       # The Tor path is feature-gated (pulls arti); a plain build never compiles it, so
       # verify it separately. Compile-only — the live circuit test is #[ignore]d.
-      - name: Tor feature compiles
-        run: cargo build -p nightdrop --features tor
+      #
+      # `--tests` is load-bearing and was missing: without it this builds the library only, so
+      # core/tests/tor_smoke.rs and relay_e2e.rs are compiled by NOTHING in CI — not by
+      # `cargo test` (feature off) and not by `clippy --all-targets` (same). They once sat broken
+      # for a whole session and it surfaced only when the documented relay probe was needed during
+      # an incident.
+      - name: Tor feature compiles (including its test targets)
+        run: cargo build -p nightdrop --tests --features tor
 
   flutter:
     name: Flutter app
