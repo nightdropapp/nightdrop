@@ -32,13 +32,52 @@ class _KeepAliveTaskHandler extends TaskHandler {
   void onRepeatEvent(DateTime timestamp) {}
 
   @override
-  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {}
+  Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    // `isTimeout` means the SYSTEM stopped us, not the user — Android 15 enforces a per-type
+    // budget on foreground services and simply ends them when it runs out. Record it so the app
+    // can say so.
+    //
+    // The service type is now `specialUse`, which has no such cap (see AndroidManifest), so this
+    // should not fire. It is kept because the failure it guards against is *silence*: the version
+    // that hit the six-hour dataSync cap stopped receiving messages overnight with nothing on
+    // screen and one Log.e nobody would ever read. Any future budget, on any type, must not be
+    // able to do that again.
+    if (!isTimeout) return;
+    try {
+      await FlutterForegroundTask.saveData(
+        key: BackgroundDelivery.kStoppedBySystemKey,
+        value: true,
+      );
+    } catch (_) {
+      // Best-effort from a dying isolate; the service is going away either way.
+    }
+  }
 }
 
 class BackgroundDelivery {
   BackgroundDelivery._();
 
   static const String _kEnabledKey = 'bg_delivery_enabled';
+
+  /// Set when Android *itself* stopped the foreground service (a foreground-service-type budget
+  /// running out), as opposed to the user turning it off. Read once by the UI and cleared.
+  static const String kStoppedBySystemKey = 'bg_delivery_stopped_by_system';
+
+  /// Whether Android stopped background delivery behind the user's back since this was last
+  /// asked. Clears itself, so a caller that shows it will not show it twice.
+  static Future<bool> takeStoppedBySystem() async {
+    if (!supported) return false;
+    try {
+      final flagged =
+          await FlutterForegroundTask.getData<bool>(key: kStoppedBySystemKey) ?? false;
+      if (flagged) {
+        await FlutterForegroundTask.removeData(key: kStoppedBySystemKey);
+      }
+      return flagged;
+    } catch (_) {
+      return false;
+    }
+  }
 
   /// Only Android can host a foreground service; elsewhere every method is a no-op.
   static bool get supported => !kIsWeb && Platform.isAndroid;

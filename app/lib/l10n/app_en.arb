@@ -638,6 +638,8 @@
   "@updateDownload": { "description": "Button that starts the verified download of a newer build." },
   "updateHide": "Hide",
   "@updateHide": { "description": "Button that hides the update banner until a newer version exists." },
+  "backgroundStoppedBySystem": "Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.",
+  "@backgroundStoppedBySystem": { "description": "Shown when the system (not the user) ended the foreground service, e.g. a foreground-service-type time budget running out. The point is that the user could not otherwise tell." },
   "peerCapturesSilentBanner": "This person's device can't tell them about screenshots, so it won't tell you either. If they capture what you send, you won't hear about it.",
   "@peerCapturesSilentBanner": { "description": "Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information." },
   "updateDownloading": "Downloading over Tor…",

@@ -916,6 +916,12 @@ abstract class AppLocalizations {
   /// **'Hide'**
   String get updateHide;
 
+  /// Shown when the system (not the user) ended the foreground service, e.g. a foreground-service-type time budget running out. The point is that the user could not otherwise tell.
+  ///
+  /// In en, this message translates to:
+  /// **'Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.'**
+  String get backgroundStoppedBySystem;
+
   /// Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information.
   ///
   /// In en, this message translates to:

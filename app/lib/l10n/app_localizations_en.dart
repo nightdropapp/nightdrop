@@ -494,6 +494,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get updateHide => 'Hide';
 
   @override
+  String get backgroundStoppedBySystem =>
+      'Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.';
+
+  @override
   String get peerCapturesSilentBanner =>
       'This person\'s device can\'t tell them about screenshots, so it won\'t tell you either. If they capture what you send, you won\'t hear about it.';
 

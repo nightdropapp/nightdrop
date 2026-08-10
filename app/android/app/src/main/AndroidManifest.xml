@@ -15,7 +15,7 @@
     <!-- Opt-in background delivery foreground service (flutter_foreground_task, §11.8 / #13):
          keeps the process alive so the Tor peek keeps running while backgrounded. -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
 
     <!-- Screenshot transparency (#1): lets the app be told when the user screenshots a chat, so it
@@ -73,14 +73,35 @@
         <!-- Don't delete the meta-data below.
              This is used by the Flutter tool to generate GeneratedPluginRegistrant.java -->
         <meta-data android:name="flutterEmbedding" android:value="2" />
-        <!-- Background-delivery foreground service (flutter_foreground_task, #13). The typed
-             service (Android 14+) declares a data-sync foreground service — it keeps the Tor
-             peek alive; it never uploads anything to a server. -->
+        <!-- Background-delivery foreground service (flutter_foreground_task, #13): it keeps the Tor
+             peek alive so messages arrive while the app is off screen. It never uploads anything
+             to a server.
+
+             specialUse, NOT dataSync. Android 15 caps a `dataSync` foreground service at six
+             cumulative hours per 24, then calls onTimeout and the system stops it — measured at
+             exactly 6h 0m 0s 20ms on an S25 (API 36) on 2026-08-09, after which the app sat cached
+             for five hours receiving nothing. Nothing told the user, and it does not come back
+             until the app is reopened, so "keeps checking for messages" became false overnight
+             with no way to notice. A messenger holding an anonymity-network connection is not a
+             data-sync job and must not be budgeted as one.
+
+             The cost of this type is that Google Play requires a written justification for it. We
+             do not ship on Play — F-Droid, GitHub releases and the onion site are unaffected — so
+             the trade is a permission reviewers may ask about (answered by the subtype below)
+             against background delivery that actually stays on. -->
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
-            android:foregroundServiceType="dataSync"
+            android:foregroundServiceType="specialUse"
             android:exported="false"
-            android:stopWithTask="true" />
+            android:stopWithTask="true">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Maintains the user's own anonymous Tor onion service so that
+                    end-to-end encrypted peer-to-peer messages can be received while the app is not
+                    on screen. Night Drop has no push service and no account server: there is
+                    nothing that could wake the app on a message's behalf, so the connection must
+                    be held by the device itself." />
+        </service>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

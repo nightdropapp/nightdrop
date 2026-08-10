@@ -93,6 +93,7 @@ class HomeScreen extends StatelessWidget {
       body: Column(
         children: [
           _OnionBanner(core: core),
+          const _BackgroundStoppedBanner(),
           _RelayHealthBanner(core: core),
           _BackupReminderBanner(core: core),
           _UpdateBanner(core: core),
@@ -314,6 +315,68 @@ class _OnionBannerState extends State<_OnionBanner> {
 /// i.e. a self-hosted relay is down, so contacts' offline mail routed through it may be stuck.
 /// Nudges the user to add a backup relay so delivery stays redundant. Polls on the same cadence
 /// as the onion banner (relay health is refreshed by the background poller).
+/// "Android stopped background delivery" — shown when the SYSTEM ended the foreground service,
+/// never when the user did.
+///
+/// Exists because the failure it reports is invisible by construction: the app stops receiving,
+/// the notification disappears among fifty others, and nothing else changes. On 2026-08-09 the
+/// service was ended by Android's six-hour `dataSync` budget at 03:08 and the phone received
+/// nothing for the next five hours — discovered from `dumpsys batterystats`, which is not
+/// somewhere a user is going to look. The service type was changed to one with no such budget, so
+/// this should stay hidden; it is here so that if some future budget ends the service anyway, the
+/// user is told instead of quietly going offline.
+class _BackgroundStoppedBanner extends StatefulWidget {
+  const _BackgroundStoppedBanner();
+
+  @override
+  State<_BackgroundStoppedBanner> createState() => _BackgroundStoppedBannerState();
+}
+
+class _BackgroundStoppedBannerState extends State<_BackgroundStoppedBanner> {
+  bool _stopped = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    // Reading it clears it, so this shows once per occurrence rather than until dismissed.
+    final stopped = await BackgroundDelivery.takeStoppedBySystem();
+    if (!mounted || !stopped) return;
+    setState(() => _stopped = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_stopped) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.sync_problem, size: 18, color: scheme.onErrorContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                AppLocalizations.of(context)!.backgroundStoppedBySystem,
+                style: TextStyle(color: scheme.onErrorContainer, fontSize: 12.5),
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.close, size: 18, color: scheme.onErrorContainer),
+              onPressed: () => setState(() => _stopped = false),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RelayHealthBanner extends StatefulWidget {
   const _RelayHealthBanner({required this.core});
 
