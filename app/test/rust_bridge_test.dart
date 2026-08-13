@@ -6,6 +6,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:night_drop/src/core/install_source.dart';
 import 'package:night_drop/src/core/rust_nightdrop_core.dart';
 import 'package:night_drop/src/rust/api.dart' as rust;
 import 'package:night_drop/src/rust/frb_generated.dart';
@@ -128,6 +129,55 @@ void main() {
     expect(support.listSync(), isEmpty,
         reason: 'one failing step must not skip the others — a half-wipe that reports '
             'success is worse than a wipe that fails loudly');
+  });
+
+  // F-Droid updates the apps it installs, so a second updater asking our onion site once a day is
+  // duplicative — and it is an item on F-Droid's review checklist. The gate must be narrow: only
+  // the automatic check, only for F-Droid, and never at the cost of a sideloader's only signal.
+  group('automatic update check is gated on who installed us', () {
+    final binding = TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    const channel = MethodChannel('app.nightdrop/screenshots');
+
+    setUp(InstallSource.resetForTest);
+    tearDown(() {
+      binding.setMockMethodCallHandler(channel, null);
+      InstallSource.resetForTest();
+    });
+
+    void installedBy(String? pkg) => binding.setMockMethodCallHandler(
+          channel,
+          (call) async => call.method == 'installerPackage' ? pkg : null,
+        );
+
+    test('F-Droid installs are recognised, including the Basic client', () async {
+      installedBy('org.fdroid.fdroid');
+      expect(await InstallSource.isFdroid(), isTrue);
+      InstallSource.resetForTest();
+      installedBy('org.fdroid.basic');
+      expect(await InstallSource.isFdroid(), isTrue);
+    });
+
+    test('a sideload keeps its update check', () async {
+      // The GitHub download and the AppImage have no update channel at all; they are the reason
+      // the check exists. Anything that is not F-Droid must keep it.
+      installedBy('com.android.packageinstaller');
+      expect(await InstallSource.isFdroid(), isFalse);
+    });
+
+    test('an unknown installer is treated as not-F-Droid', () async {
+      // Android may decline to say. Guessing F-Droid would silently take away a sideloader's only
+      // update signal; guessing the other way merely leaves a redundant check running.
+      installedBy(null);
+      expect(await InstallSource.isFdroid(), isFalse);
+    });
+
+    test('a missing channel does not turn the check off', () async {
+      binding.setMockMethodCallHandler(
+        channel,
+        (call) async => throw MissingPluginException('no channel here'),
+      );
+      expect(await InstallSource.isFdroid(), isFalse);
+    });
   });
 
   // Cover traffic lived only in a process-lifetime flag in the core, so every restart silently

@@ -431,6 +431,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'Reconnecting to Tor — this takes a minute or two.';
 
   @override
+  String get aboutUpdateChecks =>
+      'Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don’t do this at all, because F-Droid updates them.';
+
+  @override
   String get aboutMenu => 'About Night Drop';
 
   @override
@@ -448,7 +452,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get publishingAddressTor =>
-      'Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.';
+      'Publishing your address to Tor. This can take several minutes. Others can’t pair with you until it finishes — keep the app open.';
 
   @override
   String relayOfflineOne(String names) {

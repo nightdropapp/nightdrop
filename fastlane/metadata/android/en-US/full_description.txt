@@ -9,5 +9,6 @@ Night Drop is a privacy-first 1:1 messenger. Like a night deposit box: every mes
 * Safety-number verification (scan or compare) to confirm no one is in the middle.
 * User-owned encrypted backups: the recovery password is generated on your device, shown once, and never sent to any server. Lose it and the backup is unrecoverable — by design.
 * No analytics, no crash reporters, no ad SDKs, no Google Play Services, and no third-party push service.
+* No automatic update check on F-Droid installs. Other builds (sideloaded, or the desktop AppImage, which have no update channel of their own) ask the Night Drop onion site over Tor, at most once a day, whether a newer version exists — and only tell you. The app never installs anything, and does not hold the permission that would let it.
 
 Night Drop is free software (AGPL-3.0-or-later) and built to be reproducible: anyone can rebuild the release from source and confirm it matches, byte for byte.

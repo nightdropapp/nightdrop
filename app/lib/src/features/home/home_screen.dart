@@ -921,6 +921,13 @@ void _showAbout(BuildContext context) {
                 const SizedBox(height: 12),
                 const Text('© 2026 Night Drop'),
                 const Text('AGPL-3.0-or-later'),
+                const SizedBox(height: 12),
+                // The one connection the app makes on its own behalf, stated where it stays
+                // stated. Everything else on the wire is the user's own traffic.
+                Text(
+                  l10n.aboutUpdateChecks,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
           ),

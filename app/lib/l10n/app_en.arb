@@ -569,6 +569,10 @@
   "@resetTorRunning": {
     "description": "Snackbar shown while the Tor connection is being reset."
   },
+  "aboutUpdateChecks": "Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don\u2019t do this at all, because F-Droid updates them.",
+  "@aboutUpdateChecks": {
+    "description": "Shown in the About dialog. Discloses the one outbound connection the app makes on its own behalf, so it is stated somewhere durable rather than only in a banner nobody is looking at."
+  },
   "aboutMenu": "About Night Drop",
   "@aboutMenu": {
     "description": "Menu item opening the about dialog (app name, version, license)."
@@ -589,9 +593,9 @@
   "@storedOnThisDevice": {
     "description": "Chat subtitle when messages are local-only."
   },
-  "publishingAddressTor": "Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.",
+  "publishingAddressTor": "Publishing your address to Tor. This can take several minutes. Others can’t pair with you until it finishes — keep the app open.",
   "@publishingAddressTor": {
-    "description": "Banner while the onion descriptor is still publishing."
+    "description": "Banner while the onion descriptor is still publishing. Deliberately gives no numeric range: it said 1-3 min and an F-Droid reviewer measured ~5 on a Redmi Note 8T, matching our own device logs of 4 and 6 minutes. The wait depends on the network, so a number we cannot keep is worse than none."
   },
   "relayOfflineOne": "Your relay {names} looks offline. ",
   "@relayOfflineOne": {

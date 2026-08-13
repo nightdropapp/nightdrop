@@ -64,6 +64,17 @@ class MainActivity : FlutterActivity() {
                     // Whether this device can report screenshots at all, so the UI can be honest
                     // rather than claiming a protection it doesn't have below API 34.
                     "canDetect" -> result.success(Build.VERSION.SDK_INT >= 34)
+                    // Who installed us. Used to switch the automatic update check OFF when this
+                    // copy came from F-Droid: F-Droid IS the update channel for those users, and a
+                    // second updater asking our onion site every day is duplicative — it is on
+                    // F-Droid's own review checklist as something to look for. The check stays on
+                    // for sideloads and the desktop AppImage, which have no channel at all, and the
+                    // manual "Update app" item keeps working everywhere.
+                    //
+                    // Null when Android will not say (or nobody is recorded), which is treated as
+                    // "not F-Droid" — the honest default, since guessing F-Droid would silently
+                    // deprive a sideloader of the only update signal they get.
+                    "installerPackage" -> result.success(installerPackage())
                     else -> result.notImplemented()
                 }
             }
@@ -112,6 +123,20 @@ class MainActivity : FlutterActivity() {
         downloads = null
         super.onDestroy()
     }
+
+    /// The package that installed this app, or null if unknown. `getInstallSourceInfo` replaced the
+    /// deprecated `getInstallerPackageName` in API 30; both can legitimately return null.
+    private fun installerPackage(): String? =
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                packageManager.getInstallSourceInfo(packageName).installingPackageName
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getInstallerPackageName(packageName)
+            }
+        } catch (_: Exception) {
+            null
+        }
 
     companion object {
         const val CHANNEL = "app.nightdrop/screenshots"

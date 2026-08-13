@@ -11,6 +11,7 @@ import 'nightdrop_core.dart';
 import 'media_cache.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'install_source.dart';
 import 'public_downloads.dart';
 import 'screenshot_detector.dart';
 
@@ -693,6 +694,12 @@ class RustNightdropCore extends NightdropCore {
 
   @override
   Future<void> maybeCheckForUpdate() async {
+    // Not when F-Droid installed us: F-Droid updates those users itself, so asking our onion site
+    // as well is a second updater doing the same job — which is why it appears on F-Droid's review
+    // checklist. Sideloads, the GitHub download and the desktop AppImage have no channel at all,
+    // and they are who this was written for. `checkForUpdateNow` is deliberately NOT gated: a user
+    // who opens the menu and asks gets a real answer wherever they got the app.
+    if (await InstallSource.isFdroid()) return;
     await _check();
   }
 

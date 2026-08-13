@@ -814,6 +814,12 @@ abstract class AppLocalizations {
   /// **'Reconnecting to Tor — this takes a minute or two.'**
   String get resetTorRunning;
 
+  /// Shown in the About dialog. Discloses the one outbound connection the app makes on its own behalf, so it is stated somewhere durable rather than only in a banner nobody is looking at.
+  ///
+  /// In en, this message translates to:
+  /// **'Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don’t do this at all, because F-Droid updates them.'**
+  String get aboutUpdateChecks;
+
   /// Menu item opening the about dialog (app name, version, license).
   ///
   /// In en, this message translates to:
@@ -844,10 +850,10 @@ abstract class AppLocalizations {
   /// **'Stored on this device'**
   String get storedOnThisDevice;
 
-  /// Banner while the onion descriptor is still publishing.
+  /// Banner while the onion descriptor is still publishing. Deliberately gives no numeric range: it said 1-3 min and an F-Droid reviewer measured ~5 on a Redmi Note 8T, matching our own device logs of 4 and 6 minutes. The wait depends on the network, so a number we cannot keep is worse than none.
   ///
   /// In en, this message translates to:
-  /// **'Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.'**
+  /// **'Publishing your address to Tor. This can take several minutes. Others can’t pair with you until it finishes — keep the app open.'**
   String get publishingAddressTor;
 
   /// Relay-health banner when a single relay is unreachable (trailing space intentional).
