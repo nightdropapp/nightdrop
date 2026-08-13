@@ -1,0 +1,3 @@
+Installed from F-Droid? Night Drop no longer checks for its own updates — F-Droid does that for you. Other builds (sideloaded, or the desktop AppImage) still ask the Night Drop onion site over Tor at most once a day, and only ever tell you; nothing downloads or installs on its own. "Update app" in the menu still works everywhere, and this is now spelled out in About.
+
+The banner shown while your address publishes no longer promises "1-3 min" — it can take several minutes.
