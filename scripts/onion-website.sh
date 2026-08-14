@@ -101,12 +101,72 @@ echo "Serving $WEB on http://127.0.0.1:$PORT (localhost only) ..."
 # Default: keep no logs (privacy). Opt in to request logging for a private visitor count by setting
 # NIGHTDROP_ONION_LOG=/path/to/log — then `scripts/stats.sh $NIGHTDROP_ONION_LOG` summarises visits.
 # Over Tor every request arrives from 127.0.0.1, so the log holds request counts, never client IPs.
+# nginx, NOT `python3 -m http.server`. Two independent reasons, both found the hard way on
+# 2026-08-14:
+#
+#   * that module's server is single-threaded and answers one request at a time. The biggest file
+#     we publish is a ~45 MB APK that takes ~30 minutes over Tor, and for that whole window the
+#     site served nothing else — so users' downloads failed, and the watchdog's own self-dial for
+#     /update.json timed out at the full 120s and was scored as "the onion layer is dark". Three of
+#     those restarted the service, killing the download that was blocking it and rotating the
+#     introduction points on the way out. tor was innocent throughout: no warnings, and its
+#     heartbeat reported real clients arriving the whole time.
+#   * it ignores `Range` outright — a ranged request gets `200` and the entire file. The updater in
+#     `core/src/update.rs` sends `Range: bytes=N-`, keeps a `.part` file and resumes, and even has a
+#     branch that truncates when a 200 comes back to a ranged request. That branch was firing every
+#     time: **resume has never once worked in production**, so every interrupted 45 MB download
+#     started again from zero. nginx honours Range, which is what makes a half-hour transfer over
+#     flaky circuits finishable at all.
+#
+# Speed was never the reason — ~25 KB/s is the Tor circuit, and no server language changes that.
+#
+# A user-level instance with its own prefix: the box already runs a system nginx as root, and this
+# must not touch it. Everything it writes lives under the onion's own state dir.
+NGINX_DIR="$STATE/nginx"
+mkdir -p "$NGINX_DIR/tmp"
 if [ -n "${NIGHTDROP_ONION_LOG:-}" ]; then
   echo "  request logging ON → $NIGHTDROP_ONION_LOG (counts only; Tor gives no client identity)"
-  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WEB" >/dev/null 2>>"$NIGHTDROP_ONION_LOG" &
+  access_log_line="access_log $NIGHTDROP_ONION_LOG;"
 else
-  python3 -m http.server "$PORT" --bind 127.0.0.1 --directory "$WEB" >/dev/null 2>&1 &
+  # Default: no logs at all. Over Tor every request arrives from 127.0.0.1 so a log holds no client
+  # identity, but "we keep nothing" is a stronger claim than "what we keep is harmless".
+  access_log_line="access_log off;"
 fi
+cat > "$NGINX_DIR/nginx.conf" <<NGINXCONF
+worker_processes 1;
+daemon off;
+pid $NGINX_DIR/nginx.pid;
+error_log /dev/null crit;
+events { worker_connections 256; }
+http {
+  include /etc/nginx/mime.types;
+  default_type application/octet-stream;
+  # Not in nginx's default map, and the APK is the whole point of the download page.
+  types { application/vnd.android.package-archive apk; }
+  $access_log_line
+  client_body_temp_path $NGINX_DIR/tmp;
+  proxy_temp_path $NGINX_DIR/tmp;
+  fastcgi_temp_path $NGINX_DIR/tmp;
+  uwsgi_temp_path $NGINX_DIR/tmp;
+  scgi_temp_path $NGINX_DIR/tmp;
+  sendfile on;
+  # A Tor client pulling 45 MB at 25 KB/s must not be timed out mid-transfer.
+  send_timeout 3600s;
+  keepalive_timeout 75s;
+  server {
+    listen 127.0.0.1:$PORT;
+    root $WEB;
+    index index.html;
+    autoindex off;
+  }
+}
+NGINXCONF
+nginx -t -c "$NGINX_DIR/nginx.conf" -p "$NGINX_DIR" >/dev/null 2>&1 || {
+  echo "nginx config rejected — refusing to start with a broken site" >&2
+  nginx -t -c "$NGINX_DIR/nginx.conf" -p "$NGINX_DIR"
+  exit 1
+}
+nginx -c "$NGINX_DIR/nginx.conf" -p "$NGINX_DIR" &
 web_pid=$!
 
 echo "Starting tor; publishing the onion descriptor can take ~30-60s ..."
@@ -226,6 +286,18 @@ while :; do
   #
   # This is the same mistake the relay watchdog made in its own way: evidence must be attributable
   # to the thing being judged before it is spent on a restart.
+  # Someone is being served RIGHT NOW, so the onion is demonstrably reachable and our probe is
+  # what failed. This is the relay watchdog's "clients are still being served" veto, which this one
+  # never had — and its absence is expensive here: a 45 MB APK takes ~30 minutes over Tor and
+  # saturates the circuit, so the probe can time out three cycles running while the download it is
+  # about to kill is the very proof the service is up. Measured 2026-08-14: with a large download
+  # in flight, probes over Tor came back 000/119s and 200/1.3s in the same minute, while the same
+  # file over 127.0.0.1 answered in 0.3ms.
+  if [ "$(ss -tn state established "( sport = :$PORT )" 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
+    echo "nightdrop-onion: self-dial failed but the site is actively serving $(ss -tn state established "( sport = :$PORT )" 2>/dev/null | tail -n +2 | wc -l) connection(s) — reachable, so this says nothing about darkness (still ${fails}/${DARK_LIMIT})" >&2
+    continue
+  fi
+
   if ! timeout 3 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$SOCKS_PORT" 2>/dev/null; then
     echo "nightdrop-onion: self-dial could not start — SOCKS $SOCKS_PORT is not accepting; tor is starting or gone. Inconclusive, not counted (still ${fails}/${DARK_LIMIT})" >&2
     continue
