@@ -32,6 +32,25 @@ DARK_LIMIT="${ONION_DARK_LIMIT:-3}"
 # What the probe fetches. Deliberately the file the app depends on for update checks, so the
 # watchdog proves the thing that actually matters rather than merely that tor answered.
 PROBE_PATH="${ONION_PROBE_PATH:-/update.json}"
+# Below this, a failed dial is treated as INCONCLUSIVE rather than dark. Reaching a genuinely
+# unreachable onion takes many seconds — fetching the descriptor from the HSDirs, then trying
+# introduction points — so a dial that gives up in a heartbeat did not observe the onion at all;
+# something local refused it. Counting those as darkness is what drove the restart counter to 10
+# (see the 'after 0s' entries in the journal), and every one of those restarts rotated the
+# introduction points and broke the clients it was meant to protect.
+MIN_REAL_FAIL="${ONION_MIN_REAL_FAIL:-10}"
+#
+# STILL UNEXPLAINED, as of 2026-08-14: this onion goes genuinely dark for multi-minute windows,
+# often. Four days of journal show 19 dials that reached the SOCKS proxy and then timed out at the
+# full 120s, and every restart so far was driven by three of those in a row — real darkness, not
+# the false positives the rule above removes. Meanwhile tor logs no warning at all and its
+# heartbeat reports real clients arriving throughout (130, 158, 86 INTRODUCE2 cells per 6h), so
+# the service is up and serving while our own probe cannot reach it.
+#
+# The probe shares the service's tor instance, so "our tor cannot dial our onion" and "the onion is
+# unreachable" are not distinguishable from here. Separating them needs a probe on an independent
+# tor client, which is what the relay watchdog does. Until that exists, a restart is treating a
+# symptom whose cause is unknown — so keep the sustained-darkness bar high rather than lowering it.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -195,6 +214,25 @@ while :; do
   if ! curl -s -o /dev/null --max-time 5 "http://127.0.0.1:$PORT$PROBE_PATH" 2>/dev/null; then
     echo "nightdrop-onion: the local server stopped answering on 127.0.0.1:$PORT — restarting" >&2
     exit 1
+  fi
+
+  # A failure only counts as darkness if the probe was actually in a position to observe it.
+  # Two ways it was not, and neither says anything about whether clients can reach us:
+  #
+  #   * the SOCKS port is not accepting — tor is still starting, or has gone away. The probe never
+  #     left the box.
+  #   * the dial failed faster than a real one can. A dark onion is discovered slowly (HSDir fetch,
+  #     then introduction attempts); an instant 000 is a local refusal wearing the same clothes.
+  #
+  # This is the same mistake the relay watchdog made in its own way: evidence must be attributable
+  # to the thing being judged before it is spent on a restart.
+  if ! timeout 3 bash -c "cat < /dev/null > /dev/tcp/127.0.0.1/$SOCKS_PORT" 2>/dev/null; then
+    echo "nightdrop-onion: self-dial could not start — SOCKS $SOCKS_PORT is not accepting; tor is starting or gone. Inconclusive, not counted (still ${fails}/${DARK_LIMIT})" >&2
+    continue
+  fi
+  if [ "$took" -lt "$MIN_REAL_FAIL" ]; then
+    echo "nightdrop-onion: self-dial failed in ${took}s, faster than a real unreachable onion — treating as a local hiccup, not darkness (still ${fails}/${DARK_LIMIT})" >&2
+    continue
   fi
 
   fails=$((fails + 1))
