@@ -1,0 +1,33 @@
+# WebTunnel pluggable-transport client, in-process for the Night Drop core.
+#
+# Protocol compatible with the Tor Project's WebTunnel (gitlab.torproject.org/tpo/
+# anti-censorship/pluggable-transports/webtunnel, and its copy in lyrebird): TLS to a real
+# web server, an HTTP/1.1 Upgrade on a secret path, then raw Tor bytes. It adds no
+# cryptography of its own — Tor's link encryption runs inside the stream.
+#
+# See docs/design/android-bridges.md for why this exists instead of bundling lyrebird.
+[package]
+name = "nightdrop-webtunnel"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+tokio = { version = "1", features = ["net", "io-util", "rt", "time"] }
+# Same rustls + ring as the core's Tor stack, so no second TLS or crypto backend is pulled in.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+# Mozilla's root store, compiled in: deterministic across devices and reproducible builds.
+webpki-roots = "1"
+sha2 = "0.10"
+base64 = "0.22"
+url = "2"
+httparse = "1"
+thiserror = "2"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full"] }
+rcgen = "0.13"

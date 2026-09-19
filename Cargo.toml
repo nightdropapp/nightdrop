@@ -2,7 +2,7 @@
 # The Flutter app lives in app/ and is built separately with the Flutter toolchain.
 [workspace]
 resolver = "2"
-members = ["core", "relay"]
+members = ["core", "relay", "webtunnel"]
 
 [workspace.package]
 edition = "2021"
