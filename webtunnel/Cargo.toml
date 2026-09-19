@@ -29,6 +29,26 @@ httparse = "1"
 thiserror = "2"
 tracing = "0.1"
 
+# Step 2 (desktop prototype): a BoringSSL ClientHello tuned to match Chrome's JA4, proven on
+# desktop before being wired into the client path or Android. BoringSSL (C, cmake) is an
+# OPTIONAL dependency behind `chrome-proto`, so the ordinary build, CI, and pre-commit hook
+# stay pure-Rust and never compile it — it is absent from the dependency graph without the flag.
+[features]
+chrome-proto = ["dep:boring", "dep:brotli"]
+
+[[example]]
+name = "boring_hello"
+required-features = ["chrome-proto"]
+
+[dependencies.boring]
+version = "5"
+features = ["mlkem"]
+optional = true
+
+[dependencies.brotli]
+version = "7"
+optional = true
+
 [dev-dependencies]
 tokio = { version = "1", features = ["full"] }
 rcgen = "0.13"

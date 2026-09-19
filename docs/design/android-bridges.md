@@ -103,17 +103,52 @@ gives arti; anything without it is refused before dialling. arti's in-process tr
 (`AbstractPtMgr`) would avoid the port entirely but sits behind `experimental-api`, which can
 change in any release — revisit if it stabilises.
 
-**Step 2 — the TLS fingerprint (the hard part; not started).** rustls's ClientHello is
-recognisable as rustls, and very little that browses the web sends it, so a censor could block
-it for almost no collateral cost. That makes the transport *correct but not stealthy* until
-this is solved, and **it must not ship to users before it is** — a recognisable handshake does
-not just fail, it can mark the user as a circumventer. Constraints found while reading
-lyrebird: its default is `hellorandomizednoalpn` — a *randomised* hello with **no ALPN**, not a
-browser copy — and the no-ALPN part is load-bearing, because a bridge's nginx offered `h2`
-would negotiate HTTP/2, where the Upgrade doesn't exist. A straight Chrome copy (BoringSSL via
-the `boring` crate) therefore needs its ALPN changed, which is itself a deviation from Chrome.
-Options to evaluate: BoringSSL with a Chrome-like hello minus `h2`; or randomisation in the
-style of uTLS. Either needs a JA3/JA4 comparison against real traffic before it counts.
+**Step 2 — the TLS fingerprint (desktop prototype proven 2026-09-19; not yet wired into the
+client).** rustls's ClientHello is recognisable as rustls, and very little that browses the web
+sends it, so a censor could block it for almost no collateral cost. That makes the transport
+*correct but not stealthy* until this is solved, and **it must not ship to users before it is**
+— a recognisable handshake does not just fail, it can mark the user as a circumventer.
+
+*Why pure Rust cannot do it* (measured, not assumed). A spike compared stock rustls against a
+real Chrome hello: even with ciphers/groups reordered, ALPN set, and cert compression enabled,
+rustls was missing six of Chrome's ciphers (the legacy CBC/RSA-kx suites rustls *deliberately
+refuses to implement*), GREASE (no API), the `X25519MLKEM768` keyshare (needs the `aws-lc-rs`
+backend), and several extensions. Reaching a Chrome JA4 from rustls would mean reintroducing
+crypto rustls exists to avoid — not a small fork. A from-scratch Rust uTLS is worse: the
+ClientHello commits you to the whole handshake (key exchange for every group offered, the 1.3
+key schedule, cert-compression *decompression*), i.e. reimplementing a TLS stack, which the
+"no hand-rolled crypto" rule forbids. There is no maintained Rust uTLS; every browser-mimicking
+Rust library wraps BoringSSL.
+
+*What works.* Cloudflare's `boring` (BoringSSL — the library Chrome itself uses) reproduces
+Chrome's hello **exactly**. Prototype `webtunnel/examples/boring_hello.rs` plus the self-test
+`webtunnel/tests/fingerprint.rs` produce JA4 `t13d1515h1_8daaf6152771_f04195365787`, byte-equal
+in cipher set, extension set, groups, sigalgs and ALPN to Chromium 152 opening a WebSocket,
+stable across connections (GREASE varies, JA4 excludes it). The recipe: TLS 1.2–1.3,
+`set_grease_enabled`, `set_permute_extensions`, Chrome's explicit cipher list,
+`X25519MLKEM768:X25519:P-256:P-384`, ALPN `http/1.1`, OCSP + SCT + brotli cert-compression +
+GREASE-ECH.
+
+*The ALPN worry was unfounded.* An earlier note feared a Chrome copy would advertise `h2` and a
+bridge's nginx would take it, breaking the Upgrade. But Chrome's **WebSocket** hello — which is
+what we imitate — offers only `http/1.1`, exactly what WebTunnel needs. No deviation from
+Chrome is required. (Firefox offers `h2` even for WebSockets, which is why we mimic Chrome.)
+
+*Honest limits.* JA4 match is necessary, not sufficient — sophisticated censors also look at
+keyshare sizes, ALPS and active probing. Chrome's fingerprint drifts (it intermittently sends
+the new `trust_anchors` draft extension → a 16-extension variant; we match the common 15). Some
+party owns keeping the profile current forever; the `fingerprint` self-test is the tripwire.
+
+*Cost accepted (see the top-of-file status and the commit).* BoringSSL is C built with cmake —
+the class of dependency the core avoided by choosing rustls for Android. It is isolated in
+`webtunnel-client` behind the **optional** `chrome-proto` feature: without the flag it is absent
+from the dependency graph, so the ordinary build, CI and pre-commit hook stay pure-Rust. The Tor
+path keeps rustls/ring regardless. **Gate:** the Android/F-Droid cross-compile of BoringSSL must
+be proven separately before this feature becomes load-bearing on a device (part of step 4).
+
+*Remaining in step 2:* fold the boring profile into `tls.rs` as the real TLS layer behind
+`chrome-proto` (reimplementing the three cert-verification modes with boring's verify callback),
+so `connect()` itself emits the Chrome hello, and point the self-test at `connect()`.
 
 **Step 3 — into the core.** Spawn the SOCKS listener at Tor startup on `127.0.0.1:0` with a
 fresh secret, add an unmanaged `webtunnel` transport pointing at it, append the secret to
