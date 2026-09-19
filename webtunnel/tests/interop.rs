@@ -9,8 +9,6 @@
 //! Tests marked `#[ignore]` need the Go server binary in `WEBTUNNEL_SERVER_BIN`; run them with
 //! `webtunnel/interop.sh`, which builds it from a pinned commit. The rest need nothing.
 
-use nightdrop_webtunnel::socks::{Access, SocksServer, SECRET_ARG};
-use nightdrop_webtunnel::{chain_hash, connect, ClientConfig, Error, PtArgs};
 use std::net::SocketAddr;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -18,6 +16,8 @@ use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::{Child, Command};
+use webtunnel_client::socks::{Access, SocksServer, SECRET_ARG};
+use webtunnel_client::{chain_hash, connect, ClientConfig, Error, PtArgs};
 
 const HOST: &str = "bridge.test";
 const PATH: &str = "s3cr3t-path";

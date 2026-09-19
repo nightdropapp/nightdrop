@@ -87,7 +87,7 @@ crate is still `0.1.0-alpha.1` (2024-09), with nothing but dependency bumps sinc
 author, no audit. `ptrs-gesher` (a fork adding WebTunnel): created 2026-05, one maintainer, and
 its WebTunnel TLS is plain rustls — see the fingerprint problem below.
 
-**Step 1 — protocol (done).** `webtunnel/` (`nightdrop-webtunnel`): bridge-option parsing with
+**Step 1 — protocol (done).** `webtunnel/` (`webtunnel-client`, MIT OR Apache-2.0): bridge-option parsing with
 lyrebird's semantics (`url`, `addr`, `servername`, `sni-imitation`, `cert-domain`, `cert`),
 TLS with WebPKI verification or lyrebird's certificate-chain pin, the upgrade request
 byte-identical to Go's, and a SOCKS5 front end speaking arti's pt-spec argument encoding.
@@ -98,7 +98,7 @@ check, or accepting any pin each make a test fail.
 
 **Access control.** A loopback port on Android is reachable by every app on the device, and
 the SOCKS username/password already carry the bridge options. So the listener requires a
-random bridge argument, `nightdrop-secret=…`, which the core appends to each bridge line it
+random bridge argument, `listener-secret=…`, which the core appends to each bridge line it
 gives arti; anything without it is refused before dialling. arti's in-process transport hook
 (`AbstractPtMgr`) would avoid the port entirely but sits behind `experimental-api`, which can
 change in any release — revisit if it stabilises.

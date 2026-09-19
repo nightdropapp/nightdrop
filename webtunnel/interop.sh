@@ -12,8 +12,11 @@ set -euo pipefail
 WEBTUNNEL_REPO=https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/webtunnel.git
 WEBTUNNEL_COMMIT=11334a222c1beeb45759d436b7aef963a10600b2   # v0.0.7, 2026-09-15
 
-root=$(cd "$(dirname "$0")/.." && pwd)
-src=$root/target/webtunnel-go
+crate=$(cd "$(dirname "$0")" && pwd)
+cd "$crate"
+# Works both inside a workspace and as a standalone checkout.
+target=$(cargo metadata --no-deps --format-version 1 | sed -n 's/.*"target_directory":"\([^"]*\)".*/\1/p')
+src=$target/webtunnel-go
 bin=$src/webtunnel-server-$WEBTUNNEL_COMMIT
 
 if [[ ! -x $bin ]]; then
@@ -27,5 +30,4 @@ if [[ ! -x $bin ]]; then
 fi
 
 export WEBTUNNEL_SERVER_BIN=$bin
-cd "$root"
-cargo test -p nightdrop-webtunnel -- --include-ignored "$@"
+cargo test -p webtunnel-client -- --include-ignored "$@"

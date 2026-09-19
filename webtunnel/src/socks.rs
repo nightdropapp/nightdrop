@@ -8,7 +8,7 @@
 //!
 //! **Access control.** On Android, a loopback port is reachable by every app on the device, and
 //! the username/password fields are already spoken for. So the listener can require a secret
-//! *bridge argument* ([`SECRET_ARG`]), which the core appends to each bridge line it hands arti;
+//! *bridge argument* ([`SECRET_ARG`]), which the embedding application appends to each bridge line it hands its Tor client;
 //! a connection without it is refused before anything is dialled.
 
 use crate::{connect, ClientConfig, Error, PtArgs};
@@ -18,7 +18,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 
 /// Bridge argument carrying the listener's shared secret.
-pub const SECRET_ARG: &str = "nightdrop-secret";
+pub const SECRET_ARG: &str = "listener-secret";
 
 /// How long a client gets to finish the SOCKS exchange (not the tunnel; see `client`).
 const SOCKS_TIMEOUT: Duration = Duration::from_secs(10);
@@ -28,7 +28,7 @@ const SOCKS_TIMEOUT: Duration = Duration::from_secs(10);
 pub enum Access {
     /// Anyone who can reach the port. Tests and desktop experiments only.
     Open,
-    /// Only requests whose argument list carries `nightdrop-secret=<this>`.
+    /// Only requests whose argument list carries `listener-secret=<this>`.
     Secret(String),
 }
 
