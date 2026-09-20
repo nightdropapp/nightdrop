@@ -2,10 +2,10 @@
 
 **Status:** 🟢 in-app **bridge** configuration implemented (2026-08-01), not yet exercised on a
 device. PT binaries are a separate, larger piece (§3) and are **not** included. 🟢 An in-process
-**WebTunnel** client (§5) is built in `webtunnel/` instead: steps 1–3 done and the BoringSSL
-Android cross-compile (the step-4 gate) proven for all three ABIs (2026-09-20). Remaining:
-wire the `webtunnel` feature through the app's Android build, on-device test, F-Droid
-reproducibility. Off by default, so nothing ships yet.
+**WebTunnel** client (§5) is built in `webtunnel/` instead: steps 1–3 done, the BoringSSL
+Android cross-compile proven for all ABIs, and a real `NIGHTDROP_WEBTUNNEL=1` APK built with
+BoringSSL + WebTunnel linked in (2026-09-20). Remaining: on-device "block Tor → fall back" test
+and F-Droid reproducibility. Off by default, so nothing ships yet.
 **Relates to:** `docs/bridges.md` (the file formats and where to get bridge lines),
 `ARCHITECTURE.md` §6 (censorship resistance), `core/src/transport/tor.rs`
 (`apply_bridges` / `apply_transports`).
