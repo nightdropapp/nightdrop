@@ -43,12 +43,17 @@ fn main() -> anyhow::Result<()> {
 }
 
 async fn run(bridge_line: String) -> anyhow::Result<()> {
-    // 1. Our WebTunnel SOCKS front end, on an OS-assigned loopback port. Open access: this is a
-    //    throwaway harness, not the app (the app will use Access::Secret).
-    let server = SocksServer::bind("127.0.0.1:0".parse()?, Access::Open).await?;
+    // 1. Our WebTunnel SOCKS front end, on an OS-assigned loopback port, with a per-run secret —
+    //    exactly as core/src/transport/tor.rs wires it (the loopback port is reachable by any app
+    //    on Android, so the transport args must carry the secret the listener authorises on).
+    let secret = "harness-secret-0123456789abcdef".to_string();
+    let server = SocksServer::bind("127.0.0.1:0".parse()?, Access::Secret(secret.clone())).await?;
     let socks_addr: SocketAddr = server.local_addr()?;
     tokio::spawn(server.serve());
     eprintln!("webtunnel SOCKS listener: {socks_addr}");
+
+    // The secret rides on the bridge line as one more transport arg; arti forwards it over SOCKS.
+    let bridge_line = format!("{bridge_line} listener-secret={secret}");
 
     // 2. A throwaway Tor state/cache dir so this never touches the app's identity.
     let dir = std::env::temp_dir().join(format!("wt-bootstrap-{}", std::process::id()));

@@ -238,8 +238,11 @@ impl TorTransport {
         if !on_disk_keystore {
             forget_stale_ipts(state_dir, nickname);
         }
-        let config = tor_config(state_dir, on_disk_keystore)?;
+        // The runtime must exist before the config: the WebTunnel transport (if built in) runs an
+        // async SOCKS listener that the config then points arti at.
         let runtime = Arc::new(Runtime::new().context("tokio runtime")?);
+        let webtunnel_proxy = spawn_webtunnel_proxy(&runtime)?;
+        let config = tor_config(state_dir, on_disk_keystore, webtunnel_proxy)?;
         let nickname_owned: HsNickname = nickname.parse().context("onion service nickname")?;
         let auth_dir = client_auth_dir.map(str::to_string);
         let auth_dir_for_svc = auth_dir.clone();
@@ -859,7 +862,11 @@ fn forget_stale_ipts(state_dir: Option<&str>, nickname: &str) {
     }
 }
 
-fn tor_config(state_dir: Option<&str>, on_disk_keystore: bool) -> Result<TorClientConfig> {
+fn tor_config(
+    state_dir: Option<&str>,
+    on_disk_keystore: bool,
+    webtunnel: Option<WtProxy>,
+) -> Result<TorClientConfig> {
     match state_dir {
         None => {
             let mut builder = TorClientConfigBuilder::default();
@@ -875,11 +882,20 @@ fn tor_config(state_dir: Option<&str>, on_disk_keystore: bool) -> Result<TorClie
             let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
             builder.storage().permissions().dangerously_trust_everyone();
             apply_common_tuning(&mut builder);
-            apply_bridges(&mut builder, base);
+            apply_bridges(
+                &mut builder,
+                base,
+                webtunnel.as_ref().map(|p| p.secret.as_str()),
+            );
             // Register any pluggable transports (obfs4/snowflake) the user configured, so a bridge
             // line that names such a transport has a binary to run it. Must come with the bridges:
             // arti's config validation rejects a PT bridge that has no matching transport entry.
             apply_transports(&mut builder, base);
+            // The in-process WebTunnel transport, pointing at our SOCKS listener (unmanaged, no
+            // external binary). Same rule: a `webtunnel` bridge line needs this transport present.
+            if let Some(proxy) = &webtunnel {
+                register_webtunnel_transport(&mut builder, proxy.addr);
+            }
             apply_keystore_kind(&mut builder, on_disk_keystore);
             builder.build().context("build Tor config")
         }
@@ -896,6 +912,12 @@ pub fn check_bridge_line(line: &str) -> std::result::Result<(), String> {
         .strip_prefix("Bridge ")
         .unwrap_or(line.trim())
         .trim();
+    // A build without the WebTunnel transport must not let the editor save a WebTunnel line: it
+    // parses, but would then be skipped at startup, so accepting it would mislead the user.
+    #[cfg(not(feature = "webtunnel"))]
+    if spec.split_whitespace().next() == Some("webtunnel") {
+        return Err("WebTunnel bridges are not supported in this build".into());
+    }
     spec.parse::<BridgeConfigBuilder>()
         .map(|_| ())
         .map_err(|e| e.to_string())
@@ -929,7 +951,11 @@ fn apply_keystore_kind(builder: &mut TorClientConfigBuilder, on_disk: bool) {
 /// that names a pluggable transport — `obfs4 ADDR FINGERPRINT cert=… iat-mode=…`, `snowflake …` —
 /// also parses here; it additionally needs a matching entry in `transports.txt` (see
 /// [`apply_transports`]) pointing arti at the PT client binary.
-fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
+fn apply_bridges(
+    builder: &mut TorClientConfigBuilder,
+    base: &str,
+    webtunnel_secret: Option<&str>,
+) -> usize {
     let path = format!("{base}/bridges.txt");
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return 0;
@@ -941,6 +967,26 @@ fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
             continue;
         }
         let spec = line.strip_prefix("Bridge ").unwrap_or(line).trim();
+        let is_webtunnel = spec.split_whitespace().next() == Some("webtunnel");
+        // A build without the `webtunnel` feature has no transport for such a line; pushing it
+        // would fail the whole config build (arti requires a matching transport), taking Tor down
+        // with it. Skip it like any unusable line instead — non-fatal.
+        #[cfg(not(feature = "webtunnel"))]
+        if is_webtunnel {
+            eprintln!(
+                "nightdrop: skipping WebTunnel bridge line — this build has no WebTunnel transport"
+            );
+            continue;
+        }
+        // A WebTunnel bridge reaches our in-process SOCKS listener, which requires a per-run
+        // secret (its loopback port is reachable by any app on Android). Pass it as one more
+        // transport arg on the bridge line, so arti forwards it and the listener authorises.
+        let spec = match webtunnel_secret {
+            Some(secret) if is_webtunnel => {
+                std::borrow::Cow::Owned(format!("{spec} listener-secret={secret}"))
+            }
+            _ => std::borrow::Cow::Borrowed(spec),
+        };
         match spec.parse::<BridgeConfigBuilder>() {
             Ok(bridge) => {
                 builder.bridges().bridges().push(bridge);
@@ -952,6 +998,59 @@ fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
         }
     }
     added
+}
+
+/// A running in-process WebTunnel SOCKS proxy: the loopback address arti's unmanaged `webtunnel`
+/// transport connects to, and the per-run secret that authorises it (also appended to WebTunnel
+/// bridge lines by [`apply_bridges`]).
+struct WtProxy {
+    addr: std::net::SocketAddr,
+    secret: String,
+}
+
+/// Register an *unmanaged* `webtunnel` transport that arti reaches at `addr` (our SOCKS listener),
+/// so a WebTunnel bridge needs no external PT binary. Uses the standard `webtunnel` transport
+/// name; needs no `webtunnel-client` symbols, so it compiles without the `webtunnel` feature.
+fn register_webtunnel_transport(builder: &mut TorClientConfigBuilder, addr: std::net::SocketAddr) {
+    let mut transport = TransportConfigBuilder::default();
+    transport
+        .protocols(vec!["webtunnel"
+            .parse()
+            .expect("webtunnel is a valid PT name")])
+        .proxy_addr(addr);
+    builder.bridges().transports().push(transport);
+}
+
+/// Bind the WebTunnel SOCKS listener on loopback, spawn it on `runtime` for the client's
+/// lifetime, and return its address plus a fresh secret. `None` without the `webtunnel` feature.
+#[cfg(feature = "webtunnel")]
+fn spawn_webtunnel_proxy(runtime: &Runtime) -> Result<Option<WtProxy>> {
+    use rand::RngCore;
+    use webtunnel_client::socks::{Access, SocksServer};
+
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    let secret: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    let access_secret = secret.clone();
+
+    let addr = runtime.block_on(async move {
+        let server = SocksServer::bind(
+            "127.0.0.1:0".parse().unwrap(),
+            Access::Secret(access_secret),
+        )
+        .await
+        .context("bind WebTunnel SOCKS listener")?;
+        let addr = server.local_addr().context("WebTunnel SOCKS address")?;
+        tokio::spawn(server.serve());
+        Ok::<_, anyhow::Error>(addr)
+    })?;
+    crate::diag!("tor: WebTunnel transport proxy listening on {addr}");
+    Ok(Some(WtProxy { addr, secret }))
+}
+
+#[cfg(not(feature = "webtunnel"))]
+fn spawn_webtunnel_proxy(_runtime: &Runtime) -> Result<Option<WtProxy>> {
+    Ok(None)
 }
 
 /// Register **pluggable transports** (obfs4/snowflake, ARCHITECTURE.md §6) from
@@ -1107,7 +1206,7 @@ mod bridge_tests {
         .unwrap();
 
         let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
-        let added = apply_bridges(&mut builder, dir.to_str().unwrap());
+        let added = apply_bridges(&mut builder, dir.to_str().unwrap(), None);
         assert_eq!(
             added, 2,
             "two valid lines added; comment/blank/junk skipped"
@@ -1117,8 +1216,86 @@ mod bridge_tests {
         let empty = dir.join("empty");
         std::fs::create_dir_all(&empty).unwrap();
         let mut b2 = TorClientConfigBuilder::from_directories(&state, &cache);
-        assert_eq!(apply_bridges(&mut b2, empty.to_str().unwrap()), 0);
+        assert_eq!(apply_bridges(&mut b2, empty.to_str().unwrap(), None), 0);
 
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A real-shaped WebTunnel line: the addr is the distributor's 2001:db8 placeholder, the
+    /// url= host is what the client actually resolves.
+    const WT_LINE: &str = "webtunnel [2001:db8::1]:443 CD0DFB72DE3124704AEA1BEF3A2CCD62347F6376 \
+                           url=https://cover.example/abc ver=0.0.5";
+
+    fn wt_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!(
+            "nd-wt-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ))
+    }
+
+    #[cfg(feature = "webtunnel")]
+    #[test]
+    fn webtunnel_bridge_is_accepted_and_needs_its_transport() {
+        // The settings editor's validator accepts it (no transport needed to parse).
+        assert!(
+            check_bridge_line(WT_LINE).is_ok(),
+            "editor must accept a webtunnel line"
+        );
+
+        let dir = wt_dir();
+        let state = format!("{}/arti-state", dir.display());
+        let cache = format!("{}/arti-cache", dir.display());
+        std::fs::create_dir_all(&state).unwrap();
+        std::fs::create_dir_all(&cache).unwrap();
+        std::fs::write(dir.join("bridges.txt"), format!("{WT_LINE}\n")).unwrap();
+
+        // With the secret and the transport registered, the config builds: our
+        // register_webtunnel_transport supplies the transport arti's validation demands.
+        let mut ok = TorClientConfigBuilder::from_directories(&state, &cache);
+        assert_eq!(
+            apply_bridges(&mut ok, dir.to_str().unwrap(), Some("s3cr3t")),
+            1
+        );
+        register_webtunnel_transport(&mut ok, "127.0.0.1:9".parse().unwrap());
+        assert!(
+            ok.build().is_ok(),
+            "webtunnel bridge + its transport must build"
+        );
+
+        // Without the transport, the same bridge is rejected at build time — proving the transport
+        // is load-bearing, so the wiring genuinely does something.
+        let mut missing = TorClientConfigBuilder::from_directories(&state, &cache);
+        apply_bridges(&mut missing, dir.to_str().unwrap(), Some("s3cr3t"));
+        assert!(
+            missing.build().is_err(),
+            "webtunnel bridge with no transport must not build"
+        );
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(not(feature = "webtunnel"))]
+    #[test]
+    fn webtunnel_bridge_refused_when_unsupported() {
+        // A build with no WebTunnel transport must reject the line in the editor and skip it at
+        // load, so it can never take Tor bootstrap down.
+        assert!(
+            check_bridge_line(WT_LINE).is_err(),
+            "a build without the webtunnel feature must reject webtunnel lines"
+        );
+        let dir = wt_dir();
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bridges.txt"), format!("{WT_LINE}\n")).unwrap();
+        let mut builder = TorClientConfigBuilder::from_directories(dir.join("s"), dir.join("c"));
+        assert_eq!(
+            apply_bridges(&mut builder, dir.to_str().unwrap(), None),
+            0,
+            "webtunnel line must be skipped, not pushed"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 

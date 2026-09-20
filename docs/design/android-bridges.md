@@ -181,11 +181,28 @@ Two findings from that run:
 - *IPv6.* The distributor may hand out IPv6-only-looking lines, but the `url=` host has an A
   record, so resolution reaches it over IPv4. No IPv6 egress is required (this box has none).
 
-**Step 3 — into the core.** Spawn the SOCKS listener at Tor startup on `127.0.0.1:0` with a
-fresh secret, add an unmanaged `webtunnel` transport pointing at it (proven above), append the
-secret to WebTunnel bridge lines, and teach the bridge editor to accept them. This adds a
-clearnet DNS lookup of the bridge's hostname (the same one the SNI already reveals), which
-`DEPENDENCIES.md`'s "the only egress is Tor" statement must then describe.
+**Step 3 — into the core (DONE 2026-09-20, behind the `webtunnel` feature).** At Tor startup
+`core/src/transport/tor.rs` now creates the runtime first, `spawn_webtunnel_proxy` binds
+webtunnel-client's SOCKS listener on `127.0.0.1:0` with a fresh per-run secret and spawns it for
+the client's lifetime, `register_webtunnel_transport` adds the unmanaged `webtunnel` transport at
+that address, and `apply_bridges` appends `listener-secret=<secret>` to each `webtunnel` bridge
+line so arti forwards it and the listener authorises. Proven end-to-end: the harness, updated to
+this exact secret-authorised wiring, bootstraps real Tor in ~22 s through it.
+
+The feature is **off by default and implies `tor`**, and pulls `webtunnel-client/chrome-proto`
+(BoringSSL) — so the shipped build is unchanged and cross-compiles as before. A build *without*
+the feature can't run these bridges, so `check_bridge_line` rejects a `webtunnel` line in the
+editor and `apply_bridges` skips one at load (rather than failing the whole config build and
+taking Tor down). Unit-tested both ways.
+
+Two follow-ups this leaves: it adds a clearnet DNS lookup of the bridge's `url=` host (the same
+name the SNI already reveals), which `DEPENDENCIES.md`'s "the only egress is Tor" statement must
+describe; and the Dart bridge editor already accepts webtunnel lines via `check_bridge_line`, but
+its help text should point users at where to get them.
+
+**Step 4 — Android and F-Droid.** Cross-compile (the open BoringSSL/cmake gate), test on a device
+against a real bridge from bridges.torproject.org, and confirm the F-Droid build stays
+reproducible.
 
 **Step 4 — Android and F-Droid.** Cross-compile, test on a device against a real bridge from
 bridges.torproject.org, and confirm the F-Droid build stays reproducible.

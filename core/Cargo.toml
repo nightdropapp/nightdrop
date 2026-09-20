@@ -85,15 +85,24 @@ libsqlite3-sys = { version = "0.37", features = ["bundled"], optional = true }
 # the bridge/tests don't pull the (large) arti dependency tree.
 tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell", "dep:safelog", "dep:tokio", "dep:futures", "dep:libsqlite3-sys", "dep:rustls", "dep:tor-hscrypto", "dep:tor-keymgr", "dep:tor-llcrypto", "dep:tor-config-path", "dep:tor-config", "dep:tracing-subscriber"]
 
+# In-process WebTunnel pluggable transport (docs/design/android-bridges.md §5): at Tor startup
+# the core runs webtunnel-client's SOCKS listener and points arti's `webtunnel` transport at it,
+# so a WebTunnel bridge line works with no external binary. OFF by default and implies `tor`;
+# `webtunnel-client/chrome-proto` pulls BoringSSL for the Chrome-identical handshake — so this
+# feature also brings a C/cmake dependency and must not be enabled in a shipped build until the
+# Android BoringSSL cross-compile (step 4) is proven.
+webtunnel = ["tor", "dep:webtunnel-client", "webtunnel-client/chrome-proto"]
+
+[dependencies.webtunnel-client]
+path = "../webtunnel"
+optional = true
+
 [dev-dependencies]
 # Surfaces arti's client-side tracing in the #[ignore]d Tor tests when RUST_LOG is set
 # (circuit/HS-client diagnostics). Tests only — never linked into the shipped core.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# Desktop end-to-end harness (examples/webtunnel_bootstrap.rs): bootstrap real Tor through the
-# in-process WebTunnel client. Gated on the `tor` feature so it is never built by default.
-webtunnel-client = { path = "../webtunnel" }
-
+# Desktop end-to-end harness: bootstrap real Tor through the in-process WebTunnel client.
 [[example]]
 name = "webtunnel_bootstrap"
-required-features = ["tor"]
+required-features = ["webtunnel"]
