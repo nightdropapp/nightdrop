@@ -150,10 +150,28 @@ be proven separately before this feature becomes load-bearing on a device (part 
 `chrome-proto` (reimplementing the three cert-verification modes with boring's verify callback),
 so `connect()` itself emits the Chrome hello, and point the self-test at `connect()`.
 
+**End-to-end viability proven on desktop (2026-09-19).** Before building step 3 into the app, a
+harness (`core/examples/webtunnel_bootstrap.rs`, `--features tor`) ran the exact architecture
+step 3 will use: a real `arti` client with the `webtunnel` transport configured *unmanaged*
+(`TransportConfigBuilder::proxy_addr` → our `SocksServer`), pointed at two live bridges from
+bridges.torproject.org. Both bootstrapped Tor in ~20–22 s **through the WebTunnel client** and
+opened a working circuit (`HTTP/1.1 200 OK` from example.com over Tor). So the whole chain —
+arti → unmanaged SOCKS → our TLS+upgrade → real bridge → Tor — works; step 3 is wiring, not
+invention.
+
+Two findings from that run:
+- *The `addr` in a WebTunnel bridge line is a `2001:db8:` placeholder by design.* The distributor
+  never publishes the real IP (that would just be blockable); the real endpoint is the `url=`
+  host, which the client resolves. Our design handles this for free: arti passes the placeholder
+  `addr` as the SOCKS CONNECT target and the SOCKS layer discards it, dialing `url=` instead. So
+  **for WebTunnel, ignore `addr`; resolve `url`** — the client already does.
+- *IPv6.* The distributor may hand out IPv6-only-looking lines, but the `url=` host has an A
+  record, so resolution reaches it over IPv4. No IPv6 egress is required (this box has none).
+
 **Step 3 — into the core.** Spawn the SOCKS listener at Tor startup on `127.0.0.1:0` with a
-fresh secret, add an unmanaged `webtunnel` transport pointing at it, append the secret to
-WebTunnel bridge lines, and teach the bridge editor to accept them. This adds a clearnet DNS
-lookup of the bridge's hostname (the same one the SNI already reveals), which
+fresh secret, add an unmanaged `webtunnel` transport pointing at it (proven above), append the
+secret to WebTunnel bridge lines, and teach the bridge editor to accept them. This adds a
+clearnet DNS lookup of the bridge's hostname (the same one the SNI already reveals), which
 `DEPENDENCIES.md`'s "the only egress is Tor" statement must then describe.
 
 **Step 4 — Android and F-Droid.** Cross-compile, test on a device against a real bridge from

@@ -2604,6 +2604,7 @@ dependencies = [
  "tor-rtcompat",
  "tracing-subscriber",
  "vodozemac",
+ "webtunnel-client",
  "zeroize",
 ]
 

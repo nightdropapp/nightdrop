@@ -78,3 +78,11 @@ tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell
 # Surfaces arti's client-side tracing in the #[ignore]d Tor tests when RUST_LOG is set
 # (circuit/HS-client diagnostics). Tests only — never linked into the shipped core.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Desktop end-to-end harness (examples/webtunnel_bootstrap.rs): bootstrap real Tor through the
+# in-process WebTunnel client. Gated on the `tor` feature so it is never built by default.
+webtunnel-client = { path = "../webtunnel" }
+
+[[example]]
+name = "webtunnel_bootstrap"
+required-features = ["tor"]
