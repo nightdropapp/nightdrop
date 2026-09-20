@@ -1,8 +1,11 @@
 # Design draft — Bridges and pluggable transports on Android
 
 **Status:** 🟢 in-app **bridge** configuration implemented (2026-08-01), not yet exercised on a
-device. PT binaries are a separate, larger piece (§3) and are **not** included. 🟡 An in-process
-**WebTunnel** client (§5) is being built in `webtunnel/` instead: step 1 of 4 done (2026-09-19).
+device. PT binaries are a separate, larger piece (§3) and are **not** included. 🟢 An in-process
+**WebTunnel** client (§5) is built in `webtunnel/` instead: steps 1–3 done and the BoringSSL
+Android cross-compile (the step-4 gate) proven for all three ABIs (2026-09-20). Remaining:
+wire the `webtunnel` feature through the app's Android build, on-device test, F-Droid
+reproducibility. Off by default, so nothing ships yet.
 **Relates to:** `docs/bridges.md` (the file formats and where to get bridge lines),
 `ARCHITECTURE.md` §6 (censorship resistance), `core/src/transport/tor.rs`
 (`apply_bridges` / `apply_transports`).
@@ -200,9 +203,24 @@ name the SNI already reveals), which `DEPENDENCIES.md`'s "the only egress is Tor
 describe; and the Dart bridge editor already accepts webtunnel lines via `check_bridge_line`, but
 its help text should point users at where to get them.
 
-**Step 4 — Android and F-Droid.** Cross-compile (the open BoringSSL/cmake gate), test on a device
-against a real bridge from bridges.torproject.org, and confirm the F-Droid build stays
-reproducible.
+**Step 4 — Android and F-Droid.**
+
+*BoringSSL Android cross-compile — DONE / gate cleared (2026-09-20).* `webtunnel-client` with
+`chrome-proto` (BoringSSL) cross-compiles for **all three F-Droid ABIs** — arm64-v8a,
+armeabi-v7a, x86_64 — with NDK 28.2; the produced BoringSSL objects are genuine
+ARM/ARM64/x86-64 ELF. This was the one unproven blocker for shipping WebTunnel. The snag was
+`boring-sys` building BoringSSL's test-only `third_party/benchmark`, whose regex-backend
+detection runs a target binary (impossible when cross-compiling); the fix is
+`webtunnel/android/boringssl-toolchain.cmake`, a wrapper that forces `BUILD_TESTING OFF` and
+includes the NDK toolchain, selected via `CMAKE_TOOLCHAIN_FILE` (which `boring-sys` defers to).
+Full recipe + per-ABI settings (armv7 needs `CC_*` set explicitly, since `ring`'s cc-rs guesses
+a clang name the NDK doesn't ship): `webtunnel/android/README.md`.
+
+*Remaining:* wire the app's Android build (cargokit / flutter_rust_bridge) to enable the
+`webtunnel` feature and export that `CMAKE_TOOLCHAIN_FILE` + per-ABI `CC_*` for each ABI build —
+and make it reproducible for F-Droid (the toolchain forces only tests off, so libcrypto/libssl
+are unchanged and deterministic). Then test on a device against a real bridge from
+bridges.torproject.org, and confirm the F-Droid build stays reproducible with BoringSSL added.
 
 **Step 4 — Android and F-Droid.** Cross-compile, test on a device against a real bridge from
 bridges.torproject.org, and confirm the F-Droid build stays reproducible.
