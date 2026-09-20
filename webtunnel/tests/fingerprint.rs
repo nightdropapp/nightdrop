@@ -1,80 +1,37 @@
-//! Does our TLS ClientHello look like Chrome opening a WebSocket?
+//! Does `connect()`'s TLS ClientHello look like Chrome opening a WebSocket?
 //!
 //! WebTunnel hides Tor inside what should look like a browser's `wss://` connection, so the
 //! reference is a real one: Chromium's ClientHello for `new WebSocket("wss://…")`. Chrome offers
 //! only `http/1.1` there, which is exactly what WebTunnel needs — a page load offers `h2`, and a
 //! bridge's nginx would take it, breaking the HTTP Upgrade.
 //!
-//! This is the drift check for step 2 (docs/design/android-bridges.md §5): it builds the same
-//! BoringSSL ClientHello the client will use, captures it on a local listener, computes its JA4,
-//! and asserts it still equals the Chrome JA4 we validated by capture. When BoringSSL or the
-//! profile drifts, this fails and we re-validate against a current Chrome.
+//! This is the drift check for step 2 (docs/design/android-bridges.md §5): it drives the real
+//! `connect()` at a local listener that captures the first TLS record, computes its JA4, and
+//! asserts it still equals the Chrome JA4 we validated by capture. When BoringSSL or the profile
+//! drifts, this fails and we re-validate against a current Chrome.
 //!
-//! Gated behind `chrome-proto` so the ordinary build and CI never compile BoringSSL:
+//! Gated behind `chrome-proto`, the feature that makes `connect()` use BoringSSL; the default
+//! (rustls) build emits a different hello and never compiles BoringSSL:
 //!   cargo test -p webtunnel-client --features chrome-proto --test fingerprint
 #![cfg(feature = "chrome-proto")]
 
-use boring::ssl::{
-    CertificateCompressionAlgorithm, CertificateCompressor, SslConnector, SslMethod, SslVersion,
-};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Read;
+use std::net::{SocketAddr, TcpListener};
 use std::thread;
+use webtunnel_client::{connect, ClientConfig, PtArgs};
 
 /// JA4 of Chromium 152 opening a WebSocket, captured 2026-09-19 (the 15-extension profile;
 /// Chrome intermittently also sends the `trust_anchors` draft extension → a 16-ext variant).
 /// GREASE is excluded from JA4 by construction, so this is stable per Chrome build. Refresh it,
-/// and the profile below, when this test fails against a current Chrome.
+/// and the profile in `tls.rs`, when this test fails against a current Chrome.
 const CHROME_JA4: &str = "t13d1515h1_8daaf6152771_f04195365787";
 
-// -------------------------------------------------------------- the profile under test
-
-/// Chrome's TLS 1.2 cipher list; BoringSSL prepends the three TLS 1.3 suites.
-const CIPHERS: &str = "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:\
-ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:\
-ECDHE-RSA-CHACHA20-POLY1305:ECDHE-RSA-AES128-SHA:ECDHE-RSA-AES256-SHA:AES128-GCM-SHA256:\
-AES256-GCM-SHA384:AES128-SHA:AES256-SHA";
-
-struct Brotli;
-impl CertificateCompressor for Brotli {
-    const ALGORITHM: CertificateCompressionAlgorithm = CertificateCompressionAlgorithm::BROTLI;
-    const CAN_COMPRESS: bool = false;
-    const CAN_DECOMPRESS: bool = true;
-    fn decompress<W: Write>(&self, input: &[u8], output: &mut W) -> std::io::Result<()> {
-        std::io::copy(&mut brotli::Decompressor::new(input, 4096), output).map(|_| ())
-    }
-}
-
-/// Send one ClientHello with the Chrome-matching profile to `addr`. This is the exact
-/// configuration the client's TLS layer will use; keep the two in sync.
-fn send_chrome_hello(addr: &str) {
-    let mut b = SslConnector::builder(SslMethod::tls()).unwrap();
-    b.set_min_proto_version(Some(SslVersion::TLS1_2)).unwrap();
-    b.set_max_proto_version(Some(SslVersion::TLS1_3)).unwrap();
-    b.set_grease_enabled(true);
-    b.set_permute_extensions(true);
-    b.set_cipher_list(CIPHERS).unwrap();
-    b.set_curves_list("X25519MLKEM768:X25519:P-256:P-384")
-        .unwrap();
-    b.set_alpn_protos(b"\x08http/1.1").unwrap();
-    b.enable_ocsp_stapling();
-    b.enable_signed_cert_timestamps();
-    b.add_certificate_compression_algorithm(Brotli).unwrap();
-    let mut cc = b.build().configure().unwrap();
-    cc.set_use_server_name_indication(true);
-    cc.set_verify_hostname(false);
-    cc.set_enable_ech_grease(true);
-    let sock = TcpStream::connect(addr).unwrap();
-    let _ = cc.connect("ws.test", sock); // fails at the closed listener; the hello is already out
-}
-
-// -------------------------------------------------------------- capture + parse
-
-/// Bind a listener, run `send_chrome_hello` against it, and return the first TLS record body
-/// (the ClientHello handshake message).
-fn capture_hello() -> Vec<u8> {
+/// Drive `connect()` at a listener that captures the first TLS record, and return that
+/// ClientHello. `connect()` reaches TLS (the listener closes right after, so the handshake then
+/// fails — but the hello is already on the wire) via `addr=` so it dials loopback directly.
+async fn capture_hello() -> Vec<u8> {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    let addr = listener.local_addr().unwrap().to_string();
+    let addr: SocketAddr = listener.local_addr().unwrap();
     let handle = thread::spawn(move || {
         let (mut conn, _) = listener.accept().unwrap();
         let mut hdr = [0u8; 5];
@@ -85,7 +42,9 @@ fn capture_hello() -> Vec<u8> {
         conn.read_exact(&mut body).unwrap();
         body
     });
-    send_chrome_hello(&addr);
+    let line = format!("url=https://ws.test/secret;addr={addr}");
+    let cfg = ClientConfig::from_args(&PtArgs::parse(&line).unwrap()).unwrap();
+    let _ = connect(&cfg).await; // fails after the hello; that is fine
     handle.join().unwrap()
 }
 
@@ -199,18 +158,15 @@ fn ja4(h: &Hello) -> String {
     format!("{a}_{b}_{c}")
 }
 
-// tiny local hex, to avoid a dependency
 mod hex {
     pub fn encode(b: &[u8]) -> String {
         b.iter().map(|x| format!("{x:02x}")).collect()
     }
 }
 
-// -------------------------------------------------------------- the checks
-
-#[test]
-fn matches_chrome_websocket() {
-    let h = parse(&capture_hello());
+#[tokio::test]
+async fn matches_chrome_websocket() {
+    let h = parse(&capture_hello().await);
     // Structural asserts first: they give a readable failure before the opaque JA4 diff.
     assert!(h.ciphers.iter().any(|c| is_grease(*c)), "no GREASE cipher");
     assert!(
@@ -222,15 +178,18 @@ fn matches_chrome_websocket() {
         "no compress_certificate extension"
     );
     assert_eq!(h.alpn, ["http/1.1"], "ALPN must be exactly http/1.1");
-    let got = ja4(&h);
     assert_eq!(
-        got, CHROME_JA4,
+        ja4(&h),
+        CHROME_JA4,
         "JA4 drifted from the validated Chrome profile"
     );
 }
 
-#[test]
-fn ja4_is_stable_across_connections() {
+#[tokio::test]
+async fn ja4_is_stable_across_connections() {
     // GREASE randomises per connection; JA4 must not.
-    assert_eq!(ja4(&parse(&capture_hello())), ja4(&parse(&capture_hello())));
+    assert_eq!(
+        ja4(&parse(&capture_hello().await)),
+        ja4(&parse(&capture_hello().await))
+    );
 }

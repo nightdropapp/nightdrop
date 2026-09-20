@@ -2,7 +2,6 @@
 
 use crate::config::{ClientConfig, Remote};
 use crate::{tls, Error};
-use rustls::pki_types::ServerName;
 use std::collections::HashMap;
 use std::hash::{BuildHasher, RandomState};
 use std::io;
@@ -13,8 +12,6 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf};
 use tokio::net::TcpStream;
-use tokio_rustls::client::TlsStream;
-use tokio_rustls::TlsConnector;
 
 /// Upper bound on TCP + TLS + upgrade. Tor has its own, longer, channel timeouts above this;
 /// this only stops a half-open bridge from pinning a connection forever.
@@ -30,7 +27,7 @@ pub struct WebTunnelStream {
 
 enum Inner {
     Plain(TcpStream),
-    Tls(Box<TlsStream<TcpStream>>),
+    Tls(Box<tls::TlsStream>),
 }
 
 /// Open a tunnel to the bridge described by `config`.
@@ -60,17 +57,7 @@ async fn connect_inner(config: &ClientConfig) -> Result<WebTunnelStream, Error> 
         ),
         Some(tls_cfg) => {
             let sni = SNI_PICKER.current(&tls_cfg.server_names);
-            let server_name = ServerName::try_from(sni.clone())
-                .map_err(|e| Error::Config(format!("server name {sni:?}: {e}")))?;
-            let connector = TlsConnector::from(tls::client_config(tls_cfg)?);
-            let tls = connector.connect(server_name, tcp).await.map_err(|e| {
-                // rustls reports certificate rejections as InvalidData wrapping its own error.
-                if e.kind() == io::ErrorKind::InvalidData {
-                    Error::Tls(e.to_string())
-                } else {
-                    Error::io("TLS handshake", e)
-                }
-            })?;
+            let tls = tls::connect_tls(tcp, &sni, tls_cfg).await?;
             (
                 WebTunnelStream {
                     inner: Inner::Tls(Box::new(tls)),

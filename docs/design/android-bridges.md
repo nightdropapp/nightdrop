@@ -103,9 +103,9 @@ gives arti; anything without it is refused before dialling. arti's in-process tr
 (`AbstractPtMgr`) would avoid the port entirely but sits behind `experimental-api`, which can
 change in any release — revisit if it stabilises.
 
-**Step 2 — the TLS fingerprint (desktop prototype proven 2026-09-19; not yet wired into the
-client).** rustls's ClientHello is recognisable as rustls, and very little that browses the web
-sends it, so a censor could block it for almost no collateral cost. That makes the transport
+**Step 2 — the TLS fingerprint (DONE 2026-09-20; boring is the `connect()` TLS layer behind
+`chrome-proto`).** rustls's ClientHello is recognisable as rustls, and very little that browses
+the web sends it, so a censor could block it for almost no collateral cost. That makes the transport
 *correct but not stealthy* until this is solved, and **it must not ship to users before it is**
 — a recognisable handshake does not just fail, it can mark the user as a circumventer.
 
@@ -146,9 +146,22 @@ from the dependency graph, so the ordinary build, CI and pre-commit hook stay pu
 path keeps rustls/ring regardless. **Gate:** the Android/F-Droid cross-compile of BoringSSL must
 be proven separately before this feature becomes load-bearing on a device (part of step 4).
 
-*Remaining in step 2:* fold the boring profile into `tls.rs` as the real TLS layer behind
-`chrome-proto` (reimplementing the three cert-verification modes with boring's verify callback),
-so `connect()` itself emits the Chrome hello, and point the self-test at `connect()`.
+*Done (2026-09-20).* `tls.rs` now has two back ends behind one `connect_tls`/`TlsStream`
+interface, chosen by `chrome-proto`: the pure-Rust rustls path (default, unchanged) and a
+BoringSSL path. Under `chrome-proto`, `connect()` itself emits the Chrome hello, and all three
+certificate modes are reimplemented on boring: `cert=` via a custom verify callback over the
+chain hash, and CA / `cert-domain` via `SslVerifyMode::PEER` against a bundled-Mozilla-roots
+store (`webpki-root-certs`, deterministic and Android-safe) with the verify-host decoupled from
+the SNI. The self-test drives the real `connect()`. Verified: the fingerprint test (JA4 equals
+the captured Chrome), the interop suite under `--features chrome-proto` (pin accept, wrong-pin
+and self-signed reject, round-trips), a real bridge over the boring CA path, the untouched rustls
+suite, and a full end-to-end run — real arti bootstrapped Tor (~22 s, working circuit) through
+the boring Chrome-fingerprinted client to a live bridge
+(`cargo run --example webtunnel_bootstrap -p nightdrop --features tor -F webtunnel-client/chrome-proto`).
+
+*Residual limits (unchanged):* JA4 match is necessary, not sufficient (keyshare sizes, ALPS,
+active probing remain), and Chrome's profile drifts — the `fingerprint` test is the tripwire and
+someone must refresh the profile when it fails.
 
 **End-to-end viability proven on desktop (2026-09-19).** Before building step 3 into the app, a
 harness (`core/examples/webtunnel_bootstrap.rs`, `--features tor`) ran the exact architecture

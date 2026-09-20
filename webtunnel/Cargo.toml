@@ -33,8 +33,11 @@ tracing = "0.1"
 # desktop before being wired into the client path or Android. BoringSSL (C, cmake) is an
 # OPTIONAL dependency behind `chrome-proto`, so the ordinary build, CI, and pre-commit hook
 # stay pure-Rust and never compile it — it is absent from the dependency graph without the flag.
+# `chrome-proto` swaps the TLS backend from rustls to BoringSSL, so `connect()` emits a
+# Chrome-identical ClientHello (docs/design/android-bridges.md §5). BoringSSL is C/cmake, so it
+# stays optional: the default build is pure-Rust rustls and never compiles it.
 [features]
-chrome-proto = ["dep:boring", "dep:brotli"]
+chrome-proto = ["dep:boring", "dep:brotli", "dep:tokio-boring", "dep:webpki-root-certs"]
 
 [[example]]
 name = "boring_hello"
@@ -45,8 +48,19 @@ version = "5"
 features = ["mlkem"]
 optional = true
 
+[dependencies.tokio-boring]
+version = "5"
+optional = true
+
 [dependencies.brotli]
 version = "7"
+optional = true
+
+# Mozilla roots as DER, for BoringSSL's trust store — the same root set as the rustls path's
+# `webpki-roots`, so CA validation matches and stays deterministic (also works on Android, where
+# BoringSSL's default system-path lookup does not).
+[dependencies.webpki-root-certs]
+version = "1"
 optional = true
 
 [dev-dependencies]
