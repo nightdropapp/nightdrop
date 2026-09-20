@@ -12,6 +12,14 @@ clearnet path by design (invariant: "Tor by default, never hardcode a non-anonym
 network path"). No Firebase, no FCM/APNs push SDK, no Google Play Services (GMS), no
 analytics, no crash reporter, no ad SDK appears anywhere in the resolved tree.
 
+The one deliberate exception is a **user-configured bridge**, which is how Tor itself is
+reached where the public relays are blocked (`docs/bridges.md`, `docs/design/android-bridges.md`):
+connecting to *any* bridge is a clearnet connection to that bridge by design. A **WebTunnel**
+bridge (`webtunnel` feature, off by default) additionally does a clearnet DNS lookup of the
+bridge's `url=` host — the same name the TLS SNI to that bridge already carries. This carries no
+app data: it is Tor's own entry hop, disguised, chosen and pasted by the user. All message
+traffic still flows through Tor inside it.
+
 ## How this was audited
 
 - Read every direct dependency in `app/pubspec.yaml`, `core/Cargo.toml`, and

@@ -216,11 +216,18 @@ includes the NDK toolchain, selected via `CMAKE_TOOLCHAIN_FILE` (which `boring-s
 Full recipe + per-ABI settings (armv7 needs `CC_*` set explicitly, since `ring`'s cc-rs guesses
 a clang name the NDK doesn't ship): `webtunnel/android/README.md`.
 
-*Remaining:* wire the app's Android build (cargokit / flutter_rust_bridge) to enable the
-`webtunnel` feature and export that `CMAKE_TOOLCHAIN_FILE` + per-ABI `CC_*` for each ABI build —
-and make it reproducible for F-Droid (the toolchain forces only tests off, so libcrypto/libssl
-are unchanged and deterministic). Then test on a device against a real bridge from
-bridges.torproject.org, and confirm the F-Droid build stays reproducible with BoringSSL added.
+*cargokit wiring — DONE + validated by a real APK (2026-09-20).* cargokit's `builder.dart`
+adds `--features webtunnel` and exports the toolchain + per-ABI `ND_ANDROID_ABI` only when
+`NIGHTDROP_WEBTUNNEL=1` (off by default). A `NIGHTDROP_WEBTUNNEL=1 fvm flutter build apk --debug`
+built a WebTunnel-capable APK: `boring-sys` produced `libcrypto.a`/`libssl.a` for the Android
+ABIs, and the arm64 `libnightdrop.so` links both BoringSSL (`X25519MLKEM768KeyShare`) and the
+WebTunnel Rust (`webtunnel/src/socks.rs`, `listener-secret=`). cargokit built arm64-v8a, x86,
+x86_64 here; armv7 was proven separately.
+
+*Remaining:* install the APK on a device and run the "block Tor → app falls back to WebTunnel"
+test against a real bridge from bridges.torproject.org; and confirm the F-Droid build stays
+reproducible with BoringSSL added (the toolchain forces only tests off, so libcrypto/libssl are
+unchanged and deterministic) before ever enabling the feature in a shipped build.
 
 **Step 4 — Android and F-Droid.** Cross-compile, test on a device against a real bridge from
 bridges.torproject.org, and confirm the F-Droid build stays reproducible.
