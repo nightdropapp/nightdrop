@@ -38,6 +38,12 @@ Per-ABI settings:
 `CC_armv7_linux_androideabi=armv7a-linux-androideabi24-clang` (and `CXX_*=…-clang++`,
 `AR_armv7_linux_androideabi=llvm-ar`).
 
+**libc++ is linked statically** (`ANDROID_STL c++_static` in the toolchain). BoringSSL has C++,
+and the NDK's default shared STL would make `libnightdrop.so` depend on `libc++_shared.so`, which
+cargokit does not bundle — so the app `dlopen`s the lib and crashes at startup with *"library
+libc++_shared.so not found"*. Static libc++ makes the one native lib self-contained. (Found by the
+on-device test 2026-09-20; a cross-compile alone does not catch a load-time dependency.)
+
 `android-24` matches the app's `minSdk`. `BUILD_TESTING OFF` only skips BoringSSL's tests and
 benchmarks; libcrypto/libssl build normally, so the result is unaffected and deterministic.
 
