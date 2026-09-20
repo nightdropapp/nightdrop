@@ -45,3 +45,19 @@ When the app's Android build (cargokit/flutter_rust_bridge) is set to enable the
 feature, it must export `CMAKE_TOOLCHAIN_FILE` (this file) and the per-ABI `CC_*` for each of
 its ABI builds — this is the remaining wiring, and the same env must be reproducible for
 F-Droid.
+
+## Building the app with WebTunnel (opt-in)
+
+cargokit (`app/rust_builder`) builds the core with `--features tor` from `core/cargokit.yaml`.
+A small Night Drop customization in `cargokit/build_tool/lib/src/builder.dart` additionally
+enables `--features webtunnel` and exports this toolchain + `ND_ANDROID_ABI` **only when
+`NIGHTDROP_WEBTUNNEL=1`** — so default and F-Droid builds are unaffected. To build a
+WebTunnel-capable APK:
+
+```sh
+export NIGHTDROP_WEBTUNNEL=1
+cd app && fvm flutter build apk --debug   # or install-android-app.sh for a test build
+```
+
+This is off by default; do not enable it in a release/F-Droid build until the F-Droid
+reproducibility of the added BoringSSL is confirmed.

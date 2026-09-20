@@ -1,6 +1,8 @@
 /// This is copied from Cargokit (which is the official way to use it currently)
 /// Details: https://fzyzcjy.github.io/flutter_rust_bridge/manual/integrate/builtin
 
+import 'dart:io';
+
 import 'package:collection/collection.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
@@ -141,9 +143,18 @@ class RustBuilder {
 
   String get _toolchain => _buildOptions?.toolchain.name ?? 'stable';
 
+  /// Night Drop customization: build the core with the in-process WebTunnel transport
+  /// (BoringSSL). Off unless `NIGHTDROP_WEBTUNNEL=1`, so default and F-Droid builds are
+  /// untouched. See `webtunnel/android/README.md`.
+  bool get _webtunnelEnabled =>
+      Platform.environment['NIGHTDROP_WEBTUNNEL'] == '1';
+
   /// Returns the path of directory containing build artifacts.
   Future<String> build() async {
-    final extraArgs = _buildOptions?.flags ?? [];
+    final extraArgs = [...?_buildOptions?.flags];
+    if (_webtunnelEnabled) {
+      extraArgs.addAll(['--features', 'webtunnel']);
+    }
     final manifestPath = path.join(environment.manifestDir, 'Cargo.toml');
     runCommand(
       'rustup',
@@ -203,7 +214,20 @@ class RustBuilder {
       if (!env.ndkIsInstalled() && environment.javaHome != null) {
         env.installNdk(javaHome: environment.javaHome!);
       }
-      return env.buildEnvironment();
+      final result = await env.buildEnvironment();
+      // Night Drop: BoringSSL (chrome-proto) needs a CMake toolchain that disables BoringSSL's
+      // test tree (google/benchmark can't cross-compile) and points at the NDK, plus per-ABI
+      // ND_ANDROID_ABI. Only when opted in, so nothing changes for the default build.
+      if (_webtunnelEnabled) {
+        final ndkPath = path.join(sdkPath, 'ndk', ndkVersion);
+        final repoRoot = path.normalize(path.join(environment.manifestDir, '..'));
+        result['ANDROID_NDK_ROOT'] = ndkPath;
+        result['ANDROID_NDK_HOME'] = ndkPath;
+        result['CMAKE_TOOLCHAIN_FILE'] =
+            path.join(repoRoot, 'webtunnel', 'android', 'boringssl-toolchain.cmake');
+        result['ND_ANDROID_ABI'] = target.android!;
+      }
+      return result;
     }
   }
 }
