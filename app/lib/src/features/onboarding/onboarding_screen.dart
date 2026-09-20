@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../app.dart';
+import '../../core/background_delivery.dart';
 import '../../core/backup_errors.dart';
 import '../../core/backup_files.dart';
 import '../../core/nightdrop_core.dart';
@@ -57,7 +58,54 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (mounted) setState(() => _status = '');
   }
 
+  /// Offer background delivery as part of setup, explaining what it costs and what it does not do.
+  ///
+  /// It is off by default and always will be — a messenger that quietly runs a service is not what
+  /// this app is for. But leaving the choice buried in a menu meant most people never made it, and
+  /// the result is an app that looks broken: Android suspends the process whenever it is off
+  /// screen, so messages simply do not arrive until you open it, and the sender sees them sitting
+  /// undelivered. Asking once, here, is the difference between an informed "no" and never knowing.
+  ///
+  /// Asked **before** [NightdropCore.createIdentity], deliberately: creating the identity notifies
+  /// listeners, `_Root` swaps this screen for the home screen, and a dialog awaited after that
+  /// would be holding a context that is being torn out from under it. Nothing here needs an
+  /// identity to exist — the flag is a preference, and the foreground service is only actually
+  /// started by the lifecycle handler, which already waits for `hasIdentity`.
+  ///
+  /// Android-only: iOS cannot keep a process alive this way, so there is nothing to offer.
+  Future<void> _offerBackgroundDelivery() async {
+    if (!BackgroundDelivery.supported || await BackgroundDelivery.isEnabled()) return;
+    if (!mounted) return;
+    final l10n = AppLocalizations.of(context)!;
+    final wants = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        scrollable: true,
+        title: Text(l10n.onboardingBackgroundTitle),
+        content: Text(l10n.onboardingBackgroundBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.onboardingBackgroundSkip),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.onboardingBackgroundEnable),
+          ),
+        ],
+      ),
+    );
+    if (wants != true) return;
+    // Without the notification permission Android will not let the service run, so a "yes" that
+    // cannot be honoured is recorded as the "no" it effectively is, rather than leaving the user
+    // believing they are covered.
+    if (!await BackgroundDelivery.ensurePermission()) return;
+    await BackgroundDelivery.setEnabled(true);
+  }
+
   Future<void> _create() async {
+    await _offerBackgroundDelivery();
+    if (!mounted) return;
     setState(() => _busy = true);
     _startProgress();
     try {

@@ -273,6 +273,27 @@
     <section id="download" class="section alt">
       <h2>Get Night Drop</h2>
       <p class="lead">One app, every device.</p>
+
+      <!-- Remove this notice once 0.1.15 is far enough behind us to be uninteresting. It exists
+           because the Linux download link on this page pointed at the v0.1.15 tag from
+           2026-08-02 (when 0.1.16 shipped) until 2026-08-05, so people who downloaded Linux in
+           that window are on a build missing three security fixes and have no auto-update. -->
+      <div class="notice" role="note">
+        <h3>Running 0.1.15 on Linux? Please update.</h3>
+        <p>The Linux download on this page pointed at <strong>0.1.15</strong> for longer than it
+           should have. If you downloaded the Linux AppImage before <strong>5 August 2026</strong>,
+           you are very likely on that build, and it is missing three fixes that matter:</p>
+        <p class="muted">A new identity could come up on your <em>previous</em> identity's
+           <code>.onion</code> address — reachable by anyone who knew the address you walked away
+           from, and linkable to the identity you thought you had left. A shut-down transport could
+           fall back to resolving a relay through your system DNS resolver instead of Tor. And a
+           message the other person never received could still show as “Delivered”.</p>
+        <p>Download again from this page to get the current release. Your identity, chats and
+           contacts are stored locally and are not affected by replacing the AppImage.</p>
+        <p class="muted">Android was never affected: that link has always resolved to the latest
+           release. Nothing about your data was exposed to us — we have no accounts, no logs and no
+           way to tell who is running what.</p>
+      </div>
       <div class="downloads" id="download-links">
         <!--<a class="btn ghost" href="#">iOS</a>-->
         <a class="btn ghost" href="#">Android</a>

@@ -107,6 +107,12 @@ impl Default for RelayLimits {
 /// See `TODO.md` #2.
 pub const RELAY_VERSION: u8 = 1;
 
+/// The virtual port a relay's onion service is dialed on. It lives here, with the protocol,
+/// because both ends need it: the core's Tor transport dials it, and the `relay/` binary
+/// self-dials it from its own reachability watchdog. A relay accepts any rendezvous stream, so
+/// this is a convention rather than a constraint — but the two ends must agree on the convention.
+pub const RELAY_PORT: u16 = 9001;
+
 /// The versioned line that actually goes over the socket: `{"v":1,"req":<request>}`.
 /// Serializing borrows the request; deserializing (on the relay) owns it.
 #[derive(Serialize)]
@@ -1119,24 +1125,42 @@ impl RelayClient {
     }
 
     fn round_trip(&self, request: &Request) -> Result<Response> {
-        let mut line = serde_json::to_string(&RequestLineRef {
-            v: RELAY_VERSION,
-            req: request,
-        })?;
-        line.push('\n');
+        let line = request_line(request)?;
         let response_line = match &self.inner {
             RelayInner::Tcp(addr) => tcp_round_trip(addr, &line)?,
             RelayInner::Dialer(dial) => dial(&line)?,
         };
-        let rl: ResponseLine = serde_json::from_str(&response_line)?;
-        if rl.v != RELAY_VERSION {
-            anyhow::bail!(
-                "unsupported relay version {} (client speaks v{RELAY_VERSION})",
-                rl.v
-            );
-        }
-        Ok(rl.resp)
+        parse_response_line(&response_line)
     }
+}
+
+/// Serialize `request` as the newline-terminated line that goes over the socket.
+///
+/// [`RelayClient`] is blocking, so an async caller (the `relay/` binary's self-dial watchdog)
+/// cannot go through it. Rather than have that caller hand-roll the `{"v":1,"req":…}` envelope —
+/// which would then be a second definition of the wire format, free to drift from this one — it
+/// builds its line here and reads the answer back through [`parse_response_line`].
+pub fn request_line(request: &Request) -> Result<String> {
+    let mut line = serde_json::to_string(&RequestLineRef {
+        v: RELAY_VERSION,
+        req: request,
+    })?;
+    line.push('\n');
+    Ok(line)
+}
+
+/// Parse one relay response line, rejecting a version this client does not speak.
+///
+/// The counterpart to [`request_line`]; see it for why this is public.
+pub fn parse_response_line(line: &str) -> Result<Response> {
+    let rl: ResponseLine = serde_json::from_str(line)?;
+    if rl.v != RELAY_VERSION {
+        anyhow::bail!(
+            "unsupported relay version {} (client speaks v{RELAY_VERSION})",
+            rl.v
+        );
+    }
+    Ok(rl.resp)
 }
 
 /// One newline-JSON request/response over plain TCP (tests / local).
@@ -1490,6 +1514,27 @@ mod tests {
         let resp: serde_json::Value = serde_json::from_str(&raw).unwrap();
         assert_eq!(resp["v"], RELAY_VERSION);
         assert_eq!(resp["resp"]["ok"], true);
+    }
+
+    #[test]
+    fn the_exported_wire_helpers_match_what_the_client_sends() {
+        // `request_line` / `parse_response_line` exist so an async caller (the relay binary's
+        // self-dial watchdog) speaks the protocol without a second copy of the envelope. They are
+        // only worth having while they stay byte-identical to what `RelayClient` puts on the wire.
+        let line = request_line(&Request::Peek { handle: "h".into() }).unwrap();
+        assert_eq!(
+            line,
+            "{\"v\":1,\"req\":{\"op\":\"peek\",\"handle\":\"h\"}}\n"
+        );
+
+        let addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+        let raw = tcp_round_trip(&addr.to_string(), &line).unwrap();
+        assert!(parse_response_line(&raw).unwrap().ok);
+
+        // And a relay speaking a version we don't is rejected rather than misparsed.
+        let future = format!("{{\"v\":{},\"resp\":{{\"ok\":true}}}}", RELAY_VERSION + 1);
+        let err = parse_response_line(&future).unwrap_err().to_string();
+        assert!(err.contains("unsupported relay version"), "{err}");
     }
 
     #[test]

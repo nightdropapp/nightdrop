@@ -67,6 +67,19 @@ identity), and the keystore copy of the store key. The lock file **must** go wit
 it behind would show a lock screen for a store that no longer exists, which is both broken and
 conspicuous.
 
+**Each removal stands alone (2026-08-02, after a device test).** This was one `try` around the whole
+list with a silent `catch`, and its *first* statement was the keystore delete — the one call that
+throws on Android. When it threw, every deletion below it was skipped and nothing was recorded. The
+identity still looked destroyed, because onboarding overwrites the state file; in fact the store key,
+the sealed onion identity, arti's state and the authorized-client files all survived, and the next
+identity came up **on the wiped identity's onion address**. Under coercion — the case this feature
+exists for — that is the failure that matters most, and it was invisible.
+
+So: every target is attempted independently, a failure is reported rather than swallowed, and the
+store key is **overwritten with a fresh random key before it is deleted**, so that if the delete
+still fails what remains unlocks nothing. A wipe that half-succeeds in silence is the one failure
+mode this code must not have.
+
 **The peers are not told, and this is structural — not a preference.** (Settled 2026-08-01 by a
 device test, after two wrong turns. The first draft argued for silence on timing grounds. That
 reasoning was then revised to "tell them", on the basis that `logout()` routes to onboarding before
@@ -171,6 +184,68 @@ Asked for as *"one fingerprint to unlock and another to wipe (right thumb versus
 Android's `BiometricPrompt` reports success or failure and nothing else — never which finger
 matched. There is no API, on any Android version, that exposes finger identity, and this is
 deliberate on Google's part. It cannot be built as specified.
+
+## 8b. Verified on hardware, and the theory that turned out to be wrong (2026-08-08)
+
+A wipe on a device once left the **store key** behind: the key survived, and nothing in the app
+said so. The standing explanation was a `flutter_secure_storage` 10 migration — legacy
+`EncryptedSharedPreferences` entries are migrated "on first access", and a delete against a
+just-migrated entry failing once would mean every user upgrading from an older build had one wipe
+that could half-fail. **That explanation is wrong**, on three independent grounds:
+
+* `app/pubspec.lock` has pinned `flutter_secure_storage` 10.3.1, byte-identical `sha256`, since
+  0.1.12 — well before the install that failed. No plugin upgrade ever happened.
+* the ESP migration path (`FlutterSecureStorage.java`) only runs when
+  `hasDataInEncryptedSharedPreferences()` is true, i.e. data written by plugin **9.2.4 or earlier**.
+  Night Drop has never shipped one.
+* the app passes a bare `const FlutterSecureStorage()`, and `encryptedSharedPreferences` defaults to
+  `false` on both the Dart and Java sides, so nothing was ever written there to migrate.
+
+The `__androidx_security_crypto_encrypted_prefs_*_keyset__` entries that *do* appear in the prefs
+file are a side effect of the plugin initialising ESP merely to run that check — not legacy data.
+
+**The actual root cause, established 2026-08-08.** It does not need a migration, or a lost write,
+or anything exotic — it is a deduction from the end state that was recorded at the time. The wipe
+was then a *single* `try` with a silent `catch`, and **the first statement in it was the keystore
+delete**. Had that call returned, execution would have continued into the file deletions below it.
+What was observed instead is that the store key, the sealed onion identity, arti's state **and**
+the authorized-client files all survived together. Only one control flow produces that end state:
+the block threw at its first statement, i.e. `_secure.delete` raised — and the silent catch
+swallowed it, skipping every deletion below while onboarding overwrote the state file and made the
+identity *look* destroyed.
+
+So the answer to "how did the store key survive a wipe" is the abort, and it was already fixed by
+the step-by-step wipe (each target removed independently, failures collected and reported) plus
+overwrite-before-delete (what survives a failed delete is a random key that unlocks nothing). Why
+the Android keystore call threw *that particular day* is unknown, and is no longer load-bearing: no
+single failing step can abort the wipe now, and the value left behind if one does is inert.
+
+**The lost-flush theory is not needed and does not fit.** `apply()` is asynchronous, so a window
+does exist in principle — but it was measured on a device (Galaxy S25, 2026-08-08) at **~130 ms
+from the confirm tap to the key leaving the on-disk XML**, with the whole Dart chain, the FFI call
+to mint a random key, and both `apply()`s inside that figure; the gap between the in-memory delete
+and the file changing is below the ~20 ms resolution of the probe. Losing it requires the process
+to be killed inside a sub-frame window. The original incident had no process death at all — the app
+carried on to onboarding — so this cannot be what happened.
+
+It is still worth knowing that the read-back added to the wipe does **not** cover that window:
+`flutter_secure_storage`'s `read`/`containsKey` go to `SharedPreferencesImpl`'s **in-memory** map,
+so the check proves the delete took effect in memory and says nothing about the bytes on disk. It
+catches a delete that silently did nothing — which is what it was added for — and nothing more.
+
+**The wipe itself is verified end to end** (Galaxy S25, Android 16, 2026-08-08), on a fresh identity
+with no app lock so the key really was in the keystore rather than derived from a lock secret:
+before, `shared_prefs/FlutterSecureStorage.xml` held `nightdrop_store_key`; after "Log out / delete
+identity" it was gone, along with `nightdrop-state.bin`, `onion-key.sealed`, `arti-state/` (hss
+onion keys included) and `nightdrop-media/`. No `wipe: could not remove` line appeared — and the
+same log carried `diagnostics enabled` and six other diag lines through the wipe window, so that
+silence is evidence rather than a dead channel.
+
+`files/arti-cache/` survived that run and was **added to the wipe afterwards**. It is not a data
+leak — arti's directory cache holds the public Tor consensus and microdescriptors, no key, no
+address, no contact list — but it carries a modification time, and a wipe that leaves "Tor last ran
+at 14:26" beside an app presenting itself as freshly onboarded is a wipe with an asterisk. Removing
+it costs a fresh consensus fetch on the next launch.
 
 ## 9. Status
 

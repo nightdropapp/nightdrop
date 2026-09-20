@@ -78,6 +78,70 @@ abstract class NightdropCore extends ChangeNotifier {
   /// reach us to pair. Always true for the mock/non-Tor cores.
   Future<bool> onionReady();
 
+  /// Reset the Tor connection: drop the entry guards (keeping the `.onion` identity) and rebuild
+  /// on fresh ones. The remedy for a device whose guard set has churned out of the network, which
+  /// a plain restart cannot fix because it reuses the same guards.
+  ///
+  /// Offered manually because the automatic heal fires at most once per launch and only on
+  /// evidence it can see; a device can be unable to reach anyone while believing itself healthy.
+  /// No-op on the mock/non-Tor cores.
+  Future<void> resetTorConnection() async {}
+
+  /// The newer release our onion site advertises, or `null` when this build is current, the
+  /// check hasn't run, or it failed. Never a reason to block the user — only to tell them.
+  String? get updateAvailable => null;
+
+  /// Tell peers whether this device can report screenshots at all.
+  ///
+  /// Goes to the peer, never shown to us: we already know when we screenshot. The person who needs
+  /// it is the one deciding what to send, because below Android 14 a capture raises no notice and
+  /// the peer's silence therefore proves nothing. Safe to call every launch — only a change is put
+  /// on the wire.
+  Future<void> setCaptureReporting(bool visible) async {}
+
+  /// Whether an update download is running, whichever screen started it.
+  ///
+  /// The banner and the "Update app" menu item are two entry points to one operation, so neither
+  /// may keep this state itself: a banner that only knew about its own tap once let a user start a
+  /// second concurrent download by tapping it to *watch* the first.
+  bool get downloadInProgress => false;
+
+  /// How far a running update download has got, 0.0–1.0, or `null` when nothing is downloading
+  /// **or** the server did not say how big the file is.
+  ///
+  /// Null therefore means "no determinate figure", not "no download" — a caller showing a bar
+  /// should treat it as indeterminate rather than as finished. The download is minutes long over
+  /// Tor, so a spinner alone leaves the user unable to tell progress from a stall.
+  double? get downloadProgress => null;
+
+  /// Ask the onion site whether a newer release exists — over Tor, at most once a day.
+  ///
+  /// Safe to call on every launch: it returns immediately when a check isn't due, so the caller
+  /// doesn't need its own timer. Never throws and never blocks startup; a site that is down, or
+  /// a transport with no anonymized path, is silence rather than an error the user must dismiss.
+  ///
+  /// This matters most for the desktop AppImage, which has no auto-update — a user there can be
+  /// months behind a security fix with nothing in the app to say so.
+  Future<void> maybeCheckForUpdate() async {}
+
+  /// Download the published build over Tor, verifying its hash, and return the file path.
+  ///
+  /// Nothing is installed — the caller shows the user where it landed and they decide. Slow (tens
+  /// of megabytes over Tor), so callers must not block the UI on it. Returns null on failure.
+  Future<String?> downloadUpdate() async => null;
+
+  /// Check now, ignoring the once-a-day limit and any earlier "hide". For the menu item: a user
+  /// who deliberately asks must get a fresh answer, not yesterday's cached one.
+  ///
+  /// Returns whether the site actually answered. This is NOT the same question as
+  /// [updateAvailable]: a check that could not reach the site must never be reported as "you are
+  /// up to date", which is the one wrong answer this feature exists to prevent.
+  Future<bool> checkForUpdateNow() async => false;
+
+  /// Hide the update banner until a *newer* version than this one is published. Deliberately
+  /// version-scoped: hiding 0.1.18 must not also hide 0.1.19 and its security fixes.
+  Future<void> hideUpdateBanner() async {}
+
   /// All 1:1 contacts.
   List<Contact> get contacts;
 

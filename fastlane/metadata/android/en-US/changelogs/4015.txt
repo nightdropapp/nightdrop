@@ -1,0 +1,3 @@
+Your conversations no longer show up in the app-switcher preview on Android 13 and later. The old method raced the system and could lose, showing the chat anyway; now the preview is never taken. Deliberate screenshots still work, and still tell the other person.
+
+New, off by default: cover traffic sends occasional dummy mail to yourself, so the server holding your offline messages can't read your rhythm from when real ones arrive. It raises the cost of watching you rather than ending it.

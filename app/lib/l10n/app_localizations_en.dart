@@ -414,6 +414,27 @@ class AppLocalizationsEn extends AppLocalizations {
   String get myRelaysMenu => 'My relays…';
 
   @override
+  String get resetTorMenu => 'Reset Tor connection…';
+
+  @override
+  String get resetTorTitle => 'Reset Tor connection?';
+
+  @override
+  String get resetTorBody =>
+      'If messages keep being held for delivery instead of arriving directly, this device\'s route into Tor may be stuck. This picks a fresh route and reconnects.\n\nYour identity, your address and your chats are not affected. Reconnecting takes a minute or two.';
+
+  @override
+  String get resetTorConfirm => 'Reset';
+
+  @override
+  String get resetTorRunning =>
+      'Reconnecting to Tor — this takes a minute or two.';
+
+  @override
+  String get aboutUpdateChecks =>
+      'Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don’t do this at all, because F-Droid updates them.';
+
+  @override
   String get aboutMenu => 'About Night Drop';
 
   @override
@@ -431,7 +452,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get publishingAddressTor =>
-      'Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.';
+      'Publishing your address to Tor. This can take several minutes. Others can’t pair with you until it finishes — keep the app open.';
 
   @override
   String relayOfflineOne(String names) {
@@ -456,6 +477,55 @@ class AppLocalizationsEn extends AppLocalizations {
       'Back up your identity so you don’t lose your chats. There’s no account to recover from — if you lose this device without a backup, it’s gone.';
 
   @override
+  String updateAvailableBody(String version) {
+    return 'Version $version is available. This build is out of date.';
+  }
+
+  @override
+  String get updateChecking => 'Checking for updates…';
+
+  @override
+  String get updateCheckFailed =>
+      'Could not reach the update site. Try again later.';
+
+  @override
+  String get updateUpToDate => 'Night Drop is up to date.';
+
+  @override
+  String get updateDownload => 'Download';
+
+  @override
+  String get updateHide => 'Hide';
+
+  @override
+  String get backgroundStoppedBySystem =>
+      'Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.';
+
+  @override
+  String get peerCapturesSilentBanner =>
+      'This person\'s device can\'t tell them about screenshots, so it won\'t tell you either. If they capture what you send, you won\'t hear about it.';
+
+  @override
+  String get updateDownloading => 'Downloading over Tor…';
+
+  @override
+  String updateDownloadingPercent(String percent) {
+    return 'Downloading over Tor…$percent';
+  }
+
+  @override
+  String get updateDownloaded => 'Downloaded and verified. Open it to install.';
+
+  @override
+  String get updateFailed => 'Could not download the update.';
+
+  @override
+  String get updateApp => 'Update app';
+
+  @override
+  String get updateHow => 'How';
+
+  @override
   String get deleteThisChat => 'Delete this chat?';
 
   @override
@@ -472,6 +542,19 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get backgroundDeliveryBody =>
       'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.';
+
+  @override
+  String get onboardingBackgroundTitle => 'Receive messages in the background?';
+
+  @override
+  String get onboardingBackgroundBody =>
+      'Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.';
+
+  @override
+  String get onboardingBackgroundEnable => 'Turn on';
+
+  @override
+  String get onboardingBackgroundSkip => 'Not now';
 
   @override
   String get notificationPermissionRequired =>
@@ -733,6 +816,9 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get deliveryDelivered => 'Delivered';
+
+  @override
+  String get deliverySent => 'Not confirmed yet';
 
   @override
   String get imageUnavailable => 'Image unavailable';

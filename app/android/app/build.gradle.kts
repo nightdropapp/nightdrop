@@ -1,3 +1,4 @@
+import com.android.build.gradle.internal.api.ApkVariantOutputImpl
 import java.io.FileInputStream
 import java.util.Properties
 
@@ -82,6 +83,19 @@ android {
                 // works locally. A distributable release REQUIRES key.properties.
                 signingConfigs.getByName("debug")
             }
+            // Requested by the F-Droid reviewer on fdroiddata!43625.
+            //
+            // R8 only touches the Java/Kotlin shim: the Dart code is AOT-compiled into libapp.so
+            // and the security core into libnightdrop.so, neither of which R8 can see. So the
+            // savings come from the plugin layer, and so does all of the risk — a stripped
+            // reflective call fails at RUNTIME, not at build time, and no unit test will catch it.
+            // Anything added here needs a smoke test on hardware, not just a green build.
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro",
+            )
         }
     }
 }
@@ -98,4 +112,43 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// F-Droid's per-ABI version-code scheme (requested by the reviewer on fdroiddata!43625).
+//
+// Flutter's own `--split-per-abi` default adds 1000/2000/4000 per ABI, which makes the version
+// codes of ONE release span a range wider than the gap between releases: x86_64 of 0.1.15 is
+// 4016, while armeabi-v7a of 0.1.16 would be 1017. Anything picking "the highest version code"
+// — F-Droid's current-version logic included — then reads an older release as the newest.
+//
+// `versionCode * 10 + abi` keeps every ABI of a release adjacent and the ordering monotonic
+// across releases.
+//
+// The universal APK gets slot 4 — ABOVE all three per-ABI builds — and this is the point that was
+// wrong until 0.1.18. It used to keep the plain base code, which put it *below* every per-ABI
+// build of the same release: universal 0.1.17 was 403 while its own arm64 build was 4032. Android
+// reads that as a downgrade and refuses to install, so anyone running a per-ABI build — every
+// F-Droid user, and now everyone the in-app updater has served, since that deliberately fetches
+// per-ABI — got "App not installed" from the website's primary download, with nothing to say why.
+// Slot 4 is above 4043 and above the old universal 403, so it installs over anything shipped so
+// far and stays monotonic in both directions.
+//
+// NOTE: the codes this produces must stay ABOVE anything already published, or Android refuses
+// the update as a downgrade. See MAINTENANCE.md — the base version code was raised when this
+// scheme was adopted, precisely because 16*10+1 = 161 is far below the 4016 already shipped.
+val abiCodes = mapOf("armeabi-v7a" to 1, "arm64-v8a" to 2, "x86_64" to 3)
+// Plain `val`, not `const val`: a .kts script body is not a Kotlin top level, and `const` there
+// fails compilation with "Const 'val' is only allowed on top level, in named objects, or in
+// companion objects."
+val universalAbiSlot = 4
+android.applicationVariants.configureEach {
+    val variant = this
+    variant.outputs.forEach { output ->
+        val abi = output.filters.find { it.filterType == "ABI" }?.identifier
+        // No ABI filter means the universal APK.
+        val slot = if (abi == null) universalAbiSlot else abiCodes[abi]
+        if (slot != null) {
+            (output as ApkVariantOutputImpl).versionCodeOverride = variant.versionCode * 10 + slot
+        }
+    }
 }

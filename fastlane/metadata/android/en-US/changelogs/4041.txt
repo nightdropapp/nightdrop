@@ -1,0 +1,3 @@
+Night Drop can now tell you when a newer version is out, and fetch it for you over Tor. Tap the notice to start, watch it count up, and the finished file lands in your Downloads folder — checked against what our site published before you ever see it. It never installs anything itself: Android asks you, as it should.
+
+Checking from the menu now says plainly when it couldn't reach the site, instead of telling you that you're up to date.

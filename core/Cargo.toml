@@ -42,6 +42,13 @@ arti-client = { version = "0.43", default-features = false, features = [
     # Onion-service client authorization (restricted discovery, TODO #22). These pull arti's
     # EXPERIMENTAL, semver-unstable API surface (`__is_experimental`) — pinned arti required.
     "restricted-discovery", "experimental-api", "keymgr",
+    # In-memory keystore (onion-key-at-rest.md): keeps the onion identity and every contact's
+    # client key out of arti's on-disk keystore, where they sat unencrypted beside a sealed store.
+    # Also EXPERIMENTAL — same pinned-arti caveat as the two above.
+    "ephemeral-keystore",
+    # `TorClient::keymgr()`, to put the onion identity into that in-memory keystore before the
+    # service launches. Also `__is_experimental`.
+    "onion-service-cli-extra",
     # Censorship resistance (§6): reach Tor where the public relays are IP-blocked.
     # "bridge-client" = vanilla (direct) bridges; "pt-client" = obfs4/snowflake pluggable
     # transports, which additionally need an external PT binary on the device (configured via
@@ -57,7 +64,11 @@ tor-cell = { version = "0.43", optional = true }
 # KeystoreSelector (client-key generation), and CfgPath (the authorized-keys directory path).
 tor-hscrypto = { version = "0.43", optional = true }
 tor-keymgr = { version = "0.43", optional = true }
+# ExpandedKeypair, to round-trip the onion identity through our own sealed store.
+tor-llcrypto = { version = "0.43", optional = true }
 tor-config-path = { version = "0.43", optional = true }
+# ExplicitOrAuto, for selecting the keystore kind.
+tor-config = { version = "0.43", optional = true }
 safelog = { version = "0.8", optional = true } # DisplayRedacted, to render the onion address
 # Routes arti's own tracing to the diagnostics channel (logcat on Android) — only when the diag
 # flag is on at runtime, so a normal release stays silent. Needed to debug why a Tor bootstrap
@@ -72,7 +83,7 @@ libsqlite3-sys = { version = "0.37", features = ["bundled"], optional = true }
 [features]
 # Enables the embedded Tor (arti) transport. Off by default so the core builds fast and
 # the bridge/tests don't pull the (large) arti dependency tree.
-tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell", "dep:safelog", "dep:tokio", "dep:futures", "dep:libsqlite3-sys", "dep:rustls", "dep:tor-hscrypto", "dep:tor-keymgr", "dep:tor-config-path", "dep:tracing-subscriber"]
+tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell", "dep:safelog", "dep:tokio", "dep:futures", "dep:libsqlite3-sys", "dep:rustls", "dep:tor-hscrypto", "dep:tor-keymgr", "dep:tor-llcrypto", "dep:tor-config-path", "dep:tor-config", "dep:tracing-subscriber"]
 
 [dev-dependencies]
 # Surfaces arti's client-side tracing in the #[ignore]d Tor tests when RUST_LOG is set

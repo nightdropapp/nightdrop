@@ -59,3 +59,4 @@ scripts/deploy-website.sh
 
 # Project todo lists
 TODO.*
+gitlab_token.txt

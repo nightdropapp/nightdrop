@@ -206,29 +206,22 @@ Future<void> _removeDuress(BuildContext context, NightdropCore core) async {
 /// spot instead of surfacing several screens later. Returns null if the user cancels or gives up.
 Future<String?> _askVerifiedSecret(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
-  // One controller for the whole loop, disposed once at the end. Disposing per attempt would tear
-  // it down while the dialog it belongs to is still animating out, and the retry would rebuild
-  // against a dead controller.
-  final controller = TextEditingController();
   String? error;
-  try {
-    while (true) {
-      if (!context.mounted) return null;
-      controller.clear();
-      final secret = await _askCurrentSecret(
-        context,
-        controller: controller,
-        label: l10n.duressCurrentSecret,
-        error: error,
-      );
-      if (secret == null) return null;
-      if (await core.verifyStoreSecret(secret)) return secret;
-      // Generic, and identical for "wrong secret" and "that's the wipe code" — this screen never
-      // confirms to anyone which of the two they typed.
-      error = l10n.appLockWrongSecret;
-    }
-  } finally {
-    controller.dispose();
+  while (true) {
+    if (!context.mounted) return null;
+    // Each attempt gets a fresh dialog owning its own controller, so nothing here has to outlive
+    // the dialog it belongs to — which is what made the previous shared-controller version tear
+    // one down mid-animation.
+    final secret = await _askCurrentSecret(
+      context,
+      label: l10n.duressCurrentSecret,
+      error: error,
+    );
+    if (secret == null) return null;
+    if (await core.verifyStoreSecret(secret)) return secret;
+    // Generic, and identical for "wrong secret" and "that's the wipe code" — this screen never
+    // confirms to anyone which of the two they typed.
+    error = l10n.appLockWrongSecret;
   }
 }
 
@@ -245,7 +238,13 @@ Future<String?> _askNewDuress(BuildContext context) async {
   String? error;
   final result = await showDialog<String>(
     context: context,
-    builder: (context) => StatefulBuilder(
+    builder: (context) => _Owns(
+      disposer: () {
+        first.dispose();
+        second.dispose();
+        secondFocus.dispose();
+      },
+      child: StatefulBuilder(
       builder: (context, setState) {
         void submit() {
           final a = first.text, b = second.text;
@@ -306,12 +305,10 @@ Future<String?> _askNewDuress(BuildContext context) async {
             FilledButton(onPressed: submit, child: Text(l10n.duressSet)),
           ],
         );
-      },
+        },
+      ),
     ),
   );
-  first.dispose();
-  second.dispose();
-  secondFocus.dispose();
   return result;
 }
 
@@ -320,15 +317,20 @@ Future<String?> _askNewDuress(BuildContext context) async {
 /// [_askVerifiedSecret]) instead of disposing one that a closing dialog still references.
 Future<String?> _askCurrentSecret(
   BuildContext context, {
-  required TextEditingController controller,
   required String label,
   String? error,
 }) async {
   final l10n = AppLocalizations.of(context)!;
+  // Created here and owned by the dialog: each attempt gets its own, disposed when that dialog's
+  // element unmounts. A controller shared across attempts and disposed at the end of the loop is
+  // torn down while the last dialog is still animating out.
+  final controller = TextEditingController();
   final secret = await showDialog<String>(
     context: context,
-    builder: (context) => AlertDialog(
-      content: TextField(
+    builder: (context) => _Owns(
+      disposer: controller.dispose,
+      child: AlertDialog(
+        content: TextField(
         controller: controller,
         autofocus: true,
         obscureText: true,
@@ -342,11 +344,12 @@ Future<String?> _askCurrentSecret(
           onPressed: () => Navigator.of(context).pop(),
           child: Text(l10n.cancel),
         ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(controller.text),
-          child: Text(l10n.confirm),
-        ),
-      ],
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: Text(l10n.confirm),
+          ),
+        ],
+      ),
     ),
   );
   return (secret == null || secret.isEmpty) ? null : secret;
@@ -460,8 +463,10 @@ Future<void> _disable(BuildContext context, NightdropCore core) async {
   final controller = TextEditingController();
   final secret = await showDialog<String>(
     context: context,
-    builder: (context) => AlertDialog(
-      title: Text(l10n.appLockDisable),
+    builder: (context) => _Owns(
+      disposer: controller.dispose,
+      child: AlertDialog(
+        title: Text(l10n.appLockDisable),
       content: TextField(
         controller: controller,
         autofocus: true,
@@ -476,14 +481,14 @@ Future<void> _disable(BuildContext context, NightdropCore core) async {
           onPressed: () => Navigator.of(context).pop(),
           child: Text(l10n.cancel),
         ),
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(controller.text),
-          child: Text(l10n.appLockDisable),
-        ),
-      ],
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: Text(l10n.appLockDisable),
+          ),
+        ],
+      ),
     ),
   );
-  controller.dispose();
   if (secret == null || secret.isEmpty || !context.mounted) return;
   try {
     await core.disableStoreLock(secret);
@@ -510,7 +515,13 @@ Future<String?> _askNewSecret(BuildContext context,
   String? error;
   final result = await showDialog<String>(
     context: context,
-    builder: (context) => StatefulBuilder(
+    builder: (context) => _Owns(
+      disposer: () {
+        first.dispose();
+        second.dispose();
+        secondFocus.dispose();
+      },
+      child: StatefulBuilder(
       builder: (context, setState) {
         void submit() {
           final a = first.text, b = second.text;
@@ -569,11 +580,41 @@ Future<String?> _askNewSecret(BuildContext context,
             FilledButton(onPressed: submit, child: Text(l10n.appLockEnable)),
           ],
         );
-      },
+        },
+      ),
     ),
   );
-  first.dispose();
-  second.dispose();
-  secondFocus.dispose();
   return result;
+}
+
+/// Keeps dialog-owned disposables alive for as long as the dialog's element is.
+///
+/// `showDialog`'s future completes when the route is **popped**, not when it has finished
+/// animating out — so disposing a controller or focus node on the line after `await` tears it down
+/// while the dialog is still building, and the framework trips on the way out
+/// ("A TextEditingController was used after being disposed"). Assertions are stripped from release
+/// builds, so a shipped APK shows no red screen; it just half-performs whatever came next. That is
+/// how enabling an app lock aborted between deleting the keystore copy and writing the lock file
+/// (found on hardware 2026-08-08).
+///
+/// Owning them here moves disposal to unmount, which happens after the exit animation.
+class _Owns extends StatefulWidget {
+  const _Owns({required this.disposer, required this.child});
+
+  final VoidCallback disposer;
+  final Widget child;
+
+  @override
+  State<_Owns> createState() => _OwnsState();
+}
+
+class _OwnsState extends State<_Owns> {
+  @override
+  void dispose() {
+    widget.disposer();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
 }

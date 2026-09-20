@@ -1,15 +1,19 @@
 import 'dart:async';
-import 'dart:io' show File, Directory, Platform;
+import 'dart:io' show Directory, File, FileSystemEntity, Platform;
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../rust/api.dart' as rust;
 import 'background_delivery.dart';
+import 'app_version.dart';
 import 'nightdrop_core.dart';
 import 'media_cache.dart';
 import 'models.dart';
 import 'notifications.dart';
+import 'install_source.dart';
+import 'public_downloads.dart';
+import 'screenshot_detector.dart';
 
 /// [NightdropCore] backed by the real Rust security core via flutter_rust_bridge.
 ///
@@ -74,6 +78,7 @@ class RustNightdropCore extends NightdropCore {
   // Security is deprecated); existing entries migrate automatically on first access.
   static const _secure = FlutterSecureStorage();
   static const _kStoreKeyName = 'nightdrop_store_key';
+  static const _kCoverTraffic = 'nightdrop_cover_traffic';
   static const _kStateFile = 'nightdrop-state.bin';
 
   Future<String> _stateFilePath() async =>
@@ -229,7 +234,29 @@ class RustNightdropCore extends NightdropCore {
   @override
   Future<void> setCoverTraffic(bool enabled) async {
     await rust.setCoverTraffic(enabled: enabled);
+    // Remember it. The core holds this in a process-lifetime flag, so without a record here the
+    // setting was lost on every restart — and silently, which is the part that matters: the user
+    // turned on a privacy feature, saw it confirmed, and got no chaff after the next launch with
+    // nothing on screen to say so. Cover traffic is unobservable by design, so it cannot be
+    // noticed missing the way a broken visible feature would be.
+    try {
+      await _secure.write(key: _kCoverTraffic, value: enabled ? '1' : '0');
+    } catch (_) {
+      // Best-effort: failing to persist the preference must not fail turning it on now.
+    }
     notifyListeners();
+  }
+
+  /// Re-apply the saved cover-traffic preference to the freshly built core.
+  Future<void> _restoreCoverTraffic() async {
+    try {
+      if (await _secure.read(key: _kCoverTraffic) == '1') {
+        await rust.setCoverTraffic(enabled: true);
+      }
+    } catch (_) {
+      // A preference we cannot read is left off — the honest default for something the user
+      // cannot see running.
+    }
   }
 
   @override
@@ -304,9 +331,24 @@ class RustNightdropCore extends NightdropCore {
   /// at a time. Clearing `_core` is not enough: the Rust object is freed by a Dart finalizer at
   /// an unpredictable time, and its poller thread keeps the transport alive regardless — so the
   /// lock outlives the reference and the next bootstrap dies with "State already locked".
-  /// `shutdown()` releases it synchronously. No-op when there is no core.
+  ///
+  /// `shutdown()` releases it synchronously: it stops the poller, tears the transport down, and
+  /// **waits** (bounded, a few seconds at worst) for the poller to actually let go. Awaiting it is
+  /// therefore load-bearing — a caller that fires it off and rebuilds immediately gets the
+  /// read-only arti client this is here to prevent. No-op when there is no core.
   Future<void> _closeCore() async {
-    await _events?.cancel();
+    // Drop the Rust `StreamSink` FIRST. Cancelling the Dart subscription waits for the stream to
+    // close, and only dropping the sink closes it — so awaiting the cancel while the sink is still
+    // held in the `EVENTS` static waits for something that can never happen. That is a deadlock on
+    // every teardown path there is: the guard heal, the manual reset, logout and restore all come
+    // through here. Measured on a phone (2026-08-03): "Reset Tor connection" logged "closing the
+    // core" and then nothing, forever, with no error and a still-running old client.
+    //
+    // Bounded as well as ordered: this is teardown, and no event-stream quirk is worth wedging it.
+    rust.unsubscribe();
+    await _events
+        ?.cancel()
+        .timeout(const Duration(seconds: 2), onTimeout: () {});
     _events = null;
     final core = _core;
     _core = null;
@@ -320,25 +362,70 @@ class RustNightdropCore extends NightdropCore {
   }
 
   /// Automatically recover from a wedged Tor entry-guard set — the in-app equivalent of deleting
-  /// `guards.json` by hand. If the onion hasn't published within [_guardHealTimeout], the guards
-  /// have almost certainly churned out of the network: the device can neither publish its onion nor
-  /// reach the relay, and a plain re-bootstrap reuses the same guards, so it can't recover. Reset
-  /// the guard state (keeping the .onion identity) and rebuild the core with fresh guards. Guarded
-  /// so it runs at most once per launch and only while the onion is genuinely unpublished — so it
-  /// can never disrupt a working session (a stuck onion means the app is non-functional anyway).
+  /// `guards.json` by hand. A guard set that has churned out of the network can't be recovered by a
+  /// plain re-bootstrap, because that reuses the same guards; only resetting them (keeping the
+  /// `.onion` identity) breaks the loop. Runs at most once per launch.
+  ///
+  /// **What counts as evidence, and what does not.** Two triggers have been removed from here
+  /// after being measured on hardware, and both were removed for the same reason: they inferred
+  /// "the guards must be bad" from something that was not evidence of that.
+  ///
+  ///  * `!onionReady()` — arti's aggregate onion-service state is *bootstrap progress*, not
+  ///    liveness. A phone with its descriptor on 8/8 HSDirs for both time periods, 4/4 introduction
+  ///    points and zero upload failures reported not-published for eight minutes (2026-08-03), so
+  ///    this destroyed a healthy guard set 2.5 minutes into every session.
+  ///  * arti's `bootstrap_status()` — `BlockageKind::CantReachTor` turns out to be unreachable in
+  ///    arti 0.43 (its `_` arm has no matching `ConnBlockage` variant), and the kinds that *are*
+  ///    reachable can't be acted on: `online` is derived from connections to relays, so a dead
+  ///    guard set and a dead network are indistinguishable, and rotating guards because the device
+  ///    is offline burns anonymity margin for someone else's problem.
+  ///
+  /// What survives is the one signal that is positive, end-to-end evidence rather than inference:
+  /// [`NightdropCore.directPathWedged`] — several sends failed and *neither* the direct path nor
+  /// the relay has ever succeeded this run. It is self-corroborating, because a working relay means
+  /// Tor works and the problem is the peer.
+  ///
+  /// The bar is high on purpose. Entry guards are meant to be sticky for weeks, and arti repairs a
+  /// bad set by itself: with a router dropping every packet to all four of a device's confirmed
+  /// guards, a cold start still reached `Running` and published in ~80 s by sampling a replacement
+  /// (2026-08-04). Anything automatic here has to beat that, and only user-visible failure does.
   Future<void> _scheduleGuardHeal(String statePath, String key) async {
     if (!_tor || _guardHealDone) return;
     final core = _core;
     await Future.delayed(_guardHealTimeout);
-    // Bail if anything changed meanwhile: already healed, no longer Tor, the core was replaced
-    // (logout/restore), or the onion published fine.
-    if (_guardHealDone || !_tor || !identical(_core, core) || core == null) return;
-    if (await onionReady()) return;
+    while (!_guardHealDone && _tor && identical(_core, core) && core != null) {
+      if (await core.directPathWedged()) {
+        // Measurement build (`NIGHTDROP_NO_HEAL=1`): log what the heal would have done and carry
+        // on. This is how the false triggers above were caught; keep it.
+        if (_noHeal) {
+          await rust.diagNote(
+              line: 'heal: SUPPRESSED (NIGHTDROP_NO_HEAL) — directWedged=true '
+                  'onionReady=${await onionReady()}');
+          await Future.delayed(_guardHealRecheck);
+          continue;
+        }
+        await rust.diagNote(
+            line: 'heal: resetting guards — no send has reached a peer or a relay this run');
+        await _resetTorConnection(statePath, key);
+        return;
+      }
+      await Future.delayed(_guardHealRecheck);
+    }
+  }
+
+  /// Reset the entry-guard state and rebuild the core on fresh guards, keeping the `.onion`
+  /// identity. Shared by the automatic heal and the manual [resetTorConnection] action.
+  Future<void> _resetTorConnection(String statePath, String key) async {
     final stateDir = await _torStateDir();
     if (stateDir == null) return; // no writable Tor state dir — nothing to reset
     _guardHealDone = true;
-    await rust.resetTorGuards(stateDir: stateDir);
+    // Shut the core down BEFORE touching the guard files. `resetTorGuards` says so in its own doc
+    // ("Call this with the core shut down, then build a fresh core") and this called it the other
+    // way round: the live arti client can re-persist the guards we just deleted, so the heal
+    // quietly undoes itself and the next launch inherits the same wedged set. Seen on a desktop
+    // 2026-08-02, healing repeatedly with no improvement.
     await _closeCore();
+    await rust.resetTorGuards(stateDir: stateDir);
     _core = await rust.NightdropCore.newTor(
       stateDir: stateDir,
       relayAddr: _relayAddr,
@@ -346,11 +433,32 @@ class RustNightdropCore extends NightdropCore {
       persistKey: key,
     );
     _tor = true;
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
     notifyListeners();
+  }
+
+  /// Manually reset the Tor connection (menu action). The automatic heal only fires once per
+  /// launch and only on its own evidence; this is the escape hatch for a device that is wedged in
+  /// a way no heuristic caught — previously there was none, and a user in that state had nothing
+  /// to try but reinstalling.
+  @override
+  Future<void> resetTorConnection() async {
+    if (!_tor) {
+      await rust.diagNote(line: 'reset: ignored — not running on Tor');
+      return;
+    }
+    final key = await _readStoreKey();
+    if (key == null) {
+      // Locked, or the key is not retrievable. Said out loud: a menu action that silently does
+      // nothing is indistinguishable from one that ran and failed to help.
+      await rust.diagNote(line: 'reset: no store key available — nothing to rebuild');
+      return;
+    }
+    await rust.diagNote(line: 'reset: user asked for a fresh Tor connection');
+    await _resetTorConnection(await _stateFilePath(), key);
   }
 
   @override
@@ -400,6 +508,12 @@ class RustNightdropCore extends NightdropCore {
   // codes, onion addresses, or names — so it is safe to enable on a build you hand to someone
   // for a repro. Off unless asked for; a normal release is silent.
   static const String _defineDiag = String.fromEnvironment('NIGHTDROP_DIAG');
+  // Measurement-only (NIGHTDROP_NO_HEAL=1): suppress the automatic guard heal so a device that
+  // trips its conditions is observed instead of reset. Exists to answer whether the heal is a net
+  // win or whether it fires on network-wide trouble and makes the next minutes worse. Not a user
+  // setting and not documented in the app — absent from every normal build.
+  static const String _defineNoHeal = String.fromEnvironment('NIGHTDROP_NO_HEAL');
+  static bool get _noHeal => _defineNoHeal == '1';
 
   static String? _config(String key, String define) {
     if (define.isNotEmpty) return define;
@@ -444,6 +558,198 @@ class RustNightdropCore extends NightdropCore {
 
   static const _kBackedUp = 'nightdrop_backed_up';
   static const _kBackupSnoozeUntil = 'nightdrop_backup_snooze_until';
+  static const _kUpdateCheckedAt = 'nightdrop_update_checked_at';
+  static const _kUpdateHidden = 'nightdrop_update_hidden_version';
+
+  /// How often we ask the onion site. Daily is often enough to matter for a security fix and
+  /// rare enough that the request is not a heartbeat: a beacon every launch would let anyone
+  /// counting requests infer how many installs exist and how often they run.
+  static const _updateCheckInterval = Duration(hours: 24);
+
+  String? _updateAvailable;
+
+  @override
+  String? get updateAvailable => _updateAvailable;
+
+  double? _downloadProgress;
+
+  @override
+  double? get downloadProgress => _downloadProgress;
+
+  /// Handle one `update_progress` event.
+  ///
+  /// Kept off [_refresh] on purpose: that reloads the roster and every changed chat's history,
+  /// and these arrive several times a second for the length of a download. Routing them through
+  /// it would turn a progress bar into hundreds of full reloads.
+  void _onDownloadProgress(rust.AppEvent e) {
+    final p = e.progress;
+    final total = p?.total;
+    // No total means no determinate figure — the bar goes indeterminate rather than guessing.
+    final next = (p == null || total == null || total == BigInt.zero)
+        ? null
+        : (p.done / total).clamp(0.0, 1.0);
+    if (next == _downloadProgress) return;
+    _downloadProgress = next;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> hideUpdateBanner() async {
+    final v = _updateAvailable;
+    if (v == null) return;
+    await _secure.write(key: _kUpdateHidden, value: v);
+    _updateAvailable = null;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> setCaptureReporting(bool visible) async {
+    try {
+      await _core?.setCaptureReporting(visible: visible);
+    } catch (_) {
+      // Best-effort: a standing capability is not worth failing a launch over, and the next
+      // change or re-pair re-announces it.
+    }
+  }
+
+  /// Ask the platform what it can actually do and tell peers, once the core is up.
+  Future<void> _announceCaptureReporting() async {
+    if (_core == null) return;
+    await setCaptureReporting(await ScreenshotDetector.canDetect());
+  }
+
+  Future<String?>? _downloadInFlight;
+
+  @override
+  bool get downloadInProgress => _downloadInFlight != null;
+
+  /// Single-flight. A second call joins the running download instead of starting another.
+  ///
+  /// Observed on hardware before this existed: the user started a download from the menu, then
+  /// tapped the banner to watch it, which started a second one. Both streamed over Tor at once,
+  /// both wrote to the same scratch file, and when the first finished it verified and renamed that
+  /// file into place — while the second, whose descriptor survives a rename, went on writing into
+  /// the file that had just been published. Bytes landed *after* verification. It only produced a
+  /// correct APK because both streams carried identical content.
+  @override
+  Future<String?> downloadUpdate() {
+    final running = _downloadInFlight;
+    if (running != null) return running;
+    final started = _downloadHeld();
+    _downloadInFlight = started.whenComplete(() {
+      _downloadInFlight = null;
+      _downloadProgress = null;
+      notifyListeners();
+    });
+    // Tell the UI immediately, so the banner shows a bar for a download the menu started.
+    notifyListeners();
+    return _downloadInFlight!;
+  }
+
+  /// Held for the whole download, not just the fetch: tens of megabytes over Tor takes minutes,
+  /// and Doze/App Standby are free to freeze the process partway through. Taken while the app is
+  /// still foreground from the tap that got us here — Android 12+ refuses to start a foreground
+  /// service once the app has already left.
+  Future<String?> _downloadHeld() => BackgroundDelivery.holdDuring(
+        _downloadUpdate,
+        notificationText: 'Downloading update',
+      );
+
+  Future<String?> _downloadUpdate() async {
+    try {
+      // Downloaded and verified app-privately first, then published. Rust writes nothing until the
+      // hash matches what the onion site said, so the file only ever becomes visible to the user
+      // after it has passed — there is no window where a file manager can offer a bad build.
+      final dir = await PublicDownloads.staging();
+      final dest = '${dir.path}/NightDrop-update.apk';
+      // Which ABI's build to fetch is Rust's call, not ours — it reads the architecture the core
+      // was compiled for, which is the one Android actually chose. See `update::native_abi`.
+      final n = await _core?.downloadUpdate(destPath: dest);
+      if (n == null || n <= BigInt.zero) {
+        // Rust has already said why on its own diag line; this one marks that the UI gave up, so
+        // a log without it means the failure was somewhere after the download.
+        await rust.diagNote(line: 'update: download returned nothing — reporting failure');
+        return null;
+      }
+      // Named for the version it actually is. "NightDrop-update.apk" tells a user nothing months
+      // later, and collides with the last one they downloaded.
+      final version = _updateAvailable;
+      final where = await PublicDownloads.publish(
+        File(dest),
+        displayName:
+            version == null ? 'NightDrop.apk' : 'NightDrop-$version.apk',
+        mimeType: 'application/vnd.android.package-archive',
+      );
+      // Which of the three routes ran is invisible otherwise, and it is the difference between a
+      // file the user can find and one they cannot. Paths are app-private or public storage —
+      // nothing identity-linked — but log only the leaf, not the full path.
+      await rust.diagNote(
+        line: where == dest
+            ? 'update: published NOWHERE — file left in app-private storage'
+            : 'update: published to ${where.startsWith('Downloads/') ? 'MediaStore Downloads' : 'external storage'}',
+      );
+      return where;
+    } catch (e) {
+      // This used to swallow everything, so a failure here was indistinguishable from a failed
+      // download and the UI could only ever say "failed".
+      await rust.diagNote(line: 'update: download/publish threw: $e');
+      return null;
+    }
+  }
+
+  @override
+  Future<bool> checkForUpdateNow() async {
+    // Clear both gates: the daily timer and the hidden-version marker. Asking explicitly is the
+    // user overriding both, and a menu item that answers "nothing" because of a hide they forgot
+    // about is worse than useless.
+    await _secure.delete(key: _kUpdateCheckedAt);
+    await _secure.delete(key: _kUpdateHidden);
+    return _check();
+  }
+
+  @override
+  Future<void> maybeCheckForUpdate() async {
+    // Not when F-Droid installed us: F-Droid updates those users itself, so asking our onion site
+    // as well is a second updater doing the same job — which is why it appears on F-Droid's review
+    // checklist. Sideloads, the GitHub download and the desktop AppImage have no channel at all,
+    // and they are who this was written for. `checkForUpdateNow` is deliberately NOT gated: a user
+    // who opens the menu and asks gets a real answer wherever they got the app.
+    if (await InstallSource.isFdroid()) return;
+    await _check();
+  }
+
+  /// The check itself. Returns whether the onion site answered.
+  Future<bool> _check() async {
+    // Never let this fail a launch. Every branch below is best-effort: no answer is the normal
+    // outcome on a slow or offline network, and it must look exactly like "nothing to report".
+    try {
+      final last = int.tryParse(await _secure.read(key: _kUpdateCheckedAt) ?? '') ?? 0;
+      final since = DateTime.now().millisecondsSinceEpoch - last;
+      if (last != 0 && since < _updateCheckInterval.inMilliseconds) return false;
+
+      final result = await _core?.checkForUpdate(currentVersion: kAppVersion);
+      // Record the attempt, not the success: a site that is down must not turn into a retry on
+      // every launch, which is the beacon we are avoiding.
+      await _secure.write(
+        key: _kUpdateCheckedAt,
+        value: '${DateTime.now().millisecondsSinceEpoch}',
+      );
+      // Null means the site did not answer (down, slow, or no anonymized path). Do NOT let that
+      // read as "no update": the caller reports it separately.
+      if (result == null) return false;
+      var next = result.updateAvailable ? result.latest : null;
+      // Respect a hide, but only for the exact version that was hidden — a later release, which
+      // may be the one carrying a fix that matters, shows again.
+      if (next != null && await _secure.read(key: _kUpdateHidden) == next) next = null;
+      if (next != _updateAvailable) {
+        _updateAvailable = next;
+        notifyListeners();
+      }
+      return true;
+    } catch (_) {
+      return false; // Silence for the banner; the menu turns this into a real message.
+    }
+  }
 
   @override
   Future<bool> shouldSuggestBackup() async {
@@ -474,6 +780,9 @@ class RustNightdropCore extends NightdropCore {
   // If the onion hasn't published within this long, the entry-guard set is almost certainly wedged
   // (a healthy publish finishes well under it) — the app then resets guards and rebuilds itself.
   static const _guardHealTimeout = Duration(seconds: 150);
+  // How often the health signals are re-read after that first check. Two cheap FFI reads, so the
+  // cost is nil; the point is that a session which wedges an hour in is still noticed.
+  static const _guardHealRecheck = Duration(seconds: 30);
   // At most one automatic guard-heal per launch, so a genuinely offline device can't loop.
   bool _guardHealDone = false;
 
@@ -517,7 +826,7 @@ class RustNightdropCore extends NightdropCore {
               persistKey: key,
             );
             _tor = true;
-            _events = rust.subscribe().listen((e) => _refresh(e));
+            _events = rust.subscribe().listen(_onEvent);
             final id = await _core!.identity();
             _identity = Identity(id: id.id);
             await _refresh();
@@ -559,11 +868,40 @@ class RustNightdropCore extends NightdropCore {
     } finally {
       _booting = false;
       notifyListeners();
+      // Tell restored contacts whether this device can report screenshots (#1). Unawaited for the
+      // same reason as the update check: it puts a frame on the wire per contact.
+      unawaited(_announceCaptureReporting());
+      unawaited(_restoreCoverTraffic());
+      // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
+      // this one dials Tor. It self-limits to one check a day, so calling it on every start is
+      // free after the first.
+      unawaited(maybeCheckForUpdate());
     }
   }
 
   /// Copy an unreadable state file aside before anything can overwrite it, so a transient failure
   /// (or a bug fixed in a later build) doesn't cost the user their data. Best-effort.
+  /// Move any persisted state out of the way before a **new** identity is created.
+  ///
+  /// The core restores from `persistPath` whenever that file exists — it has no other way to tell
+  /// "create" from "restore". So an unreadable state file, which is the exact reason the load-error
+  /// screen is on screen, made "set up a new identity" fail with "wrong key or corrupt store": the
+  /// recovery path blocked by the thing it exists to recover from. Found on a device, 2026-08-02,
+  /// straight after the same shape of bug in the sealed onion key.
+  ///
+  /// **Renamed, never deleted.** These bytes may be the user's only copy of an identity they are
+  /// abandoning under duress of a failed launch, possibly recoverable later with the right key.
+  /// The wipe removes the sidecars, so they never outlive a deliberate destruction.
+  Future<void> _setAsideOldState() async {
+    try {
+      final file = File(await _stateFilePath());
+      if (!file.existsSync()) return;
+      await file.rename('${file.path}.replaced-${DateTime.now().millisecondsSinceEpoch}');
+    } catch (_) {
+      // Non-Tor demo modes have no persistence and no plugin to ask; never block onboarding.
+    }
+  }
+
   Future<void> _preserveUnreadableState(String path) async {
     try {
       final file = File(path);
@@ -581,6 +919,7 @@ class RustNightdropCore extends NightdropCore {
     // have left a core holding the Tor state lock.
     await _closeCore();
     _guardHealDone = false;
+    await _setAsideOldState();
     final listen = _listenAddr;
     final relay = _relayAddr;
     if (_torEnabled) {
@@ -604,9 +943,13 @@ class RustNightdropCore extends NightdropCore {
       _core = await rust.NightdropCore.newInstance();
     }
     // Subscribe to push events from Rust; refresh our view whenever state changes.
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
+    // Settle the screenshot capability before anyone pairs, so the first contact is announced to
+    // on pairing rather than left reading our silence as "they'd be told" (#1).
+    unawaited(_announceCaptureReporting());
+    unawaited(_restoreCoverTraffic());
     notifyListeners();
   }
 
@@ -766,7 +1109,7 @@ class RustNightdropCore extends NightdropCore {
       );
       _networked = listen != null && relay != null;
     }
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
@@ -792,7 +1135,7 @@ class RustNightdropCore extends NightdropCore {
       persistKey: key,
     );
     _tor = true;
-    _events = rust.subscribe().listen((e) => _refresh(e));
+    _events = rust.subscribe().listen(_onEvent);
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
@@ -836,6 +1179,20 @@ class RustNightdropCore extends NightdropCore {
     _countsReady = false;
     notifyListeners(); // _Root -> onboarding now
 
+    // Stop background delivery and FORGET the preference, on every path that destroys an
+    // identity — not just the menu one, which is where the `stop()` used to live alone.
+    //
+    // The duress wipe (§ app-lock #3) went through `logout` without ever touching this, so the
+    // foreground service kept running and its permanent notification stayed up until the
+    // lifecycle handler happened to notice there was no identity left. For a wipe whose whole
+    // purpose is that the app looks untouched, that is backwards.
+    //
+    // Clearing the flag, not merely stopping the service, is deliberate: identity is
+    // one-per-install here and a wipe is meant to be a clean break, so a device preference that
+    // silently spans two identities the user believes are unrelated is the wrong default. The
+    // cost is one prompt at the next setup — exactly the moment to reconsider it.
+    unawaited(BackgroundDelivery.setEnabled(false)); // also stops a running service
+
     // Best-effort cleanup, after the UI has already moved on.
     unawaited(events?.cancel());
     // Peer-facing logout (#7 / §11.6): tell un-backed chats' peers the chat closed (so their
@@ -862,27 +1219,113 @@ class RustNightdropCore extends NightdropCore {
     // below, so the next launch finds "saved data, no key" and shows the recovery screen for an
     // identity that was deliberately destroyed. The duress path made this near-certain, since
     // `duressLogout()` marks the state dirty immediately beforehand.
+    //
+    // Under duress, stop *awaiting* it after a couple of seconds. `shutdown()` waits for the poller
+    // to release everything, and on Tor the tail of that is arti's runtime shutting down — seconds
+    // of task unwinding whose only purpose is releasing the state lock for a core we are not going
+    // to rebuild. The part the wipe actually needs (the poller stopped, its last save done) is over
+    // well inside this window; the rest finishes on its own while the files are deleted. A coerced
+    // user must not be left watching a spinner.
     try {
-      await core?.shutdown();
+      final stopping = core?.shutdown();
+      if (stopping != null) {
+        await (duress
+            ? stopping.timeout(const Duration(seconds: 2), onTimeout: () {})
+            : stopping);
+      }
     } catch (_) {
       // Best-effort: a core that won't stop cleanly must not block the wipe.
     }
     // Decrypted media must not outlive the identity: drop the in-memory caches and delete
     // the plaintext `nightdrop-media-*` temp files written for the system player.
     unawaited(MediaCache.wipe());
-    try {
-      await _secure.delete(key: _kStoreKeyName);
-      final support = (await getApplicationSupportDirectory()).path;
-      final state = File('$support/$_kStateFile');
-      if (state.existsSync()) state.deleteSync();
-      final media = Directory('$support/nightdrop-media');
-      if (media.existsSync()) media.deleteSync(recursive: true);
-      if (Platform.isAndroid || Platform.isIOS) {
-        final artiState = Directory('$support/arti-state');
-        if (artiState.existsSync()) artiState.deleteSync(recursive: true);
+    // Each target is removed independently. This was one `try` around the lot, with a silent
+    // catch, and the first statement in it was the keystore delete — so on Android, where that
+    // call can throw, EVERY file below it was skipped and nothing said so. The identity still
+    // looked destroyed (onboarding overwrites the state file), while the store key, the sealed
+    // onion identity, arti's state and the authorized-client files all survived on disk. A wipe
+    // that half-succeeds in silence is the one failure mode this code must not have.
+    final failed = <String>[];
+    Future<void> step(String what, FutureOr<void> Function() act) async {
+      try {
+        await act();
+      } catch (_) {
+        failed.add(what);
       }
-    } catch (_) {
-      // Ignore wipe failures — the in-memory identity is already gone.
+    }
+
+    // An absent target is not a failure — a wipe with no media, no contacts and no lock is
+    // ordinary — so existence is checked first rather than letting `delete()` throw for it.
+    void rm(FileSystemEntity target) {
+      if (target.existsSync()) target.deleteSync(recursive: true);
+    }
+
+    // Overwrite before deleting. If `delete` fails — which is how this whole wipe came to be
+    // skipped on Android — the entry that survives is then a random key that unlocks nothing,
+    // instead of the key that protected everything just destroyed (and that still unseals any
+    // copy of the state file or the sealed onion identity taken off the device). It also lands
+    // where a fresh identity wants to be: `_ensureStoreKey` reads it back and treats it as the
+    // new key, which is exactly right, since `randomStoreKey` returns a well-formed one.
+    await step('store key', () async {
+      try {
+        await _secure.write(key: _kStoreKeyName, value: await rust.randomStoreKey());
+      } catch (_) {
+        // Deletion is still worth attempting on its own.
+      }
+      await _secure.delete(key: _kStoreKeyName);
+      // Read it back. A delete that *throws* is caught above; a delete that returns success and
+      // leaves the entry readable is not, and that is closer to the failure seen on a device — the
+      // key survived a wipe with nothing reported.
+      //
+      // Be precise about the reach of this check, because it is easy to credit it with more.
+      // `read` goes to `SharedPreferencesImpl`'s IN-MEMORY map (`preferences.getString`), and the
+      // platform commits to disk asynchronously via `apply()`. So this catches a delete that
+      // did not take effect at all; it CANNOT see a delete that took effect in memory and never
+      // reached storage — process death during a wipe would leave the entry on disk with this
+      // check having passed. Closing that gap needs something that looks at the file.
+      if (await _secure.read(key: _kStoreKeyName) != null) {
+        throw StateError('store key survived its delete');
+      }
+    });
+    String? support;
+    await step('app dir', () async {
+      support = (await getApplicationSupportDirectory()).path;
+    });
+    if (support case final dir?) {
+      // The state file AND its sidecars: `nightdrop-state.bin.unreadable-*` from a failed launch
+      // and `.replaced-*` from a new identity created over an old one. Both are encrypted copies
+      // of the identity being destroyed, and deleting the original while leaving them would make
+      // the wipe a rename.
+      await step('state file', () {
+        for (final f in Directory(dir).listSync()) {
+          if (f.path.split('/').last.startsWith(_kStateFile)) rm(f);
+        }
+      });
+      await step('media', () => rm(Directory('$dir/nightdrop-media')));
+      // Every platform, not just mobile. This used to be Android/iOS only, which left desktop
+      // logouts holding the whole Tor state: the onion identity key we were supposedly deleting,
+      // and one keystore directory per peer *named after their onion address* — a contact list
+      // that outlived the identity. The core drops those keys individually as chats are cleared,
+      // but removing the directory is what guarantees nothing is left behind.
+      await step('arti state', () => rm(Directory('$dir/arti-state')));
+      // Arti's *directory* cache — the Tor consensus and microdescriptors. Public documents, so
+      // unlike `arti-state` it holds no key, no address and no contact list, and it survived the
+      // wipe verified on a device 2026-08-08. It goes anyway: what it does carry is a modification
+      // time, and a wipe that leaves "Tor last ran at 14:26" behind an app that presents itself as
+      // freshly onboarded is a wipe with an asterisk. Costs a fresh consensus fetch on next launch.
+      await step('tor dir cache', () => rm(Directory('$dir/arti-cache')));
+      // Authorized-client files (#22) name one file per contact. They hold public keys, so nothing
+      // secret, but the count is still a contact list and it has no reason to outlive the identity.
+      await step('client auth', () => rm(Directory('$dir/client-auth')));
+      // The sealed onion identity (docs/design/onion-key-at-rest.md). It must go for two reasons:
+      // it *is* the identity being destroyed, and leaving it behind breaks the next start outright
+      // — a fresh identity has a new store key, the stale file will not unseal under it, and the
+      // core treats an unreadable identity as an error rather than silently minting a new address.
+      await step('onion key', () => rm(File('$dir/onion-key.sealed')));
+    }
+    if (failed.isNotEmpty && _diagEnabled) {
+      // ignore: avoid_print — the wipe's outcome belongs on the record; names only, no paths.
+      print('[nd-diag] wipe: could not remove ${failed.join(', ')}');
     }
     return notNotified;
   }
@@ -986,6 +1429,16 @@ class RustNightdropCore extends NightdropCore {
     await _refresh();
   }
 
+  /// The single entry point for core events, so the cheap high-frequency ones cannot accidentally
+  /// be routed through the expensive refresh.
+  void _onEvent(rust.AppEvent e) {
+    if (e.kind == 'update_progress') {
+      _onDownloadProgress(e);
+      return;
+    }
+    unawaited(_refresh(e));
+  }
+
   Future<void> _refresh([rust.AppEvent? event]) async {
     // Contact/request lists are small — always re-read them (a roster change is cheap).
     _contacts = (await _core!.contacts()).map(_map).toList();
@@ -1053,6 +1506,7 @@ class RustNightdropCore extends NightdropCore {
         peerBackedUp: c.peerBackedUp,
         verified: c.verified,
         peerVerified: c.peerVerified,
+        peerCapturesSilent: c.peerCapturesSilent,
         peerRelays: c.peerRelays,
         remoteStorageHealthy: c.remoteStorageHealthy,
         lastSeenSecs: c.lastSeenSecs.toInt(),

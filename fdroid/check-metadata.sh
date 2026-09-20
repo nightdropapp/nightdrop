@@ -24,8 +24,9 @@ WRITE=0
 # commit, so it cannot be fixed after a release without cutting another one.
 # F-Droid reads the changelog as changelogs/<versionCode>.txt, matched against each build's
 # versionCode (and CurrentVersionCode for the app-level entry) - see insert_localized_app_metadata
-# in fdroidserver/update.py. With per-ABI splitting those are 1011/2011/4011, not the pubspec's
-# base, so a missing file means the release silently ships with no "What's New" at all.
+# in fdroidserver/update.py. With per-ABI splitting those are versionCode * 10 + ABI (4021/4022/
+# 4023), not the pubspec's base, so a missing file means the release silently ships with no
+# "What's New" at all.
 missing=0
 for vc in $(sed -n -E 's/^ *versionCode: ([0-9]+)$/\1/p' "$RECIPE"); do
     [ -f "$REPO_ROOT/fastlane/metadata/android/en-US/changelogs/$vc.txt" ] \
@@ -59,16 +60,45 @@ chmod 600 config.yml
 cp /out/in.yml metadata/'"$APPID"'.yml
 fdroid rewritemeta '"$APPID"' >/dev/null 2>&1
 cp metadata/'"$APPID"'.yml /out/out.yml
-# Categories are only resolvable against fdroiddata config/, so that complaint is noise here.
+# Categories are only resolvable against fdroiddata config/, so that complaint is noise here —
+# they are checked separately against the real list below, which is NOT noise: a bad category
+# fails both `fdroid lint` and schema validation in CI.
 fdroid lint '"$APPID"' 2>&1 | grep -v "Categories .* is not valid" > /out/lint.txt || true
 ' >/dev/null
+
+# Categories, against fdroiddata's own config/categories.yml. Dropping the lint complaint above
+# without checking this anywhere is how `Messager` (for `Messaging`) reached CI and failed two
+# jobs — a typo in a one-line review suggestion, invisible to every local check we had.
+# Network-dependent, so a fetch failure warns rather than fails.
+cats=$(sed -n '/^Categories:/,/^[A-Za-z]/p' "$RECIPE" | sed -n -E 's/^  - (.+)$/\1/p')
+valid=$(curl -fsS --max-time 20 \
+    "https://gitlab.com/fdroid/fdroiddata/-/raw/master/config/categories.yml" 2>/dev/null \
+    | sed -n -E 's/^([A-Za-z][^:]*):$/\1/p')
+if [ -z "$valid" ]; then
+    echo "note: could not fetch fdroiddata config/categories.yml — categories unchecked"
+elif [ -n "$cats" ]; then
+    while IFS= read -r c; do
+        [ -n "$c" ] || continue
+        if printf '%s\n' "$valid" | grep -qxF "$c"; then
+            echo "category OK: $c"
+        else
+            echo "INVALID CATEGORY: '$c' is not in fdroiddata config/categories.yml"
+            echo "  closest: $(printf '%s\n' "$valid" | grep -iF "${c:0:5}" | paste -sd', ' -)"
+            badcat=1
+        fi
+    done <<< "$cats"
+fi
 
 lint=$(grep -v '^20[0-9][0-9]-' "$WORK/lint.txt" 2>/dev/null || true)
 if [ -n "$lint" ]; then echo "lint findings:"; echo "$lint"; fi
 
+if [ -n "${badcat:-}" ]; then
+    echo "^ fix the category before pushing: CI fails both 'fdroid lint' and 'schema validation'"
+fi
+
 if diff -q "$RECIPE" "$WORK/out.yml" >/dev/null; then
     echo "rewritemeta: canonical${lint:+ (but see lint above)}"
-    [ -z "$lint" ]
+    [ -z "$lint" ] && [ -z "${badcat:-}" ]
 else
     echo "rewritemeta: NOT canonical — CI will reject this. Diff (yours -> canonical):"
     diff -u "$RECIPE" "$WORK/out.yml" || true

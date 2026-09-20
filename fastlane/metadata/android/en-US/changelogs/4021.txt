@@ -1,0 +1,7 @@
+Fixed: a chat request could turn itself into an accepted contact. Restarting the app was enough, and that person's messages were accepted from then on. Approval survives a restart now — worth a glance at your chat list.
+
+Your onion address and your contacts' addresses no longer sit unencrypted on disk. Your own address doesn't change.
+
+Deleting your identity is thorough now; on Android parts of it could quietly survive.
+
+"Sent" means their device has it: one tick sent, two delivered.

@@ -51,6 +51,12 @@ pub struct PersistedChat {
     /// design). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]
     pub verified: bool,
+    /// Whether the peer told us their device cannot report screenshots (#1). Persisted so the
+    /// warning survives a restart — recomputing it as "unknown" every launch would drop the signal
+    /// until the peer next announced, which they only do on a change. `#[serde(default)]` (→ None)
+    /// keeps older state files loadable and correctly says "they have not told us".
+    #[serde(default)]
+    pub peer_captures_silent: Option<bool>,
     /// Whether the **peer** signaled that *they* verified this chat's safety number — informational
     /// only (never sets our own `verified`). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]
@@ -76,6 +82,33 @@ pub struct PersistedChat {
     /// state files loadable; a new field on a shipped format must never be required.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub local_name: String,
+    /// Base64 of our 32-byte client descriptor-encryption secret for this peer's restricted onion
+    /// (#22). Kept here — sealed with everything else — rather than in arti's keystore, which
+    /// stored it unencrypted in a directory named after the peer's address
+    /// (`docs/design/onion-key-at-rest.md`). `#[serde(default)]` keeps older state files loadable;
+    /// a chat without one simply mints a fresh key and re-announces it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_key: Option<String>,
+    /// Whether the local user has **approved** this chat, or it is still an inbound request awaiting
+    /// approval (`ARCHITECTURE.md` §5 — authorization before first message).
+    ///
+    /// Added 2026-08-02, after a device test. This field did not exist, and restore hardcoded
+    /// `authorized: true` on the reasoning that "persisted chats were authorized before saving" —
+    /// which is simply not so, since a pending request is a chat and is saved like any other. So a
+    /// stranger's unapproved request was **promoted to an approved contact by the next restart**,
+    /// with no approval ever given: exactly the invariant this app is supposed to hold.
+    ///
+    /// `default = "yes"`, not `#[serde(default)]`. A missing field means a state file written before
+    /// this existed, and defaulting those to `false` would demote every real contact on an upgrade
+    /// to a request the user has to re-approve. Files written from now on carry the truth.
+    #[serde(default = "yes")]
+    pub authorized: bool,
+}
+
+/// `serde` default for [`PersistedChat::authorized`] — see the field's note on why absence must
+/// read as approved.
+fn yes() -> bool {
+    true
 }
 
 /// One relay recall receipt for a still-queued message (see [`PersistedChat::queued_receipts`]).
@@ -162,6 +195,32 @@ pub struct PersistedPendingControl {
     pub bytes: String,
 }
 
+/// A short-code invite this device is hosting, persisted so it survives a **core rebuild**.
+///
+/// It used to live only in memory, and a rebuild is not rare: the guard heal does one, so does
+/// "Reset Tor connection", so does a restore. The inviter's screen kept showing a code that
+/// nothing was listening for any more, so the joiner got "the inviter never answered" and the
+/// blame landed on the wrong side. Observed on 2026-08-03 with two fresh identities, where it is
+/// worst — a new identity's first descriptor publish is slow enough that the 150 s heal reliably
+/// fires *during* pairing, so the people most likely to hit it are new users on their first try.
+///
+/// The secret words are moderate-entropy and live at most [`SHORT_CODE_TTL`]; they sit inside the
+/// same sealed state file as the ratchet sessions, so this adds no new class of at-rest secret.
+///
+/// [`SHORT_CODE_TTL`]: crate::api
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedInvite {
+    pub slot: String,
+    pub secret: String,
+    /// The `nightdrop://pair?…` payload handed to the joiner.
+    pub payload: String,
+    /// TTL for the sealed response posted back to the joiner, in seconds.
+    pub ttl_secs: u64,
+    /// Wall-clock expiry. Stored as unix seconds because the in-memory form is an `Instant`,
+    /// which is monotonic and meaningless across a process restart.
+    pub expires_unix: u64,
+}
+
 /// The full device state written to disk.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedState {
@@ -191,6 +250,10 @@ pub struct PersistedState {
     /// restart before the retry lands. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_control: Vec<PersistedPendingControl>,
+    /// Short-code invites still being hosted (§5b), persisted so a core rebuild mid-pairing does
+    /// not silently strand the joiner. `#[serde(default)]` for forward-compat.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub pending_invites: Vec<PersistedInvite>,
 }
 
 fn is_zero_u64(n: &u64) -> bool {
@@ -323,6 +386,7 @@ mod tests {
             discovered_relays: Vec::new(),
             directory_version: 0,
             pending_control: Vec::new(),
+            pending_invites: Vec::new(),
         };
 
         // A stale temp from a previously-crashed write must not break the next save.

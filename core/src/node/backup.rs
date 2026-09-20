@@ -2,6 +2,15 @@
 //! onion-keystore bundling, and server backup. Split out of `node.rs`.
 use super::*;
 
+/// Wall-clock time in unix seconds, for expiries that have to survive a process restart
+/// (`Instant` is monotonic and means nothing across one). Saturates to 0 on a pre-epoch clock.
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
 impl Node {
     /// Capture the full device state for at-rest persistence (`storage::`). Identity and
     /// sessions are vodozemac-encrypted under `key`; the rest is sealed by the caller.
@@ -45,6 +54,7 @@ impl Node {
                 peer_backed_up: chat.contact.peer_backed_up,
                 verified: chat.contact.verified,
                 peer_verified: chat.contact.peer_verified,
+                peer_captures_silent: chat.contact.peer_captures_silent,
                 peer_relays: chat.contact.peer_relays.clone(),
                 // Persist recall receipts for still-queued messages so an edit/unsend can pull an
                 // undelivered blob off the relay even after a restart (§1.1). Flatten the
@@ -64,7 +74,12 @@ impl Node {
                     })
                     .collect(),
                 last_seen_unix: chat.last_seen,
+                client_key: chat.client_key.map(|k| {
+                    use base64::Engine as _;
+                    base64::engine::general_purpose::STANDARD.encode(k)
+                }),
                 local_name: chat.local_name.clone(),
+                authorized: chat.authorized,
             })
             .collect();
         PersistedState {
@@ -77,7 +92,55 @@ impl Node {
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
             pending_control: self.export_pending_control(),
+            pending_invites: self.export_pending_invites(),
         }
+    }
+
+    /// Serialize the in-flight short-code invites (§5b). The monotonic `Instant` expiry becomes
+    /// wall-clock unix seconds — the only form that means anything after a rebuild. Invites that
+    /// have already run out are dropped here rather than written and skipped on the way back in.
+    fn export_pending_invites(&self) -> Vec<crate::storage::PersistedInvite> {
+        let now = Instant::now();
+        self.pending_invites
+            .iter()
+            .filter_map(|p| {
+                let remaining = p.expiry.checked_duration_since(now)?;
+                if remaining.is_zero() {
+                    return None;
+                }
+                Some(crate::storage::PersistedInvite {
+                    slot: p.slot.clone(),
+                    secret: p.secret.clone(),
+                    payload: p.payload.clone(),
+                    ttl_secs: p.ttl.as_secs(),
+                    expires_unix: now_unix().saturating_add(remaining.as_secs()),
+                })
+            })
+            .collect()
+    }
+
+    /// Rebuild the short-code invites we're still hosting. Anything already expired is dropped, so
+    /// a device that was off past the code's TTL comes back up hosting nothing. The remaining time
+    /// is clamped to the invite's own TTL: a backwards clock jump must not resurrect a code for
+    /// longer than it was ever meant to live.
+    fn import_pending_invites(persisted: &[crate::storage::PersistedInvite]) -> Vec<PendingInvite> {
+        let now_unix = now_unix();
+        persisted
+            .iter()
+            .filter_map(|p| {
+                let remaining = p.expires_unix.saturating_sub(now_unix).min(p.ttl_secs);
+                if remaining == 0 {
+                    return None;
+                }
+                Some(PendingInvite {
+                    slot: p.slot.clone(),
+                    secret: p.secret.clone(),
+                    payload: p.payload.clone(),
+                    ttl: Duration::from_secs(p.ttl_secs),
+                    expiry: Instant::now() + Duration::from_secs(remaining),
+                })
+            })
+            .collect()
     }
 
     /// Serialize the undelivered chat-delete `Closed` queue (§11.6) for persistence: the sealed
@@ -229,6 +292,7 @@ impl Node {
         node.discovered_relays = state.discovered_relays.clone();
         node.directory_version = state.directory_version;
         node.pending_control = Self::import_pending_control(&state.pending_control);
+        node.pending_invites = Self::import_pending_invites(&state.pending_invites);
         for chat in &state.chats {
             let session = Session::from_pickle(
                 SessionPickle::from_encrypted(&chat.session_pickle, key)
@@ -260,6 +324,7 @@ impl Node {
                         peer_backed_up: chat.peer_backed_up,
                         verified: chat.verified,
                         peer_verified: chat.peer_verified,
+                        peer_captures_silent: chat.peer_captures_silent,
                         peer_relays: chat.peer_relays.clone(),
                         remote_storage_healthy: true,
                         last_seen_secs: 0, // these three are filled in `contacts()` from the chat
@@ -289,7 +354,18 @@ impl Node {
                         .collect(),
                     last_seen: chat.last_seen_unix,
                     local_name: chat.local_name.clone(),
-                    authorized: true, // persisted chats were authorized before saving
+                    client_key: chat.client_key.as_ref().and_then(|b| {
+                        use base64::Engine as _;
+                        base64::engine::general_purpose::STANDARD
+                            .decode(b)
+                            .ok()
+                            .and_then(|v| v.try_into().ok())
+                    }),
+                    // NOT hardcoded true any more: a pending inbound request is persisted like any
+                    // other chat, so assuming approval here promoted strangers to contacts on the
+                    // next restart. Old files (field absent) still read as approved — see the
+                    // field's note.
+                    authorized: chat.authorized,
                     code: None,
                     closed: chat.closed,
                     relay_receipts,
@@ -333,6 +409,7 @@ impl Node {
                                 peer_backed_up: pchat.peer_backed_up,
                                 verified: pchat.verified,
                                 peer_verified: pchat.peer_verified,
+                                peer_captures_silent: pchat.peer_captures_silent,
                                 peer_relays: pchat.peer_relays.clone(),
                                 remote_storage_healthy: true,
                                 last_seen_secs: 0, // these three are filled in `contacts()` from the chat
@@ -342,12 +419,21 @@ impl Node {
                             peer_address: pchat.peer_address.clone(),
                             session,
                             history,
-                            authorized: true,
+                            // Same reasoning as the restore path above: a merged chat that was
+                            // still a pending request must not arrive approved.
+                            authorized: pchat.authorized,
                             code: None,
                             closed: pchat.closed,
                             relay_receipts: HashMap::new(),
                             last_seen: pchat.last_seen_unix,
                             local_name: pchat.local_name.clone(),
+                            client_key: pchat.client_key.as_ref().and_then(|b| {
+                                use base64::Engine as _;
+                                base64::engine::general_purpose::STANDARD
+                                    .decode(b)
+                                    .ok()
+                                    .and_then(|v| v.try_into().ok())
+                            }),
                             remote_storage_healthy: true,
                         },
                     );

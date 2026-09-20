@@ -5,6 +5,7 @@
 //! demo peer); the network transport (Tor) and relay slot in behind the same trait.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use vodozemac::olm::{Account, AccountPickle, Session, SessionPickle};
@@ -50,6 +51,10 @@ const MARK_BACKEDUP: &[u8] = b"nightdrop/ctl/backedup/v1";
 const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
 const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
 const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
+/// Two markers for the screenshot-capability signal (#1), same shape as the verification pair: the
+/// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
+const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
+const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
 
 /// Dev-only logging. Identity keys, invite codes, and decrypted display names must never
 /// reach release logs (Android's logcat persists them for any `adb`-connected observer);
@@ -264,17 +269,6 @@ fn recall_receipts(
     all_recalled
 }
 
-/// Mark this chat's relay-"queued" outgoing messages as "delivered" — called when the peer is
-/// observed reachable (a direct send succeeded, we received a message from them, or they acked
-/// a relay drain), meaning they have the messages.
-fn flip_queued_delivered(history: &mut [ChatMessage]) {
-    for m in history.iter_mut() {
-        if m.from_me && m.delivery == "queued" {
-            m.delivery = "delivered".to_string();
-        }
-    }
-}
-
 /// The sender identity of a frame representing a delivered **user message** (so draining it from
 /// the relay warrants a delivery ack). `None` for control frames (Hello/Approved/Closed/Ack/…).
 fn user_frame_sender(frame: &Frame) -> Option<String> {
@@ -325,6 +319,11 @@ struct Chat {
     last_seen: Option<u64>,
     /// A nickname the local user gave this contact. **Never sent** — see `contact-naming.md` §2.
     local_name: String,
+    /// Our 32-byte client secret for this peer's restricted onion (#22), kept here so it can be
+    /// re-inserted into the in-memory keystore at startup. `None` on a chat paired before this
+    /// existed: a fresh key is minted and re-announced, which the peer accepts on the existing
+    /// chat, so nothing needs re-pairing.
+    client_key: Option<[u8; 32]>,
     /// False while an inbound request awaits the local user's approval (§5). A chat we
     /// initiated is authorized immediately; one opened by a stranger's `Hello` is not.
     authorized: bool,
@@ -356,7 +355,10 @@ struct Chat {
 /// during the handshake.
 pub struct Node {
     identity: LocalIdentity,
-    transport: Box<dyn Transport>,
+    /// `Arc`, not `Box`, so a blocking send can take a handle and do its network I/O **without the
+    /// core lock** — the same split the relay drain already uses (§1.5.2). Constructors still take
+    /// a `Box` (nothing else changes) and convert here.
+    transport: Arc<dyn Transport>,
     /// The **primary** relay — the shared, baked-in default both peers fall back to. Kept for
     /// all existing code paths; multi-relay (#17) fans out *in addition* to this.
     relay: Option<RelayClient>,
@@ -371,6 +373,9 @@ pub struct Node {
     /// The most recently minted invite code (short code), remembered so the approval
     /// signal we send back to a joiner can echo the code they used (§5).
     last_invite_code: Option<String>,
+    /// What we last told peers about whether this device can report screenshots (#1). `None` until
+    /// the UI says; only a change is announced, so a restart does not re-broadcast to every chat.
+    captures_visible: Option<bool>,
     /// Where media attachments are stored at rest: `(dir, key)`. Each attachment is sealed
     /// under `key` into its own file in `dir`, and the message only references its id — so
     /// large media never inflates the JSON state blob. `None` disables media (demo/tests).
@@ -393,10 +398,20 @@ pub struct Node {
     /// against the live transport address on startup: if the onion changed (e.g. a rebuilt Tor
     /// keystore), we announce the new address to contacts so they can still reach us (§5c, #11).
     restored_address: String,
-    /// Hashes of relay blobs we've already processed, to de-duplicate a message a sender fanned
-    /// out to several relays (#17) — including the case where one relay was down when its sibling
-    /// was drained. Bounded (cleared past a cap); in-memory only.
-    seen_relay_blobs: std::collections::HashSet<[u8; 32]>,
+    /// Hashes of the **sealed frames** we've already processed, whichever way they reached us.
+    ///
+    /// De-duplicates a message a sender fanned out to several relays (#17), including the case
+    /// where one relay was down when its sibling was drained — and, because it spans both intake
+    /// paths, the copy that arrives directly *and* on the relay. That happens on every message
+    /// once server storage is on, and the second copy is the same Olm ciphertext, whose message
+    /// key the first decrypt already consumed: it cannot decrypt, and before this it took the rest
+    /// of the drain down with it (see [`apply_relay_harvest`](Self::apply_relay_harvest)).
+    ///
+    /// Hashed over the frame *inside* the relay envelope, so the same frame matches whether it
+    /// arrived wrapped or not. A re-sent message is re-sealed and so hashes differently — that is
+    /// what the id-level dedup in `process_frame` is for. Bounded (cleared past a cap); in-memory
+    /// only.
+    seen_frames: std::collections::HashSet<[u8; 32]>,
     /// Reachability of **our own** advertised extra relays (`my_relays`, #17), keyed by address,
     /// as observed on the last [`poll_relay`](Self::poll_relay). `false` = that relay (e.g. one the
     /// user self-hosts) did not answer our drain, so contacts' mail to us via it may be stuck. Drives
@@ -411,7 +426,7 @@ pub struct Node {
     pending_relay: Vec<PendingRelaySend>,
     /// Messages composed while a **non-synchronous** transport (Tor) is in use: [`Node::send`]
     /// seals + stores them "queued" and defers the network here so composing never blocks the UI
-    /// on a dial. The poller drains this via [`flush_pending_sends`](Self::flush_pending_sends),
+    /// on a dial. The poller drains this via [`plan_pending_sends`](Self::plan_pending_sends),
     /// attempting direct-peer delivery with relay fallback. In-memory only, and drained on the very
     /// next poll tick (~80 ms), so a restart in that window just leaves the message "queued" — the
     /// same recovery profile as [`pending_relay`](Self::pending_relay).
@@ -433,6 +448,129 @@ pub struct Node {
     /// Version of the last relay directory we accepted; a fetched list is applied only if newer
     /// (monotonic anti-rollback). Persisted.
     directory_version: u64,
+    /// Directly-sent messages still waiting for a receipt that names them; swept by
+    /// [`sweep_unconfirmed`](Self::sweep_unconfirmed).
+    ///
+    /// **In memory only, on purpose.** Seeding it from persisted history on start-up would, on the
+    /// first launch after upgrading, re-queue every message ever left in the pre-existing "sent"
+    /// state — a burst of duplicates to every contact. The cost is that a send lost across a
+    /// *sender* restart is not retried; the case this exists for is the receiver going away, with
+    /// the sender still up.
+    awaiting_receipt: Vec<AwaitingReceipt>,
+    /// Consecutive failed direct (onion-to-onion) sends since the last successful one, and whether
+    /// *any* direct send has succeeded this run. Together they answer "can this device reach anyone
+    /// at all, or is it only ever falling back to the relay?" — see
+    /// [`direct_path_wedged`](Self::direct_path_wedged). In memory only; a fresh run re-measures.
+    direct_failures: u32,
+    direct_ever_succeeded: bool,
+    /// Whether any **relay** operation has succeeded this run. The discriminator between "this
+    /// peer is offline" and "this device cannot reach the network": the relay is dialled over the
+    /// same Tor path, so if it answers, our circuits work and an unreachable peer is their problem.
+    relay_ever_succeeded: bool,
+    /// `(peer, id)` for every user message we have **accepted**, owed a [`Frame::Delivered`].
+    ///
+    /// Recorded by the frame handlers themselves, at the point of acceptance, because that is the
+    /// only place the answer is known: a media frame keeps its id *inside* the encrypted envelope,
+    /// so nothing upstream of the decrypt can name it. Building it from the frame beforehand — as
+    /// this used to — also risks receipting something that is then dropped.
+    ///
+    /// The id is the message's `msg_id` for text, and `t:<transfer_id>` for an attachment (which
+    /// has no `msg_id`); see [`Frame::Delivered`]'s handler for the matching side.
+    pending_receipts: Vec<(String, String)>,
+}
+
+/// Everything a batch of deferred sends needs to reach the network, snapshotted under the core lock
+/// so the **blocking** part can run without it. Built by [`Node::plan_pending_sends`], consumed by
+/// [`execute_sends`], applied by [`Node::apply_send_outcomes`].
+///
+/// This is the same three-phase split the relay drain uses (§1.5.2), for the same reason and then
+/// some. A send does a peer dial (up to `PEER_DIAL_TIMEOUT`) and, on failure, a relay post per
+/// target (up to `RELAY_DIAL_TIMEOUT` each) — and all of that used to happen inside `apply_tick`,
+/// i.e. **holding the core lock**. On a healthy network nobody notices. On a device whose circuits
+/// are timing out it means the lock is held for minutes, and everything else queues behind it: UI
+/// reads, and — measured on a phone, 2026-08-03 — the teardown itself, so "Reset Tor connection"
+/// did nothing at all. The app was least able to recover exactly when it most needed to.
+pub(crate) struct SendPlan {
+    transport: Arc<dyn Transport>,
+    primary: Option<RelayClient>,
+    items: Vec<PlannedSend>,
+}
+
+struct PlannedSend {
+    contact_id: String,
+    msg_id: String,
+    bytes: Vec<u8>,
+    peer_address: String,
+    /// The recipient's advertised relays plus our discovered set (#17 fan-out).
+    relay_targets: Vec<String>,
+    /// Opt-in server storage: post a copy even when the direct send succeeds (§6).
+    remote_storage: bool,
+}
+
+/// What [`execute_sends`] observed, to be folded back into the node under the lock.
+pub(crate) struct SendOutcomes {
+    items: Vec<SendOutcome>,
+}
+
+struct SendOutcome {
+    contact_id: String,
+    msg_id: String,
+    /// The sealed frame, kept so a send that reached neither the peer nor a relay can be retried
+    /// verbatim (re-sealing would advance the ratchet again).
+    bytes: Vec<u8>,
+    delivered: bool,
+    /// `Some` = at least one relay accepted a copy (receipts for a later edit/unsend recall).
+    copies: Option<Vec<QueuedReceipt>>,
+    /// A relay post was attempted and every relay refused it.
+    relay_failed: bool,
+}
+
+/// Perform a batch of sends with **no core lock held** — the dials and relay posts that used to
+/// block every other caller. Pure I/O: it changes no node state, and everything it learns comes
+/// back in [`SendOutcomes`] for [`Node::apply_send_outcomes`] to record.
+pub(crate) fn execute_sends(plan: &SendPlan) -> SendOutcomes {
+    let mut items = Vec::with_capacity(plan.items.len());
+    for p in &plan.items {
+        let delivered = plan.transport.send(&p.peer_address, &p.bytes).is_ok();
+        let mut copies = None;
+        let mut relay_failed = false;
+        if !delivered || p.remote_storage {
+            match queue_on_relays(
+                plan.transport.as_ref(),
+                &plan.primary,
+                &p.relay_targets,
+                &p.contact_id,
+                &p.bytes,
+            ) {
+                Ok(c) => copies = Some(c),
+                Err(_) => relay_failed = true,
+            }
+        }
+        items.push(SendOutcome {
+            contact_id: p.contact_id.clone(),
+            msg_id: p.msg_id.clone(),
+            bytes: p.bytes.clone(),
+            delivered,
+            copies,
+            relay_failed,
+        });
+    }
+    SendOutcomes { items }
+}
+
+/// A message handed to the peer's onion but not yet confirmed by a [`Frame::Delivered`] naming it
+/// (see [`Node::awaiting_receipt`]).
+///
+/// A successful dial only means their service answered. The frame can still be lost — that is
+/// exactly what happened on 2026-08-02, when a core was torn down mid-flight and the message
+/// vanished with the sender's side showing it as sent. Once this has gone unconfirmed for
+/// [`RECEIPT_TIMEOUT`](crate::node::messaging::RECEIPT_TIMEOUT), the poller re-queues the message on
+/// the relay so it survives the peer being offline, restarted or rebuilt.
+struct AwaitingReceipt {
+    contact_id: String,
+    msg_id: String,
+    /// When the direct send succeeded (unix seconds).
+    since: u64,
 }
 
 /// A sent message awaiting a relay to accept its store-and-forward copy (see [`Node::pending_relay`]).
@@ -478,6 +616,12 @@ mod frames;
 mod messaging;
 mod pairing;
 
+/// How long a directly-sent message may sit unconfirmed before a relay copy goes behind it.
+/// Re-exported for the api-layer test that drives a whole poll cycle, so it ages a message by the
+/// same window the node actually uses rather than a number that can drift away from it.
+#[cfg(test)]
+pub(crate) use messaging::RECEIPT_TIMEOUT;
+
 impl Node {
     pub fn new(transport: Box<dyn Transport>) -> Self {
         Self::with_identity(LocalIdentity::generate(), transport)
@@ -487,25 +631,31 @@ impl Node {
     pub fn with_identity(identity: LocalIdentity, transport: Box<dyn Transport>) -> Self {
         Self {
             identity,
-            transport,
+            transport: Arc::from(transport),
             relay: None,
             my_relays: Vec::new(),
             chats: HashMap::new(),
             require_authorization: false,
             last_invite_code: None,
+            captures_visible: None,
             media_store: None,
             pending_media: Vec::new(),
             tor_state_dir: None,
             dirty: false,
             pending_invites: Vec::new(),
             restored_address: String::new(),
-            seen_relay_blobs: std::collections::HashSet::new(),
+            seen_frames: std::collections::HashSet::new(),
             relay_reachable: std::collections::HashMap::new(),
             pending_relay: Vec::new(),
             pending_sends: Vec::new(),
             pending_control: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
+            awaiting_receipt: Vec::new(),
+            pending_receipts: Vec::new(),
+            direct_failures: 0,
+            direct_ever_succeeded: false,
+            relay_ever_succeeded: false,
         }
     }
 
@@ -698,10 +848,22 @@ impl Node {
                 });
             }
         }
+        // Read the address out before the chat goes: forgetting our client key needs it, and it is
+        // the only place we hold it.
+        let peer_onion = self
+            .chats
+            .get(contact_id)
+            .map(|c| c.peer_address.clone())
+            .unwrap_or_default();
         self.chats.remove(contact_id);
-        // Onion client auth (#22): drop their authorized-client key so they can no longer fetch our
-        // (restricted) descriptor or reach our onion. No-op off Tor.
+        // Onion client auth (#22), both directions. `revoke_client` drops *their* permission to
+        // reach us. `forget_peer_key` drops *our* key for reaching them — which arti stores in a
+        // directory named after their onion address, so skipping it leaves a deleted contact's
+        // address on disk indefinitely. No-op off Tor.
         let _ = self.transport.revoke_client(contact_id);
+        if !peer_onion.is_empty() {
+            let _ = self.transport.forget_peer_key(&peer_onion);
+        }
         Ok(())
     }
 
@@ -725,6 +887,70 @@ impl Node {
             }) {
                 let _ = self.deliver(&addr, id, &frame);
             }
+        }
+    }
+
+    /// Tell every open chat whether this device can report screenshots at all (#1).
+    ///
+    /// Sent to the PEER, not shown to us: we already know whether we took a screenshot. The person
+    /// who needs this is the one deciding what to send, because below Android 14 a capture raises
+    /// no notice and the absence of one therefore means nothing.
+    ///
+    /// Announced only when the value changes from what this node last announced. That state is not
+    /// persisted, so it does go out once per launch — deliberately, since a send is best-effort and
+    /// a peer who missed the first one would otherwise never hear it. Within a session, a repeated
+    /// call is free.
+    ///
+    /// Only reaches chats that exist *now*; [`announce_captures_to`](Self::announce_captures_to)
+    /// covers the ones paired afterwards.
+    pub fn announce_captures(&mut self, visible: bool) {
+        if self.captures_visible == Some(visible) {
+            return;
+        }
+        self.captures_visible = Some(visible);
+        let marker = if visible {
+            MARK_CAPTURES_VISIBLE
+        } else {
+            MARK_CAPTURES_SILENT
+        };
+        let ids: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(_, c)| !c.closed)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            if let Some((addr, frame)) = self.authed_control(&id, marker, |from, message| {
+                Frame::Captures { from, message }
+            }) {
+                // Best-effort and deliberately quiet: this is a standing property, not an event, so
+                // a failed send costs nothing that the next change or re-pair will not fix. It must
+                // never block or noisily retry the way a message does.
+                let _ = self.deliver(&addr, &id, &frame);
+            }
+        }
+    }
+
+    /// Tell one freshly paired chat what [`announce_captures`](Self::announce_captures) already told
+    /// the others.
+    ///
+    /// Without this, a contact added *after* the launch-time announce would never hear it at all —
+    /// the broadcast only walks the chats that existed when it ran, and the value never changes
+    /// again. Silent for a node that has not been told its own capability yet: guessing here would
+    /// be the false reassurance the whole signal exists to remove.
+    fn announce_captures_to(&mut self, contact_id: &str) {
+        let Some(visible) = self.captures_visible else {
+            return;
+        };
+        let marker = if visible {
+            MARK_CAPTURES_VISIBLE
+        } else {
+            MARK_CAPTURES_SILENT
+        };
+        if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
+            Frame::Captures { from, message }
+        }) {
+            let _ = self.deliver(&addr, contact_id, &frame);
         }
     }
 
@@ -838,9 +1064,14 @@ impl Node {
                 failed += 1;
             }
         }
-        // Onion client auth (#22): revoke every contact's reachability to our onion on logout.
-        for id in self.chats.keys() {
+        // Onion client auth (#22), both directions, for every chat. Dropping only their
+        // permission would leave *our* client keys behind — one directory per peer, named by their
+        // onion address — so a wiped identity would still yield a recoverable contact list.
+        for (id, chat) in &self.chats {
             let _ = self.transport.revoke_client(id);
+            if !chat.peer_address.is_empty() {
+                let _ = self.transport.forget_peer_key(&chat.peer_address);
+            }
         }
         self.chats.clear();
         // §1.4: wipe any decrypted-media scratch so plaintext attachments don't outlive the wiped
@@ -918,9 +1149,15 @@ impl Node {
                 &bytes,
             )
             .inspect_err(|_| {
+                // States only what THIS attempt observed. `deliver` returns the error and several
+                // callers retry — `pending_control` holds a control frame until a copy lands, and
+                // `flush_pending_relay` re-queues messages once arti has warmed — so it is not in a
+                // position to declare the frame lost. It used to say "the frame is lost and the
+                // peer will never see it", and on 2026-08-08 that sent a device session hunting a
+                // Secure Folder bug over two messages that both arrived a few minutes later.
                 crate::diag!(
-                    "deliver: relay fallback ALSO failed ({} peer relay(s) known) — the frame is \
-                     lost and the peer will never see it",
+                    "deliver: relay fallback also failed this attempt ({} peer relay(s) known) — \
+                     up to the caller whether it retries",
                     peer_relays.len()
                 );
             })?;
@@ -935,13 +1172,19 @@ impl Node {
     /// fallback, and a no-op on transports without restricted discovery (`make_client_key` → `None`)
     /// or when `peer_address` isn't an onion — so non-Tor pairing is unaffected. Called whenever we
     /// (re)learn a peer's onion: on pairing and on address rotation.
-    fn announce_client_key(&self, contact: &str, peer_address: &str) {
+    fn announce_client_key(&mut self, contact: &str, peer_address: &str) {
         let Some(key_result) = self.transport.make_client_key(peer_address) else {
             return; // transport has no restricted-discovery client keys (e.g. tests, LAN)
         };
-        let Ok(client_key) = key_result else {
+        let Ok((client_key, secret)) = key_result else {
             return; // couldn't parse the peer onion / mint a key — leave us a public onion
         };
+        // Keep the secret: the keystore is in memory, so this is the only copy that survives a
+        // restart, and losing it would silently drop the peer to relay-only.
+        if let Some(chat) = self.chats.get_mut(contact) {
+            chat.client_key = Some(secret);
+            self.dirty = true;
+        }
         let frame = Frame::ClientKey {
             from: self.identity_key(),
             client_key,
@@ -956,7 +1199,11 @@ impl Node {
     /// device can reach the restricted relay. `None` on transports without restricted discovery
     /// (tests, LAN); `Some(Err)` if the onion won't parse / key generation fails.
     pub(crate) fn relay_access_key(&self, relay_onion: &str) -> Option<Result<String>> {
-        self.transport.make_client_key(relay_onion)
+        // The relay's key is not persisted: unlike a peer, a relay is reached fresh each run and
+        // re-minting costs nothing, so only the public half matters here.
+        self.transport
+            .make_client_key(relay_onion)
+            .map(|r| r.map(|(public, _secret)| public))
     }
 
     /// Attach the primary relay for offline store-and-forward (§6). Without one (and no
@@ -978,7 +1225,7 @@ impl Node {
     /// the same arti client, and the lock is only released once *every* handle is gone.
     pub fn close_transport(&mut self) {
         let address = self.transport.address();
-        self.transport = Box::new(crate::transport::ClosedTransport::new(address));
+        self.transport = Arc::new(crate::transport::ClosedTransport::new(address));
         self.relay = None;
     }
 
@@ -994,6 +1241,15 @@ impl Node {
     /// Our advertised extra relays (does not include the implicit primary).
     pub fn my_relays(&self) -> Vec<String> {
         self.my_relays.clone()
+    }
+
+    /// A handle to our transport, so a caller can do bounded network work **after releasing the
+    /// core lock**. Network I/O under the lock freezes every other FFI call and the poller for as
+    /// long as the dial takes (§6), and the update check is a Tor fetch bounded at
+    /// [`update::FETCH_TIMEOUT`](crate::update::FETCH_TIMEOUT) — long enough that holding the lock
+    /// across it would be felt as the app hanging.
+    pub fn transport_handle(&self) -> std::sync::Arc<dyn Transport> {
+        std::sync::Arc::clone(&self.transport)
     }
 
     /// Reachability of each of **our** advertised extra relays (#17), as observed on the last

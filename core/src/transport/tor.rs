@@ -14,7 +14,6 @@
 
 use std::collections::HashMap;
 use std::str::FromStr;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -33,8 +32,13 @@ use tor_hsservice::config::restricted_discovery::DirectoryKeyProviderBuilder;
 use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder};
 use tor_hsservice::{handle_rend_requests, HsNickname, RunningOnionService};
 use tor_keymgr::KeystoreSelector;
+use tor_llcrypto::pk::ed25519;
 use tor_rtcompat::PreferredRuntime;
 
+use crate::lifecycle::{ExitGuard, StopSignal};
+// The virtual port a relay's onion is dialed on lives with the protocol, so the core's transport
+// and the relay binary's own self-dial watchdog cannot drift apart on it.
+use crate::relay_client::RELAY_PORT;
 use crate::transport::{client_auth, Address, Transport};
 use crate::Result;
 
@@ -62,6 +66,18 @@ fn install_arti_tracing() {
     });
 }
 
+/// Per-`connect()` chatter with no diagnostic value, dropped before it reaches the log.
+///
+/// Every relay request opens a fresh stream, and arti logs both of these each time — so while a
+/// short-code invite is outstanding (rendezvous polling every 2s, several requests per poll) they
+/// arrive in a steady stream and bury everything else. Filtered by message rather than by lowering
+/// `arti_client`/`tor_dirmgr` to `info`, because their debug output is precisely what explains a
+/// stuck bootstrap, which is what this log exists for. Seen flooding a device log 2026-08-02.
+const ARTI_NOISE: [&str; 2] = [
+    "Attempted to bootstrap twice; ignoring",
+    "It appears we have the lock on our state files",
+];
+
 /// A `std::io::Write` that turns each completed line from the tracing formatter into one
 /// [`crate::diag::emit_tor`] call. A fresh instance is made per event (one line ending in `\n`).
 #[derive(Default)]
@@ -73,7 +89,11 @@ impl std::io::Write for ArtiDiagWriter {
         self.buf.extend_from_slice(data);
         while let Some(nl) = self.buf.iter().position(|&b| b == b'\n') {
             let line: Vec<u8> = self.buf.drain(..=nl).collect();
-            crate::diag::emit_tor(String::from_utf8_lossy(&line).trim_end());
+            let line = String::from_utf8_lossy(&line);
+            let line = line.trim_end();
+            if !ARTI_NOISE.iter().any(|n| line.contains(n)) {
+                crate::diag::emit_tor(line);
+            }
         }
         Ok(data.len())
     }
@@ -89,9 +109,6 @@ impl std::io::Write for ArtiDiagWriter {
 /// The virtual port our onion service exposes (peers dial `<onion>:NIGHTDROP_PORT`).
 const NIGHTDROP_PORT: u16 = 9001;
 
-/// The virtual port the relay's onion service is dialed on (it accepts any rendezvous stream).
-const RELAY_PORT: u16 = 9001;
-
 /// Upper bound on the initial Tor bootstrap. Tor normally connects in well under a minute, but on a
 /// blocked/censored or dead network `create_bootstrapped` would otherwise wait indefinitely, leaving
 /// the app on a spinner with no way out. On timeout we return a clear error so the UI can offer a
@@ -103,6 +120,20 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(120);
 /// continuously-observable connection longer than needed; per-peer, so contacts stay
 /// circuit-isolated by arti's per-`.onion` routing).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
+
+/// How often the reaper looks for streams that have gone idle. Interruptible (it sleeps on the
+/// transport's [`StopSignal`]), so this only sets how *late* a stream is closed, never how long a
+/// teardown waits.
+const IDLE_SWEEP: Duration = Duration::from_secs(30);
+
+/// How long [`TorTransport`]'s drop waits for the idle reaper to let go of the tokio runtime.
+/// The reaper wakes from the stop signal immediately, so reaching this bound means it is stuck
+/// closing a stream; we log and move on rather than block a logout or a wipe.
+const REAPER_EXIT_TIMEOUT: Duration = Duration::from_secs(1);
+
+/// How often an in-flight relay request re-checks whether the transport is closing. Only ticks
+/// while a request is actually outstanding, and 100ms is far below every timeout it races.
+const CLOSE_CHECK_INTERVAL: Duration = Duration::from_millis(100);
 
 /// Cap a single **direct peer** dial. `send` runs while the core lock is held, so an unbounded
 /// dial to an offline peer would freeze every other UI call (and the poller) for as long as arti
@@ -127,18 +158,42 @@ pub struct TorTransport {
     inbound: Mutex<Receiver<(Address, Vec<u8>)>>,
     /// Warm outbound streams, one per peer `.onion` (reused across frames, idle-closed).
     out_streams: OutStreams,
-    running: Arc<AtomicBool>,
+    /// Raised when this transport is dropped. Stops the idle reaper *and* cancels any relay
+    /// request in flight on a dialer we handed out — see [`Self::make_relay_dialer`].
+    closing: Arc<StopSignal>,
     /// Directory of authorized-client keys backing onion client authorization (restricted
     /// discovery, #22). The node writes/removes `<nickname>.auth` files here as contacts are
     /// added/deleted (see [`client_auth`]); arti watches it. `None` = client auth not in use.
     auth_dir: Option<String>,
     // Keep the running service alive for the lifetime of the transport.
     _service: Arc<RunningOnionService>,
+    /// The service nickname, kept so [`onion_key_material`](Self::onion_key_material) can name the
+    /// identity key in the keystore after launch.
+    nickname: HsNickname,
+    /// Last onion-service state seen by [`published`](Transport::published), so only transitions
+    /// are logged rather than one line per poll.
+    last_state: Mutex<String>,
+    /// Whether the service has ever been fully reachable this run — see
+    /// [`published`](Transport::published) for why that answer is monotonic.
+    ever_published: std::sync::atomic::AtomicBool,
 }
 
 impl Drop for TorTransport {
     fn drop(&mut self) {
-        self.running.store(false, Ordering::Relaxed);
+        // Stop the idle reaper and wait for it, bounded. The reaper holds an `Arc<Runtime>`, and
+        // arti's own background tasks live on that runtime holding the state manager that owns the
+        // exclusive on-disk lock — so a reaper still asleep keeps that lock held after the
+        // transport is otherwise gone. It used to sleep a flat 30s between sweeps, which is a
+        // 30-second window in which a rebuilt client (guard heal, restore) comes up read-only.
+        self.closing.stop();
+        if !self.closing.wait_for_exit(REAPER_EXIT_TIMEOUT) {
+            crate::diag!(
+                "tor: the idle-stream reaper is still running {}s after the transport was \
+                 dropped — arti's state lock is released late, so a client rebuilt right now may \
+                 come up read-only",
+                REAPER_EXIT_TIMEOUT.as_secs()
+            );
+        }
     }
 }
 
@@ -149,10 +204,21 @@ impl TorTransport {
     /// `state_dir`, when set, is a writable base directory for arti's state + cache. It is
     /// **required on Android** (the default `${ARTI_LOCAL_DATA}` does not resolve in the app
     /// sandbox); on desktop, pass `None` to use arti's standard per-user locations.
+    /// `onion_key` is the 64-byte expanded ed25519 secret for our onion identity, held in our own
+    /// sealed store rather than arti's keystore (`docs/design/onion-key-at-rest.md`). `Some` on
+    /// every run after the first: it is inserted into the in-memory keystore **before** the service
+    /// launches, so the address survives restarts. `None` means "first run" and lets arti generate
+    /// one, which the caller then reads back with [`onion_key_material`](Self::onion_key_material)
+    /// and persists.
+    ///
+    /// Passing `None` when a key *does* exist would mint a **new identity** — a new address, every
+    /// contact stranded with no notice. The caller must never do that on a failed read; it must
+    /// fail instead. See §4 of the design note.
     pub fn bootstrap(
         nickname: &str,
         state_dir: Option<&str>,
         client_auth_dir: Option<&str>,
+        onion_key: Option<[u8; 64]>,
     ) -> Result<Self> {
         // rustls 0.23 needs a process-default crypto provider before any TLS config is
         // built; install ring once (ignore the error if another call already did).
@@ -162,8 +228,19 @@ impl TorTransport {
         if crate::diag::enabled() {
             install_arti_tracing();
         }
-        let config = tor_config(state_dir)?;
+        let on_disk_keystore = keystore_is_on_disk(state_dir, nickname, onion_key.is_some());
+        if on_disk_keystore {
+            crate::diag!(
+                "tor: reading the onion identity from the on-disk keystore once, to move it into \
+                 the sealed store; later runs keep the keystore in memory"
+            );
+        }
+        if !on_disk_keystore {
+            forget_stale_ipts(state_dir, nickname);
+        }
+        let config = tor_config(state_dir, on_disk_keystore)?;
         let runtime = Arc::new(Runtime::new().context("tokio runtime")?);
+        let nickname_owned: HsNickname = nickname.parse().context("onion service nickname")?;
         let auth_dir = client_auth_dir.map(str::to_string);
         let auth_dir_for_svc = auth_dir.clone();
         let (onion, client, service, inbound_rx) = runtime.block_on(async {
@@ -181,6 +258,26 @@ impl TorTransport {
                     .context("bootstrap Tor")?;
 
             let nickname: HsNickname = nickname.parse().context("onion service nickname")?;
+            // Restore our identity into the in-memory keystore before the service starts. arti
+            // would otherwise generate a fresh one and we would come up on a different address.
+            if let Some(bytes) = onion_key {
+                let expanded = ed25519::ExpandedKeypair::from_secret_key_bytes(bytes)
+                    .ok_or_else(|| anyhow::anyhow!("stored onion key is malformed"))?;
+                let spec = tor_hsservice::HsIdKeypairSpecifier::new(nickname.clone());
+                client
+                    .keymgr()
+                    .context("keystore unavailable")?
+                    .insert(
+                        tor_hscrypto::pk::HsIdKeypair::from(expanded),
+                        &spec,
+                        KeystoreSelector::Primary,
+                        true,
+                    )
+                    .context("restore onion identity into the keystore")?;
+                crate::diag!("tor: restored the saved onion identity into the in-memory keystore");
+            } else {
+                crate::diag!("tor: no saved onion identity — arti will generate one (first run)");
+            }
             // Whether our onion is restricted decides who can reach us at all: a peer we haven't
             // authorized can't even fetch the descriptor, so a brand-new contact's Hello has to
             // come via the relay (#22). Worth knowing when a chat request never arrives (#6).
@@ -227,11 +324,11 @@ impl TorTransport {
         })?;
 
         let out_streams: OutStreams = Arc::new(Mutex::new(HashMap::new()));
-        let running = Arc::new(AtomicBool::new(true));
+        let closing = StopSignal::new();
         spawn_idle_reaper(
             Arc::clone(&runtime),
             Arc::clone(&out_streams),
-            Arc::clone(&running),
+            Arc::clone(&closing),
         );
 
         Ok(Self {
@@ -240,9 +337,12 @@ impl TorTransport {
             client,
             inbound: Mutex::new(inbound_rx),
             out_streams,
-            running,
+            closing,
             auth_dir,
             _service: service,
+            nickname: nickname_owned,
+            last_state: Mutex::new(String::from("<start>")),
+            ever_published: std::sync::atomic::AtomicBool::new(false),
         })
     }
 
@@ -250,22 +350,56 @@ impl TorTransport {
     /// connecting to peer `peer_onion`'s restricted onion, returning the **public** key string
     /// (`descriptor:x25519:…`) to hand the peer during pairing so they can authorize us (#22).
     /// arti uses the stored keypair automatically on future connects to that onion.
-    pub fn make_service_discovery_key(&self, peer_onion: &str) -> Result<String> {
+    pub fn make_service_discovery_key(&self, peer_onion: &str) -> Result<(String, [u8; 32])> {
         let hsid = HsId::from_str(peer_onion).context("parse peer onion address")?;
-        let key = self
+        // Generated here rather than by `generate_service_discovery_key`, because arti will only
+        // hand back the *public* half afterwards — and we need the secret to persist. Minting it
+        // ourselves is the only way to keep a copy.
+        let mut bytes = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+        let secret = tor_hscrypto::pk::HsClientDescEncSecretKey::from(
+            tor_llcrypto::pk::curve25519::StaticSecret::from(bytes),
+        );
+        let public = self
             .client
-            .generate_service_discovery_key(KeystoreSelector::Primary, hsid)
-            .context("generate client service-discovery key")?;
-        Ok(key.to_string())
+            .insert_service_discovery_key(KeystoreSelector::Primary, hsid, secret)
+            .context("install client service-discovery key")?;
+        Ok((public.to_string(), bytes))
+    }
+
+    /// The 64-byte expanded ed25519 secret for our onion identity, read back out of the in-memory
+    /// keystore so the caller can seal it into our own store
+    /// (`docs/design/onion-key-at-rest.md`).
+    ///
+    /// Called once, after a first-run bootstrap that let arti generate the identity. Returns `None`
+    /// only if the keystore has no such key, which would mean the service launched without one —
+    /// the caller must treat that as a failure rather than carrying on, or the next start mints a
+    /// different address.
+    pub fn onion_key_material(&self) -> Option<[u8; 64]> {
+        let spec = tor_hsservice::HsIdKeypairSpecifier::new(self.nickname.clone());
+        let keypair: tor_hscrypto::pk::HsIdKeypair =
+            self.client.keymgr().ok()?.get(&spec).ok()??;
+        let expanded: &ed25519::ExpandedKeypair = keypair.as_ref();
+        Some(expanded.to_secret_key_bytes())
     }
 
     /// A [`RelayDialer`](crate::relay_client::RelayDialer) that round-trips one newline-JSON relay
     /// request to `relay_onion` over this Tor client. Build it **before** the transport is moved
     /// into the node (it captures clones of the arti client + runtime), then hand it to
     /// `RelayClient::with_dialer`. This is how the relay is reached over Tor (§11.2).
+    ///
+    /// The request is raced against this transport's `closing` signal, so a dial in flight when the
+    /// transport is dropped gives up within [`CLOSE_CHECK_INTERVAL`] instead of holding the arti
+    /// client for the rest of its [`RELAY_DIAL_TIMEOUT`]. That matters because the background
+    /// poller runs these off the core lock: without the cancellation, a teardown during a relay
+    /// poll leaves the poller — and therefore arti's on-disk state lock — alive for up to 30s, and
+    /// a core rebuilt in that window comes up read-only (see [`NightdropCore::shutdown`]).
+    ///
+    /// [`NightdropCore::shutdown`]: crate::api::NightdropCore::shutdown
     pub fn make_relay_dialer(&self, relay_onion: String) -> crate::relay_client::RelayDialer {
         let client = Arc::clone(&self.client);
         let runtime = Arc::clone(&self.runtime);
+        let closing = Arc::clone(&self.closing);
         Arc::new(move |request_line: &str| -> Result<String> {
             let req = if request_line.ends_with('\n') {
                 request_line.to_string()
@@ -273,29 +407,57 @@ impl TorTransport {
                 format!("{request_line}\n")
             };
             runtime.block_on(async {
-                let mut stream = tokio::time::timeout(
-                    RELAY_DIAL_TIMEOUT,
-                    client.connect((relay_onion.as_str(), RELAY_PORT)),
-                )
-                .await
-                .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
-                .with_context(|| format!("relay connect {relay_onion}"))?;
-                stream.write_all(req.as_bytes()).await?;
-                stream.flush().await?;
-                let mut reader = futures::io::BufReader::new(stream);
-                let mut line = String::new();
-                reader.read_line(&mut line).await?;
-                Ok(line)
+                let exchange = async {
+                    let mut stream = tokio::time::timeout(
+                        RELAY_DIAL_TIMEOUT,
+                        client.connect((relay_onion.as_str(), RELAY_PORT)),
+                    )
+                    .await
+                    .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
+                    .with_context(|| format!("relay connect {relay_onion}"))?;
+                    stream.write_all(req.as_bytes()).await?;
+                    stream.flush().await?;
+                    let mut reader = futures::io::BufReader::new(stream);
+                    let mut line = String::new();
+                    reader.read_line(&mut line).await?;
+                    Ok(line)
+                };
+                // `futures::select` rather than `tokio::select!` so this needs no new dependency
+                // (tokio's `macros` feature); the two futures are pinned locally and neither is
+                // resumed after the race, so dropping the loser is the cancellation.
+                let exchange = std::pin::pin!(exchange);
+                let closed = std::pin::pin!(transport_closed(&closing));
+                match futures::future::select(exchange, closed).await {
+                    futures::future::Either::Left((result, _)) => result,
+                    futures::future::Either::Right(((), _)) => Err(anyhow::anyhow!(
+                        "relay request abandoned: the transport is closing"
+                    )),
+                }
             })
         })
     }
 }
 
+/// Completes once the transport that owns `closing` has been dropped. Polled rather than awaited
+/// on a channel so it can be raced against any request future without threading a cancellation
+/// token through arti; it only runs while a request is outstanding.
+async fn transport_closed(closing: &StopSignal) {
+    while !closing.stopped() {
+        tokio::time::sleep(CLOSE_CHECK_INTERVAL).await;
+    }
+}
+
 /// Periodically close outbound streams that have been idle past [`IDLE_TIMEOUT`].
-fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, running: Arc<AtomicBool>) {
+///
+/// Sleeps on `closing` rather than the clock so that dropping the transport ends this thread at
+/// once: it holds the tokio runtime the arti client runs on, and [`Drop for TorTransport`] waits
+/// for it before returning.
+///
+/// [`Drop for TorTransport`]: TorTransport
+fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, closing: Arc<StopSignal>) {
     std::thread::spawn(move || {
-        while running.load(Ordering::Relaxed) {
-            std::thread::sleep(Duration::from_secs(30));
+        let _exit = ExitGuard::new(Arc::clone(&closing));
+        while closing.sleep(IDLE_SWEEP) {
             let stale: Vec<DataStream> = {
                 let mut map = streams.lock().unwrap();
                 let now = Instant::now();
@@ -312,6 +474,11 @@ fn spawn_idle_reaper(runtime: Arc<Runtime>, streams: OutStreams, running: Arc<At
                 let _ = runtime.block_on(async { s.close().await });
             }
         }
+        // Release the runtime — and with it arti's tasks and its state lock — *before* the exit
+        // guard fires, since the guard's promise to `wait_for_exit` is "this thread holds nothing
+        // any more". A closure's captures outlive its body, so this has to be explicit.
+        drop(streams);
+        drop(runtime);
     });
 }
 
@@ -322,8 +489,39 @@ impl Transport for TorTransport {
 
     /// True once the onion descriptor is published and the service is reachable (arti reports
     /// `Running`/`DegradedReachable`). False during the ~1–3 min republish window after launch.
+    ///
+    /// **Monotonic within a run.** A published descriptor stays valid on the HSDirs for hours, so
+    /// once we have seen the service reachable, a later dip in arti's aggregate state does not mean
+    /// peers can no longer find us — it usually means an introduction point is being replaced. This
+    /// used to un-publish us on every such dip, which told the user "others can't pair with you yet"
+    /// about a service that was serving fine.
+    ///
+    /// The state is logged on every **change**, because getting this boolean wrong was expensive:
+    /// a device measured on 2026-08-03 published 8/8 HSDirs on both time periods with 4/4 good IPTs
+    /// and zero upload failures, and still reported not-ready for eight minutes. Only transitions
+    /// are logged, so this is a handful of lines per session, not a poll-rate firehose.
     fn published(&self) -> bool {
-        self._service.status().state().is_fully_reachable()
+        let state = self._service.status().state();
+        let ready = state.is_fully_reachable()
+            || self
+                .ever_published
+                .load(std::sync::atomic::Ordering::Relaxed);
+        if state.is_fully_reachable() {
+            self.ever_published
+                .store(true, std::sync::atomic::Ordering::Relaxed);
+        }
+        if crate::diag::enabled() {
+            let seen = format!("{state:?}");
+            let mut last = self.last_state.lock().unwrap_or_else(|e| e.into_inner());
+            if *last != seen {
+                crate::diag!(
+                    "tor: onion service state {} -> {seen} (ready={ready})",
+                    *last
+                );
+                *last = seen;
+            }
+        }
+        ready
     }
 
     /// Reach any relay `.onion` over this Tor client — lets the node fan out to a recipient's
@@ -332,9 +530,190 @@ impl Transport for TorTransport {
         Some(self.make_relay_dialer(addr.to_string()))
     }
 
+    /// Fetch a small static file from an onion over Tor (the update check, `crate::update`).
+    ///
+    /// Isolated from every other stream we open: this request is not associated with our identity,
+    /// our peers, or our relay traffic, and arti must not reuse a circuit across that boundary.
+    fn onion_get_capped(
+        &self,
+        onion: &str,
+        port: u16,
+        path: &str,
+        max_bytes: usize,
+    ) -> Option<Result<Vec<u8>>> {
+        let client = Arc::clone(&self.client);
+        let runtime = Arc::clone(&self.runtime);
+        // A manifest is a few bytes and a build is tens of megabytes; one timeout cannot serve
+        // both. Derived from the cap the caller asked for so the two cannot drift apart.
+        let budget = if max_bytes <= crate::update::MAX_MANIFEST_BYTES {
+            crate::update::FETCH_TIMEOUT
+        } else {
+            crate::update::DOWNLOAD_TIMEOUT
+        };
+        let request = crate::update::request_line(onion, path);
+        let (onion, path) = (onion.to_string(), path.to_string());
+        Some(runtime.block_on(async move {
+            let fetch = async {
+                let mut stream = tokio::time::timeout(
+                    budget,
+                    client.isolated_client().connect((onion.as_str(), port)),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out dialing {onion}"))?
+                .with_context(|| format!("update fetch connect {onion}"))?;
+                stream.write_all(request.as_bytes()).await?;
+                stream.flush().await?;
+                // Bounded read: the server closes the stream after the body (HTTP/1.0 +
+                // `Connection: close`), but a hostile or broken one could stream forever, so stop
+                // at the cap rather than trusting the peer to end.
+                let mut buf = Vec::new();
+                let mut chunk = [0u8; 1024];
+                loop {
+                    let n = futures::AsyncReadExt::read(&mut stream, &mut chunk).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    buf.extend_from_slice(&chunk[..n]);
+                    if buf.len() > max_bytes {
+                        anyhow::bail!("update fetch of {path} exceeded the size cap");
+                    }
+                }
+                Ok(crate::update::body_of(&buf)?.to_vec())
+            };
+            tokio::time::timeout(budget, fetch)
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out"))?
+        }))
+    }
+
+    /// Stream a build from an onion straight to `dest` (`crate::update::download`).
+    ///
+    /// Same isolated circuit as [`onion_get_capped`](Self::onion_get_capped), and the same bounded
+    /// read. The difference is where the bytes go: a build is tens of megabytes, and holding that
+    /// in a `Vec` for the minutes a Tor transfer takes makes the process a low-memory-killer target
+    /// exactly while it is backgrounded.
+    ///
+    /// The response head is parsed incrementally, because it no longer fits the "read everything,
+    /// then split" shape: bytes are accumulated only until the `\r\n\r\n` terminator, after which
+    /// everything goes to the file. The cap counts **body** bytes, which is what the caller means
+    /// by a size limit.
+    fn onion_get_to_file(
+        &self,
+        req: crate::transport::FileFetch<'_>,
+        progress: &dyn Fn(u64, Option<u64>),
+    ) -> Option<Result<u64>> {
+        let crate::transport::FileFetch {
+            onion,
+            port,
+            path,
+            dest,
+            max_bytes,
+            resume_from,
+        } = req;
+        use std::io::{Seek as _, Write as _};
+
+        let client = Arc::clone(&self.client);
+        let runtime = Arc::clone(&self.runtime);
+        let budget = crate::update::DOWNLOAD_TIMEOUT;
+        let request = if resume_from > 0 {
+            crate::update::range_request_line(onion, path, resume_from)
+        } else {
+            crate::update::request_line(onion, path)
+        };
+        let (onion, path) = (onion.to_string(), path.to_string());
+        let dest = dest.to_path_buf();
+        Some(runtime.block_on(async move {
+            let fetch = async {
+                let mut stream = tokio::time::timeout(
+                    budget,
+                    client.isolated_client().connect((onion.as_str(), port)),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out dialing {onion}"))?
+                .with_context(|| format!("update fetch connect {onion}"))?;
+                stream.write_all(request.as_bytes()).await?;
+                stream.flush().await?;
+
+                // Opened read/write rather than truncating: a resume has to keep what is already
+                // there, and only a 200 (server ignored the range) may throw it away.
+                let mut file = std::fs::OpenOptions::new()
+                    .read(true)
+                    .write(true)
+                    .create(true)
+                    .truncate(resume_from == 0)
+                    .open(&dest)
+                    .with_context(|| format!("open {}", dest.display()))?;
+                if resume_from > 0 {
+                    file.seek(std::io::SeekFrom::Start(resume_from))?;
+                }
+                let mut head = crate::update::ResponseHead::default();
+                let mut resumed = resume_from;
+                let mut written: u64 = 0;
+                let mut checked_status = false;
+                let mut chunk = [0u8; 16 * 1024];
+                loop {
+                    let n = futures::AsyncReadExt::read(&mut stream, &mut chunk).await?;
+                    if n == 0 {
+                        break;
+                    }
+                    let body = head.push(&chunk[..n])?;
+                    if head.complete() && !checked_status {
+                        checked_status = true;
+                        // 200 to a Range request means the server sent the whole body regardless.
+                        // Appending it to the partial would splice two copies together, so the
+                        // partial goes.
+                        if resumed > 0 && head.status() == 200 {
+                            file.set_len(0)?;
+                            file.seek(std::io::SeekFrom::Start(0))?;
+                            resumed = 0;
+                        }
+                    }
+                    written += body.len() as u64;
+                    if resumed + written > max_bytes {
+                        anyhow::bail!("update fetch of {path} exceeded the size cap");
+                    }
+                    file.write_all(body)?;
+                    // Reported after the write, so a number that appears in the log is a number of
+                    // bytes actually on disk. Resumed bytes count too — a bar that restarted at 0%
+                    // on a resume would say the opposite of what happened.
+                    progress(
+                        resumed + written,
+                        head.content_length().map(|len| resumed + len),
+                    );
+                }
+                if !head.complete() {
+                    anyhow::bail!("update fetch of {path} ended before its headers did");
+                }
+                // Durability is not the point — the caller re-hashes what it reads back — but an
+                // unflushed tail would make the hash fail for a download that actually succeeded.
+                file.flush()?;
+                Ok(resumed + written)
+            };
+            let result = tokio::time::timeout(budget, fetch)
+                .await
+                .map_err(|_| anyhow::anyhow!("update fetch timed out"))?;
+            // The partial is deliberately LEFT on a failure now: it is what the next attempt
+            // resumes from. Discarding it is the caller's decision (crate::update::download drops
+            // it when the completed file fails its hash), because only the caller knows whether the
+            // bytes are still worth anything.
+            result
+        }))
+    }
+
     /// Mint our client descriptor-encryption key for `peer_onion` (onion client auth, #22).
-    fn make_client_key(&self, peer_onion: &str) -> Option<Result<String>> {
+    fn make_client_key(&self, peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
         Some(self.make_service_discovery_key(peer_onion))
+    }
+
+    fn insert_client_key(&self, peer_onion: &str, secret: &[u8; 32]) -> Result<()> {
+        let hsid = HsId::from_str(peer_onion).context("parse peer onion address")?;
+        let secret = tor_hscrypto::pk::HsClientDescEncSecretKey::from(
+            tor_llcrypto::pk::curve25519::StaticSecret::from(*secret),
+        );
+        self.client
+            .insert_service_discovery_key(KeystoreSelector::Primary, hsid, secret)
+            .context("restore client key for a peer")?;
+        Ok(())
     }
 
     /// Write a paired contact's client key into our watched authorized-keys directory, so arti
@@ -352,6 +731,18 @@ impl Transport for TorTransport {
             Some(dir) => client_auth::revoke(std::path::Path::new(dir), contact_id),
             None => Ok(()),
         }
+    }
+
+    fn forget_peer_key(&self, peer_onion: &str) -> Result<()> {
+        // Best-effort: an unparseable address or a key that was never generated is not an error
+        // worth failing a chat deletion over. What must not happen is the key silently staying.
+        let Ok(hsid) = HsId::from_str(peer_onion) else {
+            return Ok(());
+        };
+        let _ = self
+            .client
+            .remove_service_discovery_key(KeystoreSelector::Primary, hsid);
+        Ok(())
     }
 
     fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
@@ -418,11 +809,62 @@ fn apply_common_tuning(builder: &mut TorClientConfigBuilder) {
         .hs_intro_rend_attempts(HS_CONNECT_ATTEMPTS);
 }
 
-fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
+/// Whether arti's keystore should live **in memory** (the default now) or on disk for one
+/// migration run.
+///
+/// On disk is used exactly once: an install that predates this change has its onion identity in
+/// arti's own keystore and nothing else can read it — `get_service_discovery_key` returns only
+/// public halves, and the identity file is arti's format. So that run reads it through arti, the
+/// caller seals it, and every run afterwards is in-memory.
+#[cfg(feature = "tor")]
+fn keystore_is_on_disk(state_dir: Option<&str>, nickname: &str, have_saved_key: bool) -> bool {
+    if have_saved_key {
+        return false; // we hold the identity ourselves — never touch the disk keystore again
+    }
+    let Some(base) = state_dir else {
+        return false;
+    };
+    std::path::Path::new(base)
+        .join("arti-state/keystore/hss")
+        .join(nickname)
+        .join("ks_hs_id.ed25519_expanded_private")
+        .exists()
+}
+
+/// Drop arti's record of our previous introduction points when their keys no longer exist.
+///
+/// `hss/<nickname>/ipts.json` persists on disk, but with the ephemeral keystore the IPT keys it
+/// names (`k_hss_ntor`, `k_sid`) live only in memory and are gone by the next launch. arti then
+/// hits its own bug assertion on every start —
+///
+/// ```text
+/// ERROR tor_hsservice::ipt_mgr: bug: HS service nightdrop missing previous key
+///       ArtiPath("hss/nightdrop/ipts/k_hss_ntor+…"). Regenerating.
+/// ```
+///
+/// — and rebuilds the set from nothing, so every launch spends time at "no good IPTs" before it is
+/// reachable again. Introduced by the move to the in-memory keystore (`onion-key-at-rest.md`) and
+/// found in a device log on 2026-08-02. Removing the stale record makes the fresh start honest and
+/// silences a real bug report we were causing. The address is unaffected — that is the identity
+/// key, which we hold sealed; these are per-introduction-point keys, regenerated by design.
+fn forget_stale_ipts(state_dir: Option<&str>, nickname: &str) {
+    let Some(base) = state_dir else {
+        return;
+    };
+    let dir = std::path::Path::new(base)
+        .join("arti-state/hss")
+        .join(nickname);
+    for name in ["ipts.json", "iptpub.json"] {
+        let _ = std::fs::remove_file(dir.join(name));
+    }
+}
+
+fn tor_config(state_dir: Option<&str>, on_disk_keystore: bool) -> Result<TorClientConfig> {
     match state_dir {
         None => {
             let mut builder = TorClientConfigBuilder::default();
             apply_common_tuning(&mut builder);
+            apply_keystore_kind(&mut builder, on_disk_keystore);
             builder.build().context("build Tor config")
         }
         Some(base) => {
@@ -438,22 +880,12 @@ fn tor_config(state_dir: Option<&str>) -> Result<TorClientConfig> {
             // line that names such a transport has a binary to run it. Must come with the bridges:
             // arti's config validation rejects a PT bridge that has no matching transport entry.
             apply_transports(&mut builder, base);
+            apply_keystore_kind(&mut builder, on_disk_keystore);
             builder.build().context("build Tor config")
         }
     }
 }
 
-/// Load optional Tor **bridges** from `<base>/bridges.txt` and add them to the config. Bridges are
-/// unlisted entry relays, so a client can still reach the Tor network where the public relays are
-/// IP-blocked — the censorship-resistance path (ARCHITECTURE.md §6). One bridge line per line;
-/// blank lines and `#` comments are ignored, and an optional leading `Bridge ` keyword (torrc
-/// style) is tolerated. Absent file → no bridges (today's behavior). A malformed line is skipped
-/// (logged to stderr, never fatal). Returns how many bridges were added.
-///
-/// Vanilla (direct) bridge lines — `ADDR:PORT FINGERPRINT [ED25519-ID]` — work as-is. A bridge line
-/// that names a pluggable transport — `obfs4 ADDR FINGERPRINT cert=… iat-mode=…`, `snowflake …` —
-/// also parses here; it additionally needs a matching entry in `transports.txt` (see
-/// [`apply_transports`]) pointing arti at the PT client binary.
 /// Validate one bridge line with **the same parse the bootstrap uses**, so the settings editor can
 /// never accept a line that would later be dropped on startup. Returns the parse error verbatim:
 /// a bridge line is operator-supplied config carrying no secret, and someone copying bridges over a
@@ -469,6 +901,34 @@ pub fn check_bridge_line(line: &str) -> std::result::Result<(), String> {
         .map_err(|e| e.to_string())
 }
 
+/// Keystore in memory unless this is the one-time migration read. In memory, neither our onion
+/// identity nor the per-contact client keys ever reach disk — they live in our sealed store and are
+/// re-inserted at startup (`docs/design/onion-key-at-rest.md`).
+fn apply_keystore_kind(builder: &mut TorClientConfigBuilder, on_disk: bool) {
+    use tor_config::ExplicitOrAuto;
+    use tor_keymgr::config::ArtiKeystoreKind;
+    builder
+        .storage()
+        .keystore()
+        .primary()
+        .kind(ExplicitOrAuto::Explicit(if on_disk {
+            ArtiKeystoreKind::Native
+        } else {
+            ArtiKeystoreKind::Ephemeral
+        }));
+}
+
+/// Load optional Tor **bridges** from `<base>/bridges.txt` and add them to the config. Bridges are
+/// unlisted entry relays, so a client can still reach the Tor network where the public relays are
+/// IP-blocked — the censorship-resistance path (ARCHITECTURE.md §6). One bridge line per line;
+/// blank lines and `#` comments are ignored, and an optional leading `Bridge ` keyword (torrc
+/// style) is tolerated. Absent file → no bridges (today's behavior). A malformed line is skipped
+/// (logged to stderr, never fatal). Returns how many bridges were added.
+///
+/// Vanilla (direct) bridge lines — `ADDR:PORT FINGERPRINT [ED25519-ID]` — work as-is. A bridge line
+/// that names a pluggable transport — `obfs4 ADDR FINGERPRINT cert=… iat-mode=…`, `snowflake …` —
+/// also parses here; it additionally needs a matching entry in `transports.txt` (see
+/// [`apply_transports`]) pointing arti at the PT client binary.
 fn apply_bridges(builder: &mut TorClientConfigBuilder, base: &str) -> usize {
     let path = format!("{base}/bridges.txt");
     let Ok(contents) = std::fs::read_to_string(&path) else {

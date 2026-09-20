@@ -385,7 +385,16 @@ build_apk() {
         local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
         # Install the split matching this device; a release build made all three, a debug build
         # made only this one. Fall back to the universal when there is no per-ABI file.
-        if [ -n "$abi" ] && [ -f "$dir/app-$abi-$BUILD_MODE.apk" ]; then
+        #
+        # `--universal` has to win outright, not merely fall through: this build produced no
+        # per-ABI file, but a *previous* split build's leftover is still sitting in the same
+        # directory, and picking it up meant `--universal` built the universal APK and then
+        # installed a stale split one. That failed loudly here only because the two carry
+        # different versionCodes (universal is slot 4) — with matching codes it would have
+        # installed old code and reported success.
+        if [ "${UNIVERSAL:-0}" = 1 ]; then
+            APK_PATH="$dir/app-$BUILD_MODE.apk"
+        elif [ -n "$abi" ] && [ -f "$dir/app-$abi-$BUILD_MODE.apk" ]; then
             APK_PATH="$dir/app-$abi-$BUILD_MODE.apk"
         else
             APK_PATH="$dir/app-$BUILD_MODE.apk"

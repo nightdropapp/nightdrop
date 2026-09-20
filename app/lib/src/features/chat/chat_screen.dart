@@ -702,6 +702,10 @@ class _ChatScreenState extends State<ChatScreen> {
               if (contact.remoteStorage)
                 _RemoteStorageBanner(healthy: contact.remoteStorageHealthy),
               if (contact.peerBackedUp) const _PeerBackupBanner(),
+              // Shown to the SENDER, and only when the peer has actually said so. A null here
+              // means "they have not told us" and deliberately shows nothing — claiming either
+              // answer without evidence is worse than staying quiet.
+              if (contact.peerCapturesSilent == true) const _PeerCapturesSilentBanner(),
               _SilenceBanner(lastSeenSecs: contact.lastSeenSecs),
               Expanded(
                 child: visibleMessages.isEmpty
@@ -881,6 +885,37 @@ class _UnverifiedBanner extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "Screenshots here are silent" — a property of the PEER's device, shown to the person deciding
+/// what to send. They already know when they screenshot; what they cannot otherwise know is that
+/// the other end raises no notice, which makes the peer's silence meaningless.
+class _PeerCapturesSilentBanner extends StatelessWidget {
+  const _PeerCapturesSilentBanner();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      color: scheme.secondaryContainer,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Row(
+        children: [
+          Icon(Icons.no_photography_outlined,
+              size: 18, color: scheme.onSecondaryContainer),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              AppLocalizations.of(context)!.peerCapturesSilentBanner,
+              style:
+                  TextStyle(color: scheme.onSecondaryContainer, fontSize: 12.5),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1081,9 +1116,15 @@ class _Bubble extends StatelessWidget {
                   ),
                 ],
                 // Sender delivery status: held on the relay, delivered, or expired unread.
+                // "sent" is included deliberately. It used to render NOTHING, so a message that
+                // had only been handed to the peer's onion looked identical to one they had
+                // actually received — and when a message was lost in flight (2026-08-02) the
+                // sender had no way to tell. Now it reads "Sent" until their device confirms
+                // that exact message, and only then "Delivered".
                 if (mine &&
                     !message.sending &&
                     (message.delivery == 'queued' ||
+                        message.delivery == 'sent' ||
                         message.delivery == 'delivered' ||
                         message.delivery == 'expired')) ...[
                   const SizedBox(height: 3),
@@ -1094,6 +1135,12 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => Icons.cloud_upload_outlined,
                           'expired' => Icons.error_outline,
+                          // Deliberately not a tick. A tick reads as "done", and this state means
+                          // only that the peer's onion answered — the message can still be lost
+                          // there, which is exactly what happened on 2026-08-02. The core puts a
+                          // relay copy behind it if no receipt names it, so this resolves on its
+                          // own to "Held for delivery" and then "Delivered".
+                          'sent' => Icons.schedule,
                           _ => Icons.done_all,
                         },
                         size: 12,
@@ -1104,6 +1151,7 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => l10n.deliveryHeld,
                           'expired' => l10n.deliveryExpired,
+                          'sent' => l10n.deliverySent,
                           _ => l10n.deliveryDelivered,
                         },
                         style: TextStyle(

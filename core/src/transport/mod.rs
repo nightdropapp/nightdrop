@@ -27,6 +27,23 @@ pub mod tor;
 /// arbitrary unique string.
 pub type Address = String;
 
+/// What a streamed onion fetch needs to know.
+///
+/// A struct rather than six positional arguments: `(onion, 80, path, dest, 209715200, 0, &p)` at a
+/// call site says nothing about which number is which, and two adjacent `u64`s meaning "cap" and
+/// "resume offset" are exactly the pair that gets swapped.
+pub struct FileFetch<'a> {
+    pub onion: &'a str,
+    pub port: u16,
+    pub path: &'a str,
+    /// Written as bytes arrive, so **unverified while in flight**. Callers must hand over a scratch
+    /// path and only publish the result once its hash matches.
+    pub dest: &'a std::path::Path,
+    pub max_bytes: u64,
+    /// Continue an existing `dest` from this offset via HTTP Range; 0 starts fresh.
+    pub resume_from: u64,
+}
+
 /// One endpoint on an anonymity network. Frames are opaque, already-encrypted bytes
 /// (see [`crate::wire`]); the transport never inspects them.
 pub trait Transport: Send + Sync {
@@ -43,6 +60,10 @@ pub trait Transport: Send + Sync {
     /// Whether our address is published/reachable so peers can actually reach us. For Tor this
     /// is false for the ~1–3 min after launch while the onion descriptor (re)publishes; other
     /// transports are reachable immediately (default `true`).
+    ///
+    /// This is a **UI-facing** question ("can others pair with me yet") and nothing more. It is
+    /// deliberately not used to decide that anything is broken: it was measured reading false on a
+    /// fully published service, and a guard heal keyed off it destroyed healthy guard sets.
     fn published(&self) -> bool {
         true
     }
@@ -64,14 +85,85 @@ pub trait Transport: Send + Sync {
         None
     }
 
+    /// Fetch a small static file from an onion service over this transport's anonymized path,
+    /// for the update check (`crate::update`). `Some(bytes)` on success; `None` means **this
+    /// transport cannot fetch anonymously**, and the caller must then do nothing at all.
+    ///
+    /// `None` deliberately does NOT mean "fall back to something else". A closed transport once
+    /// returned `None` from [`relay_dialer`](Transport::relay_dialer) and the node read that as
+    /// "use a direct TCP client", which handed an `.onion` hostname to the system resolver — a
+    /// clearnet leak from a path that was supposed to be anonymous. The update check exists to
+    /// tell users about security fixes; it must never become the thing that deanonymizes them, so
+    /// there is no non-Tor path here by construction and the only correct handling of `None` is to
+    /// skip the check.
+    fn onion_get(&self, onion: &str, port: u16, path: &str) -> Option<Result<Vec<u8>>> {
+        self.onion_get_capped(onion, port, path, crate::update::MAX_MANIFEST_BYTES)
+    }
+
+    /// As [`onion_get`](Transport::onion_get) but with an explicit size cap, for the one caller
+    /// that fetches something big (a build, `crate::update::download`). Split out so the manifest
+    /// path keeps its tiny bound by default — a shared cap large enough for an APK would silently
+    /// make the every-24h fetch unbounded too.
+    fn onion_get_capped(
+        &self,
+        _onion: &str,
+        _port: u16,
+        _path: &str,
+        _max_bytes: usize,
+    ) -> Option<Result<Vec<u8>>> {
+        None
+    }
+
+    /// As [`onion_get_capped`](Transport::onion_get_capped) but **streamed to a file**, returning
+    /// the number of body bytes written. Same `None` contract: no anonymized path, do nothing.
+    ///
+    /// Exists because a build is tens of megabytes and returning it as a `Vec<u8>` means holding
+    /// all of it in memory for the minutes the transfer takes — which on Android is precisely when
+    /// the process is backgrounded and the low-memory killer is choosing a victim. Streaming keeps
+    /// resident memory at one small buffer.
+    ///
+    /// `dest` is written as the bytes arrive, so it is **unverified while in flight**. Callers must
+    /// hand it a scratch path and only move the result somewhere the user can reach it after the
+    /// hash matches — see [`crate::update::download`].
+    ///
+    /// `progress` is called as body bytes land, with `(bytes_so_far, content_length)`. The length
+    /// is what the server claimed and may be `None`; it is for reporting only, never for deciding
+    /// the transfer finished. Implementations should call it on every chunk and leave any
+    /// throttling to the caller, which knows what it wants to do with the numbers.
+    /// `resume_from` asks the server to continue an existing `dest` from that offset (HTTP Range).
+    /// Pass 0 to start fresh. A server that ignores the range answers 200 with the whole body, and
+    /// the implementation must then discard whatever was already on disk rather than appending to
+    /// it — half a build followed by a whole one is not a build. The returned count is the total
+    /// size of `dest` afterwards, resumed bytes included.
+    fn onion_get_to_file(
+        &self,
+        _req: FileFetch<'_>,
+        _progress: &dyn Fn(u64, Option<u64>),
+    ) -> Option<Result<u64>> {
+        None
+    }
+
     /// Onion client authorization (#22, Tor only). Generate (and store in arti's keymgr) *our*
     /// client descriptor-encryption keypair for connecting to `peer_onion`'s (possibly restricted)
     /// onion, returning the **public** key string (`descriptor:x25519:…`) to hand the peer so they
     /// can authorize us. arti then uses the stored keypair automatically on future connects to that
     /// onion. `None` for transports without restricted discovery (everything but Tor), so the node
     /// simply skips the client-key exchange.
-    fn make_client_key(&self, _peer_onion: &str) -> Option<Result<String>> {
+    /// Mint our client descriptor-encryption key for `peer_onion`'s restricted service (#22),
+    /// returning the **public** half to hand the peer and the **secret** for us to keep.
+    ///
+    /// The secret comes back because we persist it ourselves now, sealed in the store, instead of
+    /// leaving it in arti's on-disk keystore — where it sat unencrypted in a directory named after
+    /// the peer's onion address (`docs/design/onion-key-at-rest.md`).
+    fn make_client_key(&self, _peer_onion: &str) -> Option<Result<(String, [u8; 32])>> {
         None
+    }
+
+    /// Put a previously-saved client secret back into the keystore at startup. With the keystore
+    /// in memory this is what keeps a restricted peer reachable across restarts; without it every
+    /// chat would silently fall back to relay-only after each launch.
+    fn insert_client_key(&self, _peer_onion: &str, _secret: &[u8; 32]) -> Result<()> {
+        Ok(())
     }
 
     /// Authorize `contact_id` to reach our onion by writing their client public `key` into our
@@ -84,6 +176,20 @@ pub trait Transport: Send + Sync {
     /// Revoke `contact_id`'s reachability by removing their authorized-key file (#22). No-op where
     /// client auth isn't configured.
     fn revoke_client(&self, _contact_id: &str) -> Result<()> {
+        Ok(())
+    }
+
+    /// Forget the client key we hold for reaching `peer_onion`'s restricted service (#22) — the
+    /// *other* direction from [`revoke_client`](Self::revoke_client), which only drops their
+    /// permission to reach us.
+    ///
+    /// This matters beyond tidiness: arti stores that key in a directory **named after the peer's
+    /// onion address**, so leaving it behind means a deleted chat's address stays on disk, and a
+    /// wiped identity leaves a recoverable contact list. The key is re-derivable by re-pairing, so
+    /// there is nothing to preserve and nothing to back up.
+    ///
+    /// No-op where client auth isn't configured.
+    fn forget_peer_key(&self, _peer_onion: &str) -> Result<()> {
         Ok(())
     }
 }
@@ -119,6 +225,27 @@ impl Transport for ClosedTransport {
     /// Never reachable — a closed transport publishes nothing.
     fn published(&self) -> bool {
         false
+    }
+
+    /// A dialer that always fails — deliberately **not** `None`.
+    ///
+    /// `None` means "this transport has no relay dialer of its own", and `node::build_relay` reads
+    /// that as permission to fall back to a plain **TCP** relay client. For the `.onion` addresses
+    /// this app actually uses, that client would
+    /// hand the hostname to `TcpStream::connect`, which resolves it through the **system DNS
+    /// resolver** — announcing to the resolver, and to anyone watching it, exactly which hidden
+    /// service this device is trying to reach. Off Tor entirely.
+    ///
+    /// Reachable because a closed transport is still consulted: the poller can build a drain plan,
+    /// and a send can fall back to the relay, in the window between `close_transport` and the
+    /// poller's exit — and any FFI call made against a core that has been shut down.
+    ///
+    /// A closed Tor transport must **fail**, never downgrade. See `CLAUDE.md`: never a
+    /// non-anonymized network path.
+    fn relay_dialer(&self, _addr: &str) -> Option<crate::relay_client::RelayDialer> {
+        Some(Arc::new(|_request: &str| {
+            anyhow::bail!("transport is closed")
+        }))
     }
 }
 
@@ -220,5 +347,59 @@ mod tests {
         net.endpoint("bob.onion");
         net.disconnect("bob.onion");
         assert!(alice.send("bob.onion", b"anyone?").is_err());
+    }
+
+    /// A closed transport must hand back a **failing** relay dialer, not `None`.
+    ///
+    /// `None` sends `build_relay` down its plain-TCP fallback, and a TCP connect to a `.onion`
+    /// resolves the name through the system DNS resolver — telling it which hidden service this
+    /// device wants. The closed transport is still consulted (a poller tick or a relay-fallback
+    /// send between `close_transport` and the poller's exit, or any call against a shut-down
+    /// core), so "no dialer" here is a silent way off Tor.
+    #[test]
+    fn a_closed_transport_fails_relay_dials_rather_than_falling_back_off_tor() {
+        let closed = ClosedTransport::new("me.onion".to_string());
+        let dialer = closed
+            .relay_dialer("somerelay.onion")
+            .expect("a closed transport must not report 'no dialer' — that means plain TCP");
+        assert!(
+            dialer("{\"op\":\"peek\"}").is_err(),
+            "a closed transport's dialer must fail rather than reach the network"
+        );
+    }
+
+    /// `published()` answers a UI question and nothing else.
+    ///
+    /// It used to double as the guard-heal trigger, which cost a healthy guard set on every launch
+    /// (TODO.txt item 00): arti's aggregate onion-service state is bootstrap *progress*, so it read
+    /// false on a service sitting on 8/8 HSDirs. The trigger that replaced it — asking arti whether
+    /// its client was stuck — was then removed too, once a router-level block of every confirmed
+    /// guard showed arti cold-bootstrapping back to `Running` in ~80 s on its own. Nothing in the
+    /// transport layer should grow a "therefore the guards are bad" inference again.
+    struct Quiet;
+    impl Transport for Quiet {
+        fn address(&self) -> Address {
+            Address::new()
+        }
+        fn send(&self, _peer: &str, _frame: &[u8]) -> Result<()> {
+            Ok(())
+        }
+        fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
+            None
+        }
+        fn published(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn an_unpublished_transport_exposes_no_brokenness_signal() {
+        // The only thing an unpublished transport says is "not published yet". If some future
+        // health check wants to act on it, that has to be a deliberate new decision with its own
+        // evidence — not something silently inherited from this bit.
+        let t = Quiet;
+        assert!(!t.published());
+        assert!(!ClosedTransport::new("me.onion".to_string()).published());
+        assert!(MemoryNetwork::new().endpoint("alice").published());
     }
 }

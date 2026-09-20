@@ -187,6 +187,17 @@
              they can't un-see what someone already read, photographed with another camera, or
              remembered. Physical-world observation is always outside the software.</p>
         </article>
+
+        <article class="card">
+          <h3>🔒 Night Drop inside Samsung Secure Folder</h3>
+          <p>Secure Folder is a separate user account, and Android freezes the apps inside it while
+             it's locked. A copy of Night Drop kept there isn't running, so it receives
+             <strong>nothing</strong> until you unlock the folder and open it — the sender sees the
+             message held, not delivered, however long that takes. Turning on background delivery
+             inside the app can't change this.</p>
+          <p>Your messages are no less private there — arguably more so, since nothing reaches the
+             lock screen. What you give up is knowing when someone has written to you.</p>
+        </article>
       </div>
     </section>
 
@@ -204,6 +215,18 @@
            core. But the app as a whole has not yet had an independent security audit. Until it
            has, we won't claim more than that — and we'll publish the audit and its fixes when it's
            done. Treat Night Drop as promising and improving, not battle-tested.</p>
+      </div>
+      <div class="callout warn" style="margin-top: 20px;">
+        <h3>A seized phone still reveals who you talk to</h3>
+        <p>The app lock encrypts your messages. It does <strong>not</strong> yet cover the file that
+           holds your own Tor address, or the one folder Tor keeps per contact — each named after
+           <em>their</em> address. Someone who takes your phone and copies its storage can read that
+           list without breaking any encryption, and without your PIN.</p>
+        <p>As of 0.1.15 those entries no longer pile up: deleting a chat removes that person, and
+           logging out or using the wipe code clears the lot. What remains exposed is the identity
+           you are using right now, and the contacts you currently have. We are working on moving
+           those into the encrypted store too; until that ships, assume a seized phone shows who
+           you have been talking to.</p>
       </div>
       <div class="grid" style="margin-top: 28px;">
         <article class="card">

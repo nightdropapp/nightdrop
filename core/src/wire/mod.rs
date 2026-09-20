@@ -130,11 +130,29 @@ pub enum Frame {
     /// `MARK_UNVERIFIED`, and *which one* carries the state — so it can't be forged, replayed, or
     /// have its state flipped in transit.
     Verified { from: String, message: WireOlm },
-    /// Silent **delivery ack** (§11.3): the receiver drained one or more of our messages from
-    /// the relay, so flip their "Held for delivery" to "Delivered". `from` is the acking peer's
-    /// identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
-    /// (`node::MARK_ACK`) so a forged/replayed ack can't falsely flip our messages to
-    /// "delivered" — decrypting on the session proves the real peer drained them.
+    /// Whether the sender's device can tell them when someone screenshots this chat (#1).
+    ///
+    /// Android reports captures only from 14 onwards. Below that a screenshot raises no notice at
+    /// all, so the peer's *silence* means nothing — and silence that looks like "nothing happened"
+    /// is a guarantee the app does not have. This tells the other side which world they are in, so
+    /// the warning lands on the person deciding what to SEND rather than on the person who already
+    /// knows they took a screenshot.
+    ///
+    /// **E2E-authenticated** exactly like [`Verified`](Frame::Verified): the state rides in *which*
+    /// marker decrypts on the session (`node::MARK_CAPTURES_SILENT` / `MARK_CAPTURES_VISIBLE`), so
+    /// it cannot be forged, replayed, or have a plaintext flag flipped in transit. A forged
+    /// "captures are visible" would be the dangerous direction — it would tell someone their
+    /// screenshots are watched when they are not.
+    Captures { from: String, message: WireOlm },
+    /// Silent **mailbox ack** (§11.3): the receiver drained our mailbox. `from` is the acking
+    /// peer's identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
+    /// (`node::MARK_ACK`) so it can't be forged or replayed.
+    ///
+    /// **Confirms nothing on its own, by design.** It names no message, so honouring it meant
+    /// promoting every queued message — including ones the receiver dropped on arrival and ones
+    /// queued after the drain — to "Delivered". Still sent, because peers on older builds
+    /// understand only this; still received, as proof of life. What actually confirms a message is
+    /// [`Delivered`](Self::Delivered), which names one.
     Ack { from: String, message: WireOlm },
     /// The sender changed their display name in this chat (§4). The new name is carried
     /// **E2E-encrypted** on the established session (so the relay sees only ciphertext); the
@@ -195,6 +213,22 @@ pub enum Frame {
     /// The bytes are random padding, and the fixed-size bucketing that already applies to every
     /// frame is what makes it indistinguishable from a real message on the wire.
     Cover { padding: Vec<u8> },
+    /// Per-message **delivery receipt**: the receiver has actually processed the message whose id
+    /// this frame carries, so the sender may finally call it delivered.
+    ///
+    /// Distinct from [`Ack`](Frame::Ack), which says only "I drained your mailbox" and names no
+    /// message. That coarse signal cannot express what a device test on 2026-08-02 produced: a
+    /// message was lost when the core was torn down mid-flight while the *next* one arrived
+    /// normally. Anything meaning "everything up to now" would have marked the lost one delivered
+    /// too. Olm decrypts out of order and a gap does not block later messages, so arrival of a
+    /// later frame is genuinely no evidence about an earlier one — only a receipt naming the id is.
+    ///
+    /// The encrypted payload **is** the message id, sealed on the session like any control frame,
+    /// so a forgery or replay cannot mark anything delivered. Never receipted itself (no loops).
+    ///
+    /// Appended at the end because variant order is wire-visible. A peer too old to know this
+    /// variant simply ignores it and keeps working off `Ack` alone.
+    Delivered { from: String, message: WireOlm },
 }
 
 impl Frame {

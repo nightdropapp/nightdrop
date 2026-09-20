@@ -66,6 +66,7 @@ class Contact {
     this.peerBackedUp = false,
     this.verified = false,
     this.peerVerified = false,
+    this.peerCapturesSilent,
     this.peerRelays = const [],
     this.remoteStorageHealthy = true,
     this.lastSeenSecs = 0,
@@ -108,6 +109,13 @@ class Contact {
   /// informational only. Shown as "the other person marked this verified"; it never implies
   /// our own [verified]. Each side must still confirm the number itself. Resets on a re-pair.
   bool peerVerified;
+
+  /// Whether the peer's device cannot tell them about screenshots (Android below 14).
+  ///
+  /// `null` means they have not said — an older build, or a chat predating the signal. It must
+  /// render as unknown and never as "captures are visible": assuming the reassuring answer from
+  /// silence is exactly the false guarantee this exists to remove.
+  bool? peerCapturesSilent;
 
   /// The peer's advertised **extra** relay addresses (#17). We fan offline mail out to these
   /// in addition to the shared primary relay, so a message reaches them even if one relay is
@@ -222,8 +230,20 @@ class Message {
   /// Sealed-file id of a video's preview thumbnail (empty if none).
   final String thumbId;
 
-  /// Delivery state of an outgoing message: "" / "sent" (direct), "queued" (held on the relay
-  /// for an offline peer), or "delivered" (peer since seen online). Drives the sender badge.
+  /// Delivery state of an outgoing message. Drives the sender badge:
+  ///
+  /// * `"sent"` — handed to the peer's onion. Their device has **not** confirmed it: the dial
+  ///   succeeding says the service answered, not that the app processed the frame. Shown as a
+  ///   clock, never a tick, and it does not last — the core puts a relay copy behind an
+  ///   unacknowledged message, which moves it to `"queued"`.
+  /// * `"queued"` — held on a relay for a peer who has not collected it.
+  /// * `"delivered"` — their device sent a receipt naming *this* message (`Frame::Delivered`).
+  ///   The only state that means arrival.
+  /// * `"expired"` — reaped from the relay uncollected.
+  ///
+  /// The split is load-bearing. `"sent"` used to be terminal and drew no badge, so a message lost
+  /// in flight looked exactly like one that arrived; and three separate signals that only meant
+  /// "the peer is alive" used to promote messages straight to `"delivered"`.
   final String delivery;
 
   /// True for a locally-shown optimistic media message that is still uploading over Tor.

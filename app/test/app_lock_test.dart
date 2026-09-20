@@ -58,6 +58,56 @@ void main() {
     expect(find.text('Create my identity'), findsNothing);
   });
 
+  testWidgets('each wrong secret costs longer, up to a five-second ceiling', (tester) async {
+    // The lockout grows 0.5s per failure and stops at 5s. It only slows someone typing at the
+    // phone — against a copy of the lock file it is worth nothing, which is why the screen never
+    // presents it as protection. Untested until now: the existing wrong-secret test pumps a flat
+    // second to get past it, which passes for any delay under a second and for no delay at all.
+    await tester.pumpWidget(NightdropApp(core: _LockedCore()));
+    await tester.pump();
+
+    Future<void> failOnce() async {
+      await tester.enterText(find.byType(TextField).first, 'not it');
+      await tester.tap(find.byType(FilledButton));
+      await tester.pump(); // start the async unlock
+      await tester.pump(); // let it resolve false and enter the delay
+    }
+
+    // While the delay runs the button is disabled and shows a spinner, so the spinner is the
+    // observable for "still locked out".
+    Future<void> expectBusyFor(Duration d, int attempt) async {
+      await tester.pump(d - const Duration(milliseconds: 50));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget,
+          reason: 'attempt $attempt should still be waiting just before ${d.inMilliseconds}ms');
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.byType(CircularProgressIndicator), findsNothing,
+          reason: 'attempt $attempt should be accepting input again after ${d.inMilliseconds}ms');
+    }
+
+    await failOnce();
+    await expectBusyFor(const Duration(milliseconds: 500), 1);
+
+    await failOnce();
+    await expectBusyFor(const Duration(milliseconds: 1000), 2);
+
+    await failOnce();
+    await expectBusyFor(const Duration(milliseconds: 1500), 3);
+
+    // Ceiling: by the tenth failure it is 5s, and it must not keep climbing past that — an
+    // unbounded delay would eventually lock the owner out of their own phone for minutes.
+    for (var i = 4; i <= 12; i++) {
+      await failOnce();
+      await tester.pump(const Duration(seconds: 6));
+    }
+    await failOnce();
+    await tester.pump(const Duration(milliseconds: 4950));
+    expect(find.byType(CircularProgressIndicator), findsOneWidget,
+        reason: 'the 13th failure should still be waiting just before 5s');
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.byType(CircularProgressIndicator), findsNothing,
+        reason: 'the delay must be capped at 5s, not grow with every attempt');
+  });
+
   testWidgets('the right secret unlocks through to the app', (tester) async {
     await tester.pumpWidget(NightdropApp(core: _LockedCore()));
     await tester.pump();
@@ -158,6 +208,63 @@ void main() {
 
     expect(core.steps, ['notify-peers', 'shutdown', 'delete-files'],
         reason: 'a core still running will re-persist the state file after it is deleted');
+  });
+
+  // A wipe has to take the sealed onion identity with it. Leaving it behind is not just untidy:
+  // the next identity has a different store key, the stale file will not unseal under it, and the
+  // core treats an unreadable identity as an error rather than quietly minting a new address — so
+  // the app would fail to start at all after a wipe.
+  testWidgets('the wipe deletes the sealed onion identity too', (tester) async {
+    final core = _WipeFilesCore();
+    await tester.pumpWidget(NightdropApp(core: core));
+    await tester.pump();
+
+    await tester.enterText(find.byType(TextField).first, 'the wipe code');
+    await tester.tap(find.text('Unlock'));
+    await tester.pumpAndSettle();
+
+    expect(core.deleted, contains('onion-key.sealed'));
+    expect(core.deleted, contains('arti-state'));
+    expect(core.deleted, contains('nightdrop-state.bin'));
+  });
+
+  // Repro for a red screen seen on hardware 2026-08-08 while enabling a lock:
+  //   framework.dart: Failed assertion: '_dependents.isEmpty': is not true
+  // _askNewSecret disposes its TextEditingControllers and FocusNode the instant showDialog's
+  // future completes — but that future completes when the route is POPPED, while the dialog's
+  // exit animation is still running and its TextFields still reference those objects. Assertions
+  // are stripped from release builds, so this never shows a red screen in a shipped APK; the
+  // lifecycle misuse just happens silently. It matters because the crash aborted the operation
+  // midway: the keystore copy was NOT deleted and no lock file was written.
+  testWidgets('enabling a lock survives the dialog exit animation', (tester) async {
+    final core = _EnableCore();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showAppLockSettings(context, core),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Use a passphrase'));
+    await tester.pumpAndSettle();
+
+    await tester.enterText(find.byType(TextField).at(0), 'locktest-8aug');
+    await tester.enterText(find.byType(TextField).at(1), 'locktest-8aug');
+    // The exit animation runs inside this settle. If the controllers were disposed too early,
+    // the framework trips on the way out.
+    await tester.tap(find.text('Turn on app lock'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('I understand — turn it on'), findsOneWidget,
+        reason: 'the confirmation gate must be reached, not a crash');
   });
 
   // The other half of the same report: "remove" is offered only when there is something to remove.
@@ -266,5 +373,47 @@ class _WipeOrderCore extends MockNightdropCore {
     _wiped = true;
     notifyListeners();
     return true;
+  }
+}
+
+/// Records which files a wipe removes, so the list can't silently fall behind the files the core
+/// starts writing.
+class _WipeFilesCore extends MockNightdropCore {
+  final List<String> deleted = [];
+  bool _wiped = false;
+
+  @override
+  Future<bool> isStoreLocked() async => true;
+
+  @override
+  bool get needsUnlock => !_wiped;
+
+  @override
+  Future<bool> unlockStore(String secret) async {
+    if (secret != 'the wipe code') return false;
+    // Mirrors RustNightdropCore.logout()'s deletion list.
+    deleted.addAll([
+      'nightdrop-state.bin',
+      'nightdrop-media',
+      'arti-state',
+      'client-auth',
+      'onion-key.sealed',
+    ]);
+    _wiped = true;
+    notifyListeners();
+    return true;
+  }
+}
+
+/// A core with no lock set, so the settings entry point takes the "enable" path.
+class _EnableCore extends MockNightdropCore {
+  String? enabledWith;
+
+  @override
+  Future<bool> isStoreLocked() async => false;
+
+  @override
+  Future<void> enableStoreLock(String secret) async {
+    enabledWith = secret;
   }
 }

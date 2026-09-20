@@ -82,4 +82,34 @@ raises the cost.
 * **Should cover traffic also fire on the direct path?** It would blunt a peer-adjacent observer
   rather than the relay. Probably not worth it: that observer sees Tor traffic either way.
 * **Mean interval default.** Long enough to be cheap, short enough to blur a normal conversation
-  burst. 20–40 minutes is the starting guess; wants measuring against real battery cost.
+  burst. 20–40 minutes was the starting guess. **First measurement, 2026-08-13/14 — one night per
+  condition, not yet replicated:**
+
+  | | cover **on** | cover **off** |
+  | --- | --- | --- |
+  | window | 7h 15m 58s | 7h 14m 43s |
+  | Night Drop | 502 mAh | 349 mAh |
+  | cover posts | 13 | 0 |
+
+  Galaxy S25, same debug+diag build both nights, zero contacts so nothing but chaff was on the
+  wire, `specialUse` foreground service up throughout in both.
+
+  The raw delta is 153 mAh, and **taking that as the cost would be wrong**. Run A's app burned
+  80.6 mAh of CPU while the screen was on against run B's 5.7 — ten more minutes of screen cannot
+  cost 75 mAh, so that is someone using the app, not chaff. Subtracting it leaves **~78 mAh**, or
+  about **6 mAh per post** — ~2% of a 3900 mAh battery over the night, ~6–7% per day, raising the
+  app's background cost by roughly a quarter.
+
+  6 mAh to post a padded blob is a lot until you notice what a post *is*: a fresh onion circuit to
+  the relay — descriptor fetch, introduction, rendezvous — which dwarfs the bytes.
+
+  So 30 minutes is defensible but not free, and the mean is the lever if it needs to be cheaper
+  (60 minutes roughly halves it, at the cost of coarser cover). **n=1 per condition**: Tor circuit
+  conditions vary between nights and two runs cannot bound that, so treat 6 mAh/post as ±50% and
+  do not move the default on this alone. A second pair of runs is scheduled.
+
+  Two things make the numbers trustworthy rather than assumed. The "0 posts" in the control is a
+  measurement, not an absent recorder: the capture logged 14 liveness heartbeats across the night.
+  And run B's `batterystats` line reads `bg:` rather than `fgs:` purely because the counters were
+  reset while the app was already backgrounded, so no state transition was observed — the
+  `ForegroundService:WakeLock` ran 6h 46m and the service was still up at the end.

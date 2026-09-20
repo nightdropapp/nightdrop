@@ -1,0 +1,5 @@
+Background delivery no longer stops after six hours. On Android 15 and 16 the system ended it once a day and said nothing: the app just stopped receiving until you reopened it. It now uses a service type with no such limit, and tells you if it is ever stopped anyway.
+
+Cover traffic is remembered across restarts — it used to switch itself off silently.
+
+Chats now warn when the other person's device cannot report screenshots, so their silence is not mistaken for proof.

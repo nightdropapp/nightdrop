@@ -784,6 +784,42 @@ abstract class AppLocalizations {
   /// **'My relays…'**
   String get myRelaysMenu;
 
+  /// Menu item that drops the Tor entry guards and reconnects.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset Tor connection…'**
+  String get resetTorMenu;
+
+  /// Title of the reset-Tor confirmation dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset Tor connection?'**
+  String get resetTorTitle;
+
+  /// Explains what resetting the Tor connection does, and that nothing is lost.
+  ///
+  /// In en, this message translates to:
+  /// **'If messages keep being held for delivery instead of arriving directly, this device\'s route into Tor may be stuck. This picks a fresh route and reconnects.\n\nYour identity, your address and your chats are not affected. Reconnecting takes a minute or two.'**
+  String get resetTorBody;
+
+  /// Confirm button on the reset-Tor dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Reset'**
+  String get resetTorConfirm;
+
+  /// Snackbar shown while the Tor connection is being reset.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnecting to Tor — this takes a minute or two.'**
+  String get resetTorRunning;
+
+  /// Shown in the About dialog. Discloses the one outbound connection the app makes on its own behalf, so it is stated somewhere durable rather than only in a banner nobody is looking at.
+  ///
+  /// In en, this message translates to:
+  /// **'Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don’t do this at all, because F-Droid updates them.'**
+  String get aboutUpdateChecks;
+
   /// Menu item opening the about dialog (app name, version, license).
   ///
   /// In en, this message translates to:
@@ -814,10 +850,10 @@ abstract class AppLocalizations {
   /// **'Stored on this device'**
   String get storedOnThisDevice;
 
-  /// Banner while the onion descriptor is still publishing.
+  /// Banner while the onion descriptor is still publishing. Deliberately gives no numeric range: it said 1-3 min and an F-Droid reviewer measured ~5 on a Redmi Note 8T, matching our own device logs of 4 and 6 minutes. The wait depends on the network, so a number we cannot keep is worse than none.
   ///
   /// In en, this message translates to:
-  /// **'Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.'**
+  /// **'Publishing your address to Tor. This can take several minutes. Others can’t pair with you until it finishes — keep the app open.'**
   String get publishingAddressTor;
 
   /// Relay-health banner when a single relay is unreachable (trailing space intentional).
@@ -850,6 +886,90 @@ abstract class AppLocalizations {
   /// **'Back up your identity so you don’t lose your chats. There’s no account to recover from — if you lose this device without a backup, it’s gone.'**
   String get backupReminderBody;
 
+  /// Body of the update-available banner. {version} is the newer release, e.g. 0.1.18.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version} is available. This build is out of date.'**
+  String updateAvailableBody(String version);
+
+  /// Shown while the on-demand update check runs.
+  ///
+  /// In en, this message translates to:
+  /// **'Checking for updates…'**
+  String get updateChecking;
+
+  /// Shown when the on-demand update check could not reach the onion site — deliberately distinct from being up to date.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not reach the update site. Try again later.'**
+  String get updateCheckFailed;
+
+  /// Shown when the on-demand check finds no newer release.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop is up to date.'**
+  String get updateUpToDate;
+
+  /// Button that starts the verified download of a newer build.
+  ///
+  /// In en, this message translates to:
+  /// **'Download'**
+  String get updateDownload;
+
+  /// Button that hides the update banner until a newer version exists.
+  ///
+  /// In en, this message translates to:
+  /// **'Hide'**
+  String get updateHide;
+
+  /// Shown when the system (not the user) ended the foreground service, e.g. a foreground-service-type time budget running out. The point is that the user could not otherwise tell.
+  ///
+  /// In en, this message translates to:
+  /// **'Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.'**
+  String get backgroundStoppedBySystem;
+
+  /// Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information.
+  ///
+  /// In en, this message translates to:
+  /// **'This person\'s device can\'t tell them about screenshots, so it won\'t tell you either. If they capture what you send, you won\'t hear about it.'**
+  String get peerCapturesSilentBanner;
+
+  /// Shown while the update APK is downloading.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading over Tor…'**
+  String get updateDownloading;
+
+  /// Shown while the update APK is downloading, with a percentage once one is known. The placeholder already includes its leading space and is empty until the first bytes arrive, so the string must read correctly without it.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloading over Tor…{percent}'**
+  String updateDownloadingPercent(String percent);
+
+  /// Shown when the update APK finished downloading and its hash matched.
+  ///
+  /// In en, this message translates to:
+  /// **'Downloaded and verified. Open it to install.'**
+  String get updateDownloaded;
+
+  /// Shown when the update download failed or its hash did not match.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not download the update.'**
+  String get updateFailed;
+
+  /// Menu item that checks for and downloads an update.
+  ///
+  /// In en, this message translates to:
+  /// **'Update app'**
+  String get updateApp;
+
+  /// Button on the update banner; opens instructions for updating.
+  ///
+  /// In en, this message translates to:
+  /// **'How'**
+  String get updateHow;
+
   /// Title of the delete-chat confirmation.
   ///
   /// In en, this message translates to:
@@ -879,6 +999,30 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.'**
   String get backgroundDeliveryBody;
+
+  /// Title of the background-delivery offer shown during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Receive messages in the background?'**
+  String get onboardingBackgroundTitle;
+
+  /// Explanation of what background delivery does, its privacy properties and its costs, shown during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.'**
+  String get onboardingBackgroundBody;
+
+  /// Button accepting background delivery during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get onboardingBackgroundEnable;
+
+  /// Button declining background delivery during onboarding.
+  ///
+  /// In en, this message translates to:
+  /// **'Not now'**
+  String get onboardingBackgroundSkip;
 
   /// Snackbar when notification permission is missing.
   ///
@@ -1281,6 +1425,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Delivered'**
   String get deliveryDelivered;
+
+  /// Delivery status: handed to the peer's onion service, which is not the same as their device having the message. Deliberately not the word 'Sent': that reads as a completed step, and a message can still be lost at this point. It resolves to Delivered when their device confirms this exact message, or to 'Held for delivery' when it goes to a relay instead.
+  ///
+  /// In en, this message translates to:
+  /// **'Not confirmed yet'**
+  String get deliverySent;
 
   /// Shown when an image attachment can't be decoded.
   ///

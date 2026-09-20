@@ -62,6 +62,8 @@ class HomeScreen extends StatelessWidget {
               }
               if (value == 'cover') _coverTrafficSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
+              if (value == 'resettor') _confirmResetTor(context, core);
+              if (value == 'update') _updateApp(context, core);
               if (value == 'about') _showAbout(context);
               if (value == 'logout') _confirmLogout(context, core);
             },
@@ -78,6 +80,8 @@ class HomeScreen extends StatelessWidget {
               PopupMenuItem(value: 'bridges', child: Text(l10n.bridgesMenu)),
               PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
+              PopupMenuItem(value: 'resettor', child: Text(l10n.resetTorMenu)),
+              PopupMenuItem(value: 'update', child: Text(l10n.updateApp)),
               PopupMenuItem(value: 'about', child: Text(l10n.aboutMenu)),
               PopupMenuItem(
                   value: 'logout', child: Text(l10n.logoutDeleteMenu)),
@@ -95,8 +99,10 @@ class HomeScreen extends StatelessWidget {
       body: Column(
         children: [
           _OnionBanner(core: core),
+          const _BackgroundStoppedBanner(),
           _RelayHealthBanner(core: core),
           _BackupReminderBanner(core: core),
+          _UpdateBanner(core: core),
           Expanded(
             child: ListenableBuilder(
         listenable: core,
@@ -173,6 +179,35 @@ class HomeScreen extends StatelessWidget {
 /// this is chaff, not constant-rate transmission, so it raises the cost of traffic analysis
 /// without ending it. A user who believes it makes them untrackable is worse off than one who
 /// knows what it actually buys. See `docs/design/cover-traffic.md` §4.
+/// Manually reset the Tor connection. Confirmed first because it drops the connection and
+/// reconnects, which takes a minute or two — but it is the only remedy for a guard set that has
+/// churned out of the network, and until this existed a user in that state could only reinstall.
+///
+/// Says plainly what it does and does not touch: the identity and chats are untouched, and the
+/// `.onion` address is kept, so nobody loses contacts by trying it.
+Future<void> _confirmResetTor(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(l10n.resetTorTitle),
+      content: Text(l10n.resetTorBody),
+      actions: [
+        TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(l10n.cancel)),
+        FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(l10n.resetTorConfirm)),
+      ],
+    ),
+  );
+  if (go != true || !context.mounted) return;
+  ScaffoldMessenger.of(context)
+      .showSnackBar(SnackBar(content: Text(l10n.resetTorRunning)));
+  await core.resetTorConnection();
+}
+
 Future<void> _coverTrafficSettings(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
   final on = await core.coverTrafficEnabled();
@@ -286,6 +321,68 @@ class _OnionBannerState extends State<_OnionBanner> {
 /// i.e. a self-hosted relay is down, so contacts' offline mail routed through it may be stuck.
 /// Nudges the user to add a backup relay so delivery stays redundant. Polls on the same cadence
 /// as the onion banner (relay health is refreshed by the background poller).
+/// "Android stopped background delivery" — shown when the SYSTEM ended the foreground service,
+/// never when the user did.
+///
+/// Exists because the failure it reports is invisible by construction: the app stops receiving,
+/// the notification disappears among fifty others, and nothing else changes. On 2026-08-09 the
+/// service was ended by Android's six-hour `dataSync` budget at 03:08 and the phone received
+/// nothing for the next five hours — discovered from `dumpsys batterystats`, which is not
+/// somewhere a user is going to look. The service type was changed to one with no such budget, so
+/// this should stay hidden; it is here so that if some future budget ends the service anyway, the
+/// user is told instead of quietly going offline.
+class _BackgroundStoppedBanner extends StatefulWidget {
+  const _BackgroundStoppedBanner();
+
+  @override
+  State<_BackgroundStoppedBanner> createState() => _BackgroundStoppedBannerState();
+}
+
+class _BackgroundStoppedBannerState extends State<_BackgroundStoppedBanner> {
+  bool _stopped = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  Future<void> _check() async {
+    // Reading it clears it, so this shows once per occurrence rather than until dismissed.
+    final stopped = await BackgroundDelivery.takeStoppedBySystem();
+    if (!mounted || !stopped) return;
+    setState(() => _stopped = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_stopped) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            Icon(Icons.sync_problem, size: 18, color: scheme.onErrorContainer),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                AppLocalizations.of(context)!.backgroundStoppedBySystem,
+                style: TextStyle(color: scheme.onErrorContainer, fontSize: 12.5),
+              ),
+            ),
+            IconButton(
+              icon: Icon(Icons.close, size: 18, color: scheme.onErrorContainer),
+              onPressed: () => setState(() => _stopped = false),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _RelayHealthBanner extends StatefulWidget {
   const _RelayHealthBanner({required this.core});
 
@@ -362,6 +459,161 @@ class _RelayHealthBannerState extends State<_RelayHealthBanner> {
 /// Gentle, dismissible reminder to back up once there are chats worth losing and no backup has
 /// been made yet (lost backup / password = lost data, by design — §7). "Back up" opens the file
 /// backup; "Later" snoozes it. Hidden entirely once a backup succeeds or while snoozed.
+/// "A newer release exists" — shown only when our onion site says so (see `core/src/update.rs`).
+///
+/// Deliberately not dismissible-with-memory and deliberately quiet: it carries no urgency styling
+/// and no download button. The app never fetches or installs a build; the user goes and gets it.
+/// It disappears by itself once the running version matches, so there is nothing to dismiss.
+/// "Update app" — the way back to an update the user hid, and the way to ask on demand rather
+/// than waiting for the daily check.
+///
+/// Downloads and verifies; it never installs. Forces a check first, because the point of asking
+/// is not to be told what yesterday's check thought.
+Future<void> _updateApp(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final messenger = ScaffoldMessenger.of(context);
+  messenger.showSnackBar(SnackBar(content: Text(l10n.updateChecking)));
+  final answered = await core.checkForUpdateNow();
+  final version = core.updateAvailable;
+  if (!context.mounted) return;
+  if (!answered) {
+    // The site did not answer. Saying "up to date" here would be a confident lie on the one
+    // screen where the user deliberately asked.
+    messenger.showSnackBar(SnackBar(content: Text(l10n.updateCheckFailed)));
+    return;
+  }
+  if (version == null) {
+    messenger.showSnackBar(SnackBar(content: Text(l10n.updateUpToDate)));
+    return;
+  }
+  final go = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      content: Text(l10n.updateAvailableBody(version)),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(l10n.close),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(true),
+          child: Text(l10n.updateDownload),
+        ),
+      ],
+    ),
+  );
+  if (go != true) return;
+  messenger.showSnackBar(SnackBar(content: Text(l10n.updateDownloading)));
+  final path = await core.downloadUpdate();
+  messenger.showSnackBar(SnackBar(
+    content: Text(path == null ? l10n.updateFailed : '${l10n.updateDownloaded}\n$path'),
+    duration: const Duration(seconds: 8),
+  ));
+}
+
+class _UpdateBanner extends StatefulWidget {
+  const _UpdateBanner({required this.core});
+
+  final NightdropCore core;
+
+  @override
+  State<_UpdateBanner> createState() => _UpdateBannerState();
+}
+
+class _UpdateBannerState extends State<_UpdateBanner> {
+  bool _busy = false;
+
+  /// True while *any* download runs, including one the menu started. Asking the core rather than
+  /// only tracking our own tap is what stops the banner offering to start a second one — tapping
+  /// it to watch a download in progress used to do exactly that.
+  bool get _downloading => _busy || widget.core.downloadInProgress;
+
+  /// "45%" once there is a figure, empty until then. Empty rather than "0%" on purpose: a Tor
+  /// circuit can take tens of seconds to produce the first byte, and "0%" for half a minute reads
+  /// as stuck where a bare "Downloading…" reads as starting.
+  String get _percentLabel {
+    final p = widget.core.downloadProgress;
+    return p == null ? '' : ' ${(p * 100).round()}%';
+  }
+
+  /// Tapping the banner downloads; it never installs. The file is verified against the hash the
+  /// onion site published, then handed to the user — Android decides whether it may replace the
+  /// app, and it refuses anything not signed by our release key.
+  Future<void> _download() async {
+    if (_downloading) return;
+    setState(() => _busy = true);
+    final l10n = AppLocalizations.of(context)!;
+    final path = await widget.core.downloadUpdate();
+    if (!mounted) return;
+    setState(() => _busy = false);
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(path == null ? l10n.updateFailed : '${l10n.updateDownloaded}\n$path'),
+      duration: const Duration(seconds: 8),
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final version = widget.core.updateAvailable;
+    if (version == null) return const SizedBox.shrink();
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: InkWell(
+        onTap: _downloading ? null : _download,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+          child: Row(
+            children: [
+              Icon(Icons.system_update_alt,
+                  size: 18, color: scheme.onSecondaryContainer),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      _downloading
+                          ? l10n.updateDownloadingPercent(_percentLabel)
+                          : l10n.updateAvailableBody(version),
+                      style: TextStyle(
+                          color: scheme.onSecondaryContainer, fontSize: 12.5),
+                    ),
+                    // Only while downloading, and only then: a bar sitting under a plain notice
+                    // would read as progress toward something the user has not started.
+                    if (_downloading) ...[
+                      const SizedBox(height: 6),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(2),
+                        // A null value renders the indeterminate animation, which is the honest
+                        // display when the server did not say how big the file is.
+                        child: LinearProgressIndicator(
+                          value: widget.core.downloadProgress,
+                          minHeight: 3,
+                          backgroundColor:
+                              scheme.onSecondaryContainer.withValues(alpha: 0.15),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              // Hiding is scoped to this version: a later release shows again, so a hidden
+              // banner can never swallow the notice that actually matters.
+              TextButton(
+                onPressed: _downloading ? null : widget.core.hideUpdateBanner,
+                child: Text(l10n.updateHide),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _BackupReminderBanner extends StatefulWidget {
   const _BackupReminderBanner({required this.core});
 
@@ -675,6 +927,13 @@ void _showAbout(BuildContext context) {
                 const SizedBox(height: 12),
                 const Text('© 2026 Night Drop'),
                 const Text('AGPL-3.0-or-later'),
+                const SizedBox(height: 12),
+                // The one connection the app makes on its own behalf, stated where it stays
+                // stated. Everything else on the wire is the user's own traffic.
+                Text(
+                  l10n.aboutUpdateChecks,
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
           ),
@@ -716,7 +975,6 @@ Future<void> _confirmLogout(BuildContext context, NightdropCore core) async {
     ),
   );
   if (confirmed != true) return;
-  await BackgroundDelivery.stop(); // no identity left to watch for
   // _Root routes back to onboarding; logout returns how many contacts couldn't be told the chat
   // was deleted (§1.3) so we can be honest that a few peers may still message a dead identity.
   final notNotified = await core.logout();

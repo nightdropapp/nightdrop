@@ -549,6 +549,30 @@
   "@myRelaysMenu": {
     "description": "Menu item opening the relay editor."
   },
+  "resetTorMenu": "Reset Tor connection…",
+  "@resetTorMenu": {
+    "description": "Menu item that drops the Tor entry guards and reconnects."
+  },
+  "resetTorTitle": "Reset Tor connection?",
+  "@resetTorTitle": {
+    "description": "Title of the reset-Tor confirmation dialog."
+  },
+  "resetTorBody": "If messages keep being held for delivery instead of arriving directly, this device's route into Tor may be stuck. This picks a fresh route and reconnects.\n\nYour identity, your address and your chats are not affected. Reconnecting takes a minute or two.",
+  "@resetTorBody": {
+    "description": "Explains what resetting the Tor connection does, and that nothing is lost."
+  },
+  "resetTorConfirm": "Reset",
+  "@resetTorConfirm": {
+    "description": "Confirm button on the reset-Tor dialog."
+  },
+  "resetTorRunning": "Reconnecting to Tor — this takes a minute or two.",
+  "@resetTorRunning": {
+    "description": "Snackbar shown while the Tor connection is being reset."
+  },
+  "aboutUpdateChecks": "Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don\u2019t do this at all, because F-Droid updates them.",
+  "@aboutUpdateChecks": {
+    "description": "Shown in the About dialog. Discloses the one outbound connection the app makes on its own behalf, so it is stated somewhere durable rather than only in a banner nobody is looking at."
+  },
   "aboutMenu": "About Night Drop",
   "@aboutMenu": {
     "description": "Menu item opening the about dialog (app name, version, license)."
@@ -569,9 +593,9 @@
   "@storedOnThisDevice": {
     "description": "Chat subtitle when messages are local-only."
   },
-  "publishingAddressTor": "Publishing your address to Tor (1–3 min). Others can’t pair with you until this finishes — keep the app open.",
+  "publishingAddressTor": "Publishing your address to Tor. This can take several minutes. Others can’t pair with you until it finishes — keep the app open.",
   "@publishingAddressTor": {
-    "description": "Banner while the onion descriptor is still publishing."
+    "description": "Banner while the onion descriptor is still publishing. Deliberately gives no numeric range: it said 1-3 min and an F-Droid reviewer measured ~5 on a Redmi Note 8T, matching our own device logs of 4 and 6 minutes. The wait depends on the network, so a number we cannot keep is worse than none."
   },
   "relayOfflineOne": "Your relay {names} looks offline. ",
   "@relayOfflineOne": {
@@ -603,6 +627,42 @@
   "@backupReminderBody": {
     "description": "Body of the dismissible backup-reminder banner."
   },
+  "updateAvailableBody": "Version {version} is available. This build is out of date.",
+  "@updateAvailableBody": {
+    "description": "Body of the update-available banner. {version} is the newer release, e.g. 0.1.18.",
+    "placeholders": { "version": { "type": "String", "example": "0.1.18" } }
+  },
+  "updateChecking": "Checking for updates…",
+  "@updateChecking": { "description": "Shown while the on-demand update check runs." },
+  "updateCheckFailed": "Could not reach the update site. Try again later.",
+  "@updateCheckFailed": { "description": "Shown when the on-demand update check could not reach the onion site — deliberately distinct from being up to date." },
+  "updateUpToDate": "Night Drop is up to date.",
+  "@updateUpToDate": { "description": "Shown when the on-demand check finds no newer release." },
+  "updateDownload": "Download",
+  "@updateDownload": { "description": "Button that starts the verified download of a newer build." },
+  "updateHide": "Hide",
+  "@updateHide": { "description": "Button that hides the update banner until a newer version exists." },
+  "backgroundStoppedBySystem": "Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.",
+  "@backgroundStoppedBySystem": { "description": "Shown when the system (not the user) ended the foreground service, e.g. a foreground-service-type time budget running out. The point is that the user could not otherwise tell." },
+  "peerCapturesSilentBanner": "This person's device can't tell them about screenshots, so it won't tell you either. If they capture what you send, you won't hear about it.",
+  "@peerCapturesSilentBanner": { "description": "Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information." },
+  "updateDownloading": "Downloading over Tor…",
+  "@updateDownloading": { "description": "Shown while the update APK is downloading." },
+  "updateDownloadingPercent": "Downloading over Tor…{percent}",
+  "@updateDownloadingPercent": {
+    "description": "Shown while the update APK is downloading, with a percentage once one is known. The placeholder already includes its leading space and is empty until the first bytes arrive, so the string must read correctly without it.",
+    "placeholders": { "percent": { "type": "String" } }
+  },
+  "updateDownloaded": "Downloaded and verified. Open it to install.",
+  "@updateDownloaded": { "description": "Shown when the update APK finished downloading and its hash matched." },
+  "updateFailed": "Could not download the update.",
+  "@updateFailed": { "description": "Shown when the update download failed or its hash did not match." },
+  "updateApp": "Update app",
+  "@updateApp": { "description": "Menu item that checks for and downloads an update." },
+  "updateHow": "How",
+  "@updateHow": {
+    "description": "Button on the update banner; opens instructions for updating."
+  },
   "deleteThisChat": "Delete this chat?",
   "@deleteThisChat": {
     "description": "Title of the delete-chat confirmation."
@@ -627,6 +687,22 @@
   "backgroundDeliveryBody": "Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.",
   "@backgroundDeliveryBody": {
     "description": "Explanation in the background-delivery dialog."
+  },
+  "onboardingBackgroundTitle": "Receive messages in the background?",
+  "@onboardingBackgroundTitle": {
+    "description": "Title of the background-delivery offer shown during onboarding."
+  },
+  "onboardingBackgroundBody": "Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.",
+  "@onboardingBackgroundBody": {
+    "description": "Explanation of what background delivery does, its privacy properties and its costs, shown during onboarding."
+  },
+  "onboardingBackgroundEnable": "Turn on",
+  "@onboardingBackgroundEnable": {
+    "description": "Button accepting background delivery during onboarding."
+  },
+  "onboardingBackgroundSkip": "Not now",
+  "@onboardingBackgroundSkip": {
+    "description": "Button declining background delivery during onboarding."
   },
   "notificationPermissionRequired": "Notification permission is required for background delivery.",
   "@notificationPermissionRequired": {
@@ -973,6 +1049,10 @@
   "deliveryDelivered": "Delivered",
   "@deliveryDelivered": {
     "description": "Delivery status: delivered."
+  },
+  "deliverySent": "Not confirmed yet",
+  "@deliverySent": {
+    "description": "Delivery status: handed to the peer's onion service, which is not the same as their device having the message. Deliberately not the word 'Sent': that reads as a completed step, and a message can still be lost at this point. It resolves to Delivered when their device confirms this exact message, or to 'Held for delivery' when it goes to a relay instead."
   },
   "imageUnavailable": "Image unavailable",
   "@imageUnavailable": {
