@@ -254,3 +254,42 @@ Fixed by linking libc++ statically (`ANDROID_STL c++_static` plus `BORING_BSSL_R
 `-lc++abi` for the ABI symbols the static libc++ leaves undefined). Verified in the shipped lib:
 `DT_NEEDED` is now only `liblog`/`libdl`/`libm`/`libc`.
 
+### 6.2 The listener secret cannot be per-run
+
+`spawn_webtunnel_proxy` minted a fresh random secret on every core start, and `apply_bridges`
+appended it to the bridge line as `listener-secret=`. But **arti persists a bridge's
+pluggable-transport settings, that secret included, into its own `state/guards.json`** and dials
+us with the stored copy on the next start. So the first reconnect left arti presenting a stale
+secret, `Access::Secret` refused it, and the bridge was marked down — permanently, since the
+rejection is indistinguishable from a dead bridge:
+
+```
+"settings": [["url", "…"], ["ver", "0.0.5"], ["listener-secret", "10bf149e0eec272e6c1f7c0ea91830e1"]]
+"unlisted_since": "2026-09-21T01:05:23.944410050Z"   ← the first in-app reconnect
+```
+
+The secret is now persisted at `<state_dir>/arti-state/webtunnel-listener-secret` (0600) and
+reused, so it stays in step with whatever arti stored. It only gates *local* access to a loopback
+proxy and never leaves the device, so a stable secret costs nothing. Regression test:
+`listener_secret_is_stable_across_restarts`.
+
+Recovering a device already in this state means deleting `guards.json` — the stale secret is
+baked into the persisted guard entry and nothing else clears it.
+
+Verified on the S25, 2026-09-20, with the fix in place. The secret on disk and the one arti
+persisted are now the same value, the guard entry is healthy (`unlisted_since: null`), and
+`default guards: 0` — the bridge is the *only* entry point, so nothing here could have quietly
+fallen back to direct Tor:
+
+```
+Guard set loaded. n_guards=1 n_confirmed=1
+bridgedesc: download succeeded for "webtunnel [2001:db8:…]:443 … listener-secret=ddc6c0dd…"
+chanmgr::factory: Attempting to open a new channel to [… via webtunnel …]
+guardmgr::guard: We have found that guard [… via webtunnel …] is usable.
+publish::reactor: descriptor uploaded successfully to 8/8 HSDirs
+```
+
+That last sequence is from a **restart**, which is the case that used to fail: a fresh listener on
+a new port, reusing the persisted secret, bootstrapping and republishing the onion. Before the
+fix the first restart marked the bridge down permanently.
+
