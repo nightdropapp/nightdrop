@@ -415,3 +415,72 @@ pass from that; run with `-k none --set stream.checksum-validation=no`.
 
 JA4 is also not the only fingerprint. JA4S, HTTP/2 settings fingerprints, packet timing and flow
 shape are all available to a determined censor, and none of them are addressed here.
+
+## 7. Why Night Drop does not run its own bridge (2026-09-21)
+
+Asked, reasonably: we operate a relay, so why not operate a WebTunnel bridge too, as a fallback
+for when the public ones are down? The answer is that the two sit on **opposite sides of Tor**,
+and the analogy inverts the threat model rather than extending it.
+
+**The relay is behind Tor.** It is an onion service, and §5c states the consequence: *"reached over
+Tor (no IPs)."* Clients arrive through a circuit, so the relay is *structurally* unable to learn
+who they are. That is what makes "no keys, no logs" a property rather than a promise — it does not
+depend on our good behaviour, our jurisdiction, or our server staying uncompromised.
+
+**A bridge is in front of Tor.** It is what a client contacts *before* any anonymity exists, from
+its real IP, in the clear at the network layer. Any bridge operator necessarily learns two things
+about every user:
+
+1. their real IP address, and
+2. that this address is using Tor.
+
+The second is the fact that gets people arrested. It is the entire reason bridges are rationed and
+enumeration-resistant. So a Night Drop-operated bridge would mean that every censored user, at the
+moment of maximum exposure, connects directly to a machine we run — which learns, by existing, the
+two facts a censor most wants. `ARCHITECTURE.md` forbids exactly this: no server component may
+learn *"persistent identity-linked metadata"*, and an IP address is the most identity-linked
+metadata there is. The relay honours that rule. A bridge cannot.
+
+Three further objections, each sufficient on its own:
+
+- **One domain is one block.** BridgeDB distributes many bridges with rate limiting and
+  enumeration resistance. A single vendor bridge is one name to blacklist, and when it falls the
+  feature dies for every user at once — the opposite of the resilience it was meant to buy.
+- **It shrinks the anonymity set.** Today a Night Drop user reaching a public WebTunnel bridge is
+  indistinguishable from any other WebTunnel user. Connecting to a Night Drop bridge identifies
+  them as *a Night Drop user specifically*. The general population is an asset; a private bridge
+  spends it.
+- **It concentrates pressure on the operator.** Running the infrastructure that censored users
+  depend on makes that operator the obvious party to lean on.
+
+### 7a. "Fetch bridges" as a button — the easy part and the hard part
+
+The natural follow-up is a button on the bridge screen that pulls a fresh list. Worth being precise
+about where the difficulty actually lies, because the UI is not it.
+
+Fetching bridge lines over HTTPS is trivial. The problem is that **it has to work in the one place
+it will be used**, and `bridges.torproject.org` is among the first hosts a censoring network
+blocks. A naive button therefore succeeds exactly where bridges are unnecessary and fails exactly
+where they are needed — worse than no button, because it teaches the user the app is broken.
+
+This is the problem Tor's **moat** protocol exists to solve: a CAPTCHA-gated bridge-handout API
+(the CAPTCHA is anti-enumeration, not anti-bot), reached over a covert channel — historically
+domain fronting through a large CDN, so the connection looks like traffic to a host a censor will
+not blanket-block. Tor Browser's "Request a bridge" button is this. Adopting it means the covert
+channel, the CAPTCHA UI, and tracking a protocol we do not control; the exact API should be read
+from current Tor Project documentation rather than assumed, as it has changed before.
+
+The cheaper options are worth naming mainly to explain why they are not enough:
+
+- **Ship a built-in bridge list.** Easy, and it is what Tor Browser does for obfs4/Snowflake. But
+  anything published inside the app binary is public, so it is enumerable and gets blocked — a
+  starting point with a short shelf life, not a fallback.
+- **Serve a list from `nightdrop.app`.** Blocked wherever the app is, and it marks the fetcher as a
+  Night Drop user. It reintroduces the vendor-infrastructure problem with none of the upside.
+- **The email autoresponder** (`bridges@torproject.org`, already named in the editor's help text).
+  Clumsy, entirely manual — and survives censorship better than either of the above.
+
+**Conclusion.** Running a bridge is rejected on threat-model grounds, not effort. A fetch button is
+worth building, but only with a covert channel behind it; until then the honest design is what
+exists now — the editor, help text naming where bridges come from, and support for several bridge
+lines at once so one going down is not fatal.
