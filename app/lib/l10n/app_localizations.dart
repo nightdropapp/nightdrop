@@ -1792,6 +1792,12 @@ abstract class AppLocalizations {
   /// **'Your normal PIN or passphrase'**
   String get duressCurrentSecret;
 
+  /// Onboarding link to the bridge editor, for users whose network blocks Tor and who therefore cannot create an identity at all until a bridge is configured.
+  ///
+  /// In en, this message translates to:
+  /// **'Tor blocked? Set up a bridge'**
+  String get onboardingTorBlocked;
+
   /// No description provided for @bridgesMenu.
   ///
   /// In en, this message translates to:
@@ -1825,7 +1831,7 @@ abstract class AppLocalizations {
   /// No description provided for @bridgesWhereToGet.
   ///
   /// In en, this message translates to:
-  /// **'Get bridges from bridges.torproject.org, or email bridges@torproject.org with \"get transport none\" in the body.'**
+  /// **'Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.'**
   String get bridgesWhereToGet;
 
   /// No description provided for @bridgesSaved.

@@ -1024,6 +1024,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get duressCurrentSecret => 'Your normal PIN or passphrase';
 
   @override
+  String get onboardingTorBlocked => 'Tor blocked? Set up a bridge';
+
+  @override
   String get bridgesMenu => 'Tor bridges';
 
   @override
@@ -1042,7 +1045,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get bridgesWhereToGet =>
-      'Get bridges from bridges.torproject.org, or email bridges@torproject.org with \"get transport none\" in the body.';
+      'Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.';
 
   @override
   String bridgesSaved(int count) {

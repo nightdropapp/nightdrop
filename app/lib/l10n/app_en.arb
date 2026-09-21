@@ -1167,12 +1167,16 @@
   "duressDone": "Wipe code set.",
   "duressCleared": "Wipe code removed.",
   "duressCurrentSecret": "Your normal PIN or passphrase",
+  "onboardingTorBlocked": "Tor blocked? Set up a bridge",
+  "@onboardingTorBlocked": {
+    "description": "Onboarding link to the bridge editor, for users whose network blocks Tor and who therefore cannot create an identity at all until a bridge is configured."
+  },
   "bridgesMenu": "Tor bridges",
   "bridgesTitle": "Tor bridges",
   "bridgesBody": "If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.",
   "bridgesLimit": "Bridges help where a network blocks the public list of Tor relays. They do not help where a network inspects traffic and blocks Tor by how it looks — that needs obfs4 or Snowflake, which this version can't run on Android yet. If Tor still won't connect after adding bridges, that is probably why.",
   "bridgesHint": "203.0.113.5:9001 A1B2C3…",
-  "bridgesWhereToGet": "Get bridges from bridges.torproject.org, or email bridges@torproject.org with \"get transport none\" in the body.",
+  "bridgesWhereToGet": "Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.",
   "bridgesSaved": "{count, plural, =0{No bridges saved} =1{1 bridge saved} other{{count} bridges saved}}",
   "@bridgesSaved": {
     "placeholders": { "count": { "type": "int" } }

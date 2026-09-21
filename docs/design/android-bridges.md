@@ -293,3 +293,19 @@ That last sequence is from a **restart**, which is the case that used to fail: a
 a new port, reusing the persisted secret, bootstrapping and republishing the onion. Before the
 fix the first restart marked the bridge down permanently.
 
+### 6.3 The bridge editor was locked behind the censorship it defeats
+
+`BridgesScreen` was reachable only from `home_screen.dart`, which renders only when
+`core.identity != null`. Creating an identity calls `TorClient::create_bootstrapped()` with a
+120s timeout. So for the users this feature exists for — a first run where Tor is blocked —
+identity creation could never succeed, and the bridge editor could never be opened. The whole
+censorship path was unreachable by exactly the people it was built for.
+
+`OnboardingScreen` now carries a "Tor blocked? Set up a bridge" link. `readBridges`/`writeBridges`
+go straight to the Tor state directory and need no core instance, so the editor works with no
+identity. The "reconnect now?" prompt is suppressed there: there is no connection yet, and the
+core built by identity creation a moment later reads the new bridges anyway.
+
+`bridges.txt` living outside the encrypted state — so it survives identity loss — is the same
+property seen from the other side, and is deliberate: bridges must outlive the identity, because
+without them there is no way to get one.

@@ -66,7 +66,11 @@ class _BridgesScreenState extends State<BridgesScreen> {
     messenger.showSnackBar(SnackBar(content: Text(l10n.bridgesSaved(result.accepted))));
     // Bridges are read when the Tor client is built, so nothing changes until it is rebuilt. Offer
     // that plainly instead of leaving the user to guess whether it took effect.
-    if (result.rejected.isEmpty) {
+    //
+    // Reached from onboarding there is no connection to reconnect yet, and the bridges will be
+    // picked up by the core that identity creation builds a moment later — so offering it there
+    // would only invite a pointless two-minute wait.
+    if (result.rejected.isEmpty && core.identity != null) {
       final restart = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
