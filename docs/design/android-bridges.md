@@ -376,16 +376,38 @@ cannot tell this client from lyrebird's. The anonymity set is other WebTunnel us
 — and matching Chrome's TLS while WebTunnel's reference client also uses a Chrome profile is the
 same reasoning applied one layer down.
 
-**What is still untested, and how it could be.** Nothing here has met an actual DPI censor. In
-descending order of what they would buy:
+**An IDS with the standard public ruleset sees ordinary TLS.** A real Tor bootstrap through the
+bridge was captured off the wire (18,080 packets, 26 MB, `dumpcap` on `eno1`) and replayed through
+**Suricata 8.0.6** with **ET Open** loaded — 52,311 active signatures, 1,144 of them Tor-related
+(`ET INFO Onion/TOR Proxy Client Request`, `.onion` DNS queries, known-node lists). The result:
 
-1. *Run from a censored network.* The only real test. Needs a host inside such a network; there is
-   no substitute and no way to simulate the part that matters — a censor's classifier, which is
-   not public.
-2. *Classify a capture with an open-source DPI engine* (nDPI, Zeek, Suricata) and check the flow is
-   reported as ordinary TLS rather than Tor or "unknown/obfuscated". This is the strongest thing
-   available locally. None of those tools are installed on this machine and `tcpdump` needs root,
-   so it was not run.
+```
+app_layer.flow.tls   1          tls sni: www2.shallotfarm.org, version: TLS 1.3
+tcp.sessions         1          flow: app_proto=tls  alerted=false  state=closed
+fast.log             0 alerts
+```
+
+Wireshark agrees and adds the part that matters most: the JA4 it computes **from the captured
+packets** is `t13d1515h1_8daaf6152771_f04195365787` — byte-identical to the validated Chrome value.
+That is an independent implementation reading real wire bytes, not our own JA4 code checking its
+own output.
+
+*The trap in this measurement.* The first run reported zero alerts too, and it was meaningless.
+Capturing on the sending host records outbound packets **before** the NIC fills in checksums (TX
+offload), so Suricata counted `tcp.invalid_checksum: 630`, discarded that direction, never tracked
+the session and never ran app-layer detection at all — a clean bill of health from an engine that
+had not looked. `app_layer.flow.tls` and `tcp.sessions` being non-zero are what distinguish a real
+pass from that; run with `-k none --set stream.checksum-validation=no`.
+
+**What is still untested.** Nothing here has met an actual censor:
+
+1. *Run from a censored network.* The only real test. Needs a host inside one, and there is no
+   substitute — the part that matters, a censor's own classifier, is not public. ET Open is a
+   public IDS ruleset, which is a far weaker adversary than a national firewall.
+2. *The other fingerprints.* JA4 is one of several. JA4S, HTTP/2 settings fingerprints, packet
+   timing and flow shape are all available to a determined censor and none are addressed here. Note
+   that flow shape in particular is *not* disguised: a long-lived connection moving 24 MB inbound
+   against 1.5 MB outbound does not look like someone reading a web page.
 3. *Active probing.* A censor who suspects a bridge connects to it and sees what it serves. That is
    the WebTunnel server's behaviour, not this client's — though worth noting that a plain GET to
    the bridge's own URL returned `502`, which is not a convincing decoy site. It is the operator's
