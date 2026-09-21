@@ -333,7 +333,12 @@ class RustNightdropCore extends NightdropCore {
     // core" and then nothing, forever, with no error and a still-running old client.
     //
     // Bounded as well as ordered: this is teardown, and no event-stream quirk is worth wedging it.
-    rust.unsubscribe();
+    // Teardown must not throw. This is often the first FFI call of a launch, so it is where a
+    // library that will not load surfaces, and it also runs from the catch above — where a
+    // second throw would escape past the handler that exists to report the first.
+    try {
+      rust.unsubscribe();
+    } catch (_) {}
     await _events
         ?.cancel()
         .timeout(const Duration(seconds: 2), onTimeout: () {});
@@ -806,14 +811,21 @@ class RustNightdropCore extends NightdropCore {
     // a saved state file both exist, rebuild the same identity + chats; else fall through to
     // onboarding.
     //
-    // Before anything else, so a failure in the launch path itself is on the record.
-    if (_diagEnabled) await rust.setDiagnostics(enabled: true);
-    _guardHealDone = false;
-    // Close anything already running first: this runs again via `retryStart` after a failure,
-    // and a second bootstrap over the same (still-locked) Tor state dir would fail no matter
-    // how many times the user pressed "Try again".
-    await _closeCore();
     try {
+      // INSIDE the try, deliberately. These are the first FFI calls of a launch, so a native
+      // library that will not load throws right here. Sitting outside, that throw skipped the
+      // finally below, `_booting` was never cleared, and the app stayed on the splash screen
+      // for ever with nothing on screen to say why — which is how a missing libc++_shared.so
+      // presented on a device, 2026-09-20. A load failure must reach the error path like any
+      // other, not silently stall the launch.
+      //
+      // Diagnostics first, so a failure in the launch path itself is on the record.
+      if (_diagEnabled) await rust.setDiagnostics(enabled: true);
+      _guardHealDone = false;
+      // Close anything already running first: this runs again via `retryStart` after a failure,
+      // and a second bootstrap over the same (still-locked) Tor state dir would fail no matter
+      // how many times the user pressed "Try again".
+      await _closeCore();
       if (_torEnabled) {
         // A locked store has no readable key yet, and the check below would then see
         // "no key + saved state" and fall through to onboarding — which is precisely the
@@ -876,9 +888,13 @@ class RustNightdropCore extends NightdropCore {
       }
     } catch (e) {
       // An error OUTSIDE the load of an existing file (e.g. reading the keystore, resolving the
-      // state dir). No confirmed on-disk identity to protect here — fall back to onboarding.
+      // state dir, or the native library failing to load at all).
       await _closeCore();
       _identity = null;
+      // Only treat this as a fresh device if there is demonstrably nothing here. A state file on
+      // disk means the launch failed over the top of real data, and onboarding would invite
+      // creating an identity across it; the recovery screen says so and offers a retry instead.
+      if (await _savedStateExists()) _loadError = true;
     } finally {
       _booting = false;
       notifyListeners();
