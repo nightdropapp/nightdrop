@@ -38,7 +38,12 @@ if grep -qE '\.rs$|(^|/)Cargo\.(toml|lock)$' <<<"$staged"; then
 fi
 
 if grep -qE '^app/.*\.(dart|arb)$|^app/pubspec\.yaml$' <<<"$staged"; then
-    step "flutter analyze" bash -c 'cd app && flutter analyze lib'
+    # Via fvm when the project pins an SDK. A bare `flutter` from an fvm-managed SDK reports its
+    # version as 0.0.0-unknown, and `pub get` then refuses to solve at all ("flutter_zxing
+    # requires Flutter >=2.5.0"), failing the hook for a reason that has nothing to do with the
+    # commit. That is what made this hook look broken and got a run of commits pushed with
+    # --no-verify, which is worse than no hook: it reads as "checked" in the log.
+    step "flutter analyze" bash -c 'cd app && if [ -f .fvmrc ] && command -v fvm >/dev/null 2>&1; then fvm flutter analyze lib; else flutter analyze lib; fi'
 fi
 
 # The generated version constant is easy to forget after a version bump, and shipping it stale
