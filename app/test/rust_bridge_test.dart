@@ -277,6 +277,8 @@ void main() {
 
     final state = File('${support.path}/nightdrop-state.bin');
     state.writeAsStringSync('an identity that will not open');
+    final onionKey = File('${support.path}/onion-key.sealed');
+    onionKey.writeAsStringSync('the sealed onion identity');
 
     final core = RustNightdropCore();
 
@@ -285,6 +287,7 @@ void main() {
     await expectLater(core.createIdentity(), throwsA(isA<StateError>()));
     expect(state.readAsStringSync(), 'an identity that will not open',
         reason: 'onboarding reached by accident must not displace a saved identity');
+    expect(onionKey.readAsStringSync(), 'the sealed onion identity');
 
     // The recovery screen's "set up new identity" is the one route that may: it calls
     // dismissLoadError first, having told the user the saved state could not be opened.
@@ -299,6 +302,23 @@ void main() {
         .toList();
     expect(aside, hasLength(1), reason: 'abandoned is not the same as destroyed');
     expect(File(aside.single.path).readAsStringSync(), 'an identity that will not open');
+
+    // The sealed onion key travels with it. Without this the state file could be recovered but
+    // would answer on a NEW .onion, leaving every peer holding an address that no longer
+    // resolves — ARCHITECTURE.md §11, the same failure a backup without the keystore causes.
+    expect(onionKey.existsSync(), isFalse,
+        reason: 'the key that the set-aside state file unseals under must go with it');
+    final keyAside = support
+        .listSync()
+        .where((f) => f.path.contains('onion-key.sealed.replaced-'))
+        .toList();
+    expect(keyAside, hasLength(1));
+    expect(File(keyAside.single.path).readAsStringSync(), 'the sealed onion identity');
+    expect(
+      keyAside.single.path.split('.replaced-').last,
+      aside.single.path.split('.replaced-').last,
+      reason: 'one stamp, so it is obvious which key belongs to which state file',
+    );
   });
 
   // NOTE: the FRB event stream (rust.subscribe()) is wired into RustNightdropCore and used by
