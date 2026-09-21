@@ -484,3 +484,82 @@ The cheaper options are worth naming mainly to explain why they are not enough:
 worth building, but only with a covert channel behind it; until then the honest design is what
 exists now — the editor, help text naming where bridges come from, and support for several bridge
 lines at once so one going down is not fatal.
+
+### 7b. Reaching the relay from a censored network
+
+The relay does not sidestep the hidden-service problem, because **the relay is itself an onion
+service**. Reaching it needs the same two steps as reaching a peer: fetch a descriptor from the
+HSDirs, then build a rendezvous circuit. So the fallback answers *"the peer is offline"*. It does
+not answer *"the network is degraded"* — when descriptor lookups break they break for both.
+
+That was observed directly on 2026-09-21: between 11:15 and 11:20 the relay could not complete its
+**own** self-dial (`Unable to download hidden service descriptor`) on plain Tor, no bridges
+involved, while two WebTunnel clients were failing HsDir uploads in the same minutes.
+
+But the asymmetry is large and in the relay's favour, and the same session measured it:
+
+| | descriptor state | outcome |
+|---|---|---|
+| peer (phone) | `DegradedReachable`, publication failing | the desktop could not find it |
+| relay | always-on, continuously republished | the desktop reached it and queued |
+
+Not because a relay is structurally easier to reach, but because it is a stable service whose
+descriptor is always fresh and well replicated, whereas a phone is often backgrounded, offline, or
+mid-republish. A client healthy enough to bootstrap Tor at all will nearly always reach the relay.
+A client whose Tor is so degraded that HS lookups fail has no working path to anything.
+
+**The lever that already exists is `#17`, advertised extra relays.** `deliver` fans offline mail
+out to the primary relay *plus the recipient's advertised extras* (`core/src/node.rs`), and
+`RelayHealth` reports whether each answered the last mailbox drain. So a censored user — or a
+community around them — can run a relay that is reachable from where they are and advertise it;
+their contacts then use it automatically. This needs no new code, and it is the right first answer
+to "the relay is hard to reach from here".
+
+### 7c. Why "drop the relay and be purely P2P" would make censorship worse
+
+Tempting, because P2P sounds like fewer dependencies. It is the wrong direction, twice over.
+
+*It does not buy reachability.* The peer is an onion service exactly as the relay is, with
+identical descriptor machinery — and §7b measured the peer as the **harder** target. Removing the
+relay removes the more reliable of the two endpoints.
+
+*It removes asynchrony.* Messages would flow only while both parties are online simultaneously.
+On a flaky censored link that approaches never, and it contradicts the local-first, store-and-
+forward design the relay exists to provide.
+
+**On polling every 15–30 s to raise an offline peer:** an offline onion has no published descriptor
+and no introduction points. Nothing is listening to answer, so polling cannot reach it — it can
+only retry a peer that is *already up*, which `pending_relay` / `flush_pending_relay` already do,
+without a fixed timer. It would also be costly in the worst place: every attempt is a descriptor
+fetch plus a circuit build, through the one or two bridges whose circuit capacity is already the
+binding constraint, and the cover-traffic measurement puts ~78 mAh a night on far lighter activity.
+
+The "received but not accepted, then accepted" handshake is likewise already the authorization
+flow: an inbound Hello from an unknown identity is *held pending approval*
+(`pair: new chat from an unknown identity`). The protocol states are not what is missing.
+
+### 7d. Mailbox-only mode — the idea worth keeping (NOT implemented)
+
+The instinct that censored users pay too much is right; the cost is just not where it looks. The
+expensive thing is that **every user runs a full onion service**: descriptor uploads to 8 HSDirs
+across two time periods each cycle, plus long-lived introduction-point circuits, all forced through
+one or two bridges. That is what was seen failing — `DegradedReachable`, HsDir attempt counts in
+the teens, and arti rate-limiting its own republication.
+
+A **mailbox-only mode** would cut that to outbound work alone: publish no onion service, receive
+via the relay, dial out normally for sending and for draining the mailbox. Introduction circuits
+and descriptor publication disappear entirely.
+
+What it costs, stated plainly:
+
+- **No direct inbound P2P.** Everything addressed to that user goes through a relay, so the relay
+  sees traffic volume and timing for them — opaque blobs under a derived handle, capped at 24 h,
+  but a dependency the default design deliberately avoids.
+- **It weakens the v1 invariant** that messages are peer-to-peer by default, so it must be an
+  explicit, informed user choice for a hostile network — never a default, and never silent.
+- `ARCHITECTURE.md` would need amending rather than this note alone, since the P2P default is
+  stated there.
+
+Worth designing properly before any code. The measurement that would justify it: how much of a
+constrained client's circuit budget goes to *being* an onion service rather than using one — which
+this session saw qualitatively but never quantified.
