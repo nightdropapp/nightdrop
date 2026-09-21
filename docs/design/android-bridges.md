@@ -276,6 +276,15 @@ proxy and never leaves the device, so a stable secret costs nothing. Regression 
 Recovering a device already in this state means deleting `guards.json` — the stale secret is
 baked into the persisted guard entry and nothing else clears it.
 
+**Do not read `guards.json`'s timestamps as history.** The entry examined here said
+`added_at: 2026-09-10` on a package first installed on the 20th, which looked like state seeded
+from somewhere untraced. It is not: arti sets `added_at` to
+`randomize_time(now, lifetime_unconfirmed / 10)` (`tor-guardmgr` `guard.rs:290`), and
+`lifetime_unconfirmed` defaults to 120 days — so the recorded time is up to **12 days earlier than
+the guard was really added**, rounded to 10 seconds. `confirmed_at` is fuzzed the same way
+(`guard.rs:727`). It is deliberate anti-fingerprinting: the file must not reveal when a client
+started using Tor. Every other field in it is reliable; these two are noise by design.
+
 Verified on the S25, 2026-09-20, with the fix in place. The secret on disk and the one arti
 persisted are now the same value, the guard entry is healthy (`unlisted_since: null`), and
 `default guards: 0` — the bridge is the *only* entry point, so nothing here could have quietly
