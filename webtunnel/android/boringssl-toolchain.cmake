@@ -13,3 +13,23 @@ set(ANDROID_PLATFORM "android-24")
 # there is no multiple-libc++ hazard).
 set(ANDROID_STL c++_static)
 include("$ENV{ANDROID_NDK_ROOT}/build/cmake/android.toolchain.cmake")
+# Normalise the build path out of the objects, for F-Droid's reproducible-build check.
+#
+# BoringSSL is C/C++, so the recipe's --remap-path-prefix (which is a rustc flag) does not reach
+# it. Its error macros embed __FILE__, and those land in .rodata — ~190 absolute paths that
+# SURVIVE stripping and ship inside libnightdrop.so, naming both the build directory and cargo's
+# boring-sys metadata hash.
+#
+# F-Droid rebuilds at a fixed /build/nightdrop, so they would ordinarily match the APK we publish
+# from the same path. But that makes reproducibility depend on the build location, which it never
+# did while the native code was pure Rust, and the failure mode is a "not reproducible" verdict
+# published in their repo under our name. Remapping removes the dependency instead of relying on
+# it holding.
+#
+# Set AFTER the include: the NDK toolchain resets the *_FLAGS_INIT variables.
+if(DEFINED ENV{OUT_DIR})
+  foreach(_nd_lang C CXX ASM)
+    set(CMAKE_${_nd_lang}_FLAGS
+        "${CMAKE_${_nd_lang}_FLAGS} -ffile-prefix-map=$ENV{OUT_DIR}=/nd-boringssl")
+  endforeach()
+endif()

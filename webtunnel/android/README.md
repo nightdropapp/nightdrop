@@ -67,3 +67,40 @@ cd app && fvm flutter build apk --debug   # or install-android-app.sh for a test
 
 This is off by default; do not enable it in a release/F-Droid build until the F-Droid
 reproducibility of the added BoringSSL is confirmed.
+
+## Reproducible builds (F-Droid)
+
+F-Droid's recipe has `binary:`, so it rebuilds the app and compares byte for byte against the APK
+we publish. A mismatch is reported in their repo, under our name, as *not reproducible*. Adding a
+C dependency to a previously pure-Rust native library is exactly the kind of change that can break
+that, so this is what was checked (2026-09-20, arm64, release profile).
+
+**The toolchain is already there.** The recipe's `sudo:` step installs `cmake` along with
+`build-essential clang pkg-config rustup`, and pins `ndk: r28c` — which is 28.2.13676358, the
+version this cross-compile was proven with. Nothing new is needed to build BoringSSL in their
+container.
+
+**The build is deterministic.** `libcrypto.a` and `libssl.a` come out byte-identical across a
+`cargo clean -p boring-sys` and full rebuild.
+
+**But it embedded the build path, and that needed fixing.** The recipe's
+`--remap-path-prefix=$CARGO_HOME=/cargo` is a *rustc* flag and does not reach a C compiler.
+BoringSSL's error macros embed `__FILE__`, which lands in `.rodata` and **survives stripping**:
+~190 absolute paths in the shipped `libnightdrop.so`, naming both the build directory and cargo's
+`boring-sys-<metadata-hash>` directory.
+
+Those would usually still match, because F-Droid builds at a fixed `/build/nightdrop` and our
+release APKs come from `fdroid/build-locally.sh` at that same path. "Usually" is the wrong
+standard for a byte comparison, and it makes reproducibility depend on build *location* — which
+it never did while the native code was pure Rust. `boringssl-toolchain.cmake` now passes
+`-ffile-prefix-map=$OUT_DIR=/nd-boringssl` for C, C++ and ASM, after including the NDK toolchain
+(which resets the `*_FLAGS_INIT` variables, so setting them before it has no effect). Measured on
+the stripped release archive: **190 absolute paths → 0**, all remapped, and still deterministic.
+
+What remains in the linked `.so` is `$CARGO_HOME/registry` and the rustup toolchain, both of which
+the recipe's existing rustc remapping handles in a real F-Droid build.
+
+**Not done: a full `fdroid build` in the container with the feature on.** That is the real gate
+and it belongs to the change that actually enables `webtunnel` in a shipped build — the recipe
+would have to carry `NIGHTDROP_WEBTUNNEL=1`, which is a release decision, not a build check. Until
+then the shipped APK contains no BoringSSL at all and its reproducibility is unaffected.
