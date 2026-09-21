@@ -5,8 +5,26 @@ whole point of this document:
 
 | | Serves | Runs on | Deployed by |
 |---|---|---|---|
-| **Clear web** | `https://nightdrop.app` | a VPS, nginx | `scripts/deploy-vps.sh` (rsync) |
-| **Onion mirror** | `z6xw2y…qqd.onion` | the laptop, `nightdrop-onion.service` | writing into `website/` — it serves live from disk |
+| **Clear web** | `https://nightdrop.app` | **this machine**, system nginx (`/etc/nginx/conf.d/nightdrop.conf`) | `~/nightdrop-clearnet-cutover/deploy-local.sh` |
+| **Onion mirror** | `z6xw2y…qqd.onion` | this machine, `nightdrop-onion.service` | writing into `website/` — it serves live from disk |
+
+> **Both sites now run on this one machine.** That is the opposite of the "two independent
+> places" this document was written to describe, and it is worth saying plainly: a reboot here
+> takes down the landing page, the onion mirror, and the relay together. Moving any of them
+> somewhere with real uptime is a standing improvement, not an emergency.
+
+> **Correction, 2026-09-21.** Everything below §1 describes the **old VPS** (162.247.131.86) and
+> is kept as history. The clear web was cut over to this machine on **2026-09-12**; the VPS has
+> since been shut down. Verified today: system nginx active, `nightdrop.conf` present,
+> `https://nightdrop.app/` answering 200 locally, DNS A → **69.72.55.130** (the static address on
+> the MikroTik's `pppoe-wan`, forwarded to 192.168.88.94).
+>
+> Two consequences that differ from the VPS era:
+> - **Deploy with `~/nightdrop-clearnet-cutover/deploy-local.sh`, not `scripts/deploy-vps.sh`.**
+>   It needs no sudo, and it **excludes `applications/` by design** — clearnet downloads are
+>   served from GitHub Releases via `config.js`, so binaries stay onion-only.
+> - The certificate covers apex + www via certbot's **nginx** authenticator and **expires
+>   2026-10-25**, so web-root moves do not affect renewal but the date is worth a diary entry.
 
 They share the `website/` directory as a source and nothing else. The clear-web site is
 marketing and contact metadata; the onion additionally serves the **release binaries** and
@@ -14,7 +32,7 @@ marketing and contact metadata; the onion additionally serves the **release bina
 clear-web host costs a landing page. Losing the onion address breaks updates for every
 installed build — see §6.
 
-## 1. The server, as verified 2026-09-01
+## 1. The server, as verified 2026-09-01 — HISTORICAL, see the correction above
 
 - `nightdrop.app` and `www.nightdrop.app` both resolve to **162.247.131.86**. DNS is at
   Namecheap (`dns1/dns2.registrar-servers.com`).
