@@ -336,3 +336,51 @@ What this still does not cover is **DPI**. The firewall blocks by address, as a 
 public relay list does; it does not fingerprint traffic. The Chrome-exact TLS fingerprint (§5,
 `chrome-proto`) is the answer to that, and it is proven on desktop only — it has never been
 exercised against a real DPI censor.
+
+### 6.5 The DPI question (2026-09-20)
+
+§6.4 proves the bridge survives a censor that blocks by *address*. A censor that blocks by how
+traffic *looks* is a different problem, and the honest position is that it is only partly tested.
+
+**What the wire actually carries.** A passive observer sees one TCP connection to `:443` of an
+ordinary web host, carrying TLS. Everything else — the HTTP Upgrade, the WebSocket framing, Tor
+itself — is inside that TLS. So the only thing a DPI box can fingerprint is the TLS handshake,
+and specifically the ClientHello.
+
+**The ClientHello now verifies on the device, not just on a laptop.**
+`webtunnel/tests/fingerprint.rs` asserts that `connect()` still produces the Chrome JA4 captured
+from Chromium 152 (`t13d1515h1_8daaf6152771_f04195365787`). Run by `cargo test` that proves it for
+the x86-64 host build, which is not what ships: on Android the BoringSSL is a different build, for
+a different architecture, produced by a different toolchain. Since the fingerprint *is* the
+defence, "it matches on my laptop" was not the claim worth making.
+
+`webtunnel/android/run-fingerprint-on-device.sh` cross-compiles that test to arm64 and runs it on
+the phone. It needs no network — the test connects to a listener it binds itself — so it works on
+any connected device, and it is cheap enough to re-run whenever BoringSSL or the profile moves.
+Both tests pass on the S25.
+
+**The `User-Agent` is not a tell, and is deliberate.** `upgrade_request` sends
+`Go-http-client/1.1`, which is not what a browser sends and looks wrong beside a Chrome TLS
+fingerprint. It is correct twice over: that header travels *inside* TLS, so no DPI box on the path
+ever sees it; and it reproduces Go's `http.Request.Write` byte for byte, so a bridge operator
+cannot tell this client from lyrebird's. The anonymity set is other WebTunnel users, not browsers
+— and matching Chrome's TLS while WebTunnel's reference client also uses a Chrome profile is the
+same reasoning applied one layer down.
+
+**What is still untested, and how it could be.** Nothing here has met an actual DPI censor. In
+descending order of what they would buy:
+
+1. *Run from a censored network.* The only real test. Needs a host inside such a network; there is
+   no substitute and no way to simulate the part that matters — a censor's classifier, which is
+   not public.
+2. *Classify a capture with an open-source DPI engine* (nDPI, Zeek, Suricata) and check the flow is
+   reported as ordinary TLS rather than Tor or "unknown/obfuscated". This is the strongest thing
+   available locally. None of those tools are installed on this machine and `tcpdump` needs root,
+   so it was not run.
+3. *Active probing.* A censor who suspects a bridge connects to it and sees what it serves. That is
+   the WebTunnel server's behaviour, not this client's — though worth noting that a plain GET to
+   the bridge's own URL returned `502`, which is not a convincing decoy site. It is the operator's
+   configuration, and a reason not to rely on any single bridge.
+
+JA4 is also not the only fingerprint. JA4S, HTTP/2 settings fingerprints, packet timing and flow
+shape are all available to a determined censor, and none of them are addressed here.
