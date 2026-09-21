@@ -80,6 +80,9 @@ class RustNightdropCore extends NightdropCore {
   static const _kStoreKeyName = 'nightdrop_store_key';
   static const _kCoverTraffic = 'nightdrop_cover_traffic';
   static const _kStateFile = 'nightdrop-state.bin';
+  /// The sealed onion identity. Swept by prefix wherever it is handled, because it now gains
+  /// `.replaced-*` sidecars alongside the state file's.
+  static const _kOnionKeyFile = 'onion-key.sealed';
 
   Future<String> _stateFilePath() async =>
       '${(await getApplicationSupportDirectory()).path}/$_kStateFile';
@@ -932,10 +935,26 @@ class RustNightdropCore extends NightdropCore {
   }
 
   Future<void> _setAsideOldState() async {
+    // One stamp for both files, so it is obvious which key belongs to which state file.
+    final stamp = DateTime.now().millisecondsSinceEpoch;
     try {
       final file = File(await _stateFilePath());
-      if (!file.existsSync()) return;
-      await file.rename('${file.path}.replaced-${DateTime.now().millisecondsSinceEpoch}');
+      if (file.existsSync()) {
+        await file.rename('${file.path}.replaced-$stamp');
+      }
+      // The sealed onion identity has to travel with the state file. The .onion is not derivable
+      // from the identity, and every chat holds the PEER's address with nothing refreshing it
+      // after pairing (ARCHITECTURE.md §11) — so a state file recovered without its key comes
+      // back on a NEW address, with every stored peer address stale. Setting the state aside and
+      // overwriting the key made the "abandoned is not the same as destroyed" promise only half
+      // true: the identity survived, the address it answers on did not.
+      final dir = await _torStateDir();
+      if (dir != null) {
+        final key = File('$dir/$_kOnionKeyFile');
+        if (key.existsSync()) {
+          await key.rename('${key.path}.replaced-$stamp');
+        }
+      }
     } catch (_) {
       // Non-Tor demo modes have no persistence and no plugin to ask; never block onboarding.
     }
@@ -1372,7 +1391,15 @@ class RustNightdropCore extends NightdropCore {
       // it *is* the identity being destroyed, and leaving it behind breaks the next start outright
       // — a fresh identity has a new store key, the stale file will not unseal under it, and the
       // core treats an unreadable identity as an error rather than silently minting a new address.
-      await step('onion key', () => rm(File('$dir/onion-key.sealed')));
+      // By PREFIX, not the bare name: _setAsideOldState now leaves `onion-key.sealed.replaced-*`
+      // beside it, and each one is a sealed copy of an identity being destroyed. Removing only
+      // the exact file would make the wipe a rename, the same trap the state-file sweep above
+      // exists to avoid.
+      await step('onion key', () {
+        for (final f in Directory(dir).listSync()) {
+          if (f.path.split('/').last.startsWith(_kOnionKeyFile)) rm(f);
+        }
+      });
     }
     if (failed.isNotEmpty && _diagEnabled) {
       // ignore: avoid_print — the wipe's outcome belongs on the record; names only, no paths.
