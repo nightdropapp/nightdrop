@@ -100,7 +100,28 @@ the stripped release archive: **190 absolute paths → 0**, all remapped, and st
 What remains in the linked `.so` is `$CARGO_HOME/registry` and the rustup toolchain, both of which
 the recipe's existing rustc remapping handles in a real F-Droid build.
 
-**Not done: a full `fdroid build` in the container with the feature on.** That is the real gate
-and it belongs to the change that actually enables `webtunnel` in a shipped build — the recipe
-would have to carry `NIGHTDROP_WEBTUNNEL=1`, which is a release decision, not a build check. Until
-then the shipped APK contains no BoringSSL at all and its reproducibility is unaffected.
+**Confirmed by a real `fdroid build`, twice (2026-09-21).** The arm64 release entry was built in
+the buildserver container from this branch with `NIGHTDROP_WEBTUNNEL=1`, and then built again. The
+two APKs are **byte-identical** (`sha256 9cb663ad96a0…`), and the library inside carries BoringSSL
+(`X25519MLKEM768`), the WebTunnel Rust (`listener-secret`, `webtunnel/src/socks.rs`), a static
+libc++ (`NEEDED` is only liblog/libdl/libm/libc) and **no build-location strings at all** — 144
+`/nd-boringssl` paths, zero `/build/nightdrop`, zero `/home/vagrant`. So the remap does better
+than making the paths match: it removes them.
+
+### Building an unpushed branch in the container
+
+`fdroid` clones from the recipe's `Repo:`, and the container does not bind-mount the working tree,
+so testing a branch normally means pushing it. It does not have to. Put a bare clone inside the
+buildserver's own home volume and point `Repo:` at it:
+
+```sh
+git clone --bare /path/to/repo ~/.cache/fdroid-local/nightdrop.git
+podman run --rm -v fdroid-vagrant:/home/vagrant:z -v ~/.cache/fdroid-local:/mnt/out:z   registry.gitlab.com/fdroid/fdroidserver:buildserver-trixie   bash -c 'cp -a /mnt/out/nightdrop.git /home/vagrant/ && chown -R vagrant:vagrant /home/vagrant/nightdrop.git'
+# then in a COPY of the recipe: Repo: /home/vagrant/nightdrop.git, commit: <sha>,
+# plus `- export NIGHTDROP_WEBTUNNEL=1` in build:, and run with SKIP_BINARY=1 VERCODE=<one abi>
+```
+
+It must live in the volume, not in `/mnt/out`: under rootless podman the host user maps to
+container root, so `vagrant` sees a root-owned tree and git refuses it with *"detected dubious
+ownership"*. Note also that `~/.cache/fdroid-local/apk/` accumulates APKs from previous runs —
+check the timestamp before concluding anything about "the" APK.
