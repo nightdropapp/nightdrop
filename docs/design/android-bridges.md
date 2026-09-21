@@ -309,3 +309,30 @@ core built by identity creation a moment later reads the new bridges anyway.
 `bridges.txt` living outside the encrypted state — so it survives identity loss — is the same
 property seen from the other side, and is deliberate: bridges must outlive the identity, because
 without them there is no way to get one.
+
+### 6.4 Under an actual Tor block (2026-09-20)
+
+Tested on the S25 against the MikroTik, with the phone's `forward` chain cut to DNS plus a single
+HTTPS host — `185.67.127.183:443`, the WebTunnel bridge — and everything else dropped. Mobile data
+was disabled first: Android silently fails over to LTE when Wi-Fi loses internet, which would have
+produced a pass that meant nothing.
+
+| | bridge configured | bridge cleared (control) |
+|---|---|---|
+| bootstrap | **100 %** | stalls at 85 % |
+| circuits | guard usable via webtunnel | `All tunnel attempts failed due to timeout` |
+| onion descriptor | **uploaded to 8/8 HSDirs** | never published |
+
+The control is what makes the first column mean anything: under the identical firewall, direct Tor
+could not build a single circuit. The 85 % it does reach is not partial connectivity — it is the
+cached consensus from the previous run being read off disk, so the directory is "usable" while
+every channel to every relay times out. Confirmed at the router as well: with the bridge cleared,
+the accept rule's packet counter stayed flat and only the drop rule advanced.
+
+So everything Tor did in the passing case went through ordinary HTTPS to one web host. That is the
+censorship claim, demonstrated rather than argued.
+
+What this still does not cover is **DPI**. The firewall blocks by address, as a censor blocking the
+public relay list does; it does not fingerprint traffic. The Chrome-exact TLS fingerprint (§5,
+`chrome-proto`) is the answer to that, and it is proven on desktop only — it has never been
+exercised against a real DPI censor.
