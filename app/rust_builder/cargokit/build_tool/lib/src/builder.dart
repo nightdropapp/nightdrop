@@ -226,6 +226,18 @@ class RustBuilder {
         result['CMAKE_TOOLCHAIN_FILE'] =
             path.join(repoRoot, 'webtunnel', 'android', 'boringssl-toolchain.cmake');
         result['ND_ANDROID_ABI'] = target.android!;
+        // boring-sys otherwise links `-lc++`, the shared libc++_shared.so — not bundled in the
+        // APK, so the app crashes at dlopen ("library libc++_shared.so not found"). Link the
+        // static libc++ instead (so the one native lib is self-contained), plus libc++abi for
+        // the C++ ABI/exception symbols (`__gxx_personality_v0`) that libc++_static.a leaves
+        // undefined. (Paired with `ANDROID_STL c++_static` in the toolchain, which builds
+        // BoringSSL's own objects against the same static STL.)
+        result['BORING_BSSL_RUST_CPPLIB'] = 'c++_static';
+        const rustFlagsKey = 'CARGO_ENCODED_RUSTFLAGS';
+        const cxxAbi = '-Clink-arg=-lc++abi';
+        final rf = result[rustFlagsKey];
+        result[rustFlagsKey] =
+            (rf == null || rf.isEmpty) ? cxxAbi : '$rf\u001f$cxxAbi';
       }
       return result;
     }

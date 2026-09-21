@@ -232,3 +232,25 @@ unchanged and deterministic) before ever enabling the feature in a shipped build
 **Step 4 — Android and F-Droid.** Cross-compile, test on a device against a real bridge from
 bridges.torproject.org, and confirm the F-Droid build stays reproducible.
 
+## 6. First on-device run (2026-09-20)
+
+The WebTunnel APK ran on hardware for the first time. Tor bootstrapped, the onion descriptor
+published to 8/8 HSDirs, and `spawn_webtunnel_proxy` bound its loopback SOCKS listener — so the
+step-3 wiring is live on Android. Three defects surfaced that no desktop harness could have
+caught, all three because a phone restarts the core and a one-shot harness never does.
+
+### 6.1 `libc++_shared.so` — a load failure that looked like a hang
+
+`boring-sys` linked against the NDK's *shared* STL, so `libnightdrop.so` carried a `DT_NEEDED`
+on `libc++_shared.so`, which cargokit does not bundle. `dlopen` failed.
+
+It presented as the app sitting on the splash screen forever rather than crashing, because
+`RustNightdropCore.start()` makes two FFI calls — `setDiagnostics` and `_closeCore()`'s
+`rust.unsubscribe()` — **before** its `try`/`finally`. The load threw there, so `_booting` was
+never cleared and `_Root` kept rendering `_Splash`. Any future library-load failure will do the
+same: those two awaits belong inside the `try`, so the existing `_LoadErrorScreen` can show it.
+
+Fixed by linking libc++ statically (`ANDROID_STL c++_static` plus `BORING_BSSL_RUST_CPPLIB` and
+`-lc++abi` for the ABI symbols the static libc++ leaves undefined). Verified in the shipped lib:
+`DT_NEEDED` is now only `liblog`/`libdl`/`libm`/`libc`.
+
