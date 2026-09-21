@@ -7,6 +7,10 @@
 # Compiled release binaries served from the .onion mirror (APK/AppImage + signatures). Large,
 # deployed to the web host out of band, and published via GitHub Releases — never tracked in git.
 /website/applications/
+# Staged into the web root by scripts/deploy-vps.sh so security.txt's `Policy:` URL resolves.
+# Generated from the root SECURITY.md — never edit or commit it, or the published policy drifts
+# from the real one.
+/website/SECURITY.md
 
 # Logs (e.g. relay.log)
 *.log
@@ -56,3 +60,6 @@ __pycache__/
 # Project todo lists
 TODO.*
 gitlab_token.txt
+
+# Social account passwords/API tokens for the project accounts — NEVER commit.
+social-credentials.txt

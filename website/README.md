@@ -73,9 +73,23 @@ sitemap `<loc>`, the `Sitemap:` line in `robots.txt`, and `security.txt`). If th
 changes, update all of those. After a real deploy, submit `sitemap.xml` in Google Search
 Console / Bing Webmaster Tools.
 
-## Before first release
+## Publishing
 
-- Replace the placeholder Zcash address in `config/app_config.json` (then `make config`).
-- Fill `downloads` and `links.source` in `config/app_config.json` — the download
-  buttons render as dead `#` links until then.
-- Confirm the domain (`nightdrop.app`) and refresh `sitemap.xml` `lastmod`.
+Two independent targets, from this one directory — see **`docs/hosting.md`** for the full
+procedure, and read it before touching the onion.
+
+- **Clear web** (`https://nightdrop.app`): `scripts/deploy-vps.sh user@host`. It regenerates
+  `config.js`, stages `SECURITY.md` into the web root (`security.txt` advertises it as the
+  `Policy:` URL, and it lives at the repo root), and rsyncs everything except `applications/`
+  and this README.
+- **Onion mirror**: served live from this directory by `nightdrop-onion.service`, so writing a
+  file here *is* deploying it. It additionally serves `applications/` and `update.json` — the
+  app's only update channel. Publish binaries with `scripts/deploy-website.sh`, never by copying
+  them in.
+
+`SECURITY.md` in this directory is **generated** at deploy time and gitignored; edit the copy at
+the repo root instead, or the published policy drifts from the real one.
+
+A platform with an empty entry in `config/app_config.json`'s `downloads` is omitted from the
+download row rather than rendered as a dead `#` link, so adding a build is just a matter of
+filling its URL and running `make config`.

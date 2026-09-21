@@ -4,11 +4,6 @@ Night Drop is a privacy-and-security product: a vulnerability here can expose ex
 what the design promises to protect. We take reports seriously and want to make
 responsible disclosure easy.
 
-> **Before this is live:** point `nightdrop.app` at the site so `SECURITY.md`,
-> `/.well-known/security.txt`, and `/pgp.txt` resolve, and make sure
-> `security@nightdrop.app` is a monitored inbox. Until the domain serves these, the
-> channel below is configured but not yet reachable.
-
 ## Reporting a vulnerability
 
 **Please report privately — do not open a public issue for a security bug.**

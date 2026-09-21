@@ -59,7 +59,7 @@
         "@id": "https://nightdrop.app/#app",
         "name": "Night Drop",
         "applicationCategory": "CommunicationApplication",
-        "operatingSystem": "Android, iOS, Windows, macOS, Linux",
+        "operatingSystem": "Android, Linux",
         "url": "https://nightdrop.app/",
         "image": "https://nightdrop.app/icon-512.png",
         "description": "A free, anonymous, end-to-end encrypted 1:1 messenger. Peer-to-peer over Tor, local-first storage, no accounts and no server-side keys.",
@@ -103,7 +103,7 @@
         <a class="btn primary" href="#download">Get Night Drop</a>
         <a class="btn ghost" href="#features">See how it works</a>
       </div>
-      <p class="fineprint">Free and open. Peer-to-peer over Tor. Android · <!--iOS  ·-->Windows ·<!-- macOS ·--> Linux.</p>
+      <p class="fineprint">Free and open. Peer-to-peer over Tor. Android ·<!-- iOS · Windows · macOS ·--> Linux.</p>
     </div>
   </header>
 
@@ -207,7 +207,7 @@
         </article>
         <article class="card">
           <h3>💻 One app, every device</h3>
-          <p>Android, <!--iOS,--> Windows, <!--macOS,--> and Linux from one codebase — with the same
+          <p>Android <!--iOS, Windows, macOS,--> and Linux from one codebase — with the same
              Rust security core doing the cryptography on every platform.</p>
         </article>
       </div>
@@ -297,7 +297,7 @@
       <div class="downloads" id="download-links">
         <!--<a class="btn ghost" href="#">iOS</a>-->
         <a class="btn ghost" href="#">Android</a>
-        <a class="btn ghost" href="#">Windows</a>
+        <!--<a class="btn ghost" href="#">Windows</a>-->
         <!--a class="btn ghost" href="#">macOS</a>-->
         <a class="btn ghost" href="#">Linux</a>
       </div>
@@ -366,18 +366,25 @@
         var box = document.getElementById('download-links');
         if (box) {
           var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
-          box.innerHTML = Object.keys(labels).map(function (k) {
-            var url = src[k];
-            // Emit only an http(s) URL, or a same-origin /applications/ path (the .onion mirror).
-            // Never a javascript:/data: scheme, even if the config were tampered with. esc() handles
-            // characters; this guards the scheme.
-            var ok = url && (/^https?:\/\//i.test(url) || /^\/applications\/[\w.\/-]+$/.test(url));
-            // `download` only for a link to an actual file. Android points at a folder (the .onion
-            // mirror) or the release page (clearnet) so the visitor picks their build; marking
-            // those `download` would save the listing page itself instead of opening it.
-            var dl = ok && /\.[A-Za-z0-9]+$/.test(url) ? ' download' : '';
-            return '<a class="btn ghost"' + dl + ' href="' + (ok ? esc(url) : '#') + '">' + labels[k] + '</a>';
-          }).join('');
+          // Emit only an http(s) URL, or a same-origin /applications/ path (the .onion mirror).
+          // Never a javascript:/data: scheme, even if the config were tampered with. esc() handles
+          // characters; this guards the scheme.
+          var usable = function (u) {
+            return !!u && (/^https?:\/\//i.test(u) || /^\/applications\/[\w.\/-]+$/.test(u));
+          };
+          // A platform with no download configured is OMITTED, not rendered as a dead `#` button.
+          // config/app_config.json ships empty strings for the platforms that have no build yet
+          // (windows, and ios/macos which are not in `labels`), and a download button that goes
+          // nowhere reads as a broken site to the one visitor who came to download.
+          box.innerHTML = Object.keys(labels).filter(function (k) { return usable(src[k]); })
+            .map(function (k) {
+              var url = src[k];
+              // `download` only for a link to an actual file. Android points at a folder (the
+              // .onion mirror) or the release page (clearnet) so the visitor picks their build;
+              // marking those `download` would save the listing page itself instead of opening it.
+              var dl = /\.[A-Za-z0-9]+$/.test(url) ? ' download' : '';
+              return '<a class="btn ghost"' + dl + ' href="' + esc(url) + '">' + labels[k] + '</a>';
+            }).join('');
         }
       }
     })();
