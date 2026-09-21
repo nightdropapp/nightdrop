@@ -9,6 +9,7 @@ import '../../core/background_delivery.dart';
 import '../../core/nightdrop_core.dart';
 import '../../core/models.dart';
 import '../backup/backup_actions.dart';
+import '../bridges/bridges_screen.dart';
 import '../chat/chat_screen.dart';
 import '../donations/donations_screen.dart';
 import '../lock/app_lock_settings.dart';
@@ -55,6 +56,10 @@ class HomeScreen extends StatelessWidget {
               if (value == 'background') _backgroundDeliverySettings(context);
               if (value == 'applock') showAppLockSettings(context, core);
               if (value == 'duress') showDuressSettings(context, core);
+              if (value == 'bridges') {
+                Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => const BridgesScreen()));
+              }
               if (value == 'cover') _coverTrafficSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'resettor') _confirmResetTor(context, core);
@@ -72,6 +77,7 @@ class HomeScreen extends StatelessWidget {
               // whether or not one is armed, so a glance at an unlocked phone gives nothing away.
               // The feature itself is public; only *your* having armed it is worth hiding (#3).
               PopupMenuItem(value: 'duress', child: Text(l10n.duressMenu)),
+              PopupMenuItem(value: 'bridges', child: Text(l10n.bridgesMenu)),
               PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
               PopupMenuItem(value: 'resettor', child: Text(l10n.resetTorMenu)),

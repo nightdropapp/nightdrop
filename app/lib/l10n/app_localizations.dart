@@ -1792,6 +1792,78 @@ abstract class AppLocalizations {
   /// **'Your normal PIN or passphrase'**
   String get duressCurrentSecret;
 
+  /// Onboarding link to the bridge editor, for users whose network blocks Tor and who therefore cannot create an identity at all until a bridge is configured.
+  ///
+  /// In en, this message translates to:
+  /// **'Tor blocked? Set up a bridge'**
+  String get onboardingTorBlocked;
+
+  /// No description provided for @bridgesMenu.
+  ///
+  /// In en, this message translates to:
+  /// **'Tor bridges'**
+  String get bridgesMenu;
+
+  /// No description provided for @bridgesTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Tor bridges'**
+  String get bridgesTitle;
+
+  /// No description provided for @bridgesBody.
+  ///
+  /// In en, this message translates to:
+  /// **'If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.'**
+  String get bridgesBody;
+
+  /// No description provided for @bridgesLimit.
+  ///
+  /// In en, this message translates to:
+  /// **'Bridges get past a network that blocks the public list of Tor relays. Getting past one that inspects traffic and blocks Tor by how it looks needs a WebTunnel bridge, which carries Tor inside ordinary HTTPS — Night Drop will say so if this build cannot use one. Even then it is not a guarantee: we have tested it against blocked networks and against intrusion-detection tools, never against a national firewall, and the amount of data a chat moves is not disguised. If being identified as a Tor user is itself dangerous where you are, do not rely on this alone.'**
+  String get bridgesLimit;
+
+  /// No description provided for @bridgesHint.
+  ///
+  /// In en, this message translates to:
+  /// **'203.0.113.5:9001 A1B2C3…'**
+  String get bridgesHint;
+
+  /// No description provided for @bridgesWhereToGet.
+  ///
+  /// In en, this message translates to:
+  /// **'Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.'**
+  String get bridgesWhereToGet;
+
+  /// No description provided for @bridgesSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =0{No bridges saved} =1{1 bridge saved} other{{count} bridges saved}}'**
+  String bridgesSaved(int count);
+
+  /// No description provided for @bridgesRejected.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{1 line was not understood} other{{count} lines were not understood}}'**
+  String bridgesRejected(int count);
+
+  /// No description provided for @bridgesRestartTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect now?'**
+  String get bridgesRestartTitle;
+
+  /// No description provided for @bridgesRestartBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Bridges are used when Night Drop connects to Tor, so they take effect on the next connection. Reconnecting now takes a minute or two.'**
+  String get bridgesRestartBody;
+
+  /// No description provided for @bridgesRestartNow.
+  ///
+  /// In en, this message translates to:
+  /// **'Reconnect'**
+  String get bridgesRestartNow;
+
   /// No description provided for @coverTrafficMenu.
   ///
   /// In en, this message translates to:

@@ -1024,6 +1024,63 @@ class AppLocalizationsEn extends AppLocalizations {
   String get duressCurrentSecret => 'Your normal PIN or passphrase';
 
   @override
+  String get onboardingTorBlocked => 'Tor blocked? Set up a bridge';
+
+  @override
+  String get bridgesMenu => 'Tor bridges';
+
+  @override
+  String get bridgesTitle => 'Tor bridges';
+
+  @override
+  String get bridgesBody =>
+      'If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.';
+
+  @override
+  String get bridgesLimit =>
+      'Bridges get past a network that blocks the public list of Tor relays. Getting past one that inspects traffic and blocks Tor by how it looks needs a WebTunnel bridge, which carries Tor inside ordinary HTTPS — Night Drop will say so if this build cannot use one. Even then it is not a guarantee: we have tested it against blocked networks and against intrusion-detection tools, never against a national firewall, and the amount of data a chat moves is not disguised. If being identified as a Tor user is itself dangerous where you are, do not rely on this alone.';
+
+  @override
+  String get bridgesHint => '203.0.113.5:9001 A1B2C3…';
+
+  @override
+  String get bridgesWhereToGet =>
+      'Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.';
+
+  @override
+  String bridgesSaved(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count bridges saved',
+      one: '1 bridge saved',
+      zero: 'No bridges saved',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String bridgesRejected(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: '$count lines were not understood',
+      one: '1 line was not understood',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String get bridgesRestartTitle => 'Reconnect now?';
+
+  @override
+  String get bridgesRestartBody =>
+      'Bridges are used when Night Drop connects to Tor, so they take effect on the next connection. Reconnecting now takes a minute or two.';
+
+  @override
+  String get bridgesRestartNow => 'Reconnect';
+
+  @override
   String get coverTrafficMenu => 'Cover traffic';
 
   @override

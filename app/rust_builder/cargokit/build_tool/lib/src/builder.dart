@@ -1,6 +1,8 @@
 /// This is copied from Cargokit (which is the official way to use it currently)
 /// Details: https://fzyzcjy.github.io/flutter_rust_bridge/manual/integrate/builtin
 
+import 'dart:io';
+
 import 'package:collection/collection.dart';
 import 'package:logging/logging.dart';
 import 'package:path/path.dart' as path;
@@ -141,9 +143,18 @@ class RustBuilder {
 
   String get _toolchain => _buildOptions?.toolchain.name ?? 'stable';
 
+  /// Night Drop customization: build the core with the in-process WebTunnel transport
+  /// (BoringSSL). Off unless `NIGHTDROP_WEBTUNNEL=1`, so default and F-Droid builds are
+  /// untouched. See `webtunnel/android/README.md`.
+  bool get _webtunnelEnabled =>
+      Platform.environment['NIGHTDROP_WEBTUNNEL'] == '1';
+
   /// Returns the path of directory containing build artifacts.
   Future<String> build() async {
-    final extraArgs = _buildOptions?.flags ?? [];
+    final extraArgs = [...?_buildOptions?.flags];
+    if (_webtunnelEnabled) {
+      extraArgs.addAll(['--features', 'webtunnel']);
+    }
     final manifestPath = path.join(environment.manifestDir, 'Cargo.toml');
     runCommand(
       'rustup',
@@ -203,7 +214,32 @@ class RustBuilder {
       if (!env.ndkIsInstalled() && environment.javaHome != null) {
         env.installNdk(javaHome: environment.javaHome!);
       }
-      return env.buildEnvironment();
+      final result = await env.buildEnvironment();
+      // Night Drop: BoringSSL (chrome-proto) needs a CMake toolchain that disables BoringSSL's
+      // test tree (google/benchmark can't cross-compile) and points at the NDK, plus per-ABI
+      // ND_ANDROID_ABI. Only when opted in, so nothing changes for the default build.
+      if (_webtunnelEnabled) {
+        final ndkPath = path.join(sdkPath, 'ndk', ndkVersion);
+        final repoRoot = path.normalize(path.join(environment.manifestDir, '..'));
+        result['ANDROID_NDK_ROOT'] = ndkPath;
+        result['ANDROID_NDK_HOME'] = ndkPath;
+        result['CMAKE_TOOLCHAIN_FILE'] =
+            path.join(repoRoot, 'webtunnel', 'android', 'boringssl-toolchain.cmake');
+        result['ND_ANDROID_ABI'] = target.android!;
+        // boring-sys otherwise links `-lc++`, the shared libc++_shared.so — not bundled in the
+        // APK, so the app crashes at dlopen ("library libc++_shared.so not found"). Link the
+        // static libc++ instead (so the one native lib is self-contained), plus libc++abi for
+        // the C++ ABI/exception symbols (`__gxx_personality_v0`) that libc++_static.a leaves
+        // undefined. (Paired with `ANDROID_STL c++_static` in the toolchain, which builds
+        // BoringSSL's own objects against the same static STL.)
+        result['BORING_BSSL_RUST_CPPLIB'] = 'c++_static';
+        const rustFlagsKey = 'CARGO_ENCODED_RUSTFLAGS';
+        const cxxAbi = '-Clink-arg=-lc++abi';
+        final rf = result[rustFlagsKey];
+        result[rustFlagsKey] =
+            (rf == null || rf.isEmpty) ? cxxAbi : '$rf\u001f$cxxAbi';
+      }
+      return result;
     }
   }
 }

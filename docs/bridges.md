@@ -16,8 +16,10 @@ directory (the same directory that contains `arti-state/`):
 
 - **Linux desktop:** the app support directory, typically
   `~/.local/share/<app-id>/bridges.txt` (alongside `arti-state/`).
-- **Android:** the state directory is app-private and not user-writable without root, so
-  file-drop configuration isn't available there yet — see "Follow-ups" below.
+- **Android:** the state directory is app-private, so there is no file to drop. Use the in-app
+  editor instead — **menu → Tor bridges** — which validates each line with the same parser this
+  file describes and writes it there for you (`docs/design/android-bridges.md`). Pluggable
+  transports remain desktop-only: they need a client binary Android has no way to provide yet.
 
 Format — one bridge per line; blank lines and `#` comments are ignored; an optional
 leading `Bridge` keyword (torrc style) is tolerated:

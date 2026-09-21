@@ -228,6 +228,24 @@
            those into the encrypted store too; until that ships, assume a seized phone shows who
            you have been talking to.</p>
       </div>
+      <div class="callout warn" style="margin-top: 20px;">
+        <h3>Bridges beat a blocked relay list. Traffic inspection is tested, not proven.</h3>
+        <p>If your network blocks Tor by blocking the public list of relays, a bridge is an
+           unlisted way in. If it instead inspects traffic and blocks Tor by how it <em>looks</em>,
+           that needs a <strong>WebTunnel</strong> bridge &mdash; Tor carried inside ordinary HTTPS
+           to a normal-looking web server, with a TLS handshake matched to Chrome's.</p>
+        <p>What we have measured, on our own network: with every route except that one web server
+           blocked at the router, Night Drop still connected and published its address; with the
+           bridge removed under the same block, it could not build a single circuit. An
+           intrusion-detection system carrying 52,311 public signatures, over a thousand of them
+           for Tor, raised nothing and saw only ordinary TLS.</p>
+        <p>What we have <strong>not</strong> done is run it from inside a country that filters this
+           way. Public tooling is a much weaker adversary than a national firewall, and one thing
+           is not disguised at all: the <em>shape</em> of the traffic. A connection that pulls tens
+           of megabytes while sending very little does not look like reading a web page, however
+           ordinary the handshake is. If being identified as a Tor user is itself dangerous where
+           you are, do not rely on this alone.</p>
+      </div>
       <div class="grid" style="margin-top: 28px;">
         <article class="card">
           <h3>🧪 Real-world Tor testing is ongoing <span class="pill">in progress</span></h3>

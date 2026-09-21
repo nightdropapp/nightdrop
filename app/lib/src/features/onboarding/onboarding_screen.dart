@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
+import '../bridges/bridges_screen.dart';
 import '../../app.dart';
 import '../../core/background_delivery.dart';
 import '../../core/backup_errors.dart';
@@ -312,6 +313,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
               TextButton(
                 onPressed: _busy ? null : _restoreFromServer,
                 child: Text(l10n.restoreFromServerBackup),
+              ),
+              // The bridge editor must be reachable BEFORE an identity exists. Creating one
+              // bootstraps Tor (`create_bootstrapped`, 120s timeout), so where Tor is blocked
+              // identity creation cannot succeed — and every other route to this screen is behind
+              // HomeScreen, which only renders once an identity exists. Without this link the
+              // censorship feature is locked behind the censorship it exists to defeat.
+              TextButton(
+                onPressed: _busy
+                    ? null
+                    : () => Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => const BridgesScreen(),
+                        )),
+                child: Text(l10n.onboardingTorBlocked),
               ),
             ],
           ),

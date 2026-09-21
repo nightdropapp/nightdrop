@@ -35,12 +35,8 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
 
   /// Initialize flutter_rust_bridge in mock mode.
   /// No libraries for FFI are loaded.
-  static void initMock({
-    required RustLibApi api,
-  }) {
-    instance.initMockImpl(
-      api: api,
-    );
+  static void initMock({required RustLibApi api}) {
+    instance.initMockImpl(api: api);
   }
 
   /// Dispose flutter_rust_bridge
@@ -68,227 +64,297 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => 1382454983;
+  int get rustContentHash => 422120337;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
-    stem: 'nightdrop',
-    ioDirectory: '../core/target/release/',
-    webPrefix: 'pkg/',
-    wasmBindgenName: 'wasm_bindgen',
-  );
+        stem: 'nightdrop',
+        ioDirectory: '../core/target/release/',
+        webPrefix: 'pkg/',
+        wasmBindgenName: 'wasm_bindgen',
+      );
 }
 
 abstract class RustLibApi extends BaseApi {
-  Future<void> crateApiNightdropCoreAuthorize(
-      {required NightdropCore that,
-      required String contactId,
-      required bool accept});
+  Future<void> crateApiNightdropCoreAuthorize({
+    required NightdropCore that,
+    required String contactId,
+    required bool accept,
+  });
 
-  Future<Uint8List> crateApiNightdropCoreBackupBytes(
-      {required NightdropCore that});
+  Future<Uint8List> crateApiNightdropCoreBackupBytes({
+    required NightdropCore that,
+  });
 
-  Future<AppUpdate?> crateApiNightdropCoreCheckForUpdate(
-      {required NightdropCore that, required String currentVersion});
+  Future<AppUpdate?> crateApiNightdropCoreCheckForUpdate({
+    required NightdropCore that,
+    required String currentVersion,
+  });
 
-  Future<Contact> crateApiNightdropCoreConnectViaQr(
-      {required NightdropCore that, required String payload});
+  Future<Contact> crateApiNightdropCoreConnectViaQr({
+    required NightdropCore that,
+    required String payload,
+  });
 
-  Future<List<Contact>> crateApiNightdropCoreContacts(
-      {required NightdropCore that});
+  Future<List<Contact>> crateApiNightdropCoreContacts({
+    required NightdropCore that,
+  });
 
-  Future<String> crateApiNightdropCoreCreateBackup(
-      {required NightdropCore that, required bool full});
+  Future<String> crateApiNightdropCoreCreateBackup({
+    required NightdropCore that,
+    required bool full,
+  });
 
-  Future<String> crateApiNightdropCoreCreateChatBackup(
-      {required NightdropCore that,
-      required String contactId,
-      required bool full});
+  Future<String> crateApiNightdropCoreCreateChatBackup({
+    required NightdropCore that,
+    required String contactId,
+    required bool full,
+  });
 
-  Future<PairingInvite> crateApiNightdropCoreCreateInvite(
-      {required NightdropCore that});
+  Future<PairingInvite> crateApiNightdropCoreCreateInvite({
+    required NightdropCore that,
+  });
 
-  Future<String> crateApiNightdropCoreCreateRelayAccessKey(
-      {required NightdropCore that, required String relayOnion});
+  Future<String> crateApiNightdropCoreCreateRelayAccessKey({
+    required NightdropCore that,
+    required String relayOnion,
+  });
 
-  Future<ServerBackupInfo> crateApiNightdropCoreCreateServerBackup(
-      {required NightdropCore that,
-      required BigInt ttlHours,
-      required bool full});
+  Future<ServerBackupInfo> crateApiNightdropCoreCreateServerBackup({
+    required NightdropCore that,
+    required BigInt ttlHours,
+    required bool full,
+  });
 
-  Future<String> crateApiNightdropCoreCreateShortCodeInvite(
-      {required NightdropCore that});
+  Future<String> crateApiNightdropCoreCreateShortCodeInvite({
+    required NightdropCore that,
+  });
 
   Future<NightdropCore> crateApiNightdropCoreDefault();
 
-  Future<void> crateApiNightdropCoreDeleteChat(
-      {required NightdropCore that, required String contactId});
+  Future<void> crateApiNightdropCoreDeleteChat({
+    required NightdropCore that,
+    required String contactId,
+  });
 
-  Future<bool> crateApiNightdropCoreDirectPathWedged(
-      {required NightdropCore that});
+  Future<bool> crateApiNightdropCoreDirectPathWedged({
+    required NightdropCore that,
+  });
 
-  Future<BigInt> crateApiNightdropCoreDownloadUpdate(
-      {required NightdropCore that, required String destPath});
+  Future<BigInt> crateApiNightdropCoreDownloadUpdate({
+    required NightdropCore that,
+    required String destPath,
+  });
 
   Future<int> crateApiNightdropCoreDuressLogout({required NightdropCore that});
 
-  Future<void> crateApiNightdropCoreEditMessage(
-      {required NightdropCore that,
-      required String contactId,
-      required String msgId,
-      required String text});
+  Future<void> crateApiNightdropCoreEditMessage({
+    required NightdropCore that,
+    required String contactId,
+    required String msgId,
+    required String text,
+  });
 
   Future<Identity> crateApiNightdropCoreIdentity({required NightdropCore that});
 
-  Future<List<Contact>> crateApiNightdropCoreIncomingRequests(
-      {required NightdropCore that});
+  Future<List<Contact>> crateApiNightdropCoreIncomingRequests({
+    required NightdropCore that,
+  });
 
-  Future<Contact> crateApiNightdropCoreJoinViaShortCode(
-      {required NightdropCore that, required String code});
+  Future<Contact> crateApiNightdropCoreJoinViaShortCode({
+    required NightdropCore that,
+    required String code,
+  });
 
   Future<int> crateApiNightdropCoreLogout({required NightdropCore that});
 
-  Future<Uint8List> crateApiNightdropCoreMediaBytes(
-      {required NightdropCore that, required String mediaId});
+  Future<Uint8List> crateApiNightdropCoreMediaBytes({
+    required NightdropCore that,
+    required String mediaId,
+  });
 
-  Future<String> crateApiNightdropCoreMediaToFile(
-      {required NightdropCore that,
-      required String mediaId,
-      required String ext});
+  Future<String> crateApiNightdropCoreMediaToFile({
+    required NightdropCore that,
+    required String mediaId,
+    required String ext,
+  });
 
-  Future<int> crateApiNightdropCoreMergeBackup(
-      {required NightdropCore that,
-      required String path,
-      required String password});
+  Future<int> crateApiNightdropCoreMergeBackup({
+    required NightdropCore that,
+    required String path,
+    required String password,
+  });
 
-  Future<List<ChatMessage>> crateApiNightdropCoreMessages(
-      {required NightdropCore that, required String contactId});
+  Future<List<ChatMessage>> crateApiNightdropCoreMessages({
+    required NightdropCore that,
+    required String contactId,
+  });
 
-  Future<List<String>> crateApiNightdropCoreMyRelays(
-      {required NightdropCore that});
+  Future<List<String>> crateApiNightdropCoreMyRelays({
+    required NightdropCore that,
+  });
 
   Future<NightdropCore> crateApiNightdropCoreNew();
 
-  Future<NightdropCore> crateApiNightdropCoreNewLan(
-      {required int port,
-      String? relayAddr,
-      String? persistPath,
-      String? persistKey});
+  Future<NightdropCore> crateApiNightdropCoreNewLan({
+    required int port,
+    String? relayAddr,
+    String? persistPath,
+    String? persistKey,
+  });
 
-  Future<NightdropCore> crateApiNightdropCoreNewNetworked(
-      {required String listenAddr, required String relayAddr});
+  Future<NightdropCore> crateApiNightdropCoreNewNetworked({
+    required String listenAddr,
+    required String relayAddr,
+  });
 
-  Future<NightdropCore> crateApiNightdropCoreNewTor(
-      {String? stateDir,
-      String? relayAddr,
-      String? persistPath,
-      String? persistKey});
+  Future<NightdropCore> crateApiNightdropCoreNewTor({
+    String? stateDir,
+    String? relayAddr,
+    String? persistPath,
+    String? persistKey,
+  });
 
   Future<bool> crateApiNightdropCoreOnionReady({required NightdropCore that});
 
-  Future<Contact> crateApiNightdropCoreOpenChat(
-      {required NightdropCore that, String? code});
+  Future<Contact> crateApiNightdropCoreOpenChat({
+    required NightdropCore that,
+    String? code,
+  });
 
-  Future<List<RelayHealth>> crateApiNightdropCoreRelayHealth(
-      {required NightdropCore that});
+  Future<List<RelayHealth>> crateApiNightdropCoreRelayHealth({
+    required NightdropCore that,
+  });
 
-  Future<void> crateApiNightdropCoreReportScreenshot(
-      {required NightdropCore that, required String contactId});
+  Future<void> crateApiNightdropCoreReportScreenshot({
+    required NightdropCore that,
+    required String contactId,
+  });
 
-  Future<NightdropCore> crateApiNightdropCoreRestoreBackup(
-      {required String path,
-      required String password,
-      String? listenAddr,
-      String? relayAddr});
+  Future<NightdropCore> crateApiNightdropCoreRestoreBackup({
+    required String path,
+    required String password,
+    String? listenAddr,
+    String? relayAddr,
+  });
 
-  Future<NightdropCore> crateApiNightdropCoreRestoreBackupTor(
-      {required String backupPath,
-      required String password,
-      String? stateDir,
-      String? relayAddr,
-      required String persistPath,
-      required String persistKey});
+  Future<NightdropCore> crateApiNightdropCoreRestoreBackupTor({
+    required String backupPath,
+    required String password,
+    String? stateDir,
+    String? relayAddr,
+    required String persistPath,
+    required String persistKey,
+  });
 
-  Future<NightdropCore> crateApiNightdropCoreRestoreServerBackupTor(
-      {required String password,
-      String? stateDir,
-      required String relayAddr,
-      required String persistPath,
-      required String persistKey});
+  Future<NightdropCore> crateApiNightdropCoreRestoreServerBackupTor({
+    required String password,
+    String? stateDir,
+    required String relayAddr,
+    required String persistPath,
+    required String persistKey,
+  });
 
-  Future<String> crateApiNightdropCoreSafetyNumber(
-      {required NightdropCore that, required String contactId});
+  Future<String> crateApiNightdropCoreSafetyNumber({
+    required NightdropCore that,
+    required String contactId,
+  });
 
-  Future<String> crateApiNightdropCoreSafetyQr(
-      {required NightdropCore that, required String contactId});
+  Future<String> crateApiNightdropCoreSafetyQr({
+    required NightdropCore that,
+    required String contactId,
+  });
 
-  Future<void> crateApiNightdropCoreSaveBackup(
-      {required NightdropCore that, required String path});
+  Future<void> crateApiNightdropCoreSaveBackup({
+    required NightdropCore that,
+    required String path,
+  });
 
-  Future<void> crateApiNightdropCoreSendMedia(
-      {required NightdropCore that,
-      required String contactId,
-      required List<int> data,
-      required String mime,
-      required String kind,
-      required List<int> thumb});
+  Future<void> crateApiNightdropCoreSendMedia({
+    required NightdropCore that,
+    required String contactId,
+    required List<int> data,
+    required String mime,
+    required String kind,
+    required List<int> thumb,
+  });
 
-  Future<List<ChatMessage>> crateApiNightdropCoreSendMessage(
-      {required NightdropCore that,
-      required String contactId,
-      required String text});
+  Future<List<ChatMessage>> crateApiNightdropCoreSendMessage({
+    required NightdropCore that,
+    required String contactId,
+    required String text,
+  });
 
-  Future<void> crateApiNightdropCoreSetBackground(
-      {required NightdropCore that, required bool background});
+  Future<void> crateApiNightdropCoreSetBackground({
+    required NightdropCore that,
+    required bool background,
+  });
 
-  Future<void> crateApiNightdropCoreSetCaptureReporting(
-      {required NightdropCore that, required bool visible});
+  Future<void> crateApiNightdropCoreSetCaptureReporting({
+    required NightdropCore that,
+    required bool visible,
+  });
 
-  Future<void> crateApiNightdropCoreSetDisappearing(
-      {required NightdropCore that,
-      required String contactId,
-      required BigInt secs});
+  Future<void> crateApiNightdropCoreSetDisappearing({
+    required NightdropCore that,
+    required String contactId,
+    required BigInt secs,
+  });
 
-  Future<void> crateApiNightdropCoreSetLocalName(
-      {required NightdropCore that,
-      required String contactId,
-      required String name});
+  Future<void> crateApiNightdropCoreSetLocalName({
+    required NightdropCore that,
+    required String contactId,
+    required String name,
+  });
 
-  Future<void> crateApiNightdropCoreSetMyName(
-      {required NightdropCore that,
-      required String contactId,
-      required String name});
+  Future<void> crateApiNightdropCoreSetMyName({
+    required NightdropCore that,
+    required String contactId,
+    required String name,
+  });
 
-  Future<void> crateApiNightdropCoreSetMyRelays(
-      {required NightdropCore that, required List<String> relays});
+  Future<void> crateApiNightdropCoreSetMyRelays({
+    required NightdropCore that,
+    required List<String> relays,
+  });
 
-  Future<void> crateApiNightdropCoreSetRemoteStorage(
-      {required NightdropCore that,
-      required String contactId,
-      required bool enabled});
+  Future<void> crateApiNightdropCoreSetRemoteStorage({
+    required NightdropCore that,
+    required String contactId,
+    required bool enabled,
+  });
 
-  Future<void> crateApiNightdropCoreSetVerified(
-      {required NightdropCore that,
-      required String contactId,
-      required bool verified});
+  Future<void> crateApiNightdropCoreSetVerified({
+    required NightdropCore that,
+    required String contactId,
+    required bool verified,
+  });
 
   Future<void> crateApiNightdropCoreShutdown({required NightdropCore that});
 
-  Future<void> crateApiNightdropCoreUnsendMessage(
-      {required NightdropCore that,
-      required String contactId,
-      required String msgId});
+  Future<void> crateApiNightdropCoreUnsendMessage({
+    required NightdropCore that,
+    required String contactId,
+    required String msgId,
+  });
 
-  Future<bool> crateApiNightdropCoreVerifySafetyQr(
-      {required NightdropCore that,
-      required String contactId,
-      required String scanned});
+  Future<bool> crateApiNightdropCoreVerifySafetyQr({
+    required NightdropCore that,
+    required String contactId,
+    required String scanned,
+  });
 
-  Future<void> crateApiClearDuressSecret(
-      {required String dir, required String passphrase});
+  Future<String?> crateApiCheckBridge({required String line});
 
-  Future<String> crateApiClearStorePassphrase(
-      {required String dir, required String passphrase});
+  Future<void> crateApiClearDuressSecret({
+    required String dir,
+    required String passphrase,
+  });
+
+  Future<String> crateApiClearStorePassphrase({
+    required String dir,
+    required String passphrase,
+  });
 
   Future<bool> crateApiCoverTrafficEnabled();
 
@@ -296,10 +362,14 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiDiagNote({required String line});
 
-  Future<bool> crateApiDuressIsArmed(
-      {required String dir, required String keyB64});
+  Future<bool> crateApiDuressIsArmed({
+    required String dir,
+    required String keyB64,
+  });
 
   Future<String> crateApiRandomStoreKey();
+
+  Future<String> crateApiReadBridges({required String dir});
 
   Future<void> crateApiResetTorGuards({required String stateDir});
 
@@ -307,36 +377,47 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiSetDiagnostics({required bool enabled});
 
-  Future<void> crateApiSetDuressSecret(
-      {required String dir,
-      required String passphrase,
-      required String duress});
+  Future<void> crateApiSetDuressSecret({
+    required String dir,
+    required String passphrase,
+    required String duress,
+  });
 
-  Future<void> crateApiSetStorePassphrase(
-      {required String dir,
-      required String keyB64,
-      required String passphrase});
+  Future<void> crateApiSetStorePassphrase({
+    required String dir,
+    required String keyB64,
+    required String passphrase,
+  });
 
   Future<bool> crateApiStoreIsLocked({required String dir});
 
-  Future<bool> crateApiStoreSecretIsCorrect(
-      {required String dir, required String secret});
+  Future<bool> crateApiStoreSecretIsCorrect({
+    required String dir,
+    required String secret,
+  });
 
   Stream<AppEvent> crateApiSubscribe();
 
-  Future<StoreUnlock> crateApiUnlockStoreKey(
-      {required String dir, required String secret});
+  Future<StoreUnlock> crateApiUnlockStoreKey({
+    required String dir,
+    required String secret,
+  });
 
   Future<void> crateApiUnsubscribe();
 
+  Future<BridgeSaveResult> crateApiWriteBridges({
+    required String dir,
+    required String text,
+  });
+
   RustArcIncrementStrongCountFnType
-      get rust_arc_increment_strong_count_NightdropCore;
+  get rust_arc_increment_strong_count_NightdropCore;
 
   RustArcDecrementStrongCountFnType
-      get rust_arc_decrement_strong_count_NightdropCore;
+  get rust_arc_decrement_strong_count_NightdropCore;
 
   CrossPlatformFinalizerArg
-      get rust_arc_decrement_strong_count_NightdropCorePtr;
+  get rust_arc_decrement_strong_count_NightdropCorePtr;
 }
 
 class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
@@ -348,28 +429,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   });
 
   @override
-  Future<void> crateApiNightdropCoreAuthorize(
-      {required NightdropCore that,
-      required String contactId,
-      required bool accept}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_bool(accept, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 1, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreAuthorize({
+    required NightdropCore that,
+    required String contactId,
+    required bool accept,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_bool(accept, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 1,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreAuthorizeConstMeta,
+        argValues: [that, contactId, accept],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreAuthorizeConstMeta,
-      argValues: [that, contactId, accept],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreAuthorizeConstMeta =>
@@ -379,24 +469,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Uint8List> crateApiNightdropCoreBackupBytes(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 2, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_prim_u_8_strict,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Uint8List> crateApiNightdropCoreBackupBytes({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 2,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreBackupBytesConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreBackupBytesConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreBackupBytesConstMeta =>
@@ -406,25 +505,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<AppUpdate?> crateApiNightdropCoreCheckForUpdate(
-      {required NightdropCore that, required String currentVersion}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(currentVersion, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 3, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_opt_box_autoadd_app_update,
-        decodeErrorData: null,
+  Future<AppUpdate?> crateApiNightdropCoreCheckForUpdate({
+    required NightdropCore that,
+    required String currentVersion,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(currentVersion, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 3,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_box_autoadd_app_update,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreCheckForUpdateConstMeta,
+        argValues: [that, currentVersion],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCheckForUpdateConstMeta,
-      argValues: [that, currentVersion],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCheckForUpdateConstMeta =>
@@ -434,25 +543,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Contact> crateApiNightdropCoreConnectViaQr(
-      {required NightdropCore that, required String payload}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(payload, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 4, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_contact,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Contact> crateApiNightdropCoreConnectViaQr({
+    required NightdropCore that,
+    required String payload,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(payload, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 4,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_contact,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreConnectViaQrConstMeta,
+        argValues: [that, payload],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreConnectViaQrConstMeta,
-      argValues: [that, payload],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreConnectViaQrConstMeta =>
@@ -462,24 +581,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<Contact>> crateApiNightdropCoreContacts(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 5, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_contact,
-        decodeErrorData: null,
+  Future<List<Contact>> crateApiNightdropCoreContacts({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 5,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_contact,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreContactsConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreContactsConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreContactsConstMeta =>
@@ -489,25 +617,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiNightdropCoreCreateBackup(
-      {required NightdropCore that, required bool full}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_bool(full, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 6, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreCreateBackup({
+    required NightdropCore that,
+    required bool full,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_bool(full, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 6,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreCreateBackupConstMeta,
+        argValues: [that, full],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCreateBackupConstMeta,
-      argValues: [that, full],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCreateBackupConstMeta =>
@@ -517,28 +655,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiNightdropCoreCreateChatBackup(
-      {required NightdropCore that,
-      required String contactId,
-      required bool full}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_bool(full, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 7, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreCreateChatBackup({
+    required NightdropCore that,
+    required String contactId,
+    required bool full,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_bool(full, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 7,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreCreateChatBackupConstMeta,
+        argValues: [that, contactId, full],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCreateChatBackupConstMeta,
-      argValues: [that, contactId, full],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCreateChatBackupConstMeta =>
@@ -548,24 +695,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<PairingInvite> crateApiNightdropCoreCreateInvite(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 8, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_pairing_invite,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<PairingInvite> crateApiNightdropCoreCreateInvite({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 8,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_pairing_invite,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreCreateInviteConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCreateInviteConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCreateInviteConstMeta =>
@@ -575,25 +731,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiNightdropCoreCreateRelayAccessKey(
-      {required NightdropCore that, required String relayOnion}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(relayOnion, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 9, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreCreateRelayAccessKey({
+    required NightdropCore that,
+    required String relayOnion,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(relayOnion, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 9,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreCreateRelayAccessKeyConstMeta,
+        argValues: [that, relayOnion],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCreateRelayAccessKeyConstMeta,
-      argValues: [that, relayOnion],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCreateRelayAccessKeyConstMeta =>
@@ -603,28 +769,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<ServerBackupInfo> crateApiNightdropCoreCreateServerBackup(
-      {required NightdropCore that,
-      required BigInt ttlHours,
-      required bool full}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_u_64(ttlHours, serializer);
-        sse_encode_bool(full, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 10, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_server_backup_info,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<ServerBackupInfo> crateApiNightdropCoreCreateServerBackup({
+    required NightdropCore that,
+    required BigInt ttlHours,
+    required bool full,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_u_64(ttlHours, serializer);
+          sse_encode_bool(full, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 10,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_server_backup_info,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreCreateServerBackupConstMeta,
+        argValues: [that, ttlHours, full],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCreateServerBackupConstMeta,
-      argValues: [that, ttlHours, full],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCreateServerBackupConstMeta =>
@@ -634,24 +809,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiNightdropCoreCreateShortCodeInvite(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 11, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreCreateShortCodeInvite({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 11,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreCreateShortCodeInviteConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreCreateShortCodeInviteConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreCreateShortCodeInviteConstMeta =>
@@ -662,49 +846,62 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<NightdropCore> crateApiNightdropCoreDefault() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 12, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 12,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreDefaultConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreDefaultConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreDefaultConstMeta =>
-      const TaskConstMeta(
-        debugName: "NightdropCore_default",
-        argNames: [],
-      );
+      const TaskConstMeta(debugName: "NightdropCore_default", argNames: []);
 
   @override
-  Future<void> crateApiNightdropCoreDeleteChat(
-      {required NightdropCore that, required String contactId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 13, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreDeleteChat({
+    required NightdropCore that,
+    required String contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 13,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreDeleteChatConstMeta,
+        argValues: [that, contactId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreDeleteChatConstMeta,
-      argValues: [that, contactId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreDeleteChatConstMeta =>
@@ -714,24 +911,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<bool> crateApiNightdropCoreDirectPathWedged(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 14, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: null,
+  Future<bool> crateApiNightdropCoreDirectPathWedged({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 14,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreDirectPathWedgedConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreDirectPathWedgedConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreDirectPathWedgedConstMeta =>
@@ -741,25 +947,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<BigInt> crateApiNightdropCoreDownloadUpdate(
-      {required NightdropCore that, required String destPath}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(destPath, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 15, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_u_64,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<BigInt> crateApiNightdropCoreDownloadUpdate({
+    required NightdropCore that,
+    required String destPath,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(destPath, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 15,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_64,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreDownloadUpdateConstMeta,
+        argValues: [that, destPath],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreDownloadUpdateConstMeta,
-      argValues: [that, destPath],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreDownloadUpdateConstMeta =>
@@ -770,22 +986,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<int> crateApiNightdropCoreDuressLogout({required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 16, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_u_32,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 16,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_32,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreDuressLogoutConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreDuressLogoutConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreDuressLogoutConstMeta =>
@@ -795,30 +1019,39 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreEditMessage(
-      {required NightdropCore that,
-      required String contactId,
-      required String msgId,
-      required String text}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_String(msgId, serializer);
-        sse_encode_String(text, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 17, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreEditMessage({
+    required NightdropCore that,
+    required String contactId,
+    required String msgId,
+    required String text,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_String(msgId, serializer);
+          sse_encode_String(text, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 17,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreEditMessageConstMeta,
+        argValues: [that, contactId, msgId, text],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreEditMessageConstMeta,
-      argValues: [that, contactId, msgId, text],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreEditMessageConstMeta =>
@@ -828,24 +1061,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Identity> crateApiNightdropCoreIdentity(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 18, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_identity,
-        decodeErrorData: null,
+  Future<Identity> crateApiNightdropCoreIdentity({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 18,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_identity,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreIdentityConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreIdentityConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreIdentityConstMeta =>
@@ -855,24 +1097,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<Contact>> crateApiNightdropCoreIncomingRequests(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 19, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_contact,
-        decodeErrorData: null,
+  Future<List<Contact>> crateApiNightdropCoreIncomingRequests({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 19,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_contact,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreIncomingRequestsConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreIncomingRequestsConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreIncomingRequestsConstMeta =>
@@ -882,25 +1133,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Contact> crateApiNightdropCoreJoinViaShortCode(
-      {required NightdropCore that, required String code}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(code, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 20, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_contact,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Contact> crateApiNightdropCoreJoinViaShortCode({
+    required NightdropCore that,
+    required String code,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(code, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 20,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_contact,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreJoinViaShortCodeConstMeta,
+        argValues: [that, code],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreJoinViaShortCodeConstMeta,
-      argValues: [that, code],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreJoinViaShortCodeConstMeta =>
@@ -911,22 +1172,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<int> crateApiNightdropCoreLogout({required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 21, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_u_32,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 21,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_32,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreLogoutConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreLogoutConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreLogoutConstMeta =>
@@ -936,25 +1205,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Uint8List> crateApiNightdropCoreMediaBytes(
-      {required NightdropCore that, required String mediaId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(mediaId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 22, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_prim_u_8_strict,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Uint8List> crateApiNightdropCoreMediaBytes({
+    required NightdropCore that,
+    required String mediaId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(mediaId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 22,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_prim_u_8_strict,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreMediaBytesConstMeta,
+        argValues: [that, mediaId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreMediaBytesConstMeta,
-      argValues: [that, mediaId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreMediaBytesConstMeta =>
@@ -964,28 +1243,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiNightdropCoreMediaToFile(
-      {required NightdropCore that,
-      required String mediaId,
-      required String ext}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(mediaId, serializer);
-        sse_encode_String(ext, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 23, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreMediaToFile({
+    required NightdropCore that,
+    required String mediaId,
+    required String ext,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(mediaId, serializer);
+          sse_encode_String(ext, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 23,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreMediaToFileConstMeta,
+        argValues: [that, mediaId, ext],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreMediaToFileConstMeta,
-      argValues: [that, mediaId, ext],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreMediaToFileConstMeta =>
@@ -995,28 +1283,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<int> crateApiNightdropCoreMergeBackup(
-      {required NightdropCore that,
-      required String path,
-      required String password}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(path, serializer);
-        sse_encode_String(password, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 24, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_u_32,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<int> crateApiNightdropCoreMergeBackup({
+    required NightdropCore that,
+    required String path,
+    required String password,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(path, serializer);
+          sse_encode_String(password, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 24,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_u_32,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreMergeBackupConstMeta,
+        argValues: [that, path, password],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreMergeBackupConstMeta,
-      argValues: [that, path, password],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreMergeBackupConstMeta =>
@@ -1026,25 +1323,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<ChatMessage>> crateApiNightdropCoreMessages(
-      {required NightdropCore that, required String contactId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 25, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_chat_message,
-        decodeErrorData: null,
+  Future<List<ChatMessage>> crateApiNightdropCoreMessages({
+    required NightdropCore that,
+    required String contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 25,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_chat_message,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreMessagesConstMeta,
+        argValues: [that, contactId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreMessagesConstMeta,
-      argValues: [that, contactId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreMessagesConstMeta =>
@@ -1054,24 +1361,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<String>> crateApiNightdropCoreMyRelays(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 26, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_String,
-        decodeErrorData: null,
+  Future<List<String>> crateApiNightdropCoreMyRelays({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 26,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreMyRelaysConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreMyRelaysConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreMyRelaysConstMeta =>
@@ -1082,53 +1398,64 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<NightdropCore> crateApiNightdropCoreNew() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 27, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 27,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreNewConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreNewConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiNightdropCoreNewConstMeta => const TaskConstMeta(
-        debugName: "NightdropCore_new",
-        argNames: [],
-      );
+  TaskConstMeta get kCrateApiNightdropCoreNewConstMeta =>
+      const TaskConstMeta(debugName: "NightdropCore_new", argNames: []);
 
   @override
-  Future<NightdropCore> crateApiNightdropCoreNewLan(
-      {required int port,
-      String? relayAddr,
-      String? persistPath,
-      String? persistKey}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_u_16(port, serializer);
-        sse_encode_opt_String(relayAddr, serializer);
-        sse_encode_opt_String(persistPath, serializer);
-        sse_encode_opt_String(persistKey, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 28, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<NightdropCore> crateApiNightdropCoreNewLan({
+    required int port,
+    String? relayAddr,
+    String? persistPath,
+    String? persistKey,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_u_16(port, serializer);
+          sse_encode_opt_String(relayAddr, serializer);
+          sse_encode_opt_String(persistPath, serializer);
+          sse_encode_opt_String(persistKey, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 28,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreNewLanConstMeta,
+        argValues: [port, relayAddr, persistPath, persistKey],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreNewLanConstMeta,
-      argValues: [port, relayAddr, persistPath, persistKey],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreNewLanConstMeta =>
@@ -1138,25 +1465,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<NightdropCore> crateApiNightdropCoreNewNetworked(
-      {required String listenAddr, required String relayAddr}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(listenAddr, serializer);
-        sse_encode_String(relayAddr, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 29, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<NightdropCore> crateApiNightdropCoreNewNetworked({
+    required String listenAddr,
+    required String relayAddr,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(listenAddr, serializer);
+          sse_encode_String(relayAddr, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 29,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreNewNetworkedConstMeta,
+        argValues: [listenAddr, relayAddr],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreNewNetworkedConstMeta,
-      argValues: [listenAddr, relayAddr],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreNewNetworkedConstMeta =>
@@ -1166,30 +1501,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<NightdropCore> crateApiNightdropCoreNewTor(
-      {String? stateDir,
-      String? relayAddr,
-      String? persistPath,
-      String? persistKey}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_opt_String(stateDir, serializer);
-        sse_encode_opt_String(relayAddr, serializer);
-        sse_encode_opt_String(persistPath, serializer);
-        sse_encode_opt_String(persistKey, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 30, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<NightdropCore> crateApiNightdropCoreNewTor({
+    String? stateDir,
+    String? relayAddr,
+    String? persistPath,
+    String? persistKey,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_opt_String(stateDir, serializer);
+          sse_encode_opt_String(relayAddr, serializer);
+          sse_encode_opt_String(persistPath, serializer);
+          sse_encode_opt_String(persistKey, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 30,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreNewTorConstMeta,
+        argValues: [stateDir, relayAddr, persistPath, persistKey],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreNewTorConstMeta,
-      argValues: [stateDir, relayAddr, persistPath, persistKey],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreNewTorConstMeta =>
@@ -1200,22 +1542,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<bool> crateApiNightdropCoreOnionReady({required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 31, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 31,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreOnionReadyConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreOnionReadyConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreOnionReadyConstMeta =>
@@ -1225,25 +1575,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<Contact> crateApiNightdropCoreOpenChat(
-      {required NightdropCore that, String? code}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_opt_String(code, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 32, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_contact,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<Contact> crateApiNightdropCoreOpenChat({
+    required NightdropCore that,
+    String? code,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_opt_String(code, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 32,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_contact,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreOpenChatConstMeta,
+        argValues: [that, code],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreOpenChatConstMeta,
-      argValues: [that, code],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreOpenChatConstMeta =>
@@ -1253,24 +1613,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<RelayHealth>> crateApiNightdropCoreRelayHealth(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 33, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_relay_health,
-        decodeErrorData: null,
+  Future<List<RelayHealth>> crateApiNightdropCoreRelayHealth({
+    required NightdropCore that,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 33,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_relay_health,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreRelayHealthConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreRelayHealthConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreRelayHealthConstMeta =>
@@ -1280,25 +1649,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreReportScreenshot(
-      {required NightdropCore that, required String contactId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 34, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreReportScreenshot({
+    required NightdropCore that,
+    required String contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 34,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreReportScreenshotConstMeta,
+        argValues: [that, contactId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreReportScreenshotConstMeta,
-      argValues: [that, contactId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreReportScreenshotConstMeta =>
@@ -1308,30 +1687,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<NightdropCore> crateApiNightdropCoreRestoreBackup(
-      {required String path,
-      required String password,
-      String? listenAddr,
-      String? relayAddr}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(path, serializer);
-        sse_encode_String(password, serializer);
-        sse_encode_opt_String(listenAddr, serializer);
-        sse_encode_opt_String(relayAddr, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 35, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<NightdropCore> crateApiNightdropCoreRestoreBackup({
+    required String path,
+    required String password,
+    String? listenAddr,
+    String? relayAddr,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(path, serializer);
+          sse_encode_String(password, serializer);
+          sse_encode_opt_String(listenAddr, serializer);
+          sse_encode_opt_String(relayAddr, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 35,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreRestoreBackupConstMeta,
+        argValues: [path, password, listenAddr, relayAddr],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreRestoreBackupConstMeta,
-      argValues: [path, password, listenAddr, relayAddr],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreRestoreBackupConstMeta =>
@@ -1341,41 +1727,48 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<NightdropCore> crateApiNightdropCoreRestoreBackupTor(
-      {required String backupPath,
-      required String password,
-      String? stateDir,
-      String? relayAddr,
-      required String persistPath,
-      required String persistKey}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(backupPath, serializer);
-        sse_encode_String(password, serializer);
-        sse_encode_opt_String(stateDir, serializer);
-        sse_encode_opt_String(relayAddr, serializer);
-        sse_encode_String(persistPath, serializer);
-        sse_encode_String(persistKey, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 36, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<NightdropCore> crateApiNightdropCoreRestoreBackupTor({
+    required String backupPath,
+    required String password,
+    String? stateDir,
+    String? relayAddr,
+    required String persistPath,
+    required String persistKey,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(backupPath, serializer);
+          sse_encode_String(password, serializer);
+          sse_encode_opt_String(stateDir, serializer);
+          sse_encode_opt_String(relayAddr, serializer);
+          sse_encode_String(persistPath, serializer);
+          sse_encode_String(persistKey, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 36,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreRestoreBackupTorConstMeta,
+        argValues: [
+          backupPath,
+          password,
+          stateDir,
+          relayAddr,
+          persistPath,
+          persistKey,
+        ],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreRestoreBackupTorConstMeta,
-      argValues: [
-        backupPath,
-        password,
-        stateDir,
-        relayAddr,
-        persistPath,
-        persistKey
-      ],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreRestoreBackupTorConstMeta =>
@@ -1387,37 +1780,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "stateDir",
           "relayAddr",
           "persistPath",
-          "persistKey"
+          "persistKey",
         ],
       );
 
   @override
-  Future<NightdropCore> crateApiNightdropCoreRestoreServerBackupTor(
-      {required String password,
-      String? stateDir,
-      required String relayAddr,
-      required String persistPath,
-      required String persistKey}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(password, serializer);
-        sse_encode_opt_String(stateDir, serializer);
-        sse_encode_String(relayAddr, serializer);
-        sse_encode_String(persistPath, serializer);
-        sse_encode_String(persistKey, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 37, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData:
-            sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<NightdropCore> crateApiNightdropCoreRestoreServerBackupTor({
+    required String password,
+    String? stateDir,
+    required String relayAddr,
+    required String persistPath,
+    required String persistKey,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(password, serializer);
+          sse_encode_opt_String(stateDir, serializer);
+          sse_encode_String(relayAddr, serializer);
+          sse_encode_String(persistPath, serializer);
+          sse_encode_String(persistKey, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 37,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData:
+              sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreRestoreServerBackupTorConstMeta,
+        argValues: [password, stateDir, relayAddr, persistPath, persistKey],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreRestoreServerBackupTorConstMeta,
-      argValues: [password, stateDir, relayAddr, persistPath, persistKey],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreRestoreServerBackupTorConstMeta =>
@@ -1428,30 +1828,40 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
           "stateDir",
           "relayAddr",
           "persistPath",
-          "persistKey"
+          "persistKey",
         ],
       );
 
   @override
-  Future<String> crateApiNightdropCoreSafetyNumber(
-      {required NightdropCore that, required String contactId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 38, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreSafetyNumber({
+    required NightdropCore that,
+    required String contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 38,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSafetyNumberConstMeta,
+        argValues: [that, contactId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSafetyNumberConstMeta,
-      argValues: [that, contactId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSafetyNumberConstMeta =>
@@ -1461,25 +1871,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<String> crateApiNightdropCoreSafetyQr(
-      {required NightdropCore that, required String contactId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 39, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiNightdropCoreSafetyQr({
+    required NightdropCore that,
+    required String contactId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 39,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSafetyQrConstMeta,
+        argValues: [that, contactId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSafetyQrConstMeta,
-      argValues: [that, contactId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSafetyQrConstMeta =>
@@ -1489,25 +1909,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSaveBackup(
-      {required NightdropCore that, required String path}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(path, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 40, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSaveBackup({
+    required NightdropCore that,
+    required String path,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(path, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 40,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSaveBackupConstMeta,
+        argValues: [that, path],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSaveBackupConstMeta,
-      argValues: [that, path],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSaveBackupConstMeta =>
@@ -1517,34 +1947,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSendMedia(
-      {required NightdropCore that,
-      required String contactId,
-      required List<int> data,
-      required String mime,
-      required String kind,
-      required List<int> thumb}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_list_prim_u_8_loose(data, serializer);
-        sse_encode_String(mime, serializer);
-        sse_encode_String(kind, serializer);
-        sse_encode_list_prim_u_8_loose(thumb, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 41, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSendMedia({
+    required NightdropCore that,
+    required String contactId,
+    required List<int> data,
+    required String mime,
+    required String kind,
+    required List<int> thumb,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_list_prim_u_8_loose(data, serializer);
+          sse_encode_String(mime, serializer);
+          sse_encode_String(kind, serializer);
+          sse_encode_list_prim_u_8_loose(thumb, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 41,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSendMediaConstMeta,
+        argValues: [that, contactId, data, mime, kind, thumb],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSendMediaConstMeta,
-      argValues: [that, contactId, data, mime, kind, thumb],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSendMediaConstMeta =>
@@ -1554,28 +1993,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<ChatMessage>> crateApiNightdropCoreSendMessage(
-      {required NightdropCore that,
-      required String contactId,
-      required String text}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_String(text, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 42, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_chat_message,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<List<ChatMessage>> crateApiNightdropCoreSendMessage({
+    required NightdropCore that,
+    required String contactId,
+    required String text,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_String(text, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 42,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_list_chat_message,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSendMessageConstMeta,
+        argValues: [that, contactId, text],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSendMessageConstMeta,
-      argValues: [that, contactId, text],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSendMessageConstMeta =>
@@ -1585,25 +2033,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetBackground(
-      {required NightdropCore that, required bool background}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_bool(background, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 43, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+  Future<void> crateApiNightdropCoreSetBackground({
+    required NightdropCore that,
+    required bool background,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_bool(background, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 43,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreSetBackgroundConstMeta,
+        argValues: [that, background],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetBackgroundConstMeta,
-      argValues: [that, background],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetBackgroundConstMeta =>
@@ -1613,25 +2071,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetCaptureReporting(
-      {required NightdropCore that, required bool visible}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_bool(visible, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSetCaptureReporting({
+    required NightdropCore that,
+    required bool visible,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_bool(visible, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 44,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSetCaptureReportingConstMeta,
+        argValues: [that, visible],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetCaptureReportingConstMeta,
-      argValues: [that, visible],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetCaptureReportingConstMeta =>
@@ -1641,28 +2109,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetDisappearing(
-      {required NightdropCore that,
-      required String contactId,
-      required BigInt secs}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_u_64(secs, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSetDisappearing({
+    required NightdropCore that,
+    required String contactId,
+    required BigInt secs,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_u_64(secs, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 45,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSetDisappearingConstMeta,
+        argValues: [that, contactId, secs],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetDisappearingConstMeta,
-      argValues: [that, contactId, secs],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetDisappearingConstMeta =>
@@ -1672,28 +2149,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetLocalName(
-      {required NightdropCore that,
-      required String contactId,
-      required String name}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_String(name, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 46, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSetLocalName({
+    required NightdropCore that,
+    required String contactId,
+    required String name,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_String(name, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 46,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSetLocalNameConstMeta,
+        argValues: [that, contactId, name],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetLocalNameConstMeta,
-      argValues: [that, contactId, name],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetLocalNameConstMeta =>
@@ -1703,28 +2189,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetMyName(
-      {required NightdropCore that,
-      required String contactId,
-      required String name}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_String(name, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 47, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSetMyName({
+    required NightdropCore that,
+    required String contactId,
+    required String name,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_String(name, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 47,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSetMyNameConstMeta,
+        argValues: [that, contactId, name],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetMyNameConstMeta,
-      argValues: [that, contactId, name],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetMyNameConstMeta =>
@@ -1734,25 +2229,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetMyRelays(
-      {required NightdropCore that, required List<String> relays}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_list_String(relays, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 48, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+  Future<void> crateApiNightdropCoreSetMyRelays({
+    required NightdropCore that,
+    required List<String> relays,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_list_String(relays, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 48,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreSetMyRelaysConstMeta,
+        argValues: [that, relays],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetMyRelaysConstMeta,
-      argValues: [that, relays],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetMyRelaysConstMeta =>
@@ -1762,28 +2267,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetRemoteStorage(
-      {required NightdropCore that,
-      required String contactId,
-      required bool enabled}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_bool(enabled, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 49, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreSetRemoteStorage({
+    required NightdropCore that,
+    required String contactId,
+    required bool enabled,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_bool(enabled, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 49,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreSetRemoteStorageConstMeta,
+        argValues: [that, contactId, enabled],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetRemoteStorageConstMeta,
-      argValues: [that, contactId, enabled],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetRemoteStorageConstMeta =>
@@ -1793,28 +2307,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetVerified(
-      {required NightdropCore that,
-      required String contactId,
-      required bool verified}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_bool(verified, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 50, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+  Future<void> crateApiNightdropCoreSetVerified({
+    required NightdropCore that,
+    required String contactId,
+    required bool verified,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_bool(verified, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 50,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreSetVerifiedConstMeta,
+        argValues: [that, contactId, verified],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreSetVerifiedConstMeta,
-      argValues: [that, contactId, verified],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreSetVerifiedConstMeta =>
@@ -1825,22 +2348,30 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<void> crateApiNightdropCoreShutdown({required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 51, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 51,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiNightdropCoreShutdownConstMeta,
+        argValues: [that],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreShutdownConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreShutdownConstMeta =>
@@ -1850,28 +2381,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreUnsendMessage(
-      {required NightdropCore that,
-      required String contactId,
-      required String msgId}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_String(msgId, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 52, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiNightdropCoreUnsendMessage({
+    required NightdropCore that,
+    required String contactId,
+    required String msgId,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_String(msgId, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 52,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreUnsendMessageConstMeta,
+        argValues: [that, contactId, msgId],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreUnsendMessageConstMeta,
-      argValues: [that, contactId, msgId],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreUnsendMessageConstMeta =>
@@ -1881,28 +2421,37 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<bool> crateApiNightdropCoreVerifySafetyQr(
-      {required NightdropCore that,
-      required String contactId,
-      required String scanned}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        sse_encode_String(contactId, serializer);
-        sse_encode_String(scanned, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 53, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<bool> crateApiNightdropCoreVerifySafetyQr({
+    required NightdropCore that,
+    required String contactId,
+    required String scanned,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that,
+            serializer,
+          );
+          sse_encode_String(contactId, serializer);
+          sse_encode_String(scanned, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 53,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiNightdropCoreVerifySafetyQrConstMeta,
+        argValues: [that, contactId, scanned],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiNightdropCoreVerifySafetyQrConstMeta,
-      argValues: [that, contactId, scanned],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiNightdropCoreVerifySafetyQrConstMeta =>
@@ -1912,50 +2461,94 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiClearDuressSecret(
-      {required String dir, required String passphrase}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(passphrase, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 54, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String?> crateApiCheckBridge({required String line}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(line, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 54,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_opt_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiCheckBridgeConstMeta,
+        argValues: [line],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiClearDuressSecretConstMeta,
-      argValues: [dir, passphrase],
-      apiImpl: this,
-    ));
+    );
+  }
+
+  TaskConstMeta get kCrateApiCheckBridgeConstMeta =>
+      const TaskConstMeta(debugName: "check_bridge", argNames: ["line"]);
+
+  @override
+  Future<void> crateApiClearDuressSecret({
+    required String dir,
+    required String passphrase,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(passphrase, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 55,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiClearDuressSecretConstMeta,
+        argValues: [dir, passphrase],
+        apiImpl: this,
+      ),
+    );
   }
 
   TaskConstMeta get kCrateApiClearDuressSecretConstMeta => const TaskConstMeta(
-        debugName: "clear_duress_secret",
-        argNames: ["dir", "passphrase"],
-      );
+    debugName: "clear_duress_secret",
+    argNames: ["dir", "passphrase"],
+  );
 
   @override
-  Future<String> crateApiClearStorePassphrase(
-      {required String dir, required String passphrase}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(passphrase, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 55, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<String> crateApiClearStorePassphrase({
+    required String dir,
+    required String passphrase,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(passphrase, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 56,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiClearStorePassphraseConstMeta,
+        argValues: [dir, passphrase],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiClearStorePassphraseConstMeta,
-      argValues: [dir, passphrase],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiClearStorePassphraseConstMeta =>
@@ -1966,298 +2559,391 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @override
   Future<bool> crateApiCoverTrafficEnabled() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 56, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 57,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiCoverTrafficEnabledConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiCoverTrafficEnabledConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiCoverTrafficEnabledConstMeta =>
-      const TaskConstMeta(
-        debugName: "cover_traffic_enabled",
-        argNames: [],
-      );
+      const TaskConstMeta(debugName: "cover_traffic_enabled", argNames: []);
 
   @override
   Future<void> crateApiDestroyStoreLock({required String dir}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 57, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 58,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiDestroyStoreLockConstMeta,
+        argValues: [dir],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiDestroyStoreLockConstMeta,
-      argValues: [dir],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiDestroyStoreLockConstMeta => const TaskConstMeta(
-        debugName: "destroy_store_lock",
-        argNames: ["dir"],
-      );
+  TaskConstMeta get kCrateApiDestroyStoreLockConstMeta =>
+      const TaskConstMeta(debugName: "destroy_store_lock", argNames: ["dir"]);
 
   @override
   Future<void> crateApiDiagNote({required String line}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(line, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 58, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(line, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 59,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiDiagNoteConstMeta,
+        argValues: [line],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiDiagNoteConstMeta,
-      argValues: [line],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiDiagNoteConstMeta => const TaskConstMeta(
-        debugName: "diag_note",
-        argNames: ["line"],
-      );
+  TaskConstMeta get kCrateApiDiagNoteConstMeta =>
+      const TaskConstMeta(debugName: "diag_note", argNames: ["line"]);
 
   @override
-  Future<bool> crateApiDuressIsArmed(
-      {required String dir, required String keyB64}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(keyB64, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 59, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: null,
+  Future<bool> crateApiDuressIsArmed({
+    required String dir,
+    required String keyB64,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(keyB64, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 60,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiDuressIsArmedConstMeta,
+        argValues: [dir, keyB64],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiDuressIsArmedConstMeta,
-      argValues: [dir, keyB64],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiDuressIsArmedConstMeta => const TaskConstMeta(
-        debugName: "duress_is_armed",
-        argNames: ["dir", "keyB64"],
-      );
+    debugName: "duress_is_armed",
+    argNames: ["dir", "keyB64"],
+  );
 
   @override
   Future<String> crateApiRandomStoreKey() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 60, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_String,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 61,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiRandomStoreKeyConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiRandomStoreKeyConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiRandomStoreKeyConstMeta => const TaskConstMeta(
-        debugName: "random_store_key",
-        argNames: [],
-      );
+  TaskConstMeta get kCrateApiRandomStoreKeyConstMeta =>
+      const TaskConstMeta(debugName: "random_store_key", argNames: []);
+
+  @override
+  Future<String> crateApiReadBridges({required String dir}) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 62,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_String,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiReadBridgesConstMeta,
+        argValues: [dir],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiReadBridgesConstMeta =>
+      const TaskConstMeta(debugName: "read_bridges", argNames: ["dir"]);
 
   @override
   Future<void> crateApiResetTorGuards({required String stateDir}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(stateDir, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 61, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(stateDir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 63,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiResetTorGuardsConstMeta,
+        argValues: [stateDir],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiResetTorGuardsConstMeta,
-      argValues: [stateDir],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiResetTorGuardsConstMeta => const TaskConstMeta(
-        debugName: "reset_tor_guards",
-        argNames: ["stateDir"],
-      );
+    debugName: "reset_tor_guards",
+    argNames: ["stateDir"],
+  );
 
   @override
   Future<void> crateApiSetCoverTraffic({required bool enabled}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_bool(enabled, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 62, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(enabled, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 64,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSetCoverTrafficConstMeta,
+        argValues: [enabled],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSetCoverTrafficConstMeta,
-      argValues: [enabled],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiSetCoverTrafficConstMeta => const TaskConstMeta(
-        debugName: "set_cover_traffic",
-        argNames: ["enabled"],
-      );
+    debugName: "set_cover_traffic",
+    argNames: ["enabled"],
+  );
 
   @override
   Future<void> crateApiSetDiagnostics({required bool enabled}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_bool(enabled, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 63, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_bool(enabled, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 65,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiSetDiagnosticsConstMeta,
+        argValues: [enabled],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSetDiagnosticsConstMeta,
-      argValues: [enabled],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiSetDiagnosticsConstMeta => const TaskConstMeta(
-        debugName: "set_diagnostics",
-        argNames: ["enabled"],
-      );
+  TaskConstMeta get kCrateApiSetDiagnosticsConstMeta =>
+      const TaskConstMeta(debugName: "set_diagnostics", argNames: ["enabled"]);
 
   @override
-  Future<void> crateApiSetDuressSecret(
-      {required String dir,
-      required String passphrase,
-      required String duress}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(passphrase, serializer);
-        sse_encode_String(duress, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 64, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiSetDuressSecret({
+    required String dir,
+    required String passphrase,
+    required String duress,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(passphrase, serializer);
+          sse_encode_String(duress, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 66,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSetDuressSecretConstMeta,
+        argValues: [dir, passphrase, duress],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSetDuressSecretConstMeta,
-      argValues: [dir, passphrase, duress],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiSetDuressSecretConstMeta => const TaskConstMeta(
-        debugName: "set_duress_secret",
-        argNames: ["dir", "passphrase", "duress"],
-      );
+    debugName: "set_duress_secret",
+    argNames: ["dir", "passphrase", "duress"],
+  );
 
   @override
-  Future<void> crateApiSetStorePassphrase(
-      {required String dir,
-      required String keyB64,
-      required String passphrase}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(keyB64, serializer);
-        sse_encode_String(passphrase, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 65, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<void> crateApiSetStorePassphrase({
+    required String dir,
+    required String keyB64,
+    required String passphrase,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(keyB64, serializer);
+          sse_encode_String(passphrase, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 67,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiSetStorePassphraseConstMeta,
+        argValues: [dir, keyB64, passphrase],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiSetStorePassphraseConstMeta,
-      argValues: [dir, keyB64, passphrase],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiSetStorePassphraseConstMeta => const TaskConstMeta(
-        debugName: "set_store_passphrase",
-        argNames: ["dir", "keyB64", "passphrase"],
-      );
+    debugName: "set_store_passphrase",
+    argNames: ["dir", "keyB64", "passphrase"],
+  );
 
   @override
   Future<bool> crateApiStoreIsLocked({required String dir}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 66, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 68,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiStoreIsLockedConstMeta,
+        argValues: [dir],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiStoreIsLockedConstMeta,
-      argValues: [dir],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiStoreIsLockedConstMeta => const TaskConstMeta(
-        debugName: "store_is_locked",
-        argNames: ["dir"],
-      );
+  TaskConstMeta get kCrateApiStoreIsLockedConstMeta =>
+      const TaskConstMeta(debugName: "store_is_locked", argNames: ["dir"]);
 
   @override
-  Future<bool> crateApiStoreSecretIsCorrect(
-      {required String dir, required String secret}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(secret, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 67, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_bool,
-        decodeErrorData: null,
+  Future<bool> crateApiStoreSecretIsCorrect({
+    required String dir,
+    required String secret,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(secret, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 69,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bool,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiStoreSecretIsCorrectConstMeta,
+        argValues: [dir, secret],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiStoreSecretIsCorrectConstMeta,
-      argValues: [dir, secret],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiStoreSecretIsCorrectConstMeta =>
@@ -2269,85 +2955,137 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   @override
   Stream<AppEvent> crateApiSubscribe() {
     final sink = RustStreamSink<AppEvent>();
-    unawaited(handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_StreamSink_app_event_Sse(sink, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 68, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    unawaited(
+      handler.executeNormal(
+        NormalTask(
+          callFfi: (port_) {
+            final serializer = SseSerializer(generalizedFrbRustBinding);
+            sse_encode_StreamSink_app_event_Sse(sink, serializer);
+            pdeCallFfi(
+              generalizedFrbRustBinding,
+              serializer,
+              funcId: 70,
+              port: port_,
+            );
+          },
+          codec: SseCodec(
+            decodeSuccessData: sse_decode_unit,
+            decodeErrorData: null,
+          ),
+          constMeta: kCrateApiSubscribeConstMeta,
+          argValues: [sink],
+          apiImpl: this,
+        ),
       ),
-      constMeta: kCrateApiSubscribeConstMeta,
-      argValues: [sink],
-      apiImpl: this,
-    )));
+    );
     return sink.stream;
   }
 
-  TaskConstMeta get kCrateApiSubscribeConstMeta => const TaskConstMeta(
-        debugName: "subscribe",
-        argNames: ["sink"],
-      );
+  TaskConstMeta get kCrateApiSubscribeConstMeta =>
+      const TaskConstMeta(debugName: "subscribe", argNames: ["sink"]);
 
   @override
-  Future<StoreUnlock> crateApiUnlockStoreKey(
-      {required String dir, required String secret}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_String(dir, serializer);
-        sse_encode_String(secret, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 69, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_store_unlock,
-        decodeErrorData: sse_decode_AnyhowException,
+  Future<StoreUnlock> crateApiUnlockStoreKey({
+    required String dir,
+    required String secret,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(secret, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 71,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_store_unlock,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiUnlockStoreKeyConstMeta,
+        argValues: [dir, secret],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiUnlockStoreKeyConstMeta,
-      argValues: [dir, secret],
-      apiImpl: this,
-    ));
+    );
   }
 
   TaskConstMeta get kCrateApiUnlockStoreKeyConstMeta => const TaskConstMeta(
-        debugName: "unlock_store_key",
-        argNames: ["dir", "secret"],
-      );
+    debugName: "unlock_store_key",
+    argNames: ["dir", "secret"],
+  );
 
   @override
   Future<void> crateApiUnsubscribe() {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 70, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 72,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_unit,
+          decodeErrorData: null,
+        ),
+        constMeta: kCrateApiUnsubscribeConstMeta,
+        argValues: [],
+        apiImpl: this,
       ),
-      constMeta: kCrateApiUnsubscribeConstMeta,
-      argValues: [],
-      apiImpl: this,
-    ));
+    );
   }
 
-  TaskConstMeta get kCrateApiUnsubscribeConstMeta => const TaskConstMeta(
-        debugName: "unsubscribe",
-        argNames: [],
-      );
+  TaskConstMeta get kCrateApiUnsubscribeConstMeta =>
+      const TaskConstMeta(debugName: "unsubscribe", argNames: []);
+
+  @override
+  Future<BridgeSaveResult> crateApiWriteBridges({
+    required String dir,
+    required String text,
+  }) {
+    return handler.executeNormal(
+      NormalTask(
+        callFfi: (port_) {
+          final serializer = SseSerializer(generalizedFrbRustBinding);
+          sse_encode_String(dir, serializer);
+          sse_encode_String(text, serializer);
+          pdeCallFfi(
+            generalizedFrbRustBinding,
+            serializer,
+            funcId: 73,
+            port: port_,
+          );
+        },
+        codec: SseCodec(
+          decodeSuccessData: sse_decode_bridge_save_result,
+          decodeErrorData: sse_decode_AnyhowException,
+        ),
+        constMeta: kCrateApiWriteBridgesConstMeta,
+        argValues: [dir, text],
+        apiImpl: this,
+      ),
+    );
+  }
+
+  TaskConstMeta get kCrateApiWriteBridgesConstMeta => const TaskConstMeta(
+    debugName: "write_bridges",
+    argNames: ["dir", "text"],
+  );
 
   RustArcIncrementStrongCountFnType
-      get rust_arc_increment_strong_count_NightdropCore => wire
-          .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore;
+  get rust_arc_increment_strong_count_NightdropCore => wire
+      .rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore;
 
   RustArcDecrementStrongCountFnType
-      get rust_arc_decrement_strong_count_NightdropCore => wire
-          .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore;
+  get rust_arc_decrement_strong_count_NightdropCore => wire
+      .rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore;
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw) {
@@ -2357,24 +3095,27 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   NightdropCore
-      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          dynamic raw) {
+  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    dynamic raw,
+  ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return NightdropCoreImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
 
   @protected
   NightdropCore
-      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          dynamic raw) {
+  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    dynamic raw,
+  ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return NightdropCoreImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
 
   @protected
   NightdropCore
-      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          dynamic raw) {
+  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    dynamic raw,
+  ) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return NightdropCoreImpl.frbInternalDcoDecode(raw as List<dynamic>);
   }
@@ -2448,6 +3189,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  BridgeSaveResult dco_decode_bridge_save_result(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return BridgeSaveResult(
+      accepted: dco_decode_u_32(arr[0]),
+      rejected: dco_decode_list_rejected_bridge(arr[1]),
+    );
+  }
+
+  @protected
   ChatMessage dco_decode_chat_message(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2501,9 +3254,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final arr = raw as List<dynamic>;
     if (arr.length != 1)
       throw Exception('unexpected arr length: expect 1 but see ${arr.length}');
-    return Identity(
-      id: dco_decode_String(arr[0]),
-    );
+    return Identity(id: dco_decode_String(arr[0]));
   }
 
   @protected
@@ -2534,6 +3285,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Uint8List dco_decode_list_prim_u_8_strict(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw as Uint8List;
+  }
+
+  @protected
+  List<RejectedBridge> dco_decode_list_rejected_bridge(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_rejected_bridge).toList();
   }
 
   @protected
@@ -2581,6 +3338,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return PairingInvite(
       shortCode: dco_decode_String(arr[0]),
       qrPayload: dco_decode_String(arr[1]),
+    );
+  }
+
+  @protected
+  RejectedBridge dco_decode_rejected_bridge(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return RejectedBridge(
+      line: dco_decode_String(arr[0]),
+      reason: dco_decode_String(arr[1]),
     );
   }
 
@@ -2677,34 +3446,44 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   NightdropCore
-      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          SseDeserializer deserializer) {
+  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return NightdropCoreImpl.frbInternalSseDecode(
-        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
+      sse_decode_usize(deserializer),
+      sse_decode_i_32(deserializer),
+    );
   }
 
   @protected
   NightdropCore
-      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          SseDeserializer deserializer) {
+  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return NightdropCoreImpl.frbInternalSseDecode(
-        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
+      sse_decode_usize(deserializer),
+      sse_decode_i_32(deserializer),
+    );
   }
 
   @protected
   NightdropCore
-      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          SseDeserializer deserializer) {
+  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return NightdropCoreImpl.frbInternalSseDecode(
-        sse_decode_usize(deserializer), sse_decode_i_32(deserializer));
+      sse_decode_usize(deserializer),
+      sse_decode_i_32(deserializer),
+    );
   }
 
   @protected
   RustStreamSink<AppEvent> sse_decode_StreamSink_app_event_Sse(
-      SseDeserializer deserializer) {
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     throw UnimplementedError('Unreachable ()');
   }
@@ -2721,10 +3500,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     // Codec=Sse (Serialization based), see doc to use other codecs
     final var_kind = sse_decode_String(deserializer);
     final var_contacts = sse_decode_list_String(deserializer);
-    final var_progress =
-        sse_decode_opt_box_autoadd_transfer_progress(deserializer);
+    final var_progress = sse_decode_opt_box_autoadd_transfer_progress(
+      deserializer,
+    );
     return AppEvent(
-        kind: var_kind, contacts: var_contacts, progress: var_progress);
+      kind: var_kind,
+      contacts: var_contacts,
+      progress: var_progress,
+    );
   }
 
   @protected
@@ -2734,9 +3517,10 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_latest = sse_decode_String(deserializer);
     final var_updateAvailable = sse_decode_bool(deserializer);
     return AppUpdate(
-        current: var_current,
-        latest: var_latest,
-        updateAvailable: var_updateAvailable);
+      current: var_current,
+      latest: var_latest,
+      updateAvailable: var_updateAvailable,
+    );
   }
 
   @protected
@@ -2759,7 +3543,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   TransferProgress sse_decode_box_autoadd_transfer_progress(
-      SseDeserializer deserializer) {
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_transfer_progress(deserializer));
   }
@@ -2768,6 +3553,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     return (sse_decode_u_64(deserializer));
+  }
+
+  @protected
+  BridgeSaveResult sse_decode_bridge_save_result(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    final var_accepted = sse_decode_u_32(deserializer);
+    final var_rejected = sse_decode_list_rejected_bridge(deserializer);
+    return BridgeSaveResult(accepted: var_accepted, rejected: var_rejected);
   }
 
   @protected
@@ -2787,19 +3580,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_edited = sse_decode_bool(deserializer);
     final var_at = sse_decode_u_64(deserializer);
     return ChatMessage(
-        fromMe: var_fromMe,
-        text: var_text,
-        system: var_system,
-        kind: var_kind,
-        mime: var_mime,
-        mediaId: var_mediaId,
-        mediaSize: var_mediaSize,
-        transferId: var_transferId,
-        thumbId: var_thumbId,
-        delivery: var_delivery,
-        msgId: var_msgId,
-        edited: var_edited,
-        at: var_at);
+      fromMe: var_fromMe,
+      text: var_text,
+      system: var_system,
+      kind: var_kind,
+      mime: var_mime,
+      mediaId: var_mediaId,
+      mediaSize: var_mediaSize,
+      transferId: var_transferId,
+      thumbId: var_thumbId,
+      delivery: var_delivery,
+      msgId: var_msgId,
+      edited: var_edited,
+      at: var_at,
+    );
   }
 
   @protected
@@ -2814,29 +3608,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_peerBackedUp = sse_decode_bool(deserializer);
     final var_verified = sse_decode_bool(deserializer);
     final var_peerVerified = sse_decode_bool(deserializer);
-    final var_peerCapturesSilent =
-        sse_decode_opt_box_autoadd_bool(deserializer);
+    final var_peerCapturesSilent = sse_decode_opt_box_autoadd_bool(
+      deserializer,
+    );
     final var_peerRelays = sse_decode_list_String(deserializer);
     final var_remoteStorageHealthy = sse_decode_bool(deserializer);
     final var_localName = sse_decode_String(deserializer);
     final var_identityTag = sse_decode_String(deserializer);
     final var_lastSeenSecs = sse_decode_u_64(deserializer);
     return Contact(
-        id: var_id,
-        theirName: var_theirName,
-        myName: var_myName,
-        remoteStorage: var_remoteStorage,
-        disappearingSecs: var_disappearingSecs,
-        backedUp: var_backedUp,
-        peerBackedUp: var_peerBackedUp,
-        verified: var_verified,
-        peerVerified: var_peerVerified,
-        peerCapturesSilent: var_peerCapturesSilent,
-        peerRelays: var_peerRelays,
-        remoteStorageHealthy: var_remoteStorageHealthy,
-        localName: var_localName,
-        identityTag: var_identityTag,
-        lastSeenSecs: var_lastSeenSecs);
+      id: var_id,
+      theirName: var_theirName,
+      myName: var_myName,
+      remoteStorage: var_remoteStorage,
+      disappearingSecs: var_disappearingSecs,
+      backedUp: var_backedUp,
+      peerBackedUp: var_peerBackedUp,
+      verified: var_verified,
+      peerVerified: var_peerVerified,
+      peerCapturesSilent: var_peerCapturesSilent,
+      peerRelays: var_peerRelays,
+      remoteStorageHealthy: var_remoteStorageHealthy,
+      localName: var_localName,
+      identityTag: var_identityTag,
+      lastSeenSecs: var_lastSeenSecs,
+    );
   }
 
   @protected
@@ -2897,6 +3693,20 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RejectedBridge> sse_decode_list_rejected_bridge(
+    SseDeserializer deserializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    final len_ = sse_decode_i_32(deserializer);
+    final ans_ = <RejectedBridge>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_rejected_bridge(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   List<RelayHealth> sse_decode_list_relay_health(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -2921,7 +3731,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   AppUpdate? sse_decode_opt_box_autoadd_app_update(
-      SseDeserializer deserializer) {
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     if (sse_decode_bool(deserializer)) {
@@ -2944,7 +3755,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   TransferProgress? sse_decode_opt_box_autoadd_transfer_progress(
-      SseDeserializer deserializer) {
+    SseDeserializer deserializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     if (sse_decode_bool(deserializer)) {
@@ -2974,6 +3786,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RejectedBridge sse_decode_rejected_bridge(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    final var_line = sse_decode_String(deserializer);
+    final var_reason = sse_decode_String(deserializer);
+    return RejectedBridge(line: var_line, reason: var_reason);
+  }
+
+  @protected
   RelayHealth sse_decode_relay_health(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     final var_address = sse_decode_String(deserializer);
@@ -2987,7 +3807,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_password = sse_decode_String(deserializer);
     final var_expiresAtSecs = sse_decode_u_64(deserializer);
     return ServerBackupInfo(
-        password: var_password, expiresAtSecs: var_expiresAtSecs);
+      password: var_password,
+      expiresAtSecs: var_expiresAtSecs,
+    );
   }
 
   @protected
@@ -3049,52 +3871,67 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_AnyhowException(
-      AnyhowException self, SseSerializer serializer) {
+    AnyhowException self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.message, serializer);
   }
 
   @protected
   void
-      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          NightdropCore self, SseSerializer serializer) {
+  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    NightdropCore self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
-        (self as NightdropCoreImpl).frbInternalSseEncode(move: true),
-        serializer);
+      (self as NightdropCoreImpl).frbInternalSseEncode(move: true),
+      serializer,
+    );
   }
 
   @protected
   void
-      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          NightdropCore self, SseSerializer serializer) {
+  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    NightdropCore self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
-        (self as NightdropCoreImpl).frbInternalSseEncode(move: false),
-        serializer);
+      (self as NightdropCoreImpl).frbInternalSseEncode(move: false),
+      serializer,
+    );
   }
 
   @protected
   void
-      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-          NightdropCore self, SseSerializer serializer) {
+  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+    NightdropCore self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_usize(
-        (self as NightdropCoreImpl).frbInternalSseEncode(move: null),
-        serializer);
+      (self as NightdropCoreImpl).frbInternalSseEncode(move: null),
+      serializer,
+    );
   }
 
   @protected
   void sse_encode_StreamSink_app_event_Sse(
-      RustStreamSink<AppEvent> self, SseSerializer serializer) {
+    RustStreamSink<AppEvent> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(
-        self.setupAndSerialize(
-            codec: SseCodec(
+      self.setupAndSerialize(
+        codec: SseCodec(
           decodeSuccessData: sse_decode_app_event,
           decodeErrorData: sse_decode_AnyhowException,
-        )),
-        serializer);
+        ),
+      ),
+      serializer,
+    );
   }
 
   @protected
@@ -3127,7 +3964,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_box_autoadd_app_update(
-      AppUpdate self, SseSerializer serializer) {
+    AppUpdate self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_app_update(self, serializer);
   }
@@ -3140,7 +3979,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_box_autoadd_transfer_progress(
-      TransferProgress self, SseSerializer serializer) {
+    TransferProgress self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_transfer_progress(self, serializer);
   }
@@ -3149,6 +3990,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_64(self, serializer);
+  }
+
+  @protected
+  void sse_encode_bridge_save_result(
+    BridgeSaveResult self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_u_32(self.accepted, serializer);
+    sse_encode_list_rejected_bridge(self.rejected, serializer);
   }
 
   @protected
@@ -3206,7 +4057,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_chat_message(
-      List<ChatMessage> self, SseSerializer serializer) {
+    List<ChatMessage> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
@@ -3225,24 +4078,43 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_list_prim_u_8_loose(
-      List<int> self, SseSerializer serializer) {
+    List<int> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
-    serializer.buffer
-        .putUint8List(self is Uint8List ? self : Uint8List.fromList(self));
+    serializer.buffer.putUint8List(
+      self is Uint8List ? self : Uint8List.fromList(self),
+    );
   }
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-      Uint8List self, SseSerializer serializer) {
+    Uint8List self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     serializer.buffer.putUint8List(self);
   }
 
   @protected
+  void sse_encode_list_rejected_bridge(
+    List<RejectedBridge> self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_rejected_bridge(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_list_relay_health(
-      List<RelayHealth> self, SseSerializer serializer) {
+    List<RelayHealth> self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_i_32(self.length, serializer);
     for (final item in self) {
@@ -3262,7 +4134,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_opt_box_autoadd_app_update(
-      AppUpdate? self, SseSerializer serializer) {
+    AppUpdate? self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     sse_encode_bool(self != null, serializer);
@@ -3283,7 +4157,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_opt_box_autoadd_transfer_progress(
-      TransferProgress? self, SseSerializer serializer) {
+    TransferProgress? self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
     sse_encode_bool(self != null, serializer);
@@ -3310,6 +4186,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_rejected_bridge(
+    RejectedBridge self,
+    SseSerializer serializer,
+  ) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.line, serializer);
+    sse_encode_String(self.reason, serializer);
+  }
+
+  @protected
   void sse_encode_relay_health(RelayHealth self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.address, serializer);
@@ -3318,7 +4204,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_server_backup_info(
-      ServerBackupInfo self, SseSerializer serializer) {
+    ServerBackupInfo self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.password, serializer);
     sse_encode_u_64(self.expiresAtSecs, serializer);
@@ -3333,7 +4221,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 
   @protected
   void sse_encode_transfer_progress(
-      TransferProgress self, SseSerializer serializer) {
+    TransferProgress self,
+    SseSerializer serializer,
+  ) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_u_64(self.done, serializer);
     sse_encode_opt_box_autoadd_u_64(self.total, serializer);
@@ -3385,11 +4275,11 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
 class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   // Not to be used by end users
   NightdropCoreImpl.frbInternalDcoDecode(List<dynamic> wire)
-      : super.frbInternalDcoDecode(wire, _kStaticData);
+    : super.frbInternalDcoDecode(wire, _kStaticData);
 
   // Not to be used by end users
   NightdropCoreImpl.frbInternalSseDecode(BigInt ptr, int externalSizeOnNative)
-      : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
+    : super.frbInternalSseDecode(ptr, externalSizeOnNative, _kStaticData);
 
   static final _kStaticData = RustArcStaticData(
     rustArcIncrementStrongCount:
@@ -3403,16 +4293,17 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// Approve or decline a pending inbound request. On approval it becomes a contact.
   Future<void> authorize({required String contactId, required bool accept}) =>
       RustLib.instance.api.crateApiNightdropCoreAuthorize(
-          that: this, contactId: contactId, accept: accept);
+        that: this,
+        contactId: contactId,
+        accept: accept,
+      );
 
   /// Return the prepared backup blob (already password-encrypted) so the UI can hand it to
   /// the OS file picker — needed on Android, where the app can only write to a user-chosen
   /// location (Documents/Downloads) via the Storage Access Framework, not a private path.
   /// Leaves the pending blob in place so a cancelled save can be retried.
   Future<Uint8List> backupBytes() =>
-      RustLib.instance.api.crateApiNightdropCoreBackupBytes(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreBackupBytes(that: this);
 
   /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
   /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
@@ -3428,20 +4319,21 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// is ignored). Call it at most daily; it is a network round trip, not a getter.
   Future<AppUpdate?> checkForUpdate({required String currentVersion}) =>
       RustLib.instance.api.crateApiNightdropCoreCheckForUpdate(
-          that: this, currentVersion: currentVersion);
+        that: this,
+        currentVersion: currentVersion,
+      );
 
   /// Join from a scanned QR payload (pre-authorized, §5a):
   /// `nightdrop://pair?addr=...&ik=...&otk=...`. Opens a session and sends the Hello. This
   /// is the relay-free pairing path used over Tor (the QR carries the inviter's `.onion`).
-  Future<Contact> connectViaQr({required String payload}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreConnectViaQr(that: this, payload: payload);
+  Future<Contact> connectViaQr({required String payload}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreConnectViaQr(that: this, payload: payload);
 
   /// All current contacts.
   Future<List<Contact>> contacts() =>
-      RustLib.instance.api.crateApiNightdropCoreContacts(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreContacts(that: this);
 
   /// Begin an encrypted backup: build the blob, hold it pending, and return the
   /// **recovery password to show once** (§7). Randomly generated, never persisted; losing
@@ -3455,18 +4347,20 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// chat (history + media if `full`) and return the one-time recovery password. Held pending
   /// exactly like [`create_backup`](Self::create_backup) — acknowledge the password, then
   /// [`save_backup`](Self::save_backup) / [`backup_bytes`](Self::backup_bytes) to write it.
-  Future<String> createChatBackup(
-          {required String contactId, required bool full}) =>
-      RustLib.instance.api.crateApiNightdropCoreCreateChatBackup(
-          that: this, contactId: contactId, full: full);
+  Future<String> createChatBackup({
+    required String contactId,
+    required bool full,
+  }) => RustLib.instance.api.crateApiNightdropCoreCreateChatBackup(
+    that: this,
+    contactId: contactId,
+    full: full,
+  );
 
   /// Create a pairing invite: a `slot-secret-words` short code plus a QR payload that
   /// embeds our address and a real pre-key bundle (§5a). In demo mode it also simulates
   /// a peer joining, producing a request to approve.
   Future<PairingInvite> createInvite() =>
-      RustLib.instance.api.crateApiNightdropCoreCreateInvite(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreCreateInvite(that: this);
 
   /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
   /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
@@ -3476,26 +4370,30 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// for a public relay is harmless but unnecessary.
   Future<String> createRelayAccessKey({required String relayOnion}) =>
       RustLib.instance.api.crateApiNightdropCoreCreateRelayAccessKey(
-          that: this, relayOnion: relayOnion);
+        that: this,
+        relayOnion: relayOnion,
+      );
 
   /// Enable an **opt-in server backup** (§7c invariant): post an opaque, password-encrypted
   /// backup blob to the relay for `ttl_hours` (clamped to 1..=36; default 24). The recovery
   /// `password` is randomly generated here, returned to be shown **once**, and never
   /// persisted — the relay never sees it. The returned exact expiry drives the acknowledgment
   /// screen the invariant requires. Losing the password loses the backup, by design.
-  Future<ServerBackupInfo> createServerBackup(
-          {required BigInt ttlHours, required bool full}) =>
-      RustLib.instance.api.crateApiNightdropCoreCreateServerBackup(
-          that: this, ttlHours: ttlHours, full: full);
+  Future<ServerBackupInfo> createServerBackup({
+    required BigInt ttlHours,
+    required bool full,
+  }) => RustLib.instance.api.crateApiNightdropCoreCreateServerBackup(
+    that: this,
+    ttlHours: ttlHours,
+    full: full,
+  );
 
   /// Create a short-code invite via the rendezvous mailbox (§5b/§5c). Returns the full
   /// `slot-secret-words` code to read out; the secret never reaches the relay. Returns
   /// immediately — the background poller completes the interactive SPAKE2 handshake with a
   /// joiner (`Node::service_pending_invites`), so this device must stay reachable meanwhile.
-  Future<String> createShortCodeInvite() =>
-      RustLib.instance.api.crateApiNightdropCoreCreateShortCodeInvite(
-        that: this,
-      );
+  Future<String> createShortCodeInvite() => RustLib.instance.api
+      .crateApiNightdropCoreCreateShortCodeInvite(that: this);
 
   /// Delete a chat (TODO #1): signal the peer (who then sees a "chat deleted" notice) and
   /// remove it locally. Creating a new chat is required to talk again.
@@ -3512,9 +4410,7 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// timeouts and `Unable to build circuit to introduction point`. By the old health check that
   /// device was fine, so nothing healed and every message silently went by relay instead.
   Future<bool> directPathWedged() =>
-      RustLib.instance.api.crateApiNightdropCoreDirectPathWedged(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreDirectPathWedged(that: this);
 
   /// Download the published build **for this device** over Tor and write it to `dest_path`,
   /// verifying its SHA-256 against the manifest first. Returns the byte count.
@@ -3530,9 +4426,10 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   ///
   /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
   /// take minutes on a poor circuit.
-  Future<BigInt> downloadUpdate({required String destPath}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreDownloadUpdate(that: this, destPath: destPath);
+  Future<BigInt> downloadUpdate({required String destPath}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreDownloadUpdate(that: this, destPath: destPath);
 
   /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
   /// is told, not just un-backed ones, since no restore is coming. The notice is the ordinary
@@ -3541,40 +4438,39 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// Best-effort by design. The caller must wipe regardless of the count returned: a wipe that
   /// can be prevented by taking the phone off the network is not a wipe.
   Future<int> duressLogout() =>
-      RustLib.instance.api.crateApiNightdropCoreDuressLogout(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreDuressLogout(that: this);
 
   /// Edit the text of one of our own messages (`msg_id` from [`ChatMessage`]). Allowed
   /// within 15 minutes of sending, or at any time while the message is still queued on
   /// the relay (the peer never saw it — the queued blob is recalled and replaced).
   /// The message is marked `edited`; the peer's copy updates via an E2E edit frame.
-  Future<void> editMessage(
-          {required String contactId,
-          required String msgId,
-          required String text}) =>
-      RustLib.instance.api.crateApiNightdropCoreEditMessage(
-          that: this, contactId: contactId, msgId: msgId, text: text);
+  Future<void> editMessage({
+    required String contactId,
+    required String msgId,
+    required String text,
+  }) => RustLib.instance.api.crateApiNightdropCoreEditMessage(
+    that: this,
+    contactId: contactId,
+    msgId: msgId,
+    text: text,
+  );
 
   /// This device's public identity handle.
   Future<Identity> identity() =>
-      RustLib.instance.api.crateApiNightdropCoreIdentity(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreIdentity(that: this);
 
   /// Contacts whose inbound chat request awaits the user's approval (§5).
   Future<List<Contact>> incomingRequests() =>
-      RustLib.instance.api.crateApiNightdropCoreIncomingRequests(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreIncomingRequests(that: this);
 
   /// Join a chat from a `slot-secret-words` short code (§5b): run the interactive SPAKE2
   /// handshake through the rendezvous, then open a session toward the inviter. The handshake
   /// blocks on relay round-trips, so it runs **without** the core lock held; only the brief
   /// identity-mutating steps (relay lookup, session open) take the lock.
-  Future<Contact> joinViaShortCode({required String code}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreJoinViaShortCode(that: this, code: code);
+  Future<Contact> joinViaShortCode({required String code}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreJoinViaShortCode(that: this, code: code);
 
   /// Peer-facing logout (#7 / §11.6): tell the peer of every **un-backed** chat that it's
   /// closed (so their mail isn't lost to a since-deleted identity), leave backed-up chats
@@ -3584,47 +4480,50 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// Returns the number of un-backed chats whose "chat deleted" notice we could **not** get out
   /// (neither queued on a relay nor sent directly), so the UI can warn "some contacts may not
   /// have been notified" (§1.3). `0` means every notice was queued/sent.
-  Future<int> logout() => RustLib.instance.api.crateApiNightdropCoreLogout(
-        that: this,
-      );
+  Future<int> logout() =>
+      RustLib.instance.api.crateApiNightdropCoreLogout(that: this);
 
   /// Decrypt and return an attachment's bytes (for inline image display).
-  Future<Uint8List> mediaBytes({required String mediaId}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreMediaBytes(that: this, mediaId: mediaId);
+  Future<Uint8List> mediaBytes({required String mediaId}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreMediaBytes(that: this, mediaId: mediaId);
 
   /// Decrypt an attachment to a temp file and return its path (to open a video/file in the
   /// system player without copying the bytes back through the bridge).
   Future<String> mediaToFile({required String mediaId, required String ext}) =>
       RustLib.instance.api.crateApiNightdropCoreMediaToFile(
-          that: this, mediaId: mediaId, ext: ext);
+        that: this,
+        mediaId: mediaId,
+        ext: ext,
+      );
 
   /// Merge a scoped backup file at `path` into the **current** identity (#8): add the chat(s)
   /// it carries without disturbing our identity or any active session (existing chats only
   /// gain missing history). Returns how many messages were merged.
   Future<int> mergeBackup({required String path, required String password}) =>
       RustLib.instance.api.crateApiNightdropCoreMergeBackup(
-          that: this, path: path, password: password);
+        that: this,
+        path: path,
+        password: password,
+      );
 
   /// Messages for a contact, oldest first.
-  Future<List<ChatMessage>> messages({required String contactId}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreMessages(that: this, contactId: contactId);
+  Future<List<ChatMessage>> messages({required String contactId}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreMessages(that: this, contactId: contactId);
 
   /// Our advertised **extra** relay addresses (#17) — relays that also host our mailbox, on top
   /// of the built-in default. Empty by default.
   Future<List<String>> myRelays() =>
-      RustLib.instance.api.crateApiNightdropCoreMyRelays(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreMyRelays(that: this);
 
   /// Whether this device's address is published/reachable yet. On Tor it is `false` for the
   /// ~1–3 min after launch while the onion descriptor (re)publishes — the UI shows a "still
   /// publishing, others can't pair yet" banner until this is `true`.
   Future<bool> onionReady() =>
-      RustLib.instance.api.crateApiNightdropCoreOnionReady(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreOnionReady(that: this);
 
   /// Open a new chat against a fresh in-process peer (demo only): stands up a real `Node`
   /// over the in-memory network and performs the genuine bundle handshake. Errors on a real
@@ -3633,9 +4532,7 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       .crateApiNightdropCoreOpenChat(that: this, code: code);
 
   Future<List<RelayHealth>> relayHealth() =>
-      RustLib.instance.api.crateApiNightdropCoreRelayHealth(
-        that: this,
-      );
+      RustLib.instance.api.crateApiNightdropCoreRelayHealth(that: this);
 
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
   ///
@@ -3646,14 +4543,16 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
   /// not imply otherwise.
   Future<void> reportScreenshot({required String contactId}) => RustLib
-      .instance.api
+      .instance
+      .api
       .crateApiNightdropCoreReportScreenshot(that: this, contactId: contactId);
 
   /// The human-comparable **safety number** for a contact (12×5 digits, identical on both
   /// devices) — compare it out-of-band to confirm no MITM on pairing (key-verification design).
-  Future<String> safetyNumber({required String contactId}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreSafetyNumber(that: this, contactId: contactId);
+  Future<String> safetyNumber({required String contactId}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreSafetyNumber(that: this, contactId: contactId);
 
   /// The raw safety fingerprint (base64url) to render as a QR for scan-to-verify.
   Future<String> safetyQr({required String contactId}) => RustLib.instance.api
@@ -3666,26 +4565,31 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
 
   /// Send an image/video attachment (E2E-encrypted, sealed at rest). `kind` is
   /// "image"/"video", `mime` like "image/jpeg". Capped at 100 MB.
-  Future<void> sendMedia(
-          {required String contactId,
-          required List<int> data,
-          required String mime,
-          required String kind,
-          required List<int> thumb}) =>
-      RustLib.instance.api.crateApiNightdropCoreSendMedia(
-          that: this,
-          contactId: contactId,
-          data: data,
-          mime: mime,
-          kind: kind,
-          thumb: thumb);
+  Future<void> sendMedia({
+    required String contactId,
+    required List<int> data,
+    required String mime,
+    required String kind,
+    required List<int> thumb,
+  }) => RustLib.instance.api.crateApiNightdropCoreSendMedia(
+    that: this,
+    contactId: contactId,
+    data: data,
+    mime: mime,
+    kind: kind,
+    thumb: thumb,
+  );
 
   /// Send a message. In demo mode the reply is produced synchronously and returned; in
   /// real mode the reply arrives asynchronously via the poll loop + event stream.
-  Future<List<ChatMessage>> sendMessage(
-          {required String contactId, required String text}) =>
-      RustLib.instance.api.crateApiNightdropCoreSendMessage(
-          that: this, contactId: contactId, text: text);
+  Future<List<ChatMessage>> sendMessage({
+    required String contactId,
+    required String text,
+  }) => RustLib.instance.api.crateApiNightdropCoreSendMessage(
+    that: this,
+    contactId: contactId,
+    text: text,
+  );
 
   /// Tell the core the app moved to/from the background. Backgrounded, the poller slows
   /// down to conserve battery/data; foregrounded, it resumes snappy polling and does an
@@ -3702,48 +4606,69 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   ///
   /// Safe to call on every launch: only a change is put on the wire.
   Future<void> setCaptureReporting({required bool visible}) => RustLib
-      .instance.api
+      .instance
+      .api
       .crateApiNightdropCoreSetCaptureReporting(that: this, visible: visible);
 
   /// Set a chat's disappearing-messages timer (`secs`, 0 = off). A shared setting: messages
   /// older than the timer are deleted on both devices, and the new value is synced to the
   /// peer. Common values: 3600 (1h), 86400 (1d), 604800 (1w).
-  Future<void> setDisappearing(
-          {required String contactId, required BigInt secs}) =>
-      RustLib.instance.api.crateApiNightdropCoreSetDisappearing(
-          that: this, contactId: contactId, secs: secs);
+  Future<void> setDisappearing({
+    required String contactId,
+    required BigInt secs,
+  }) => RustLib.instance.api.crateApiNightdropCoreSetDisappearing(
+    that: this,
+    contactId: contactId,
+    secs: secs,
+  );
 
   /// Give a contact a nickname that only you see (`contact-naming.md`). Never sent, so a peer
   /// can neither read it nor set it; empty clears it. This is the answer to a contact list of
   /// identical "Anon"s — the peer's own name is their choice, and may be missing or duplicated.
-  Future<void> setLocalName(
-          {required String contactId, required String name}) =>
-      RustLib.instance.api.crateApiNightdropCoreSetLocalName(
-          that: this, contactId: contactId, name: name);
+  Future<void> setLocalName({
+    required String contactId,
+    required String name,
+  }) => RustLib.instance.api.crateApiNightdropCoreSetLocalName(
+    that: this,
+    contactId: contactId,
+    name: name,
+  );
 
   /// Set the local user's display name within one chat (§4).
   Future<void> setMyName({required String contactId, required String name}) =>
       RustLib.instance.api.crateApiNightdropCoreSetMyName(
-          that: this, contactId: contactId, name: name);
+        that: this,
+        contactId: contactId,
+        name: name,
+      );
 
   /// Replace our advertised extra relay set (#17): peers will fan out our offline mail to these
   /// too, and we poll them alongside the default. Announces the change to existing contacts
   /// (E2E) and persists. Addresses are validated as non-empty; reachability is the user's call.
-  Future<void> setMyRelays({required List<String> relays}) =>
-      RustLib.instance.api
-          .crateApiNightdropCoreSetMyRelays(that: this, relays: relays);
+  Future<void> setMyRelays({required List<String> relays}) => RustLib
+      .instance
+      .api
+      .crateApiNightdropCoreSetMyRelays(that: this, relays: relays);
 
   /// Toggle opt-in 24h server storage for a chat (§6).
-  Future<void> setRemoteStorage(
-          {required String contactId, required bool enabled}) =>
-      RustLib.instance.api.crateApiNightdropCoreSetRemoteStorage(
-          that: this, contactId: contactId, enabled: enabled);
+  Future<void> setRemoteStorage({
+    required String contactId,
+    required bool enabled,
+  }) => RustLib.instance.api.crateApiNightdropCoreSetRemoteStorage(
+    that: this,
+    contactId: contactId,
+    enabled: enabled,
+  );
 
   /// Set the contact's verified flag (after comparing the safety number by hand) and persist.
-  Future<void> setVerified(
-          {required String contactId, required bool verified}) =>
-      RustLib.instance.api.crateApiNightdropCoreSetVerified(
-          that: this, contactId: contactId, verified: verified);
+  Future<void> setVerified({
+    required String contactId,
+    required bool verified,
+  }) => RustLib.instance.api.crateApiNightdropCoreSetVerified(
+    that: this,
+    contactId: contactId,
+    verified: verified,
+  );
 
   /// Stop the background poller and tear down the network side (see
   /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
@@ -3773,23 +4698,30 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   ///
   /// [`RelayClient`]: crate::relay_client::RelayClient
   /// [`TorTransport::make_relay_dialer`]: crate::transport::tor::TorTransport::make_relay_dialer
-  Future<void> shutdown() => RustLib.instance.api.crateApiNightdropCoreShutdown(
-        that: this,
-      );
+  Future<void> shutdown() =>
+      RustLib.instance.api.crateApiNightdropCoreShutdown(that: this);
 
   /// Unsend ("delete for both") one of our own messages (`msg_id` from [`ChatMessage`]).
   /// Same eligibility as [`edit_message`](Self::edit_message): within 15 minutes, or while
   /// still queued (then the relay blob is recalled so the peer never receives it). The
   /// message becomes a "deleted" tombstone (`kind == "deleted"`) on both sides.
-  Future<void> unsendMessage(
-          {required String contactId, required String msgId}) =>
-      RustLib.instance.api.crateApiNightdropCoreUnsendMessage(
-          that: this, contactId: contactId, msgId: msgId);
+  Future<void> unsendMessage({
+    required String contactId,
+    required String msgId,
+  }) => RustLib.instance.api.crateApiNightdropCoreUnsendMessage(
+    that: this,
+    contactId: contactId,
+    msgId: msgId,
+  );
 
   /// Compare a scanned safety-QR payload against this contact; on a match, mark verified and
   /// persist. Returns whether it matched.
-  Future<bool> verifySafetyQr(
-          {required String contactId, required String scanned}) =>
-      RustLib.instance.api.crateApiNightdropCoreVerifySafetyQr(
-          that: this, contactId: contactId, scanned: scanned);
+  Future<bool> verifySafetyQr({
+    required String contactId,
+    required String scanned,
+  }) => RustLib.instance.api.crateApiNightdropCoreVerifySafetyQr(
+    that: this,
+    contactId: contactId,
+    scanned: scanned,
+  );
 }
