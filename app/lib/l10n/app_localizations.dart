@@ -1819,7 +1819,7 @@ abstract class AppLocalizations {
   /// No description provided for @bridgesLimit.
   ///
   /// In en, this message translates to:
-  /// **'Bridges help where a network blocks the public list of Tor relays. They do not help where a network inspects traffic and blocks Tor by how it looks — that needs obfs4 or Snowflake, which this version can\'t run on Android yet. If Tor still won\'t connect after adding bridges, that is probably why.'**
+  /// **'Bridges get past a network that blocks the public list of Tor relays. Getting past one that inspects traffic and blocks Tor by how it looks needs a WebTunnel bridge, which carries Tor inside ordinary HTTPS — Night Drop will say so if this build cannot use one. Even then it is not a guarantee: we have tested it against blocked networks and against intrusion-detection tools, never against a national firewall, and the amount of data a chat moves is not disguised. If being identified as a Tor user is itself dangerous where you are, do not rely on this alone.'**
   String get bridgesLimit;
 
   /// No description provided for @bridgesHint.

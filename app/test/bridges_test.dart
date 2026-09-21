@@ -84,6 +84,13 @@ void main() {
     await pumpBridges(tester);
 
     expect(find.textContaining('blocks Tor by how it looks'), findsOneWidget);
-    expect(find.textContaining('obfs4'), findsOneWidget);
+    // WebTunnel is the answer to that case now, not obfs4 — but the screen must not let it read
+    // as solved. The caveat is the substance of the sentence, so it is what the test pins.
+    expect(find.textContaining('needs a WebTunnel bridge'), findsOneWidget);
+    expect(
+      find.textContaining('never against a national firewall'),
+      findsOneWidget,
+      reason: 'the bridges screen must not imply censorship resistance we have not demonstrated',
+    );
   });
 }

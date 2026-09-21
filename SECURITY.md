@@ -134,6 +134,23 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   platform**, **screen recording**, and **a camera pointed at the screen**. So a peer who sees no
   notice has learned nothing, and the UI/website must never imply otherwise. What *is* blocked is
   the Recents thumbnail, since that capture has no user intent behind it.
+- **Bridges get past a blocked relay list; getting past traffic inspection is tested but not
+  proven.** *(Known limit.)* Where a network blocks the public list of Tor relays, a bridge is an
+  unlisted way in. Where a network instead inspects traffic and blocks Tor by how it *looks*, the
+  answer is a **WebTunnel** bridge: Tor carried inside ordinary HTTPS to a normal-looking web
+  server, with a TLS handshake matched byte for byte to Chrome's. A build without that transport
+  refuses WebTunnel bridge lines outright rather than accepting one it would silently skip.
+  What we have measured, on our own network: with every route except that one web server dropped
+  at the router, Tor still bootstrapped and the onion service published to 8/8 directories; with
+  the bridge removed under the identical block, not one circuit could be built. Suricata with
+  52,311 ET Open signatures — 1,144 of them Tor-related — raised nothing, classifying the flow as
+  ordinary TLS, and Wireshark computed the ClientHello's JA4 off the wire as the same value a real
+  Chromium build produces. What we have **not** done is run it from inside a country that filters
+  this way; public IDS tooling is a far weaker adversary than a national firewall. And one property
+  is not disguised at all: **traffic shape**. A connection that pulls tens of megabytes while
+  sending little does not resemble reading a web page, whatever the handshake looks like. Treat
+  this as good odds against commodity blocking, not as protection where being identified as a Tor
+  user is itself the danger.
 - **A copy inside Samsung Secure Folder receives nothing while the folder is locked.** *(Known
   limit, imposed by the platform.)* Secure Folder is a separate Android user and freezes the apps
   inside it whenever it is locked, so the inner Night Drop is not running: it holds no circuits,
