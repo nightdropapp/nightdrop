@@ -278,7 +278,18 @@ void main() {
     final state = File('${support.path}/nightdrop-state.bin');
     state.writeAsStringSync('an identity that will not open');
 
-    await RustNightdropCore().createIdentity();
+    final core = RustNightdropCore();
+
+    // Without consent the state file is untouchable: this is the shape a raced launch takes,
+    // where onboarding is shown on a device that already has an identity.
+    await expectLater(core.createIdentity(), throwsA(isA<StateError>()));
+    expect(state.readAsStringSync(), 'an identity that will not open',
+        reason: 'onboarding reached by accident must not displace a saved identity');
+
+    // The recovery screen's "set up new identity" is the one route that may: it calls
+    // dismissLoadError first, having told the user the saved state could not be opened.
+    core.dismissLoadError();
+    await core.createIdentity();
 
     expect(state.existsSync(), isFalse,
         reason: 'left in place, the core restores from it instead of creating an identity');
