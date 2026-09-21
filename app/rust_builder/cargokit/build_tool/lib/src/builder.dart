@@ -144,10 +144,13 @@ class RustBuilder {
   String get _toolchain => _buildOptions?.toolchain.name ?? 'stable';
 
   /// Night Drop customization: build the core with the in-process WebTunnel transport
-  /// (BoringSSL). Off unless `NIGHTDROP_WEBTUNNEL=1`, so default and F-Droid builds are
-  /// untouched. See `webtunnel/android/README.md`.
+  /// (BoringSSL). ON by default since the Android cross-compile and F-Droid reproducibility were
+  /// proven; set `NIGHTDROP_WEBTUNNEL=0` to build without it. That escape hatch exists because
+  /// BoringSSL has only ever been cross-compiled for Android and built natively for Linux — iOS
+  /// and macOS are untried, and whoever tries them first will want a way to build meanwhile.
+  /// See `webtunnel/android/README.md`.
   bool get _webtunnelEnabled =>
-      Platform.environment['NIGHTDROP_WEBTUNNEL'] == '1';
+      Platform.environment['NIGHTDROP_WEBTUNNEL'] != '0';
 
   /// Returns the path of directory containing build artifacts.
   Future<String> build() async {
@@ -217,7 +220,9 @@ class RustBuilder {
       final result = await env.buildEnvironment();
       // Night Drop: BoringSSL (chrome-proto) needs a CMake toolchain that disables BoringSSL's
       // test tree (google/benchmark can't cross-compile) and points at the NDK, plus per-ABI
-      // ND_ANDROID_ABI. Only when opted in, so nothing changes for the default build.
+      // ND_ANDROID_ABI. This must stay tied to the same condition as `--features webtunnel`
+      // above: enabling the feature without this env builds BoringSSL against the NDK default,
+      // which links the SHARED libc++ and gives an APK that dies at dlopen.
       if (_webtunnelEnabled) {
         final ndkPath = path.join(sdkPath, 'ndk', ndkVersion);
         final repoRoot = path.normalize(path.join(environment.manifestDir, '..'));

@@ -118,10 +118,27 @@ buildserver's own home volume and point `Repo:` at it:
 git clone --bare /path/to/repo ~/.cache/fdroid-local/nightdrop.git
 podman run --rm -v fdroid-vagrant:/home/vagrant:z -v ~/.cache/fdroid-local:/mnt/out:z   registry.gitlab.com/fdroid/fdroidserver:buildserver-trixie   bash -c 'cp -a /mnt/out/nightdrop.git /home/vagrant/ && chown -R vagrant:vagrant /home/vagrant/nightdrop.git'
 # then in a COPY of the recipe: Repo: /home/vagrant/nightdrop.git, commit: <sha>,
-# plus `- export NIGHTDROP_WEBTUNNEL=1` in build:, and run with SKIP_BINARY=1 VERCODE=<one abi>
+# and run with SKIP_BINARY=1 VERCODE=<one abi>   (the feature is on by default now)
 ```
 
 It must live in the volume, not in `/mnt/out`: under rootless podman the host user maps to
 container root, so `vagrant` sees a root-owned tree and git refuses it with *"detected dubious
 ownership"*. Note also that `~/.cache/fdroid-local/apk/` accumulates APKs from previous runs —
 check the timestamp before concluding anything about "the" APK.
+
+
+## The feature is on by default (2026-09-21)
+
+`NIGHTDROP_WEBTUNNEL=1` is no longer needed: cargokit builds the core with `--features webtunnel`
+unless `NIGHTDROP_WEBTUNNEL=0` says otherwise. Measured cost on arm64 release:
+`libnightdrop.so` 17.6 MB → 19.8 MB, APK 45.4 MB → 47.7 MB, **+2.2 MB (5.1 %)**.
+
+Two things that have to move together, and the reason the env var still gates both: the
+`--features webtunnel` flag and the Android BoringSSL toolchain environment. Setting the feature
+without the env builds BoringSSL against the NDK's defaults, which links the *shared* libc++ and
+produces an APK that dies at `dlopen`. That was the original bug; keeping them on one condition is
+what stops it coming back.
+
+**Untried: iOS and macOS.** BoringSSL has only ever been cross-compiled for Android and built
+natively for Linux. Whoever builds for Apple platforms first should expect to need a toolchain file
+there as Android did — and can use `NIGHTDROP_WEBTUNNEL=0` to get a working build meanwhile.

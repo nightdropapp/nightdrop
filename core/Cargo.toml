@@ -88,9 +88,13 @@ tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell
 # In-process WebTunnel pluggable transport (docs/design/android-bridges.md §5): at Tor startup
 # the core runs webtunnel-client's SOCKS listener and points arti's `webtunnel` transport at it,
 # so a WebTunnel bridge line works with no external binary. OFF by default and implies `tor`;
-# `webtunnel-client/chrome-proto` pulls BoringSSL for the Chrome-identical handshake — so this
-# feature also brings a C/cmake dependency and must not be enabled in a shipped build until the
-# Android BoringSSL cross-compile (step 4) is proven.
+# `webtunnel-client/chrome-proto` pulls BoringSSL for the Chrome-identical handshake, so this
+# feature brings a C/cmake dependency. That gate is CLEARED (2026-09-21): BoringSSL cross-compiles
+# for all three F-Droid ABIs, two F-Droid container builds with it on came out byte-identical, and
+# a release APK ran on hardware. It costs +2.2 MB of APK. The Flutter app therefore builds with it
+# ON by default (app/rust_builder/cargokit builder.dart); `NIGHTDROP_WEBTUNNEL=0` opts out.
+# Still untried: iOS and macOS, where BoringSSL has never been built — expect to need a toolchain
+# file there as Android did (webtunnel/android/README.md).
 webtunnel = ["tor", "dep:webtunnel-client", "webtunnel-client/chrome-proto"]
 
 [dependencies.webtunnel-client]
