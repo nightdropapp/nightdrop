@@ -552,9 +552,25 @@ class RustNightdropCore extends NightdropCore {
   void dismissLoadError() {
     // The unreadable file was already preserved as a sidecar in start(); onboarding from here
     // will write a fresh state file but cannot destroy those original bytes.
+    //
+    // This is also the ONLY place a user can consent to abandoning state that is still on disk.
+    // createIdentity refuses to set aside an existing state file without it — see
+    // _abandonExistingStateApproved.
+    _abandonExistingStateApproved = true;
     _loadError = false;
     notifyListeners();
   }
+
+  /// Set only by [dismissLoadError]: the user was shown the recovery screen, with the state file
+  /// named as unreadable, and chose to set up a new identity anyway.
+  ///
+  /// Without it, onboarding reached by any other route must not be able to displace state that is
+  /// sitting on disk. On 2026-09-20 repeated taps of the in-app Tor reconnect interleaved several
+  /// start() lifecycles; one of them cleared _booting while another was still in flight, leaving
+  /// identity == null with loadError == false, which _Root renders as OnboardingScreen —
+  /// indistinguishable from a fresh install. The identity was recoverable only because
+  /// _setAsideOldState renames rather than deletes.
+  bool _abandonExistingStateApproved = false;
 
   static const _kBackedUp = 'nightdrop_backed_up';
   static const _kBackupSnoozeUntil = 'nightdrop_backup_snooze_until';
@@ -786,8 +802,18 @@ class RustNightdropCore extends NightdropCore {
   // At most one automatic guard-heal per launch, so a genuinely offline device can't loop.
   bool _guardHealDone = false;
 
+  /// In-flight [start] call, so concurrent launches coalesce instead of interleaving.
+  ///
+  /// Every path here tears the core down and rebuilds it over the *same* state file and Tor state
+  /// directory, so two overlapping runs fight: one clears _booting in its `finally` while the
+  /// other is still building, and the UI reads that as a finished launch with no identity.
+  Future<void>? _startInFlight;
+
   @override
-  Future<void> start() async {
+  Future<void> start() => _startInFlight ??=
+      _start().whenComplete(() => _startInFlight = null);
+
+  Future<void> _start() async {
     // Auto-restore a persisted identity on launch (Tor mode only). If a secure-store key and
     // a saved state file both exist, rebuild the same identity + chats; else fall through to
     // onboarding.
@@ -892,6 +918,19 @@ class RustNightdropCore extends NightdropCore {
   /// **Renamed, never deleted.** These bytes may be the user's only copy of an identity they are
   /// abandoning under duress of a failed launch, possibly recoverable later with the right key.
   /// The wipe removes the sidecars, so they never outlive a deliberate destruction.
+  /// Whether a state file is positively known to be on disk.
+  ///
+  /// Only a confirmed sighting counts. If the path cannot even be resolved we say `false` and let
+  /// the caller proceed: refusing to create an identity is itself a way to lock someone out of
+  /// the app, and it must not happen on a guess.
+  Future<bool> _savedStateExists() async {
+    try {
+      return File(await _stateFilePath()).existsSync();
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<void> _setAsideOldState() async {
     try {
       final file = File(await _stateFilePath());
@@ -919,7 +958,19 @@ class RustNightdropCore extends NightdropCore {
     // have left a core holding the Tor state lock.
     await _closeCore();
     _guardHealDone = false;
+    // Refuse to displace a state file nobody agreed to abandon. Onboarding is only ever correct
+    // on a genuinely fresh install, or after the recovery screen said the state is unreadable and
+    // the user chose to move on (dismissLoadError). Reaching it any other way means a failed or
+    // raced launch mislabelled this device as new, and setting the identity aside there is how a
+    // working install silently loses its identity.
+    if (!_abandonExistingStateApproved && await _savedStateExists()) {
+      throw StateError(
+        'There is already a saved identity on this device. Restart Night Drop and try again; '
+        'if it still cannot be opened, the recovery screen will offer to replace it.',
+      );
+    }
     await _setAsideOldState();
+    _abandonExistingStateApproved = false;
     final listen = _listenAddr;
     final relay = _relayAddr;
     if (_torEnabled) {
