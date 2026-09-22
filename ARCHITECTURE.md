@@ -394,7 +394,13 @@ on a re-pair (new session) exactly like `verified`.
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.
   - The relay never holds keys and cannot read content.
-  - Metadata is minimized; blobs are addressed by ephemeral, unlinkable handles.
+  - Metadata is minimized; blobs are addressed by derived handles that carry no identity
+    key and no onion address. **As shipped through 0.1.22 a handle is a static hash of the
+    recipient's long-term identity key, so it is stable for the life of that identity** — the
+    relay cannot tell *who* a mailbox belongs to, but it can tell that two deposits are for the
+    same person, and build a contact graph from co-occurrence. `docs/design/mailbox-handles.md`
+    replaces this with a per-pair, daily-rotating handle; until that ships, do not describe these
+    as ephemeral or unlinkable.
   - When server storage is active, **both parties see a persistent in-chat warning**
     that messages are stored remotely.
 - **Multi-relay / self-hosting (#17):** a recipient may advertise an **extra relay set** on

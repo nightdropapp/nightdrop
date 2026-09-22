@@ -67,10 +67,19 @@ macro_rules! devlog {
     };
 }
 
-/// Unlinkable store-and-forward mailbox handle for a recipient (§6/§11.2): a truncated
-/// SHA-256 of their long-term identity key. The relay sees only this opaque token —
-/// never an onion address (which it could probe) or a raw identity key. Both ends can
-/// compute it: senders know their contact's identity key, receivers their own.
+/// Store-and-forward mailbox handle for a recipient (§6/§11.2): a truncated SHA-256 of their
+/// long-term identity key. The relay sees only this opaque token — never an onion address
+/// (which it could probe) or a raw identity key. Both ends can compute it: senders know their
+/// contact's identity key, receivers their own.
+///
+/// **This handle is STATIC, and that is a known leak.** It hides *who* a mailbox belongs to; it
+/// does not hide that two deposits are for the same person, so a relay can build a contact graph
+/// from co-occurrence and a per-mailbox behavioural profile over time. Do not describe it as
+/// unlinkable — it is unlinkable to the identity, not across messages.
+/// `docs/design/mailbox-handles.md` specifies the replacement: a per-pair secret combined with a
+/// daily epoch, so two senders to the same recipient produce different handles and nothing links
+/// across days. Migration is capability-gated because a v1 sender posting to a v2-only reader
+/// loses the message silently.
 fn mailbox_handle(recipient_identity_key: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
