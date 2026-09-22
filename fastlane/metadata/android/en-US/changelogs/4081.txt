@@ -1,0 +1,3 @@
+If your network blocks Tor, Night Drop can now use a WebTunnel bridge: Tor carried inside ordinary HTTPS. Add one under Bridges — now reachable before you create an identity, which is when you most need it. Tested against a blocked network and against intrusion-detection tools, never against a national firewall, and the data a chat moves is not disguised.
+
+Repeatedly tapping reconnect could offer to set up a new identity over your existing one. Fixed.
