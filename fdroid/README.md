@@ -108,10 +108,22 @@ apksigner sign --ks "$storeFile" --ks-key-alias "$keyAlias" \
    reproducible. This cost one failed verification round.
 5. Publish, then re-run `./fdroid/build-locally.sh` (no `SKIP_BINARY`) and confirm
    "compared built binary to supplied reference binary successfully" for every block.
-6. **Update MR !43625.** linsui asked for this explicitly on 2026-07-29: while the MR is queued
-   for testing, any new release must be reflected in it, or they will test a version that is no
-   longer current. Copy the recipe to the fork's `add-nightdrop` branch and push — this needs a
-   GitLab token, which is not kept on this box.
+6. **Nothing to do on GitLab.** MR !43625 was **merged on 2026-08-14**, so `app.nightdrop` is in
+   fdroiddata `master` and there is no per-release MR to keep current. The recipe carries
+   `AutoUpdateMode: Version` and `UpdateCheckMode: Tags ^v[\d.]+$`, so F-Droid's bot watches this
+   repo's **tags**, reads the version out of `app/pubspec.yaml` via `UpdateCheckData`, and
+   generates the per-ABI build entries itself from `VercodeOperation`. Pushing a hand-edited
+   recipe to the fork's `add-nightdrop` branch now would change nothing in `master` and leave a
+   misleading branch behind.
+
+   *(This step used to read "Update MR !43625 — linsui asked for this explicitly on 2026-07-29,
+   while the MR is queued for testing". That stopped being true when it merged, and following it
+   on 2026-09-22 wasted a round trip before the merged state was noticed. Kept here so the next
+   person recognises the instruction as retired rather than missing.)*
+
+   What to check instead, a day or so after tagging: `CurrentVersion` in fdroiddata `master`
+   should have moved to the new version. If it has not, suspect `UpdateCheckData` or the
+   `VercodeOperation` formula — not the release.
 
 Field order (top level and inside a build entry) must match `yaml_app_field_order` /
 `build_flags` in fdroidserver's `metadata.py`, or `rewritemeta` fails CI.

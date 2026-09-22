@@ -112,8 +112,9 @@ the box. What's proven vs. left:
 
 ## Getting into F-Droid
 
-The build recipe is **submitted** ([MR !43625](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/43625))
-and mirrored byte-for-byte at [`../fdroid/app.nightdrop.yml`](../fdroid/app.nightdrop.yml); see
+The build recipe is **merged** ([MR !43625](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/43625),
+merged 2026-08-14), so `app.nightdrop` lives in fdroiddata `master` and releases are picked up from
+this repo's **tags** — no per-release MR. It is mirrored byte-for-byte at [`../fdroid/app.nightdrop.yml`](../fdroid/app.nightdrop.yml); see
 [`../fdroid/README.md`](../fdroid/README.md) for its shape and how to validate it locally. It
 extracts the Flutter version from `app/.fvmrc`, provisions Rust 1.96.0 + the Android targets,
 patches cargokit's hardcoded `stable`, builds at a fixed path with the repro
