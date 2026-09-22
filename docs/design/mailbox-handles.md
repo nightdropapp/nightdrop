@@ -100,6 +100,46 @@ being fixed**, so the transition is the design, not an afterthought.
    notice must be visible on **both** sides.
 5. **Drop `v1` after two releases**, and say so in the changelog of each.
 
+## 5a. Draining must be isolated, or the scheme is undone
+
+**Added after review, 2026-09-22.** Unlinkable deposits are worthless if collection re-links them.
+`drain_relay_mailboxes` (`core/src/node.rs`) currently takes a **single** handle. Per-pair handles
+make it one request per contact — and if those go over one circuit, the relay sees a single client
+asking for `H1…H10` and learns exactly the set this design removed from the deposit side.
+
+So per-pair handles are **conditional on isolated draining**:
+
+* `arti-client` 0.43 provides `StreamPrefs::isolate_every_stream()` and `set_isolation(token)`, so
+  each poll can take its own circuit. That is the mechanism.
+* It costs a circuit build per handle — seconds each over Tor — so draining becomes markedly
+  slower, and a background drain of 10 contacts is 10 circuits.
+* **Simultaneous isolated polls still correlate by timing.** Ten circuits opening within the same
+  second is itself a signature. Jitter across the drain is needed, which trades latency for
+  unlinkability.
+
+If isolated draining is not implemented, per-pair handles buy far less than they appear to, and
+the honest thing is to say so rather than ship the appearance of a fix.
+
+## 5b. What "ephemeral" and "unlinkable" would actually mean
+
+Worth stating precisely, since `ARCHITECTURE.md` claimed both without defining either.
+
+| Can the relay link… | v1 (shipped) | v2 (this design) | per-message |
+|---|---|---|---|
+| a handle to an identity or onion | no | no | no |
+| two senders to the same recipient | **yes** | no | no |
+| today's handle to yesterday's | **yes** | no | no |
+| two messages, same pair, same day | **yes** | **yes** | no |
+
+**Unlinkable** is therefore not one property: v2 achieves it across senders and across days, and
+deliberately not within a pair-day.
+
+**Ephemeral** would mean a handle is used once. Reachable with a hash ratchet —
+`handle_n = HKDF(pair_secret, n)`, sender incrementing, reader scanning a window ahead — at the
+cost of polling a window of unknown depth per contact per relay, and a resync path for when a
+sender outruns the window. Not proposed for 0.1.23; recorded so the next person knows the ceiling
+and what it costs, rather than assuming v2 is the end of the road.
+
 ## 6. What this does not fix
 
 * **The fan-out burst.** N deposits at one instant is still N deposits. Jitter and #17 spread it;
