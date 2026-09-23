@@ -131,6 +131,46 @@ there genuinely means less code.
 buys nothing against the audit-surface one, which is the larger of the two. It makes the maturity
 concern marginally worse rather than better.
 
+### 5.2 Rejected variant: participating on desktop, hidden on mobile
+
+A reasonable-sounding proposal — desktops have power and bandwidth, so let them carry traffic;
+phones go hidden. It matches contribution to the device and answers the free-rider point in §5.
+**It should not be built**, for reasons that have little to do with battery.
+
+**Participating publishes the user's IP address.** A RouterInfo contains the router's IP (or
+introducers) and listening port, and is published to the netDb — which is trivially enumerable.
+So every desktop user would be publicly advertising that this IP runs I2P. Night Drop over Tor
+publishes *nothing*: v3 onion descriptors are under blinded keys, so only someone already given
+the address can find the service. Moving from "publishes nothing" to "listed by IP in a public
+directory" is a far larger change to the threat model than the battery cost it removes.
+
+Precisely: a RouterInfo is not a destination. I2P separates router identity from destination
+identity, so this does not directly say *this IP is Night Drop user X* — it says *this IP runs
+I2P*. For many of the people this project exists for, that is the risk, and published work on
+de-anonymising hidden I2P services by behaviour alignment would start from exactly that foothold.
+
+**The split is itself a fingerprint.** If desktop participates and mobile hides, then presence in
+the netDb *is* a platform tell — anyone can learn which device class a user is on, from a
+distinction we introduced. A privacy tool should not manufacture metadata the network did not
+already leak.
+
+**It multiplies §3.** Tor-desktop, Tor-mobile, I2P-desktop-participating, I2P-mobile-hidden: four
+populations out of a user base already too small to split in two.
+
+**"Desktop is plugged in" is not true enough.** Laptops on battery, tethering, metered and capped
+connections. The desktop/mobile boundary is not a power boundary.
+
+**It chooses legal exposure for the user.** Hidden mode exists partly for people facing
+restrictions on routing traffic for others. Enabling participation by default decides that for
+someone who never asked.
+
+**If I2P is ever adopted: hidden mode everywhere, uniformly, as the default.** One population, no
+platform tell, no IP publication. Participation then becomes an explicit opt-in for users who
+understand it — the way running a Tor relay is today, a deliberate and separate act, never
+something a messenger turns on for you. That leaves us a net consumer of I2P capacity, which is a
+fair criticism; the answer is informed opt-in contribution, not defaulting people into publishing
+their IP.
+
 Worth reading before any revisit: recent published work on
 [de-anonymising hidden I2P services via behaviour alignment](https://arxiv.org/pdf/2512.15510)
 bears directly on a messenger that would run the I2P equivalent of a hidden service. Unreviewed
