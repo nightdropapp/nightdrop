@@ -386,10 +386,12 @@ pub struct Node {
     /// What we last told peers about whether this device can report screenshots (#1). `None` until
     /// the UI says; only a change is announced, so a restart does not re-broadcast to every chat.
     captures_visible: Option<bool>,
-    /// Whether this run has already told existing chats that we understand burn messages
-    /// (see [`Node::announce_burns`]). Not persisted: re-announcing once per launch is cheap
-    /// and self-healing if a peer missed it while offline.
-    burns_announced: bool,
+    /// Contacts this run has successfully told that we understand burn messages (see
+    /// [`Node::announce_burns`]). Per-contact and success-gated rather than a single flag: a
+    /// peer who was unreachable on the first attempt must be retried, or burn stays unavailable
+    /// for that chat until the app is restarted. Not persisted — re-announcing on a fresh launch
+    /// is cheap and self-heals.
+    burns_announced: std::collections::HashSet<String>,
     /// Where media attachments are stored at rest: `(dir, key)`. Each attachment is sealed
     /// under `key` into its own file in `dir`, and the message only references its id — so
     /// large media never inflates the JSON state blob. `None` disables media (demo/tests).
@@ -652,7 +654,7 @@ impl Node {
             require_authorization: false,
             last_invite_code: None,
             captures_visible: None,
-            burns_announced: false,
+            burns_announced: std::collections::HashSet::new(),
             media_store: None,
             pending_media: Vec::new(),
             tor_state_dir: None,
@@ -954,14 +956,10 @@ impl Node {
     /// exactly the contacts someone already talks to. Called once per run; the flag keeps a
     /// restart from re-announcing to everyone.
     pub fn announce_burns(&mut self) {
-        if self.burns_announced {
-            return;
-        }
-        self.burns_announced = true;
         let ids: Vec<String> = self
             .chats
             .iter()
-            .filter(|(_, c)| !c.closed)
+            .filter(|(id, c)| !c.closed && !self.burns_announced.contains(id.as_str()))
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
@@ -973,13 +971,20 @@ impl Node {
     /// property of the build, not a user setting — and quiet: no history entry, because it is a
     /// standing fact rather than an event.
     fn announce_burns_to(&mut self, contact_id: &str) {
-        if let Some((addr, frame)) =
+        let Some((addr, frame)) =
             self.authed_control(contact_id, MARK_BURNS_V1, |from, message| Frame::Burns {
                 from,
                 message,
             })
-        {
-            let _ = self.transport.send(&addr, &wire::encode(&frame));
+        else {
+            return;
+        };
+        // `deliver`, not a bare `transport.send`: it falls back to the relay mailbox when the peer
+        // is offline. A dropped announce is not cosmetic — an unannounced peer reads as "cannot
+        // burn", so losing this frame silently disables the feature for that chat until a restart.
+        // Recorded as done only on success, so an unreachable peer is retried on the next tick.
+        if self.deliver(&addr, contact_id, &frame).is_ok() {
+            self.burns_announced.insert(contact_id.to_string());
         }
     }
 

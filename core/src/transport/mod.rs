@@ -257,6 +257,10 @@ type Inbox = Sender<(Address, Vec<u8>)>;
 #[derive(Clone, Default)]
 pub struct MemoryNetwork {
     endpoints: Arc<Mutex<HashMap<Address, Inbox>>>,
+    /// Every endpoint ever created, kept so [`MemoryNetwork::reconnect`] can put one back after
+    /// [`MemoryNetwork::disconnect`] removed it. Without this, "offline" is a one-way door and a
+    /// test cannot exercise anything that has to recover when a peer comes back.
+    registry: Arc<Mutex<HashMap<Address, Inbox>>>,
 }
 
 impl MemoryNetwork {
@@ -270,6 +274,10 @@ impl MemoryNetwork {
         self.endpoints
             .lock()
             .unwrap()
+            .insert(address.to_string(), tx.clone());
+        self.registry
+            .lock()
+            .unwrap()
             .insert(address.to_string(), tx);
         MemoryTransport {
             address: address.to_string(),
@@ -281,6 +289,17 @@ impl MemoryNetwork {
     /// Drop an endpoint to simulate going offline (sends to it then fail).
     pub fn disconnect(&self, address: &str) {
         self.endpoints.lock().unwrap().remove(address);
+    }
+
+    /// Put a [`disconnect`](Self::disconnect)ed endpoint back — the peer came back online. Its
+    /// existing receiver is reused, so anything the node already holds keeps working.
+    pub fn reconnect(&self, address: &str) {
+        if let Some(tx) = self.registry.lock().unwrap().get(address).cloned() {
+            self.endpoints
+                .lock()
+                .unwrap()
+                .insert(address.to_string(), tx);
+        }
     }
 }
 

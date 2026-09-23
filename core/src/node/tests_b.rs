@@ -1520,3 +1520,64 @@ fn a_burn_attachment_is_refused_when_the_peer_cannot_burn() {
         .expect_err("must refuse rather than send a permanent attachment");
     assert!(err.to_string().contains("cannot burn"));
 }
+
+/// The burn capability announce must survive a peer who is briefly unreachable.
+///
+/// Regression: the first version used a bare `transport.send` and a single "announced this run"
+/// flag, so an announce that failed — a peer offline, or an onion descriptor still publishing at
+/// startup, which is the normal case right after both devices launch — was dropped and never
+/// retried. An unannounced peer reads as "cannot burn", so both sides silently offered no burn
+/// option at all until an app restart. Found on hardware, not here.
+#[test]
+fn a_burn_announce_to_an_unreachable_peer_is_retried_until_it_lands() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    // Model the case that actually broke: a chat that existed BEFORE burn shipped, so neither
+    // side has announced. Pairing already sent one, so undo it — otherwise this test passes on
+    // the pairing announce and proves nothing about the retry.
+    let alice_on_bob = bob.contacts()[0].id.clone();
+    bob.chats
+        .get_mut(&alice_on_bob)
+        .unwrap()
+        .contact
+        .peer_supports_burn = None;
+    alice.burns_announced.clear();
+
+    // Bob drops off before Alice ever announces (no relay attached, so there is no fallback
+    // either — the frame simply cannot be delivered).
+    net.disconnect("bob");
+    alice.announce_burns();
+    net.reconnect("bob");
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.contacts()[0].peer_supports_burn,
+        None,
+        "nothing could have reached Bob while he was offline"
+    );
+
+    // The retry is the point: a later tick must try again rather than treating the run as done.
+    alice.announce_burns();
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.contacts()[0].peer_supports_burn,
+        Some(true),
+        "a failed announce must be retried, or burn stays dead for this chat until a restart"
+    );
+
+    // And once it has landed it is not re-sent on every subsequent tick.
+    let before = bob.messages(&bob.contacts()[0].id.clone()).len();
+    alice.announce_burns();
+    bob.pump().unwrap();
+    assert_eq!(bob.messages(&bob.contacts()[0].id.clone()).len(), before);
+    // Burn is per-direction: Alice can only send one once BOB has told HER he can burn.
+    alice.pump().unwrap();
+    assert!(
+        alice.send_burn(&bob_contact, "now it works", 30).is_ok(),
+        "and burn is available once the peer has announced"
+    );
+}
