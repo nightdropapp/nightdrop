@@ -34,9 +34,15 @@ second process).
 pure-Rust I2P router — structurally the arti-equivalent. That is the one hard blocker lifted.
 
 But as of this assessment [`emissary-core` is **0.4.0**, published April 2026](https://lib.rs/crates/emissary-core):
-five releases, three of them breaking, upstream describing it as experimental and not recommended
-for production. It is ~97K SLoC with ~342K more in dependencies, and it implements **NTCP2, SSU2,
-I2CP, SAMv3 and the garlic layer itself**.
+five releases, three of them breaking. It is ~97K SLoC with ~342K more in dependencies, and it
+implements **NTCP2, SSU2, I2CP, SAMv3 and the garlic layer itself**.
+
+*(Correction, same day: an earlier draft of this note said upstream describes emissary as
+"experimental and not recommended for production". **It does not** — neither the `eepnet` nor the
+`altonen` README carries that disclaimer, and the phrase came from a search engine's summary that
+was repeated without checking the source. The version history and release cadence above are the
+verifiable facts; the maintainers have not disclaimed production use and it is not this note's
+place to do it for them.)*
 
 That last part is the objection that matters. `CLAUDE.md` requires audited crates and explicit
 justification for new cryptographic surface. This would place an entire young, unaudited
@@ -98,6 +104,32 @@ What remains true is that it costs something, by I2P's own account:
 
 So the accurate statement is: **client-only works, would be the right choice, and hands back some
 of the anonymity the switch was made to gain.** It weakens the case rather than ending it.
+
+### 5.1 Hidden mode does not shrink what we would ship
+
+A natural follow-on: if the client runs hidden, does it still need the whole router? **Yes**, and
+this is where I2P differs structurally from Tor.
+
+I2P has no client/relay split. The *router* is the participant — it maintains the netDb, builds
+your tunnels, speaks NTCP2 and SSU2 to peers, profiles and selects them, and publishes your
+LeaseSet. Hidden mode disables three specific behaviours: accepting **participating** tunnels,
+publishing your RouterInfo, and direct connections to routers in your own country.
+
+So it reduces the obligations we take on **toward the network**, and nothing about the **code we
+carry**. A hidden node still builds its own tunnels, still speaks both transports, still queries
+and publishes to the netDb. `emissary-core` in full is what gets embedded either way; hidden mode
+is a configuration flag on it, not a smaller component.
+
+The only thin-client alternative is **SAM** (`i2p-rs`), which requires a router running as a
+separate process — the daemon dependency ruled out in §2.
+
+Tor is the opposite and is why the intuition misleads: arti is predominantly a *client*
+implementation, client-only is the norm, and relay support is the immature part — so "client-only"
+there genuinely means less code.
+
+**Consequence for §2:** hidden mode answers the battery-and-carrying-others'-traffic objection and
+buys nothing against the audit-surface one, which is the larger of the two. It makes the maturity
+concern marginally worse rather than better.
 
 Worth reading before any revisit: recent published work on
 [de-anonymising hidden I2P services via behaviour alignment](https://arxiv.org/pdf/2512.15510)
