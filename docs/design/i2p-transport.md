@@ -79,6 +79,44 @@ a second address per identity moves the opposite way.
 Dual-homing is worse than either network alone. If I2P is ever adopted it should be **exclusive per
 identity**, chosen once, never simultaneous.
 
+### 4.1 Exclusive choice at identity creation — the right shape, still not the answer
+
+The natural follow-on: rather than running both, let the user pick **one** network when they create
+their identity. That does dissolve §4 entirely — one identity, one address, nothing linking a
+`.onion` to a `.b32.i2p` — and it is the form any adoption should take. It does not change the
+recommendation, for three reasons that are more concrete than "it splits the user base".
+
+**It partitions who can talk to whom, not just the anonymity set.** A Tor identity and an I2P
+identity have no direct path to one another. Two people who both installed Night Drop could
+discover at pairing time that they cannot connect.
+
+There is a way out worth knowing: **the relay can bridge them.** A relay is a public service, so
+dual-homing *it* costs nothing — its addresses are advertised already, unlike a user's — and both
+parties can reach one mailbox from their own network. Blobs are opaque, and per-pair mailbox
+handles are derived from the pair secret, so they are network-agnostic by construction.
+
+But such pairs would be **permanently relay-only**: no onion-to-onion hot path, every message
+exposing timing and volume to the relay for the life of the contact, and `Frame::Address` rotation
+meaningless between them. QR pairing would also fail cross-network, since it carries an address the
+scanner cannot dial — leaving short-code pairing as the only route. That is a feature to build, not
+a property that falls out.
+
+**The migration trap.** Chosen at creation is effectively permanent, because switching networks
+means telling existing contacts a new address **over the network being left**. The person most
+likely to want I2P is someone whose Tor has just been blocked — precisely the person who can no
+longer reach their contacts to migrate them. The escape hatch stops working at the moment it is
+needed. WebTunnel has no equivalent failure: same identity, same address, same contacts, different
+path to them.
+
+**The choice is largely illusory.** Whatever the creation screen defaults to will take almost
+everyone, so the result is not two populations but a large default and a small, self-selected,
+distinguishable minority — sharpening §3 rather than answering it. It is also a question users
+cannot evaluate: choosing an anonymity network before first use is a real decision only for an
+enthusiast.
+
+**Recorded as the agreed form:** if I2P is ever adopted it is exclusive per identity, chosen once,
+never simultaneous — with cross-network pairs understood to be relay-only, or not supported at all.
+
 ## 5. Client-only is possible — the original objection was overstated
 
 An earlier version of this assessment said I2P "assumes you are a router" and implied a phone could
