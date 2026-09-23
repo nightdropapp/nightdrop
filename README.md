@@ -24,8 +24,8 @@ Downloads on both are the same artifacts, and every release is signed — see
 
 ## Status
 
-**Feature-complete and verified end to end** (82 Rust tests + 9 Flutter tests; `cargo
-clippy` and `flutter analyze` clean):
+**Feature-complete and verified end to end** (184 Rust tests + 75 Flutter tests, all passing
+as of 0.1.22; `cargo clippy` and `flutter analyze` clean):
 
 - **E2E crypto** (`core/crypto`, `identity`, `pake`): Signal Double Ratchet via
   `vodozemac` (X3DH + ratchet), a SPAKE2 "bouncer", anonymous device identities.
@@ -33,6 +33,13 @@ clippy` and `flutter analyze` clean):
   `Transport`; two real `Node`s pair and converse. **Embedded Tor** via `arti`
   (`transport::tor`, `tor` feature) — verified by a live test that bootstraps a circuit
   and publishes a real `.onion` (`core/tests/tor_smoke.rs`, `#[ignore]`d).
+- **Censorship circumvention** (0.1.22): in-app **Tor bridge** configuration and an
+  **in-process WebTunnel** client — Tor carried inside ordinary HTTPS with a Chrome-identical
+  TLS fingerprint (BoringSSL), no separate process and no daemon. Reachable **before** you
+  create an identity, which is when a blocked user needs it. Verified against a network
+  configured to block Tor, and against an IDS with 52,311 signatures (zero alerts). Limits are
+  stated plainly in `SECURITY.md`: never tested against a national firewall, and traffic
+  *shape* is not disguised. See [`docs/design/android-bridges.md`](docs/design/android-bridges.md).
 - **Live event-driven core**: `NightdropCore::new_with_transport` runs a background poller
   that delivers unsolicited inbound messages and emits a push-event stream. A
   deterministic integration test drives two real cores over an injected transport + relay
@@ -59,6 +66,24 @@ clippy` and `flutter analyze` clean):
   availability + censorship-resistance (a down/blocked relay doesn't drop mail) without adding
   trust or metadata — relays still see only opaque, recipient-sealed blobs, and anonymity stays
   with Tor. Edit your set from the home menu → **"My relays…"**.
+- **Cover traffic** (opt-in): decoy posts that blur per-mailbox volume and timing from the
+  relay. Off by default and measured before shipping — ~78 mAh a night
+  ([`docs/design/cover-traffic.md`](docs/design/cover-traffic.md) §6).
+- **Post-quantum pairing** (`core/pqkem`): **ML-KEM-768 (FIPS 203)** mixed into the short-code
+  rendezvous seal, so a *harvest-now-decrypt-later* adversary must break **both** SPAKE2 and
+  ML-KEM. Scoped deliberately: it protects the **rendezvous payload**, a true hybrid that never
+  weakens the classical guarantee. The QR path never crosses the network, so it is not wrapped.
+- **Screenshot transparency**: the app does **not** block screenshots (it cannot, honestly) and
+  instead *tells the other person* when one is taken. Best-effort by construction — Android 14+
+  only, blind to cameras and screen recording — and the UI never implies otherwise.
+- **App lock + duress wipe**: a lock code to open the app, and a **separate code that wipes**
+  identity and history instead of unlocking.
+- **Media messages**: sealed attachments, streamed and stored encrypted at rest.
+- **Silence detection**: tells you when nothing has arrived for long enough that the *transport*
+  is the likely explanation, rather than leaving you to guess.
+- **Update checks over Tor** (`core/update`): signed manifest fetched through the anonymized
+  path only — there is deliberately **no** clearnet fallback, so the update check can never
+  become the thing that deanonymizes you.
 - **Dart ↔ Rust bridge** + **cargokit** (`app/rust_builder`): the **Linux desktop GUI
   builds** (bundles `libnightdrop`) and the **Android APK builds** (cargokit
   cross-compiles the core into `arm64-v8a`, `armeabi-v7a`, `x86_64`) — both verified.
