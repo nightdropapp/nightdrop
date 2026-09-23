@@ -118,8 +118,11 @@ moment with no way to ignore it.
 * **A tombstone on expiry.** An expired-unviewed message currently just vanishes. §6 leaned
   towards leaving a "a message expired" marker and that reasoning still stands; it was left out to
   keep the first version small.
-* **The server-storage caveat in the UI** (see §3). Known, unstated to the user, and the one
-  honesty gap in what shipped.
+* ~~**The server-storage caveat in the UI**~~ — **done 2026-09-23.** The burn menu now says so
+  outright when, and only when, opt-in server storage is on for that chat: *"a copy stays on the
+  relay for up to 24 hours — even after it burns here."* In the menu, at the moment of choosing,
+  rather than in settings. Pinned by a test that also asserts it stays absent when it does not
+  apply — a warning shown when it is untrue trains people to ignore it when it is.
 
 ### 7.1 Media (added 2026-09-23)
 

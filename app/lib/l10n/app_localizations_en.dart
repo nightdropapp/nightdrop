@@ -1160,4 +1160,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String burnExpiresIn(String time) {
     return 'Disappears in $time';
   }
+
+  @override
+  String get burnServerStorageCaveat =>
+      'Server storage is on for this chat, so a copy stays on the relay for up to 24 hours — even after it burns here.';
 }

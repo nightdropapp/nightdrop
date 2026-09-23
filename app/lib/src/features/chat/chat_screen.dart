@@ -255,6 +255,22 @@ class _ChatScreenState extends State<ChatScreen> {
                   ),
                 ),
               ),
+              // Only when server storage is on for this chat. The relay copy cannot be pulled
+              // back when the message burns: recall is sender-driven and there is deliberately
+              // no read receipt to tell the sender it happened. So this is a standing property
+              // to disclose at the moment of choosing, not a bug to be fixed later.
+              if (contact.remoteStorage) ...[
+                const SizedBox(height: 6),
+                SizedBox(
+                  width: 240,
+                  child: Text(
+                    l10n.burnServerStorageCaveat,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.error,
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

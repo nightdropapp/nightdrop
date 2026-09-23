@@ -57,6 +57,11 @@ class _BurnCore extends MockNightdropCore {
     notifyListeners();
   }
 
+  void setServerStorage(bool on) {
+    contacts.first.remoteStorage = on;
+    notifyListeners();
+  }
+
   void peerSupportsBurn(bool? v) {
     contacts.first.peerSupportsBurn = v;
     notifyListeners();
@@ -167,6 +172,35 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(core.sent, [('secret', 30)]);
+  });
+
+  // The one residual honesty gap in this feature, and it must be visible at the moment of
+  // choosing. With server storage on, a relay copy outlives the burn by up to 24h and CANNOT be
+  // recalled — recall is sender-driven and there is deliberately no read receipt to trigger it.
+  testWidgets('the burn menu discloses the server-storage copy, but only when it applies',
+      (tester) async {
+    final (core, contact) = await pumpChat(tester);
+    core.peerSupportsBurn(true);
+    await tester.enterText(find.byType(TextField).last, 'secret');
+    await tester.pump();
+
+    // Off: no claim either way.
+    await tester.longPress(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('stays on the relay'), findsNothing);
+    await tester.tapAt(const Offset(10, 10)); // dismiss
+    await tester.pumpAndSettle();
+
+    // On: said plainly, in the menu, before anything is sent.
+    core.setServerStorage(true);
+    await tester.pump();
+    await tester.longPress(find.byIcon(Icons.send));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('stays on the relay'), findsOneWidget);
+
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+    await settleScroll(tester);
   });
 
   // A burn attachment carries no thumbnail by construction (the core never sends one), so the

@@ -1995,6 +1995,12 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Disappears in {time}'**
   String burnExpiresIn(String time);
+
+  /// Shown in the burn menu only when opt-in server storage is enabled for the chat. The relay copy cannot be recalled on burn, because recall would need a read receipt and there deliberately is none — so this is a permanent property to disclose, not a bug.
+  ///
+  /// In en, this message translates to:
+  /// **'Server storage is on for this chat, so a copy stays on the relay for up to 24 hours — even after it burns here.'**
+  String get burnServerStorageCaveat;
 }
 
 class _AppLocalizationsDelegate
