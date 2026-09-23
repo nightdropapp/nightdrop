@@ -2001,6 +2001,42 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Server storage is on, so a copy sits on the relay until their app next collects it — up to 24 hours if it never does.'**
   String get burnServerStorageCaveat;
+
+  /// Home menu entry for the burn-view receipt setting.
+  ///
+  /// In en, this message translates to:
+  /// **'Burn read receipts'**
+  String get burnReceiptsMenu;
+
+  /// Title of the burn-receipt settings dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Tell senders when you open a burn message'**
+  String get burnReceiptsTitle;
+
+  /// What the burn-receipt setting does.
+  ///
+  /// In en, this message translates to:
+  /// **'Off by default. When on, opening a burn message tells the sender, so their copy disappears at that moment instead of waiting out its 24 hours.'**
+  String get burnReceiptsBody;
+
+  /// The honest cost of the setting. The early deletion IS the disclosure — it cannot be separated — so this must be stated before the user turns it on, not implied.
+  ///
+  /// In en, this message translates to:
+  /// **'This tells them WHEN you read it. Their copy vanishing is itself the signal, so there is no way to have the early deletion without them learning the time you opened it. With this off, their copy simply lives its full 24 hours.'**
+  String get burnReceiptsLimit;
+
+  /// Confirmation snackbar when enabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Senders will be told when you open a burn message.'**
+  String get burnReceiptsOn;
+
+  /// Confirmation snackbar when disabled.
+  ///
+  /// In en, this message translates to:
+  /// **'Senders are no longer told when you open a burn message.'**
+  String get burnReceiptsOff;
 }
 
 class _AppLocalizationsDelegate

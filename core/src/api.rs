@@ -1708,6 +1708,25 @@ impl NightdropCore {
         Ok(g.me.messages(contact_id))
     }
 
+    /// Turn **burn-view receipts** on or off. Off by default, and deliberately the recipient's
+    /// choice: it is their reading behaviour being disclosed.
+    ///
+    /// With it on, opening a burn message tells the sender, so their copy goes at that moment
+    /// instead of living out its 24h. Note that the early deletion **is** the disclosure — a
+    /// sender watching their own copy vanish learns when it was read whether or not any UI says
+    /// so, which is why this is opt-in rather than silent.
+    ///
+    /// Nothing depends on the receipt arriving: the 24h horizon remains the guarantee.
+    pub fn set_burn_receipts(&self, enabled: bool) -> Result<()> {
+        self.lock().me.set_burn_receipts(enabled);
+        Ok(())
+    }
+
+    /// Whether burn-view receipts are on.
+    pub fn burn_receipts_enabled(&self) -> Result<bool> {
+        Ok(self.lock().me.burn_receipts_enabled())
+    }
+
     /// The recipient revealed a burn message: start its countdown. Idempotent — reopening a
     /// chat does not restart a clock that is already running.
     pub fn mark_burn_viewed(&self, contact_id: &str, msg_id: &str) -> Result<Vec<ChatMessage>> {

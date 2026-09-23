@@ -61,6 +61,7 @@ class HomeScreen extends StatelessWidget {
                     builder: (_) => const BridgesScreen()));
               }
               if (value == 'cover') _coverTrafficSettings(context, core);
+              if (value == 'burnreceipts') _burnReceiptSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'resettor') _confirmResetTor(context, core);
               if (value == 'update') _updateApp(context, core);
@@ -79,6 +80,8 @@ class HomeScreen extends StatelessWidget {
               PopupMenuItem(value: 'duress', child: Text(l10n.duressMenu)),
               PopupMenuItem(value: 'bridges', child: Text(l10n.bridgesMenu)),
               PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
+              PopupMenuItem(
+                  value: 'burnreceipts', child: Text(l10n.burnReceiptsMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
               PopupMenuItem(value: 'resettor', child: Text(l10n.resetTorMenu)),
               PopupMenuItem(value: 'update', child: Text(l10n.updateApp)),
@@ -249,6 +252,56 @@ Future<void> _coverTrafficSettings(BuildContext context, NightdropCore core) asy
   await core.setCoverTraffic(turnOn);
   messenger.showSnackBar(SnackBar(
     content: Text(turnOn ? l10n.coverTrafficOn : l10n.coverTrafficOff),
+  ));
+}
+
+/// Turn burn-view receipts on or off (`docs/design/burn-messages.md`).
+///
+/// Off by default and the recipient's own choice, because it discloses *their* reading behaviour
+/// to someone else. The dialog states the cost before the switch, not after: the sender's copy
+/// disappearing at the moment of reading **is** the receipt, so there is no version of this where
+/// they get the early deletion and not the timing.
+Future<void> _burnReceiptSettings(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final on = await core.burnReceiptsEnabled();
+  if (!context.mounted) return;
+  final theme = Theme.of(context);
+  final turnOn = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(l10n.burnReceiptsTitle),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.burnReceiptsBody),
+            const SizedBox(height: 16),
+            Text(
+              l10n.burnReceiptsLimit,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(!on),
+          child: Text(on ? l10n.turnOff : l10n.turnOn),
+        ),
+      ],
+    ),
+  );
+  if (turnOn == null || !context.mounted) return;
+  final messenger = ScaffoldMessenger.of(context);
+  await core.setBurnReceipts(turnOn);
+  messenger.showSnackBar(SnackBar(
+    content: Text(turnOn ? l10n.burnReceiptsOn : l10n.burnReceiptsOff),
   ));
 }
 

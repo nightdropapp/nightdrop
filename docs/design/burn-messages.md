@@ -63,9 +63,9 @@ The copy outlives the burn only until their next poll, reaching 24h only if they
 online. Still worth disclosing, and the UI says so in those terms; an earlier version of this note
 and the first shipped wording both claimed a flat 24h, which overstates it.
 
-**No read receipt.** Deliberate: the sender learns nothing about when — or whether — it was
-opened. It keeps the feature from leaking recipient behaviour, and there is no `Read`/`Viewed`
-frame today (only `Delivered`, `Ack`, `Screenshot`), so none is introduced.
+**No read receipt by default** — see §8, which revisits this. The sender learns nothing about
+when, or whether, it was opened unless the *recipient* chooses otherwise. That keeps the feature
+from leaking recipient behaviour, and nothing in the mechanism depends on a receipt.
 
 A consequence to accept: the sender cannot distinguish *read and burned* from *expired unread*
 from *landed on a client too old to burn it*. The last of those is handled below, at send time,
@@ -147,3 +147,38 @@ attachment leaks its size, which it must — the bytes have to arrive.
 Reveal works by `transfer_id` rather than `msg_id`, because attachments carry no `msg_id`;
 `mark_burn_viewed` accepts either. Burning deletes the sealed file as well as the message, which
 is asserted on disk rather than assumed.
+
+## 8. Burn-view receipts (added 2026-09-23)
+
+`Frame::Viewed` names one burn message, E2E-encrypted; on arrival the sender drops their own copy
+of that message instead of waiting out the 24h horizon. **Recipient-controlled, off by default.**
+
+### 8.1 The early deletion *is* the receipt
+
+The decisive point, and the reason this is opt-in rather than silent: even if the sender is never
+shown "Viewed", their copy vanishing at 11:43pm tells them the message was read at 11:43pm. There
+is no design in which the sender's copy goes early and the sender does not learn the timing. So
+this is a read receipt whatever it is called, and the person whose behaviour it discloses is the
+one who gets to choose. The settings dialog says this before the switch, not after.
+
+### 8.2 What it does not fix
+
+It was proposed partly to close §3's relay-recall gap. It mostly does not, and the reason is worth
+recording so nobody re-derives it: `Request::Fetch` is **remove-and-return**, and a relay copy sits
+under the *recipient's* handle. So their own drain deletes it. If they hold the message — and
+therefore could have burned it — the copy is usually already gone; if the copy is still there, they
+have not fetched it and cannot have viewed it. The window is "until their next poll", not 24h.
+
+What a receipt actually buys is tidiness on the sender's device. That is worth having, and it is
+not a privacy win, so it should not be sold as one.
+
+### 8.3 Constraints
+
+* **Nothing depends on it arriving.** The 24h horizon remains the guarantee, so a lost `Viewed`
+  costs tidiness alone. That is what makes it safe to have off by default.
+* **It only ever deletes our own burn message, named by id.** A `Viewed` naming anything else —
+  an ordinary message, one of theirs — is ignored, or it would be a way to make a peer delete
+  arbitrary history. Tested.
+* **It fires at a behaviourally meaningful instant**, so a relay sees message-in, short gap,
+  frame-back within a pair. Per-pair handles (`mailbox-handles.md`) do not hide that within a
+  pair-day. One more reason for the default to be off.

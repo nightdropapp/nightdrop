@@ -120,6 +120,18 @@ pub enum Frame {
     /// the whole point. A burn attachment therefore sends no thumbnail and no placeholder: the
     /// recipient sees a hidden tile until the payload lands and they choose to open it.
     BurnMedia { from: String, message: WireOlm },
+    /// "I opened your burn message." Carries the target id (`msg_id` for text, `transfer_id` for
+    /// an attachment) E2E-encrypted on the session, so the relay learns nothing about which
+    /// message it names.
+    ///
+    /// **Opt-in on the RECIPIENT's side and off by default** — it is their reading behaviour
+    /// being disclosed, so it is their choice to make. When enabled it lets the sender drop their
+    /// own copy at the moment it burned rather than waiting out the 24h horizon.
+    ///
+    /// Deliberately not a general read receipt: it is sent only for burn messages, names only
+    /// one, and nothing depends on it arriving — the 24h rule remains the guarantee, so a lost
+    /// `Viewed` costs tidiness and nothing else.
+    Viewed { from: String, message: WireOlm },
     /// The sender toggled opt-in 24h server storage for this chat (§6). The new state
     /// ("on"/"off") is E2E-encrypted on the session; the receiver mirrors it so **both**
     /// parties see the persistent in-chat warning while it is active (invariant).

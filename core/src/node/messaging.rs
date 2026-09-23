@@ -1476,8 +1476,46 @@ impl Node {
             return false;
         }
         msg.viewed_at = crate::api::now_secs();
+        // The id to name in the receipt: text carries `msg_id`, an attachment only `transfer_id`.
+        let target = if msg.msg_id.is_empty() {
+            msg.transfer_id.clone()
+        } else {
+            msg.msg_id.clone()
+        };
         self.dirty = true;
+        // Opt-in, and the recipient's call: this discloses when they read it. Nothing depends on
+        // it arriving — the sender's 24h horizon stands either way — so a failure here is silent
+        // by design rather than something to retry or surface.
+        if self.burn_receipts && !target.is_empty() {
+            self.send_burn_receipt(contact_id, &target);
+        }
         true
+    }
+
+    /// Tell the sender we opened their burn message, so they can drop their copy now instead of
+    /// waiting out the 24h horizon. Best-effort: see [`Node::mark_burn_viewed`].
+    pub(super) fn send_burn_receipt(&mut self, contact_id: &str, target_id: &str) {
+        let from = self.identity_key();
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return;
+        };
+        let m = crypto::encrypt(&mut chat.session, target_id.as_bytes());
+        let addr = chat.peer_address.clone();
+        let frame = Frame::Viewed {
+            from,
+            message: WireOlm::from_olm(&m),
+        };
+        let _ = self.deliver(&addr, contact_id, &frame);
+    }
+
+    /// Turn burn-view receipts on or off (recipient-controlled, off by default).
+    pub fn set_burn_receipts(&mut self, on: bool) {
+        self.burn_receipts = on;
+    }
+
+    /// Whether burn-view receipts are on.
+    pub fn burn_receipts_enabled(&self) -> bool {
+        self.burn_receipts
     }
 
     /// Delete burn messages whose time is up. Cheap (a scan of history), so it runs on **every**

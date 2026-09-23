@@ -1311,5 +1311,29 @@
   "burnServerStorageCaveat": "Server storage is on, so a copy sits on the relay until their app next collects it — up to 24 hours if it never does.",
   "@burnServerStorageCaveat": {
     "description": "Shown in the burn menu only when opt-in server storage is on. The relay copy is removed by the recipient's own drain (Request::Fetch removes), so it normally clears within minutes — 24h is the worst case where they never come back online, not the usual one. Do not restate it as 'stays 24 hours'."
+  },
+  "burnReceiptsMenu": "Burn read receipts",
+  "@burnReceiptsMenu": {
+    "description": "Home menu entry for the burn-view receipt setting."
+  },
+  "burnReceiptsTitle": "Tell senders when you open a burn message",
+  "@burnReceiptsTitle": {
+    "description": "Title of the burn-receipt settings dialog."
+  },
+  "burnReceiptsBody": "Off by default. When on, opening a burn message tells the sender, so their copy disappears at that moment instead of waiting out its 24 hours.",
+  "@burnReceiptsBody": {
+    "description": "What the burn-receipt setting does."
+  },
+  "burnReceiptsLimit": "This tells them WHEN you read it. Their copy vanishing is itself the signal, so there is no way to have the early deletion without them learning the time you opened it. With this off, their copy simply lives its full 24 hours.",
+  "@burnReceiptsLimit": {
+    "description": "The honest cost of the setting. The early deletion IS the disclosure — it cannot be separated — so this must be stated before the user turns it on, not implied."
+  },
+  "burnReceiptsOn": "Senders will be told when you open a burn message.",
+  "@burnReceiptsOn": {
+    "description": "Confirmation snackbar when enabled."
+  },
+  "burnReceiptsOff": "Senders are no longer told when you open a burn message.",
+  "@burnReceiptsOff": {
+    "description": "Confirmation snackbar when disabled."
   }
 }

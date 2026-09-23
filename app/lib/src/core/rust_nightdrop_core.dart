@@ -79,6 +79,7 @@ class RustNightdropCore extends NightdropCore {
   static const _secure = FlutterSecureStorage();
   static const _kStoreKeyName = 'nightdrop_store_key';
   static const _kCoverTraffic = 'nightdrop_cover_traffic';
+  static const _kBurnReceipts = 'nightdrop_burn_receipts';
   static const _kStateFile = 'nightdrop-state.bin';
   /// The sealed onion identity. Swept by prefix wherever it is handled, because it now gains
   /// `.replaced-*` sidecars alongside the state file's.
@@ -917,6 +918,8 @@ class RustNightdropCore extends NightdropCore {
       // same reason as the update check: it puts a frame on the wire per contact.
       unawaited(_announceCaptureReporting());
       unawaited(_restoreCoverTraffic());
+    unawaited(_restoreBurnReceipts());
+      unawaited(_restoreBurnReceipts());
       // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
       // this one dials Tor. It self-limits to one check a day, so calling it on every start is
       // free after the first.
@@ -1476,6 +1479,36 @@ class RustNightdropCore extends NightdropCore {
     );
     _messages[contactId] = _mapMessages(contactId, history);
     notifyListeners();
+  }
+
+  @override
+  Future<bool> burnReceiptsEnabled() async =>
+      _core == null ? false : await _core!.burnReceiptsEnabled();
+
+  @override
+  Future<void> setBurnReceipts(bool enabled) async {
+    await _core?.setBurnReceipts(enabled: enabled);
+    // Same reasoning as cover traffic: the core holds this for the process lifetime only, so
+    // without a record here it silently reverts on the next launch. Silently matters — the
+    // sender-side effect is invisible from this device, so nobody would notice it had stopped.
+    try {
+      await _secure.write(key: _kBurnReceipts, value: enabled ? '1' : '0');
+    } catch (_) {
+      // Best-effort: failing to persist must not fail turning it on now.
+    }
+    notifyListeners();
+  }
+
+  /// Re-apply the saved burn-receipt preference to a freshly built core.
+  Future<void> _restoreBurnReceipts() async {
+    try {
+      if (await _secure.read(key: _kBurnReceipts) == '1') {
+        await _core?.setBurnReceipts(enabled: true);
+      }
+    } catch (_) {
+      // Unreadable preference stays OFF — the safe default for something that discloses the
+      // user's behaviour to someone else.
+    }
   }
 
   @override

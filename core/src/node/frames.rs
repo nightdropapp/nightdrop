@@ -859,6 +859,51 @@ impl Node {
                 }
                 Ok(Some((from, String::new())))
             }
+            Frame::Viewed { from, message } => {
+                // They opened a burn message of ours. Drop our copy now rather than at the 24h
+                // horizon. Only ever applies to our OWN sent burn messages — a `Viewed` naming
+                // anything else is ignored, so it can never be used to delete arbitrary history.
+                let olm = message.to_olm()?;
+                let target = {
+                    let Some(chat) = self.chats.get_mut(&from) else {
+                        return Ok(None);
+                    };
+                    if !chat.authorized {
+                        return Ok(None);
+                    }
+                    String::from_utf8(crypto::decrypt(&mut chat.session, &olm)?)?
+                };
+                let mut dead_media: Vec<String> = Vec::new();
+                let mut removed = false;
+                if let Some(chat) = self.chats.get_mut(&from) {
+                    let before = chat.history.len();
+                    chat.history.retain(|m| {
+                        let ours = m.from_me && m.burn_secs > 0;
+                        let named = (!m.msg_id.is_empty() && m.msg_id == target)
+                            || (!m.transfer_id.is_empty() && m.transfer_id == target);
+                        if ours && named {
+                            for id in [m.media_id.as_str(), m.thumb_id.as_str()] {
+                                if !id.is_empty() {
+                                    dead_media.push(id.to_string());
+                                }
+                            }
+                            return false;
+                        }
+                        true
+                    });
+                    removed = chat.history.len() != before;
+                }
+                if let Some((dir, _)) = &self.media_store {
+                    for id in dead_media {
+                        let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                    }
+                }
+                if !removed {
+                    return Ok(None);
+                }
+                self.dirty = true;
+                Ok(Some((from, String::new())))
+            }
             // Short-code SPAKE2 runs over the rendezvous mailbox before any transport session
             // exists (see `run_join_handshake`/`service_pending_invites`), so a `Pake` frame on
             // the peer transport is unexpected — reserved for a future in-band re-key.

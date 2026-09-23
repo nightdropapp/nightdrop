@@ -274,6 +274,16 @@ abstract class NightdropCore extends ChangeNotifier {
   Future<void> sendBurnMedia(
       String contactId, List<int> data, String mime, String kind, int burnSecs);
 
+  /// Whether we tell senders when we open their burn message. Off by default.
+  Future<bool> burnReceiptsEnabled() async => false;
+
+  /// Turn burn-view receipts on or off. **The recipient's choice**, because it is their reading
+  /// behaviour being disclosed — and the sender's copy vanishing at that moment *is* the
+  /// disclosure, whether or not any UI spells it out.
+  ///
+  /// Nothing depends on it: with it off, a sender's copy simply lives out its 24 hours.
+  Future<void> setBurnReceipts(bool enabled) async {}
+
   /// The recipient revealed a burn message — start its countdown. Idempotent: reopening a chat
   /// does not restart a clock that is already running.
   Future<void> markBurnViewed(String contactId, String msgId);

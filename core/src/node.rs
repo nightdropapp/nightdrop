@@ -386,6 +386,10 @@ pub struct Node {
     /// What we last told peers about whether this device can report screenshots (#1). `None` until
     /// the UI says; only a change is announced, so a restart does not re-broadcast to every chat.
     captures_visible: Option<bool>,
+    /// Whether to tell senders when we open their burn message (`Frame::Viewed`). **Off by
+    /// default**: it discloses our reading behaviour, and the person whose behaviour it is should
+    /// choose. Nothing depends on it — with it off, a sender's copy simply lives its full 24h.
+    burn_receipts: bool,
     /// Contacts this run has successfully told that we understand burn messages (see
     /// [`Node::announce_burns`]). Per-contact and success-gated rather than a single flag: a
     /// peer who was unreachable on the first attempt must be retried, or burn stays unavailable
@@ -655,6 +659,7 @@ impl Node {
             last_invite_code: None,
             captures_visible: None,
             burns_announced: std::collections::HashSet::new(),
+            burn_receipts: false,
             media_store: None,
             pending_media: Vec::new(),
             tor_state_dir: None,

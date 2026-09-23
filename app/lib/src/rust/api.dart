@@ -195,6 +195,9 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Leaves the pending blob in place so a cancelled save can be retried.
   Future<Uint8List> backupBytes();
 
+  /// Whether burn-view receipts are on.
+  Future<bool> burnReceiptsEnabled();
+
   /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
   /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
   /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
@@ -553,6 +556,17 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// down to conserve battery/data; foregrounded, it resumes snappy polling and does an
   /// immediate relay catch-up so queued offline mail appears right away.
   Future<void> setBackground({required bool background});
+
+  /// Turn **burn-view receipts** on or off. Off by default, and deliberately the recipient's
+  /// choice: it is their reading behaviour being disclosed.
+  ///
+  /// With it on, opening a burn message tells the sender, so their copy goes at that moment
+  /// instead of living out its 24h. Note that the early deletion **is** the disclosure — a
+  /// sender watching their own copy vanish learns when it was read whether or not any UI says
+  /// so, which is why this is opt-in rather than silent.
+  ///
+  /// Nothing depends on the receipt arriving: the 24h horizon remains the guarantee.
+  Future<void> setBurnReceipts({required bool enabled});
 
   /// Tell peers whether this device can report screenshots at all (#1).
   ///

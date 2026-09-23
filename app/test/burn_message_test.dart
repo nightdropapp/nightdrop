@@ -5,6 +5,7 @@ import 'package:night_drop/src/app.dart';
 import 'package:night_drop/src/core/models.dart';
 import 'package:night_drop/src/core/mock_nightdrop_core.dart';
 import 'package:night_drop/src/features/chat/chat_screen.dart';
+import 'package:night_drop/src/features/home/home_screen.dart';
 
 /// Burn messages (`docs/design/burn-messages.md`) at the UI edge.
 class _BurnCore extends MockNightdropCore {
@@ -69,6 +70,48 @@ class _BurnCore extends MockNightdropCore {
 }
 
 void main() {
+  // The setting is off by default and the dialog must state the cost BEFORE the switch: the
+  // sender's copy vanishing at the moment of reading is itself the receipt, so there is no
+  // version where they get the early deletion without the timing.
+  testWidgets('burn read receipts are off by default and disclose what they leak',
+      (tester) async {
+    final core = _BurnCore();
+    await tester.runAsync(() async {
+      await core.createIdentity();
+      await core.joinWithShortCode('4-cedar-lantern-river');
+    });
+    expect(await core.burnReceiptsEnabled(), isFalse,
+        reason: 'the recipient has to opt in to disclosing their own reading behaviour');
+
+    await tester.pumpWidget(
+      NightdropScope(
+        core: core,
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const HomeScreen(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    await tester.tap(find.byIcon(Icons.more_vert));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Burn read receipts'));
+    await tester.pumpAndSettle();
+
+    expect(find.textContaining('WHEN you read it'), findsOneWidget,
+        reason: 'the cost is stated before the switch, not after');
+    expect(find.text('Turn on'), findsOneWidget, reason: 'so it is currently off');
+
+    await tester.tap(find.text('Turn on'));
+    await tester.pumpAndSettle();
+    expect(await core.burnReceiptsEnabled(), isTrue);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(seconds: 5));
+  });
+
 
   /// Replace the tree so StatefulWidgets dispose inside the test: the burn countdown's periodic
   /// ticker and the chat screen's auto-scroll callbacks are both cancelled in dispose, and

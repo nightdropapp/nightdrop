@@ -236,6 +236,17 @@ class MockNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
+  bool _burnReceipts = false;
+
+  @override
+  Future<bool> burnReceiptsEnabled() async => _burnReceipts;
+
+  @override
+  Future<void> setBurnReceipts(bool enabled) async {
+    _burnReceipts = enabled;
+    notifyListeners();
+  }
+
   @override
   Future<void> markBurnViewed(String contactId, String msgId) async {
     final list = _messages[contactId];

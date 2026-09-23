@@ -1164,4 +1164,26 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get burnServerStorageCaveat =>
       'Server storage is on, so a copy sits on the relay until their app next collects it — up to 24 hours if it never does.';
+
+  @override
+  String get burnReceiptsMenu => 'Burn read receipts';
+
+  @override
+  String get burnReceiptsTitle => 'Tell senders when you open a burn message';
+
+  @override
+  String get burnReceiptsBody =>
+      'Off by default. When on, opening a burn message tells the sender, so their copy disappears at that moment instead of waiting out its 24 hours.';
+
+  @override
+  String get burnReceiptsLimit =>
+      'This tells them WHEN you read it. Their copy vanishing is itself the signal, so there is no way to have the early deletion without them learning the time you opened it. With this off, their copy simply lives its full 24 hours.';
+
+  @override
+  String get burnReceiptsOn =>
+      'Senders will be told when you open a burn message.';
+
+  @override
+  String get burnReceiptsOff =>
+      'Senders are no longer told when you open a burn message.';
 }

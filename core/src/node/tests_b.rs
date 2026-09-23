@@ -1581,3 +1581,114 @@ fn a_burn_announce_to_an_unreachable_peer_is_retried_until_it_lands() {
         "and burn is available once the peer has announced"
     );
 }
+
+/// Burn-view receipts (`Frame::Viewed`): recipient-controlled, OFF by default.
+#[test]
+fn a_burn_view_receipt_is_silent_unless_the_recipient_turns_it_on() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    assert!(
+        !bob.burn_receipts_enabled(),
+        "off by default — the recipient's reading behaviour is not disclosed unless they say so"
+    );
+
+    // Default (off): Bob opens it, Alice's copy stays until its own 24h horizon.
+    alice.send_burn(&bob_contact, "first", 30).unwrap();
+    bob.pump().unwrap();
+    let first = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .find(|m| m.burn_secs > 0 && !m.from_me)
+        .unwrap()
+        .msg_id;
+    assert!(bob.mark_burn_viewed(&alice_contact, &first));
+    alice.pump().unwrap();
+    assert!(
+        alice
+            .messages(&bob_contact)
+            .iter()
+            .any(|m| m.from_me && m.msg_id == first),
+        "with receipts off the sender learns nothing and keeps their copy"
+    );
+
+    // Turned on: the next reveal drops Alice's copy at that moment.
+    bob.set_burn_receipts(true);
+    alice.send_burn(&bob_contact, "second", 30).unwrap();
+    bob.pump().unwrap();
+    let second = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .find(|m| m.burn_secs > 0 && !m.from_me && m.msg_id != first)
+        .unwrap()
+        .msg_id;
+    assert!(bob.mark_burn_viewed(&alice_contact, &second));
+    alice.pump().unwrap();
+    assert!(
+        !alice
+            .messages(&bob_contact)
+            .iter()
+            .any(|m| m.msg_id == second),
+        "the sender's copy goes at the moment it was opened"
+    );
+    // ...and only that one. The first is still Alice's, untouched.
+    assert!(
+        alice
+            .messages(&bob_contact)
+            .iter()
+            .any(|m| m.msg_id == first),
+        "a receipt names ONE message and must not take anything else with it"
+    );
+}
+
+/// A `Viewed` naming something that is not our own burn message must do nothing — otherwise it
+/// would be a way to make a peer delete arbitrary history.
+#[test]
+fn a_viewed_receipt_cannot_delete_anything_but_our_own_burn_message() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // An ordinary (non-burn) message from Alice, and one from Bob.
+    alice.send(&bob_contact, "ordinary keepsake").unwrap();
+    bob.pump().unwrap();
+    bob.send(&alice_contact, "bob's own line").unwrap();
+    alice.pump().unwrap();
+    let ordinary = alice
+        .messages(&bob_contact)
+        .into_iter()
+        .find(|m| m.from_me && m.text == "ordinary keepsake")
+        .unwrap()
+        .msg_id;
+
+    // Bob forges a receipt naming Alice's ordinary message.
+    bob.set_burn_receipts(true);
+    bob.send_burn_receipt(&alice_contact, &ordinary);
+    alice.pump().unwrap();
+
+    assert!(
+        alice
+            .messages(&bob_contact)
+            .iter()
+            .any(|m| m.msg_id == ordinary),
+        "a Viewed naming a non-burn message must be ignored entirely"
+    );
+    assert!(
+        alice
+            .messages(&bob_contact)
+            .iter()
+            .any(|m| !m.from_me && m.text == "bob's own line"),
+        "and it must not touch their messages either"
+    );
+}
