@@ -47,6 +47,8 @@ impl Node {
                         media_size: m.media_size,
                         transfer_id: m.transfer_id.clone(),
                         thumb_id: m.thumb_id.clone(),
+                        burn_secs: m.burn_secs,
+                        viewed_at: m.viewed_at,
                     })
                     .collect(),
                 closed: chat.closed,
@@ -56,6 +58,7 @@ impl Node {
                 peer_verified: chat.contact.peer_verified,
                 peer_captures_silent: chat.contact.peer_captures_silent,
                 peer_relays: chat.contact.peer_relays.clone(),
+                peer_supports_burn: chat.contact.peer_supports_burn,
                 // Persist recall receipts for still-queued messages so an edit/unsend can pull an
                 // undelivered blob off the relay even after a restart (§1.1). Flatten the
                 // by-msg_id map into a list carrying its target.
@@ -326,6 +329,7 @@ impl Node {
                         peer_verified: chat.peer_verified,
                         peer_captures_silent: chat.peer_captures_silent,
                         peer_relays: chat.peer_relays.clone(),
+                        peer_supports_burn: chat.peer_supports_burn,
                         remote_storage_healthy: true,
                         last_seen_secs: 0, // these three are filled in `contacts()` from the chat
                         local_name: String::new(),
@@ -350,6 +354,8 @@ impl Node {
                             msg_id: m.msg_id.clone(),
                             edited: m.edited,
                             at: m.at,
+                            burn_secs: m.burn_secs,
+                            viewed_at: m.viewed_at,
                         })
                         .collect(),
                     last_seen: chat.last_seen_unix,
@@ -411,6 +417,7 @@ impl Node {
                                 peer_verified: pchat.peer_verified,
                                 peer_captures_silent: pchat.peer_captures_silent,
                                 peer_relays: pchat.peer_relays.clone(),
+                                peer_supports_burn: pchat.peer_supports_burn,
                                 remote_storage_healthy: true,
                                 last_seen_secs: 0, // these three are filled in `contacts()` from the chat
                                 local_name: String::new(),

@@ -64,6 +64,10 @@ pub struct PersistedChat {
     /// The peer's advertised extra relay addresses (#17). `#[serde(default)]` for forward-compat.
     #[serde(default)]
     pub peer_relays: Vec<String>,
+    /// Whether the peer's build understands burn messages (`Frame::Burns`). `None`/absent means
+    /// unknown, which is treated as unsupported — burn is never offered on a guess.
+    #[serde(default)]
+    pub peer_supports_burn: Option<bool>,
     /// Recall receipts for our still-**queued** (undelivered) messages, so an edit/unsend after an
     /// app restart can still pull an undelivered blob off the relay instead of letting the peer
     /// receive it and only then tombstoning it (§11.3). The `delete_token`s are secrets, but the
@@ -161,6 +165,15 @@ pub struct PersistedMessage {
     pub transfer_id: String,
     #[serde(default)]
     pub thumb_id: String,
+    /// Burn timer in seconds for a per-message burn (`docs/design/burn-messages.md`); 0 means
+    /// this is an ordinary message. Counts from [`viewed_at`](Self::viewed_at), not from `at`.
+    #[serde(default)]
+    pub burn_secs: u64,
+    /// Unix seconds when the recipient first revealed a burn message; 0 = not yet viewed.
+    /// Persisted so the countdown survives a restart — a burn you can reset by force-quitting
+    /// would be theatre.
+    #[serde(default)]
+    pub viewed_at: u64,
 }
 
 /// An attachment carried *inside* a portable backup: its id plus the base64 plaintext bytes.

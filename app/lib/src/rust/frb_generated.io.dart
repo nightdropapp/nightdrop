@@ -19,29 +19,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   });
 
   CrossPlatformFinalizerArg
-  get rust_arc_decrement_strong_count_NightdropCorePtr => wire
-      ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCorePtr;
+      get rust_arc_decrement_strong_count_NightdropCorePtr => wire
+          ._rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCorePtr;
 
   @protected
   AnyhowException dco_decode_AnyhowException(dynamic raw);
 
   @protected
   NightdropCore
-  dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    dynamic raw,
-  );
+      dco_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          dynamic raw);
 
   @protected
   NightdropCore
-  dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    dynamic raw,
-  );
+      dco_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          dynamic raw);
 
   @protected
   NightdropCore
-  dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    dynamic raw,
-  );
+      dco_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          dynamic raw);
 
   @protected
   RustStreamSink<AppEvent> dco_decode_StreamSink_app_event_Sse(dynamic raw);
@@ -159,26 +156,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   NightdropCore
-  sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    SseDeserializer deserializer,
-  );
+      sse_decode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          SseDeserializer deserializer);
 
   @protected
   NightdropCore
-  sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    SseDeserializer deserializer,
-  );
+      sse_decode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          SseDeserializer deserializer);
 
   @protected
   NightdropCore
-  sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    SseDeserializer deserializer,
-  );
+      sse_decode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          SseDeserializer deserializer);
 
   @protected
   RustStreamSink<AppEvent> sse_decode_StreamSink_app_event_Sse(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   String sse_decode_String(SseDeserializer deserializer);
@@ -200,8 +193,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   TransferProgress sse_decode_box_autoadd_transfer_progress(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   BigInt sse_decode_box_autoadd_u_64(SseDeserializer deserializer);
@@ -235,8 +227,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   List<RejectedBridge> sse_decode_list_rejected_bridge(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   List<RelayHealth> sse_decode_list_relay_health(SseDeserializer deserializer);
@@ -246,16 +237,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   AppUpdate? sse_decode_opt_box_autoadd_app_update(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   bool? sse_decode_opt_box_autoadd_bool(SseDeserializer deserializer);
 
   @protected
   TransferProgress? sse_decode_opt_box_autoadd_transfer_progress(
-    SseDeserializer deserializer,
-  );
+      SseDeserializer deserializer);
 
   @protected
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
@@ -301,36 +290,26 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_AnyhowException(
-    AnyhowException self,
-    SseSerializer serializer,
-  );
+      AnyhowException self, SseSerializer serializer);
 
   @protected
   void
-  sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    NightdropCore self,
-    SseSerializer serializer,
-  );
+      sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          NightdropCore self, SseSerializer serializer);
 
   @protected
   void
-  sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    NightdropCore self,
-    SseSerializer serializer,
-  );
+      sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          NightdropCore self, SseSerializer serializer);
 
   @protected
   void
-  sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-    NightdropCore self,
-    SseSerializer serializer,
-  );
+      sse_encode_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+          NightdropCore self, SseSerializer serializer);
 
   @protected
   void sse_encode_StreamSink_app_event_Sse(
-    RustStreamSink<AppEvent> self,
-    SseSerializer serializer,
-  );
+      RustStreamSink<AppEvent> self, SseSerializer serializer);
 
   @protected
   void sse_encode_String(String self, SseSerializer serializer);
@@ -346,27 +325,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_box_autoadd_app_update(
-    AppUpdate self,
-    SseSerializer serializer,
-  );
+      AppUpdate self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_bool(bool self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_transfer_progress(
-    TransferProgress self,
-    SseSerializer serializer,
-  );
+      TransferProgress self, SseSerializer serializer);
 
   @protected
   void sse_encode_box_autoadd_u_64(BigInt self, SseSerializer serializer);
 
   @protected
   void sse_encode_bridge_save_result(
-    BridgeSaveResult self,
-    SseSerializer serializer,
-  );
+      BridgeSaveResult self, SseSerializer serializer);
 
   @protected
   void sse_encode_chat_message(ChatMessage self, SseSerializer serializer);
@@ -382,9 +355,7 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_chat_message(
-    List<ChatMessage> self,
-    SseSerializer serializer,
-  );
+      List<ChatMessage> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_contact(List<Contact> self, SseSerializer serializer);
@@ -394,39 +365,29 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_list_prim_u_8_strict(
-    Uint8List self,
-    SseSerializer serializer,
-  );
+      Uint8List self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_rejected_bridge(
-    List<RejectedBridge> self,
-    SseSerializer serializer,
-  );
+      List<RejectedBridge> self, SseSerializer serializer);
 
   @protected
   void sse_encode_list_relay_health(
-    List<RelayHealth> self,
-    SseSerializer serializer,
-  );
+      List<RelayHealth> self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_app_update(
-    AppUpdate? self,
-    SseSerializer serializer,
-  );
+      AppUpdate? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_bool(bool? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_transfer_progress(
-    TransferProgress? self,
-    SseSerializer serializer,
-  );
+      TransferProgress? self, SseSerializer serializer);
 
   @protected
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
@@ -436,27 +397,21 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_rejected_bridge(
-    RejectedBridge self,
-    SseSerializer serializer,
-  );
+      RejectedBridge self, SseSerializer serializer);
 
   @protected
   void sse_encode_relay_health(RelayHealth self, SseSerializer serializer);
 
   @protected
   void sse_encode_server_backup_info(
-    ServerBackupInfo self,
-    SseSerializer serializer,
-  );
+      ServerBackupInfo self, SseSerializer serializer);
 
   @protected
   void sse_encode_store_unlock(StoreUnlock self, SseSerializer serializer);
 
   @protected
   void sse_encode_transfer_progress(
-    TransferProgress self,
-    SseSerializer serializer,
-  );
+      TransferProgress self, SseSerializer serializer);
 
   @protected
   void sse_encode_u_16(int self, SseSerializer serializer);
@@ -488,14 +443,14 @@ class RustLibWire implements BaseWire {
 
   /// Holds the symbol lookup function.
   final ffi.Pointer<T> Function<T extends ffi.NativeType>(String symbolName)
-  _lookup;
+      _lookup;
 
   /// The symbols are looked up in [dynamicLibrary].
   RustLibWire(ffi.DynamicLibrary dynamicLibrary)
-    : _lookup = dynamicLibrary.lookup;
+      : _lookup = dynamicLibrary.lookup;
 
   void
-  rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+      rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
@@ -505,14 +460,13 @@ class RustLibWire implements BaseWire {
 
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCorePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-        'frbgen_night_drop_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore',
-      );
+          'frbgen_night_drop_rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore');
   late final _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore =
       _rust_arc_increment_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCorePtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();
 
   void
-  rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+      rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
     ffi.Pointer<ffi.Void> ptr,
   ) {
     return _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
@@ -522,8 +476,7 @@ class RustLibWire implements BaseWire {
 
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCorePtr =
       _lookup<ffi.NativeFunction<ffi.Void Function(ffi.Pointer<ffi.Void>)>>(
-        'frbgen_night_drop_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore',
-      );
+          'frbgen_night_drop_rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore');
   late final _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore =
       _rust_arc_decrement_strong_count_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCorePtr
           .asFunction<void Function(ffi.Pointer<ffi.Void>)>();

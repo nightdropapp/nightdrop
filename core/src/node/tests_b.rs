@@ -1258,3 +1258,178 @@ fn a_stale_persisted_invite_is_not_resurrected() {
         "the restored expiry is clamped to the invite's own TTL"
     );
 }
+
+/// Burn messages (`docs/design/burn-messages.md`): capability-gated, blurred on arrival,
+/// deleted on a view-anchored countdown, deleted unviewed at 24h.
+#[test]
+fn a_burn_message_is_refused_until_the_peer_says_it_can_burn() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+
+    // Bob's build announced burn support when the chat was created, and Alice heard it.
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.contacts()[0].peer_supports_burn,
+        Some(true),
+        "a paired peer on this build announces that it understands burn"
+    );
+
+    // A contact who has NOT said so is refused — never silently downgraded to a normal message,
+    // which is the one failure this feature must not have.
+    let mut carol = Node::new(Box::new(net.endpoint("carol")));
+    let cb = carol.publish_bundle();
+    let carol_contact = alice.connect_with_bundle("carol", &cb).unwrap();
+    // Deliberately do NOT let Alice pump Carol's announce in.
+    if let Some(chat) = alice.chats.get_mut(&carol_contact) {
+        chat.contact.peer_supports_burn = None;
+    }
+    let err = alice
+        .send_burn(&carol_contact, "secret", 30)
+        .expect_err("an unannounced peer must be refused");
+    assert!(
+        err.to_string().contains("cannot burn"),
+        "the error must name the reason, not fail generically: {err}"
+    );
+
+    // And a burn with no timer is meaningless.
+    assert!(alice.send_burn(&bob_contact, "secret", 0).is_err());
+}
+
+#[test]
+fn a_burn_message_arrives_unviewed_and_burns_on_a_view_anchored_clock() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    alice.send_burn(&bob_contact, "meet at six", 30).unwrap();
+    bob.pump().unwrap();
+
+    let got: Vec<_> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.system && !m.from_me)
+        .collect();
+    assert_eq!(got.len(), 1);
+    assert_eq!(got[0].text, "meet at six");
+    assert_eq!(
+        got[0].burn_secs, 30,
+        "the timer rides inside the ciphertext"
+    );
+    assert_eq!(
+        got[0].viewed_at, 0,
+        "it arrives unviewed — blurred, with the clock not yet running"
+    );
+
+    // Not yet revealed, so a sweep must NOT delete it however long it has sat, short of 24h.
+    bob.sweep_burns();
+    assert_eq!(
+        bob.messages(&alice_contact)
+            .iter()
+            .filter(|m| !m.system && !m.from_me)
+            .count(),
+        1,
+        "an unopened burn message survives until the 24h horizon"
+    );
+
+    // Reveal it: the clock starts, once.
+    let msg_id = got[0].msg_id.clone();
+    assert!(bob.mark_burn_viewed(&alice_contact, &msg_id));
+    let first = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .find(|m| m.msg_id == msg_id)
+        .unwrap()
+        .viewed_at;
+    assert_ne!(first, 0);
+    assert!(
+        !bob.mark_burn_viewed(&alice_contact, &msg_id),
+        "reopening a chat must not restart a clock that is already running"
+    );
+    assert_eq!(
+        bob.messages(&alice_contact)
+            .into_iter()
+            .find(|m| m.msg_id == msg_id)
+            .unwrap()
+            .viewed_at,
+        first
+    );
+
+    // Wind the clock back past the timer: it burns.
+    if let Some(chat) = bob.chats.get_mut(&alice_contact) {
+        for m in chat.history.iter_mut() {
+            if m.msg_id == msg_id {
+                m.viewed_at = crate::api::now_secs() - 31;
+            }
+        }
+    }
+    assert!(bob.sweep_burns());
+    assert!(
+        !bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.msg_id == msg_id),
+        "a burned message is DELETED from the store, not hidden"
+    );
+}
+
+#[test]
+fn an_unopened_burn_message_expires_at_24h_and_the_senders_copy_never_burns_on_view() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    alice.send_burn(&bob_contact, "never opened", 30).unwrap();
+    bob.pump().unwrap();
+
+    // Age it past 24h without ever revealing it.
+    let old = crate::api::now_secs() - super::RELAY_TTL.as_secs() - 1;
+    for node in [&mut bob] {
+        if let Some(chat) = node.chats.get_mut(&alice_contact) {
+            for m in chat.history.iter_mut() {
+                if m.burn_secs > 0 {
+                    m.at = old;
+                }
+            }
+        }
+    }
+    assert!(bob.sweep_burns());
+    assert!(
+        !bob.messages(&alice_contact).iter().any(|m| m.burn_secs > 0),
+        "a burn message nobody opened must not sit for ever"
+    );
+
+    // The SENDER's copy is on the 24h horizon only — it cannot mirror a view-anchored countdown,
+    // because there is deliberately no read receipt to tell it when the other side looked.
+    assert!(
+        alice
+            .messages(&bob_contact)
+            .iter()
+            .any(|m| m.from_me && m.burn_secs > 0),
+        "the sender's copy does not vanish when the recipient reveals theirs"
+    );
+    if let Some(chat) = alice.chats.get_mut(&bob_contact) {
+        for m in chat.history.iter_mut() {
+            if m.burn_secs > 0 {
+                m.at = old;
+            }
+        }
+    }
+    assert!(alice.sweep_burns());
+    assert!(
+        !alice.messages(&bob_contact).iter().any(|m| m.burn_secs > 0),
+        "but it does have a fixed 24h maximum life"
+    );
+}

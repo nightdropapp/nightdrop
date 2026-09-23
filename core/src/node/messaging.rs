@@ -39,6 +39,38 @@ impl Node {
     /// over the transport if the peer is reachable; otherwise queued in the relay's
     /// store-and-forward mailbox (§6), if one is attached.
     pub fn send(&mut self, contact_id: &str, text: &str) -> Result<()> {
+        self.send_inner(contact_id, text, 0)
+    }
+
+    /// Send a **burn message** (`docs/design/burn-messages.md`): blurred on arrival, deleted
+    /// `burn_secs` after the recipient first reveals it, and deleted unviewed after 24h.
+    ///
+    /// **Refuses** unless the peer has announced [`Frame::Burns`] support. A burn that silently
+    /// lands as a permanent message is the single failure this feature must not have, and the
+    /// send is the only moment anyone can act on it — there are no read receipts, so the sender
+    /// would otherwise never learn. Callers surface the error; they must not fall back to a
+    /// normal send.
+    pub fn send_burn(&mut self, contact_id: &str, text: &str, burn_secs: u64) -> Result<()> {
+        if burn_secs == 0 {
+            anyhow::bail!("a burn message needs a timer");
+        }
+        let supported = self
+            .chats
+            .get(contact_id)
+            .map(|c| c.contact.peer_supports_burn == Some(true))
+            .unwrap_or(false);
+        if !supported {
+            anyhow::bail!(
+                "this contact's app version cannot burn messages — it would keep this one"
+            );
+        }
+        self.send_inner(contact_id, text, burn_secs)
+    }
+
+    /// Shared body of [`send`](Self::send) and [`send_burn`](Self::send_burn). `burn_secs == 0`
+    /// is an ordinary message; anything else seals a [`Frame::Burn`] instead, with the duration
+    /// inside the ciphertext.
+    fn send_inner(&mut self, contact_id: &str, text: &str, burn_secs: u64) -> Result<()> {
         let from = self.identity_key();
         let chat = self
             .chats
@@ -57,15 +89,30 @@ impl Node {
         // critical step and must stay synchronous (per-message ratchet ordering). Store the message
         // right away as "queued"; only the opaque-byte *delivery* below is what may defer.
         let msg_id = random_msg_id();
-        let message = crypto::encrypt(&mut chat.session, text.as_bytes());
-        let frame = Frame::Message {
-            from,
-            id: msg_id.clone(),
-            message: WireOlm::from_olm(&message),
+        let plaintext = if burn_secs == 0 {
+            text.as_bytes().to_vec()
+        } else {
+            pack_burn(burn_secs, text)
+        };
+        let message = crypto::encrypt(&mut chat.session, &plaintext);
+        let wire_olm = WireOlm::from_olm(&message);
+        let frame = if burn_secs == 0 {
+            Frame::Message {
+                from,
+                id: msg_id.clone(),
+                message: wire_olm,
+            }
+        } else {
+            Frame::Burn {
+                from,
+                id: msg_id.clone(),
+                message: wire_olm,
+            }
         };
         let bytes = wire::encode(&frame);
         let mut msg = ChatMessage::text(true, text.to_string(), msg_id.clone());
         msg.delivery = "queued".to_string();
+        msg.burn_secs = burn_secs;
         chat.history.push(msg);
 
         if self.transport.is_synchronous() {
@@ -1350,6 +1397,80 @@ impl Node {
         Ok(())
     }
 
+    /// Start a burn message's countdown: the recipient just revealed it. Idempotent — a second
+    /// reveal does **not** restart the clock, or closing and reopening the chat would hold a
+    /// message open for ever.
+    ///
+    /// Returns true if this call started the clock (so the caller knows to persist).
+    pub fn mark_burn_viewed(&mut self, contact_id: &str, msg_id: &str) -> bool {
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return false;
+        };
+        let Some(msg) = chat
+            .history
+            .iter_mut()
+            .find(|m| m.msg_id == msg_id && m.burn_secs > 0 && !m.from_me)
+        else {
+            return false;
+        };
+        if msg.viewed_at != 0 {
+            return false;
+        }
+        msg.viewed_at = crate::api::now_secs();
+        self.dirty = true;
+        true
+    }
+
+    /// Delete burn messages whose time is up. Cheap (a scan of history), so it runs on **every**
+    /// pump rather than the relay cadence: a 10-second burn must not wait on a minute-long tick.
+    /// [`sweep_time`](Self::sweep_time) does not supersede this — it is the slower backstop that
+    /// also catches the unviewed 24h horizon.
+    ///
+    /// Two horizons, both wall-clock:
+    ///
+    /// * **viewed** — `viewed_at + burn_secs`, the countdown the recipient watched;
+    /// * **unviewed** — `at + RELAY_TTL` (24h), so a message nobody opened does not sit for ever.
+    ///
+    /// The **sender's own copy** burns on the 24h horizon only. It cannot burn on view, because
+    /// there is deliberately no read receipt (`burn-messages.md` §3) — so the sender's copy has a
+    /// fixed maximum life rather than a mirrored countdown. Users are told this rather than left
+    /// to infer that their copy vanished when the other person looked.
+    pub fn sweep_burns(&mut self) -> bool {
+        let now = crate::api::now_secs();
+        let unviewed_horizon = RELAY_TTL.as_secs();
+        let mut changed = false;
+        let mut dead_media: Vec<String> = Vec::new();
+        for chat in self.chats.values_mut() {
+            let before = chat.history.len();
+            chat.history.retain(|m| {
+                if m.burn_secs == 0 || m.at == 0 {
+                    return true;
+                }
+                let done = if m.viewed_at != 0 {
+                    now.saturating_sub(m.viewed_at) >= m.burn_secs
+                } else {
+                    now.saturating_sub(m.at) >= unviewed_horizon
+                };
+                if done {
+                    for id in [m.media_id.as_str(), m.thumb_id.as_str()] {
+                        if !id.is_empty() {
+                            dead_media.push(id.to_string());
+                        }
+                    }
+                }
+                !done
+            });
+            changed |= chat.history.len() != before;
+        }
+        if let Some((dir, _)) = &self.media_store {
+            for id in dead_media {
+                let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+            }
+        }
+        self.dirty |= changed;
+        changed
+    }
+
     /// Time-based housekeeping, run on the poller's relay cadence (§11.3/§11.4):
     ///
     /// * a queued message older than the relay's 24h TTL was reaped server-side without
@@ -1358,6 +1479,7 @@ impl Node {
     ///   24h — messages and their sealed media files. Normal local-first history is
     ///   untouched, and messages without timestamps (pre-upgrade) are left alone.
     pub fn sweep_time(&mut self) {
+        self.sweep_burns();
         let now = crate::api::now_secs();
         let horizon = RELAY_TTL.as_secs();
         let mut changed = false;

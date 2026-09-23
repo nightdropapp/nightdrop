@@ -92,6 +92,25 @@ pub enum Frame {
     /// that message with a "deleted" tombstone. Same eligibility as an edit. A still-queued
     /// message is recalled from the relay instead, so the peer never receives it at all.
     Unsend { from: String, message: WireOlm },
+    /// A **burn message** (`docs/design/burn-messages.md`): shown blurred, deleted a set time
+    /// after the recipient first reveals it, and deleted unviewed after 24h regardless.
+    ///
+    /// A **separate variant rather than a flag on [`Message`](Frame::Message)**, deliberately.
+    /// Frames are JSON and serde ignores unknown *fields*, so a flag would land on a pre-0.1.23
+    /// build as an ordinary permanent message while the sender believed it burned — a
+    /// manufactured false guarantee, and the person harmed is the one who trusted it. An unknown
+    /// *variant* fails `decode` instead, so an old build drops it and the sender simply never
+    /// sees delivery. Sending is capability-gated on [`Burns`](Frame::Burns); this is the
+    /// backstop behind that gate, and it fails closed.
+    ///
+    /// The duration rides **inside** the encrypted payload (`node::pack_burn`), not as a plaintext
+    /// field, so nothing but the peer learns that this message burns or how fast.
+    Burn {
+        from: String,
+        #[serde(default)]
+        id: String,
+        message: WireOlm,
+    },
     /// The sender toggled opt-in 24h server storage for this chat (§6). The new state
     /// ("on"/"off") is E2E-encrypted on the session; the receiver mirrors it so **both**
     /// parties see the persistent in-chat warning while it is active (invariant).
@@ -144,6 +163,14 @@ pub enum Frame {
     /// "captures are visible" would be the dangerous direction — it would tell someone their
     /// screenshots are watched when they are not.
     Captures { from: String, message: WireOlm },
+    /// "This build understands [`Burn`](Frame::Burn)." A standing property of the peer's build,
+    /// announced at the same points as [`Captures`](Frame::Captures).
+    ///
+    /// **E2E-authenticated** by the marker that decrypts (`node::MARK_BURNS_V1`), so it cannot be
+    /// forged or replayed. There is deliberately no "I do not support burn" marker: absence is
+    /// the negative, so an older build — which sends nothing — reads as unsupported without
+    /// having to say so. Unknown therefore means *do not offer burn*, which is the safe direction.
+    Burns { from: String, message: WireOlm },
     /// Silent **mailbox ack** (§11.3): the receiver drained our mailbox. `from` is the acking
     /// peer's identity key. Never acked itself (no loops). Carries an **E2E-encrypted marker**
     /// (`node::MARK_ACK`) so it can't be forged or replayed.
@@ -330,6 +357,24 @@ pub fn decode(bytes: &[u8]) -> Result<Frame> {
 
 #[cfg(test)]
 mod tests {
+    /// The reason `Burn` is its own variant and not a flag on `Message`.
+    ///
+    /// serde ignores unknown *fields*, so a `burn` flag would land on a pre-0.1.23 build as an
+    /// ordinary, permanent message while the sender believed it burned — a manufactured false
+    /// guarantee. An unknown *variant* fails to decode, so the old build drops it instead and the
+    /// sender simply never sees delivery. This test pins the property the choice depends on.
+    #[test]
+    fn an_unknown_frame_variant_fails_to_decode_rather_than_degrading() {
+        let json = br#"{"v":1,"f":{"t":"some_future_frame","from":"x"}}"#;
+        let mut bytes = (json.len() as u32).to_be_bytes().to_vec();
+        bytes.extend_from_slice(json);
+        assert!(
+            super::decode(&bytes).is_err(),
+            "an unknown variant must fail closed; if this ever starts succeeding, Frame::Burn's \
+             safety argument is void"
+        );
+    }
+
     use super::*;
     use crate::crypto;
     use crate::identity::LocalIdentity;

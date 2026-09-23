@@ -23,8 +23,14 @@ fn offline_message_is_delivered_via_the_relay() {
     // Bob goes offline; Alice sends anyway -> queued in the relay.
     net.disconnect("bob");
     alice.send(&bob_contact, "while you were out").unwrap();
+    bob.pump().unwrap();
+    // Asserted on the history rather than on pump's return: pairing also queues a capability
+    // announce (`Frame::Burns`), which is sent while Bob is still online and names his contact
+    // without being a message. The claim under test is that no MESSAGE crossed directly.
     assert!(
-        bob.pump().unwrap().is_empty(),
+        !bob.messages(&alice_contact)
+            .iter()
+            .any(|m| !m.from_me && !m.system),
         "nothing arrives directly while offline"
     );
     assert_eq!(

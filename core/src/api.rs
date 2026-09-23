@@ -288,6 +288,11 @@ pub struct Contact {
     /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
     /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
     pub peer_relays: Vec<String>,
+    /// Whether the peer's build understands burn messages. `None` = they have not said (an older
+    /// build, or a chat predating the signal), and the UI must treat that as **unsupported**:
+    /// offering a burn that silently lands as a permanent message is the one failure this
+    /// feature must not have.
+    pub peer_supports_burn: Option<bool>,
     /// Whether opt-in server storage (§6) is actually working: `false` when it is enabled but the
     /// last send couldn't reach any relay to store the copy (the message still reached the peer
     /// directly). Lets the UI downgrade the storage banner to "not currently stored" instead of
@@ -379,6 +384,14 @@ pub struct ChatMessage {
     /// Drives the edit window, the "expired" badge, and the ephemeral-chat time-bomb.
     /// 0 for messages persisted before timestamps existed (they never expire/edit).
     pub at: u64,
+    /// Burn timer in seconds (`docs/design/burn-messages.md`); 0 = an ordinary message. The UI
+    /// renders a burn message **blurred** until revealed — never behind a padlock, which would
+    /// claim an enforcement this does not have (`SECURITY.md`).
+    pub burn_secs: u64,
+    /// Unix seconds when a burn message was first revealed; 0 = not yet viewed. The countdown
+    /// runs from here in **wall-clock** time and does not pause when the app is backgrounded —
+    /// a timer that stopped off-screen would make "30 seconds" mean nothing.
+    pub viewed_at: u64,
 }
 
 /// Unix time in seconds (message timestamps).
@@ -406,6 +419,8 @@ impl ChatMessage {
             msg_id,
             edited: false,
             at: now_secs(),
+            burn_secs: 0,
+            viewed_at: 0,
         }
     }
 
@@ -425,6 +440,8 @@ impl ChatMessage {
             msg_id: String::new(),
             edited: false,
             at: now_secs(),
+            burn_secs: 0,
+            viewed_at: 0,
         }
     }
 
@@ -463,6 +480,8 @@ impl ChatMessage {
             msg_id: String::new(),
             edited: false,
             at: now_secs(),
+            burn_secs: 0,
+            viewed_at: 0,
         }
     }
 }
@@ -632,6 +651,9 @@ impl Inner {
             }
         }
         let mut messages_arrived = !affected.is_empty();
+        // Burn timers are short (10s and up), so they cannot wait for the relay cadence. Cheap
+        // enough to run every tick; `sweep_time` still runs it again as the slower backstop.
+        let burned = self.me.sweep_burns();
         if relay_due {
             // Inviter side of short-code pairing: answer any joiner's SPAKE2 opener (§5b).
             self.me.service_pending_invites();
@@ -662,7 +684,7 @@ impl Inner {
             // time-bomb (§11.3/§11.4). Reported via the dirty flag below.
             self.me.sweep_time();
         }
-        let mut changed = messages_arrived;
+        let mut changed = messages_arrived || burned;
         // Demo mode only: let the in-process peers echo, then pump again to pick the
         // echoes up. In real mode there is no demo harness and the first pump drained
         // everything (anything arriving mid-drive is caught by the next tick).
@@ -1635,6 +1657,41 @@ impl NightdropCore {
             g.drive(false)?;
         }
         g.save();
+        Ok(g.me.messages(contact_id))
+    }
+
+    /// Send a **burn message** (`docs/design/burn-messages.md`): it arrives blurred, and is
+    /// deleted `burn_secs` after the recipient first reveals it — or after 24h if they never do.
+    ///
+    /// **Errors if the contact's build cannot burn**, and the caller must surface that rather
+    /// than quietly sending a normal message. There are no read receipts here by design, so send
+    /// time is the only moment anyone can learn the feature would not have worked.
+    ///
+    /// Not a security control. The recipient can screenshot or photograph the screen, exactly as
+    /// with any other message — `SECURITY.md`'s rule that the UI must never imply otherwise
+    /// applies here too.
+    pub fn send_burn_message(
+        &self,
+        contact_id: &str,
+        text: &str,
+        burn_secs: u64,
+    ) -> Result<Vec<ChatMessage>> {
+        let mut g = self.lock();
+        g.me.send_burn(contact_id, text, burn_secs)?;
+        if g.demo.is_some() {
+            g.drive(false)?;
+        }
+        g.save();
+        Ok(g.me.messages(contact_id))
+    }
+
+    /// The recipient revealed a burn message: start its countdown. Idempotent — reopening a
+    /// chat does not restart a clock that is already running.
+    pub fn mark_burn_viewed(&self, contact_id: &str, msg_id: &str) -> Result<Vec<ChatMessage>> {
+        let mut g = self.lock();
+        if g.me.mark_burn_viewed(contact_id, msg_id) {
+            g.save();
+        }
         Ok(g.me.messages(contact_id))
     }
 

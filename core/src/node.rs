@@ -53,6 +53,7 @@ const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
 const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
 /// Two markers for the screenshot-capability signal (#1), same shape as the verification pair: the
 /// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
+const MARK_BURNS_V1: &[u8] = b"nightdrop/ctl/burns/v1";
 const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
 const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
 
@@ -940,6 +941,20 @@ impl Node {
         }
     }
 
+    /// Tell one chat that this build understands burn messages. Unconditional — support is a
+    /// property of the build, not a user setting — and quiet: no history entry, because it is a
+    /// standing fact rather than an event.
+    fn announce_burns_to(&mut self, contact_id: &str) {
+        if let Some((addr, frame)) =
+            self.authed_control(contact_id, MARK_BURNS_V1, |from, message| Frame::Burns {
+                from,
+                message,
+            })
+        {
+            let _ = self.transport.send(&addr, &wire::encode(&frame));
+        }
+    }
+
     /// Tell one freshly paired chat what [`announce_captures`](Self::announce_captures) already told
     /// the others.
     ///
@@ -1359,6 +1374,27 @@ fn unpack_edit(buf: &[u8]) -> Result<(String, String)> {
     Ok((target, text))
 }
 
+/// Pack a `Burn` envelope: `[burn_secs as ASCII][text...]` (encrypted on the session), so the
+/// duration is never visible outside the pair. Mirrors [`pack_edit`]'s shape.
+fn pack_burn(burn_secs: u64, text: &str) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len() + 8);
+    put_field(&mut out, burn_secs.to_string().as_bytes());
+    out.extend_from_slice(text.as_bytes()); // trailing
+    out
+}
+
+/// Inverse of [`pack_burn`]: `(burn_secs, text)`. A duration that does not parse is treated as
+/// `0`, which the caller must reject rather than deliver as a normal message — a burn frame whose
+/// timer we cannot read is not something to render permanently.
+fn unpack_burn(buf: &[u8]) -> Result<(u64, String)> {
+    let mut p = 0;
+    let secs = String::from_utf8(take_field(buf, &mut p)?)?
+        .parse::<u64>()
+        .unwrap_or(0);
+    let text = String::from_utf8(buf[p..].to_vec())?;
+    Ok((secs, text))
+}
+
 /// Pack an `Unsend` envelope: just the target `msg_id` (encrypted on the session).
 fn pack_unsend(target_msg_id: &str) -> Vec<u8> {
     target_msg_id.as_bytes().to_vec()
@@ -1413,6 +1449,8 @@ fn persisted_to_message(m: &crate::storage::PersistedMessage) -> ChatMessage {
         msg_id: m.msg_id.clone(),
         edited: m.edited,
         at: m.at,
+        burn_secs: m.burn_secs,
+        viewed_at: m.viewed_at,
     }
 }
 

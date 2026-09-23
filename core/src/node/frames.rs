@@ -107,6 +107,7 @@ impl Node {
                                 peer_verified: false,
                                 peer_captures_silent: None,
                                 peer_relays: Vec::new(),
+                                peer_supports_burn: None,
                                 remote_storage_healthy: true,
                                 last_seen_secs: 0, // these three are filled in `contacts()` from the chat
                                 local_name: String::new(),
@@ -155,6 +156,7 @@ impl Node {
                     // Screenshot capability (#1) — same reason as the joiner side: this chat did not
                     // exist when the launch-time broadcast ran.
                     self.announce_captures_to(&contact_id);
+                    self.announce_burns_to(&contact_id);
                 }
                 if accepted.first_plaintext.is_empty() {
                     return Ok(None);
@@ -217,6 +219,68 @@ impl Node {
                 // served their purpose; drop them so they don't linger above the conversation.
                 self.clear_system_notices(&from, &["await_approval", "approved"]);
                 Ok(Some((from, text)))
+            }
+            Frame::Burn { from, id, message } => {
+                // A burn message (`docs/design/burn-messages.md`). Same acceptance path as
+                // `Message` — authorized, decryptable, de-duplicated — but the timer travels
+                // inside the ciphertext and the message is stored blurred (not yet viewed).
+                let olm = message.to_olm()?;
+                let Some(chat) = self.chats.get_mut(&from) else {
+                    return Ok(None);
+                };
+                if !chat.authorized {
+                    crate::diag!(
+                        "recv: burn message from a contact still awaiting approval — DROPPED"
+                    );
+                    return Ok(None);
+                }
+                let plaintext = crypto::decrypt(&mut chat.session, &olm).inspect_err(|_| {
+                    crate::diag!("recv: a burn message FAILED TO DECRYPT — DROPPED");
+                })?;
+                chat.last_seen = Some(crate::api::now_secs());
+                let (burn_secs, text) = unpack_burn(&plaintext)?;
+                if burn_secs == 0 {
+                    // A burn frame whose duration we cannot read must not be rendered as an
+                    // ordinary permanent message: that is exactly the false guarantee this
+                    // feature exists to avoid. Drop it and say so.
+                    crate::diag!(
+                        "recv: burn message with an unreadable timer — DROPPED (refusing to \
+                         render it as a permanent message)"
+                    );
+                    return Ok(None);
+                }
+                let duplicate = !id.is_empty()
+                    && chat
+                        .history
+                        .iter()
+                        .any(|m| !m.from_me && m.msg_id == id && !m.system);
+                if duplicate {
+                    self.pending_receipts.push((from.clone(), id));
+                    return Ok(None);
+                }
+                let mut msg = ChatMessage::text(false, text.clone(), id.clone());
+                msg.burn_secs = burn_secs;
+                chat.history.push(msg);
+                self.pending_receipts.push((from.clone(), id));
+                self.clear_system_notices(&from, &["await_approval", "approved"]);
+                // The event carries no text: a burn message must not surface its contents in a
+                // notification or any other preview (`burn-messages.md` §4).
+                Ok(Some((from, String::new())))
+            }
+            Frame::Burns { from, message } => {
+                // "My build understands burn messages." Standing property, no history entry —
+                // on rollout it would otherwise post a line into every chat at once.
+                if !self.verify_control(&from, &message, MARK_BURNS_V1) {
+                    return Ok(None);
+                }
+                let Some(chat) = self.chats.get_mut(&from) else {
+                    return Ok(None);
+                };
+                if chat.contact.peer_supports_burn == Some(true) {
+                    return Ok(None);
+                }
+                chat.contact.peer_supports_burn = Some(true);
+                Ok(Some((from, String::new())))
             }
             Frame::Edit { from, message } => {
                 // The peer edited an earlier message of theirs: replace its text and mark it

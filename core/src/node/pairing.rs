@@ -147,6 +147,7 @@ impl Node {
                         peer_verified: false,
                         peer_captures_silent: None,
                         peer_relays: Vec::new(),
+                        peer_supports_burn: None,
                         remote_storage_healthy: true,
                         last_seen_secs: 0, // these three are filled in `contacts()` from the chat
                         local_name: String::new(),
@@ -176,6 +177,7 @@ impl Node {
         // Screenshot capability (#1): a contact paired after the launch-time broadcast would
         // otherwise never learn it, and be left reading our silence as "they'd be told".
         self.announce_captures_to(&contact_id);
+        self.announce_burns_to(&contact_id);
         Ok(contact_id)
     }
 }
