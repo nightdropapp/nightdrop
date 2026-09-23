@@ -149,6 +149,16 @@ from the dependency graph, so the ordinary build, CI and pre-commit hook stay pu
 path keeps rustls/ring regardless. **Gate:** the Android/F-Droid cross-compile of BoringSSL must
 be proven separately before this feature becomes load-bearing on a device (part of step 4).
 
+*Gate CLOSED (2026-09-23), by the strongest evidence available.* F-Droid published 0.1.22 for all
+three ABIs (4081/4082/4083) marked *"built and signed by the original developer, and guaranteed to
+correspond to"* the source — their **own independent rebuild matched the published APK**. That is
+third-party confirmation, not a local check: a 97-file C/C++ dependency built through a custom
+CMake toolchain reproduced bit-for-bit on someone else's machine, at a different path. What made
+it work is the `-ffile-prefix-map` remap in `webtunnel/android/boringssl-toolchain.cmake`, and
+specifically its placement **after** the NDK toolchain include — before it, `*_FLAGS_INIT` is
+reset and the flag is silently dropped, which would have produced a build that fails verification
+with no local symptom at all.
+
 *Done (2026-09-20).* `tls.rs` now has two back ends behind one `connect_tls`/`TlsStream`
 interface, chosen by `chrome-proto`: the pure-Rust rustls path (default, unchanged) and a
 BoringSSL path. Under `chrome-proto`, `connect()` itself emits the Chrome hello, and all three

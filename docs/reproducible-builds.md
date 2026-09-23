@@ -110,6 +110,20 @@ the box. What's proven vs. left:
    resolve (bump to a migrated release, or vendor with the upstream migration diff) to keep the
    Gradle build clean and future-proof. Didn't block reproducibility, but worth clearing.
 
+## Confirmed in production: 0.1.22 with BoringSSL (2026-09-23)
+
+The hardest case so far reproduced **on F-Droid's infrastructure, not ours**. 0.1.22 is the first
+release carrying `webtunnel-client`'s `chrome-proto` feature, which pulls in **BoringSSL** — a
+large C/C++ tree built through a custom CMake toolchain, exactly the class of dependency the core
+otherwise avoids (it is why Android uses rustls). F-Droid lists all three ABIs as *"built and
+signed by the original developer, and guaranteed to correspond to"* the source, which is their
+wording for a rebuild that matched.
+
+The load-bearing detail is in `webtunnel/android/boringssl-toolchain.cmake`: the
+`-ffile-prefix-map` remap must be set **after** the NDK toolchain include. Placed before it, the
+NDK resets `CMAKE_<LANG>_FLAGS_INIT` and the flag vanishes with no error — the build succeeds, the
+APK works, and only F-Droid's rebuild would ever have shown it as unreproducible.
+
 ## Getting into F-Droid
 
 The build recipe is **merged** ([MR !43625](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/43625),
