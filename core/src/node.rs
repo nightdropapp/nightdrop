@@ -1395,6 +1395,35 @@ fn unpack_burn(buf: &[u8]) -> Result<(u64, String)> {
     Ok((secs, text))
 }
 
+/// Pack a `BurnMedia` envelope: `[burn_secs][transfer_id][kind][mime][data...]`.
+fn pack_burn_media(
+    burn_secs: u64,
+    transfer_id: &str,
+    kind: &str,
+    mime: &str,
+    data: &[u8],
+) -> Vec<u8> {
+    let mut out = Vec::with_capacity(data.len() + 64);
+    put_field(&mut out, burn_secs.to_string().as_bytes());
+    put_field(&mut out, transfer_id.as_bytes());
+    put_field(&mut out, kind.as_bytes());
+    put_field(&mut out, mime.as_bytes());
+    out.extend_from_slice(data); // trailing
+    out
+}
+
+/// Inverse of [`pack_burn_media`]: `(burn_secs, transfer_id, kind, mime, data)`.
+fn unpack_burn_media(buf: &[u8]) -> Result<(u64, String, String, String, Vec<u8>)> {
+    let mut p = 0;
+    let secs = String::from_utf8(take_field(buf, &mut p)?)?
+        .parse::<u64>()
+        .unwrap_or(0);
+    let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
+    let kind = String::from_utf8(take_field(buf, &mut p)?)?;
+    let mime = String::from_utf8(take_field(buf, &mut p)?)?;
+    Ok((secs, transfer_id, kind, mime, buf[p..].to_vec()))
+}
+
 /// Pack an `Unsend` envelope: just the target `msg_id` (encrypted on the session).
 fn pack_unsend(target_msg_id: &str) -> Vec<u8> {
     target_msg_id.as_bytes().to_vec()

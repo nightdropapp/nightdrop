@@ -195,10 +195,25 @@ class _ChatScreenState extends State<ChatScreen> {
   /// send — is a mode, and a mode here fails in both directions: a forgotten "on" burns something
   /// meant to be kept, a forgotten "off" keeps something meant to burn.
   Future<void> _offerBurn(Offset position) async {
-    final l10n = AppLocalizations.of(context)!;
     if (_input.text.trim().isEmpty) return;
+    final secs = await _pickBurnSeconds(position);
+    if (secs == null || !mounted) return;
+    await _sendBurn(secs);
+  }
+
+  /// Long-press / right-click the attach button: pick an attachment and send it as a burn
+  /// message.
+  Future<void> _offerBurnMedia(Offset position) async {
+    final secs = await _pickBurnSeconds(position);
+    if (secs == null || !mounted) return;
+    await _attachMedia(burnSecs: secs);
+  }
+
+  /// The shared duration menu. Returns null if burn is unavailable or the user dismissed it.
+  Future<int?> _pickBurnSeconds(Offset position) async {
+    final l10n = AppLocalizations.of(context)!;
     final contact = _contact(NightdropScope.of(context));
-    if (contact == null) return;
+    if (contact == null) return null;
 
     // Unknown support reads as unsupported. Offering a burn that lands as a permanent message is
     // the one failure this feature must not have, and with no read receipts the sender would
@@ -207,11 +222,11 @@ class _ChatScreenState extends State<ChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(l10n.burnUnsupported)),
       );
-      return;
+      return null;
     }
 
     final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
-    if (overlay == null) return;
+    if (overlay == null) return null;
     final theme = Theme.of(context);
     final secs = await showMenu<int>(
       context: context,
@@ -250,8 +265,7 @@ class _ChatScreenState extends State<ChatScreen> {
         PopupMenuItem(value: 300, child: Text(l10n.burnMinutes(5))),
       ],
     );
-    if (secs == null || !mounted) return;
-    await _sendBurn(secs);
+    return secs;
   }
 
   Future<void> _sendBurn(int secs) async {
@@ -287,7 +301,10 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   /// Pick an image or video from the device and send it.
-  Future<void> _attachMedia() async {
+  /// Pick an attachment and send it. [burnSecs] > 0 sends it as a burn message, in which case
+  /// no thumbnail is generated at all — a preview of an unrevealed message would give away the
+  /// content the feature exists to withhold, so it must not be produced, let alone transmitted.
+  Future<void> _attachMedia({int burnSecs = 0}) async {
     final l10n = AppLocalizations.of(context)!;
     final result = await FilePicker.pickFiles(
       type:
@@ -307,15 +324,34 @@ class _ChatScreenState extends State<ChatScreen> {
     var bytes = await File(path).readAsBytes();
     var mime = _mimeFor(ext, isVideo);
     var thumb = <int>[];
-    if (isVideo) {
+    if (isVideo && burnSecs == 0) {
       thumb = await _videoThumbnail(path);
-    } else if (ext != 'gif') {
+    } else if (!isVideo && ext != 'gif') {
       // Images (except animated GIFs): downscale/recompress to JPEG off the UI thread so the
       // transfer over Tor is fast. GIFs are left alone to preserve animation.
       bytes = await compute(compressImage, bytes);
       mime = 'image/jpeg';
     }
-    await _sendMedia(bytes, mime, isVideo ? 'video' : 'image', thumb);
+    if (burnSecs > 0) {
+      await _sendBurnMedia(bytes, mime, isVideo ? 'video' : 'image', burnSecs);
+    } else {
+      await _sendMedia(bytes, mime, isVideo ? 'video' : 'image', thumb);
+    }
+  }
+
+  Future<void> _sendBurnMedia(
+      List<int> bytes, String mime, String kind, int secs) async {
+    final l10n = AppLocalizations.of(context)!;
+    try {
+      await NightdropScope.of(context)
+          .sendBurnMedia(widget.contactId, bytes, mime, kind, secs);
+      _scrollToEnd();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_sendErrorText(l10n, e))),
+      );
+    }
   }
 
   /// Extract a small preview frame from a video (all desktop + mobile platforms; on
@@ -851,6 +887,7 @@ class _ChatScreenState extends State<ChatScreen> {
                 controller: _input,
                 onSend: _send,
               onBurn: _offerBurn,
+              onBurnAttach: _offerBurnMedia,
                 onAttach: _attachMedia,
                 onPaste: _paste,
               ),
@@ -1709,6 +1746,7 @@ class _Composer extends StatelessWidget {
     required this.onSend,
     required this.onBurn,
     required this.onAttach,
+    required this.onBurnAttach,
     required this.onPaste,
   });
 
@@ -1721,6 +1759,9 @@ class _Composer extends StatelessWidget {
   /// the clear by forgetting it was left off.
   final Future<void> Function(Offset position) onBurn;
   final Future<void> Function() onAttach;
+
+  /// Long-press / right-click the attach button: send the attachment as a burn message.
+  final Future<void> Function(Offset position) onBurnAttach;
   final Future<void> Function() onPaste;
 
   @override
@@ -1732,11 +1773,25 @@ class _Composer extends StatelessWidget {
         padding: const EdgeInsets.all(8),
         child: Row(
           children: [
-            IconButton(
-              tooltip: l10n.attachImageOrVideo,
-              icon: const Icon(Icons.attach_file),
-              onPressed: onAttach,
-            ),
+            Builder(builder: (context) {
+              Future<void> open() async {
+                final box = context.findRenderObject() as RenderBox?;
+                final origin = box == null
+                    ? Offset.zero
+                    : box.localToGlobal(box.size.center(Offset.zero));
+                await onBurnAttach(origin);
+              }
+
+              return GestureDetector(
+                onLongPress: open,
+                onSecondaryTap: open,
+                child: IconButton(
+                  tooltip: l10n.attachImageOrVideo,
+                  icon: const Icon(Icons.attach_file),
+                  onPressed: onAttach,
+                ),
+              );
+            }),
             IconButton(
               tooltip: l10n.pasteText,
               icon: const Icon(Icons.content_paste),
@@ -1857,7 +1912,10 @@ class _BurnBodyState extends State<_BurnBody> {
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(m.text, style: TextStyle(color: fg)),
+          if (m.isText)
+            Text(m.text, style: TextStyle(color: fg))
+          else
+            _MediaContent(message: m, mine: widget.mine),
           const SizedBox(height: 4),
           Row(
             mainAxisSize: MainAxisSize.min,
@@ -1894,11 +1952,16 @@ class _BurnBodyState extends State<_BurnBody> {
             // put it in the widget tree (a screen reader reads it out), in the render tree, and
             // in any screenshot — and a blur over small text is a known de-blurring target. The
             // content must not be present until it is revealed; only its rough length shows.
+            //
+            // For an attachment the same rule is simpler to honour: nothing is decrypted at all
+            // until it is revealed, so the tile shows only the kind and the size.
             ExcludeSemantics(
-              child: ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
-                child: _redactedBars(m.text.length, fg),
-              ),
+              child: m.isText
+                  ? ImageFiltered(
+                      imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                      child: _redactedBars(m.text.length, fg),
+                    )
+                  : _hiddenMediaTile(m, fg),
             ),
             const SizedBox(height: 6),
             Row(
@@ -1933,7 +1996,11 @@ class _BurnBodyState extends State<_BurnBody> {
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Flexible(child: Text(m.text, style: TextStyle(color: fg))),
+        Flexible(
+          child: m.isText
+              ? Text(m.text, style: TextStyle(color: fg))
+              : _MediaContent(message: m, mine: widget.mine),
+        ),
         const SizedBox(width: 8),
         SizedBox(
           width: 16,
@@ -1948,6 +2015,37 @@ class _BurnBodyState extends State<_BurnBody> {
       ],
     );
   }
+}
+
+/// A hidden attachment: its kind and size, and nothing else. The sealed bytes are never
+/// decrypted for this view, so there is no preview to leak and no thumbnail to strip.
+Widget _hiddenMediaTile(Message m, Color fg) {
+  return Container(
+    width: 180,
+    height: 110,
+    decoration: BoxDecoration(
+      color: fg.withValues(alpha: 0.12),
+      borderRadius: BorderRadius.circular(10),
+      border: Border.all(color: fg.withValues(alpha: 0.25)),
+    ),
+    child: Column(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        Icon(
+          m.kind == 'video' ? Icons.videocam_outlined : Icons.image_outlined,
+          size: 30,
+          color: fg.withValues(alpha: 0.6),
+        ),
+        if (m.mediaSize > 0) ...[
+          const SizedBox(height: 4),
+          Text(
+            formatBytes(m.mediaSize),
+            style: TextStyle(fontSize: 10, color: fg.withValues(alpha: 0.6)),
+          ),
+        ],
+      ],
+    ),
+  );
 }
 
 /// Stand-in bars for an unrevealed burn message: enough to show roughly how much text is

@@ -1463,6 +1463,22 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> sendBurnMedia(String contactId, List<int> data, String mime,
+      String kind, int burnSecs) async {
+    // No optimistic preview, unlike sendMedia: showing the picture on our own screen before the
+    // core has accepted it would leave it there if the send is REFUSED for lack of peer support.
+    final history = await _core!.sendBurnMedia(
+      contactId: contactId,
+      data: data,
+      mime: mime,
+      kind: kind,
+      burnSecs: BigInt.from(burnSecs),
+    );
+    _messages[contactId] = _mapMessages(contactId, history);
+    notifyListeners();
+  }
+
+  @override
   Future<void> markBurnViewed(String contactId, String msgId) async {
     final history = await _core!.markBurnViewed(contactId: contactId, msgId: msgId);
     _messages[contactId] = _mapMessages(contactId, history);

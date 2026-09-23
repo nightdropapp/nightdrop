@@ -1,6 +1,6 @@
 # Design — Per-message burn (blur, reveal, countdown)
 
-**Status:** implemented for text 2026-09-23 (§7 records what shipped and what did not).
+**Status:** implemented for text and media 2026-09-23 (§7 records what shipped and what did not).
 **Relates to:** the existing per-chat disappearing timer (`Frame::Disappearing`),
 `screenshot-transparency.md`, `SECURITY.md`.
 
@@ -114,12 +114,29 @@ moment with no way to ignore it.
 
 **Not built:**
 
-* **Media.** Text only. The deletion path already handles sealed media (`sweep_burns` removes
-  `media_id`/`thumb_id`), so what is missing is the blurred-thumbnail UI and the in-transit case —
-  a video whose bytes have not arrived yet. This is the case the feature is most obviously *for*,
-  so it should not sit unbuilt for long.
+*(Media landed the same day — see below.)*
 * **A tombstone on expiry.** An expired-unviewed message currently just vanishes. §6 leaned
   towards leaving a "a message expired" marker and that reasoning still stands; it was left out to
   keep the first version small.
 * **The server-storage caveat in the UI** (see §3). Known, unstated to the user, and the one
   honesty gap in what shipped.
+
+### 7.1 Media (added 2026-09-23)
+
+`Frame::BurnMedia`, `send_burn_media`, and long-press / right-click on the **attach** button —
+the same gesture as text, on the button that starts the same job.
+
+The design question that decided the shape: **a burn attachment sends no thumbnail and no
+`MediaIncoming` pre-signal.** Both exist to show a preview while a video's payload uploads, and a
+preview of a message that has not been revealed gives away precisely what the feature withholds.
+So `send_burn_media` never generates a thumbnail (the app does not even compute one) and skips the
+pre-signal entirely. The recipient sees a tile carrying the kind and size, nothing more, and the
+sealed bytes stay encrypted until they choose to open it. A test asserts no thumbnail crosses and
+no placeholder is created.
+
+This is stricter than the text case, where placeholder bars leak approximate length. An
+attachment leaks its size, which it must — the bytes have to arrive.
+
+Reveal works by `transfer_id` rather than `msg_id`, because attachments carry no `msg_id`;
+`mark_burn_viewed` accepts either. Burning deletes the sealed file as well as the message, which
+is asserted on disk rather than assumed.

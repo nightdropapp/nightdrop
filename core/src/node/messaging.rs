@@ -801,6 +801,49 @@ impl Node {
         kind: &str,
         thumb: &[u8],
     ) -> Result<()> {
+        self.send_media_inner(contact_id, data, mime, kind, thumb, 0)
+    }
+
+    /// Send an attachment as a **burn message**. Same gate as [`send_burn`](Self::send_burn):
+    /// refused unless the peer announced support, never silently downgraded.
+    ///
+    /// A burn attachment carries **no thumbnail and no `MediaIncoming` pre-signal**. Both exist to
+    /// show something while a video uploads, and showing a preview of a message that has not been
+    /// revealed would give away the content this feature exists to withhold. The recipient sees a
+    /// hidden tile until the payload arrives and they choose to open it.
+    pub fn send_burn_media(
+        &mut self,
+        contact_id: &str,
+        data: &[u8],
+        mime: &str,
+        kind: &str,
+        burn_secs: u64,
+    ) -> Result<()> {
+        if burn_secs == 0 {
+            anyhow::bail!("a burn message needs a timer");
+        }
+        let supported = self
+            .chats
+            .get(contact_id)
+            .map(|c| c.contact.peer_supports_burn == Some(true))
+            .unwrap_or(false);
+        if !supported {
+            anyhow::bail!(
+                "this contact's app version cannot burn messages — it would keep this one"
+            );
+        }
+        self.send_media_inner(contact_id, data, mime, kind, &[], burn_secs)
+    }
+
+    fn send_media_inner(
+        &mut self,
+        contact_id: &str,
+        data: &[u8],
+        mime: &str,
+        kind: &str,
+        thumb: &[u8],
+        burn_secs: u64,
+    ) -> Result<()> {
         if data.len() as u64 > MAX_MEDIA_BYTES {
             anyhow::bail!(
                 "attachment too large (max {} MB)",
@@ -812,7 +855,7 @@ impl Node {
 
         // 1) Fire the small "incoming" pre-signal FIRST (videos), before the heavy work on
         // the payload (sealing/encrypting 10s of MB) — so the receiver sees it right away.
-        if kind == "video" {
+        if kind == "video" && burn_secs == 0 {
             let (peer_address, incoming) = {
                 let chat = self
                     .chats
@@ -856,11 +899,23 @@ impl Node {
                 .chats
                 .get_mut(contact_id)
                 .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
-            let env = pack_media(&transfer_id, kind, mime, data);
+            let env = if burn_secs == 0 {
+                pack_media(&transfer_id, kind, mime, data)
+            } else {
+                pack_burn_media(burn_secs, &transfer_id, kind, mime, data)
+            };
             let m = crypto::encrypt(&mut chat.session, &env);
-            let bytes = wire::encode(&Frame::Media {
-                from,
-                message: WireOlm::from_olm(&m),
+            let wire_olm = WireOlm::from_olm(&m);
+            let bytes = wire::encode(&if burn_secs == 0 {
+                Frame::Media {
+                    from,
+                    message: wire_olm,
+                }
+            } else {
+                Frame::BurnMedia {
+                    from,
+                    message: wire_olm,
+                }
             });
             (
                 chat.peer_address.clone(),
@@ -912,6 +967,7 @@ impl Node {
                 thumb_id,
             );
             msg.delivery = if delivered { "sent" } else { "queued" }.to_string();
+            msg.burn_secs = burn_secs;
             chat.history.push(msg);
         }
         Ok(())
@@ -1406,11 +1462,14 @@ impl Node {
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return false;
         };
-        let Some(msg) = chat
-            .history
-            .iter_mut()
-            .find(|m| m.msg_id == msg_id && m.burn_secs > 0 && !m.from_me)
-        else {
+        // Text carries `msg_id`; an attachment has none and is named by `transfer_id` instead
+        // (see the `Media` handler). Accept either, so revealing works for both.
+        let Some(msg) = chat.history.iter_mut().find(|m| {
+            m.burn_secs > 0
+                && !m.from_me
+                && ((!m.msg_id.is_empty() && m.msg_id == msg_id)
+                    || (!m.transfer_id.is_empty() && m.transfer_id == msg_id))
+        }) else {
             return false;
         };
         if msg.viewed_at != 0 {

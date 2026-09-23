@@ -804,6 +804,61 @@ impl Node {
                 }
                 Ok(Some((from, String::new())))
             }
+            Frame::BurnMedia { from, message } => {
+                // A burn attachment. Simpler than `Media`: there is never a placeholder to
+                // complete, because a burn attachment sends no `MediaIncoming` pre-signal.
+                let olm = message.to_olm()?;
+                let envelope = {
+                    let Some(chat) = self.chats.get_mut(&from) else {
+                        return Ok(None);
+                    };
+                    if !chat.authorized {
+                        return Ok(None);
+                    }
+                    crypto::decrypt(&mut chat.session, &olm)?
+                };
+                let (burn_secs, transfer_id, kind, mime, data) = unpack_burn_media(&envelope)?;
+                if burn_secs == 0 {
+                    // Same rule as `Burn`: an attachment whose timer will not parse must not be
+                    // stored as an ordinary permanent one.
+                    crate::diag!(
+                        "recv: burn attachment with an unreadable timer — DROPPED (refusing to \
+                         keep it permanently)"
+                    );
+                    return Ok(None);
+                }
+                let size = data.len() as u64;
+                let duplicate = self.chats.get(&from).is_some_and(|c| {
+                    c.history.iter().any(|m| {
+                        !m.from_me
+                            && !m.transfer_id.is_empty()
+                            && m.transfer_id == transfer_id
+                            && !m.media_id.is_empty()
+                    })
+                });
+                if !duplicate {
+                    let media_id = self.store_media(&data)?;
+                    if let Some(chat) = self.chats.get_mut(&from) {
+                        let mut msg = ChatMessage::media(
+                            false,
+                            kind,
+                            mime,
+                            media_id,
+                            size,
+                            transfer_id.clone(),
+                            String::new(),
+                        );
+                        msg.burn_secs = burn_secs;
+                        chat.history.push(msg);
+                    }
+                }
+                self.pending_receipts
+                    .push((from.clone(), format!("t:{transfer_id}")));
+                if duplicate {
+                    return Ok(None);
+                }
+                Ok(Some((from, String::new())))
+            }
             // Short-code SPAKE2 runs over the rendezvous mailbox before any transport session
             // exists (see `run_join_handshake`/`service_pending_invites`), so a `Pake` frame on
             // the peer transport is unexpected — reserved for a future in-band re-key.

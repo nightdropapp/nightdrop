@@ -1685,6 +1685,24 @@ impl NightdropCore {
         Ok(g.me.messages(contact_id))
     }
 
+    /// Send an attachment as a **burn message** (see [`send_burn_message`](Self::send_burn_message)).
+    ///
+    /// No thumbnail is sent: a preview of a message that has not been revealed would give away
+    /// the very thing being withheld. The recipient sees a hidden tile until they open it.
+    pub fn send_burn_media(
+        &self,
+        contact_id: &str,
+        data: Vec<u8>,
+        mime: String,
+        kind: String,
+        burn_secs: u64,
+    ) -> Result<Vec<ChatMessage>> {
+        let mut g = self.lock();
+        g.me.send_burn_media(contact_id, &data, &mime, &kind, burn_secs)?;
+        g.save();
+        Ok(g.me.messages(contact_id))
+    }
+
     /// The recipient revealed a burn message: start its countdown. Idempotent — reopening a
     /// chat does not restart a clock that is already running.
     pub fn mark_burn_viewed(&self, contact_id: &str, msg_id: &str) -> Result<Vec<ChatMessage>> {

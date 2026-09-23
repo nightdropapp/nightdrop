@@ -23,6 +23,25 @@ class _BurnCore extends MockNightdropCore {
     await super.sendBurnMessage(contactId, text, burnSecs);
   }
 
+  /// Stand in for an inbound `Frame::BurnMedia` from the peer.
+  void receiveBurnMedia(String contactId, int secs) {
+    appendForTest(Message(
+      id: 'bm-1',
+      contactId: contactId,
+      text: '',
+      fromMe: false,
+      at: DateTime.now(),
+      msgId: '',
+      kind: 'image',
+      mime: 'image/jpeg',
+      mediaId: 'sealed-1',
+      mediaSize: 4096,
+      transferId: 'bm-1',
+      burnSecs: secs,
+    ));
+    notifyListeners();
+  }
+
   /// Stand in for an inbound `Frame::Burn` from the peer.
   void receiveBurn(String contactId, String text, int secs) {
     final id = 'burn-1';
@@ -148,6 +167,24 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(core.sent, [('secret', 30)]);
+  });
+
+  // A burn attachment carries no thumbnail by construction (the core never sends one), so the
+  // hidden state has nothing to leak — the tile shows only kind and size, and the sealed bytes
+  // are not decrypted until the message is revealed.
+  testWidgets('a hidden burn attachment shows a tile, not the picture', (tester) async {
+    final (core, contact) = await pumpChat(tester);
+    core.peerSupportsBurn(true);
+    core.receiveBurnMedia(contact.id, 30);
+    await tester.pump();
+
+    expect(find.byType(Image), findsNothing,
+        reason: 'no attachment may be rendered before it is revealed');
+    expect(find.text('Tap to reveal'), findsOneWidget);
+    expect(find.byIcon(Icons.image_outlined), findsOneWidget,
+        reason: 'the tile says what kind of attachment is waiting, and nothing more');
+
+    await settleScroll(tester);
   });
 
   // A plain tap must never burn. The gesture split is what keeps this from being a mode, where a

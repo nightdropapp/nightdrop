@@ -1433,3 +1433,90 @@ fn an_unopened_burn_message_expires_at_24h_and_the_senders_copy_never_burns_on_v
         "but it does have a fixed 24h maximum life"
     );
 }
+
+#[test]
+fn a_burn_attachment_sends_no_thumbnail_and_no_preview_placeholder() {
+    let dir = std::env::temp_dir().join(format!("nightdrop-burnmedia-{}", std::process::id()));
+    let bob_dir = format!("{}-b", dir.display());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}-a", dir.display()), [7u8; 32]);
+    bob.set_media_store(bob_dir.clone(), [9u8; 32]);
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    // A video, which is exactly the case that normally gets a thumbnail + "incoming" placeholder.
+    let payload = vec![42u8; 2048];
+    alice
+        .send_burn_media(&bob_contact, &payload, "video/mp4", "video", 30)
+        .unwrap();
+    bob.pump().unwrap();
+
+    let got: Vec<_> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.system && !m.from_me && m.kind == "video")
+        .collect();
+    assert_eq!(
+        got.len(),
+        1,
+        "exactly one message, never a placeholder plus a payload"
+    );
+    assert_eq!(got[0].burn_secs, 30);
+    assert_eq!(got[0].viewed_at, 0, "arrives hidden");
+    assert!(
+        got[0].thumb_id.is_empty(),
+        "a burn attachment must carry NO thumbnail — a preview of an unrevealed message gives \
+         away the content the feature exists to withhold"
+    );
+    assert!(!got[0].media_id.is_empty(), "the payload itself did arrive");
+
+    // Revealing works by transfer_id, since attachments carry no msg_id.
+    let tid = got[0].transfer_id.clone();
+    assert!(!tid.is_empty());
+    assert!(bob.mark_burn_viewed(&alice_contact, &tid));
+
+    // And it burns, taking the sealed file with it.
+    let media_id = got[0].media_id.clone();
+    let sealed = std::path::Path::new(&bob_dir).join(format!("{media_id}.bin"));
+    assert!(sealed.exists(), "sealed media is on disk before the burn");
+    if let Some(chat) = bob.chats.get_mut(&alice_contact) {
+        for m in chat.history.iter_mut() {
+            if m.burn_secs > 0 {
+                m.viewed_at = crate::api::now_secs() - 31;
+            }
+        }
+    }
+    assert!(bob.sweep_burns());
+    assert!(
+        !bob.messages(&alice_contact).iter().any(|m| m.burn_secs > 0),
+        "the message is gone"
+    );
+    assert!(
+        !sealed.exists(),
+        "and so is the sealed file — a burned attachment must not survive on disk"
+    );
+}
+
+#[test]
+fn a_burn_attachment_is_refused_when_the_peer_cannot_burn() {
+    let dir = std::env::temp_dir().join(format!("nightdrop-burnmedia2-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}", dir.display()), [7u8; 32]);
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    if let Some(chat) = alice.chats.get_mut(&bob_contact) {
+        chat.contact.peer_supports_burn = None;
+    }
+    let err = alice
+        .send_burn_media(&bob_contact, &[1u8; 16], "image/png", "image", 30)
+        .expect_err("must refuse rather than send a permanent attachment");
+    assert!(err.to_string().contains("cannot burn"));
+}

@@ -111,6 +111,15 @@ pub enum Frame {
         id: String,
         message: WireOlm,
     },
+    /// A **burn attachment** — [`Burn`](Frame::Burn) for media. Its payload packs the duration
+    /// alongside the attachment (`node::pack_burn_media`).
+    ///
+    /// There is deliberately **no burn counterpart to [`MediaIncoming`](Frame::MediaIncoming)**.
+    /// That pre-signal exists to show a video's thumbnail while the payload is still arriving —
+    /// which for a burn message would display the content before it has been revealed, defeating
+    /// the whole point. A burn attachment therefore sends no thumbnail and no placeholder: the
+    /// recipient sees a hidden tile until the payload lands and they choose to open it.
+    BurnMedia { from: String, message: WireOlm },
     /// The sender toggled opt-in 24h server storage for this chat (§6). The new state
     /// ("on"/"off") is E2E-encrypted on the session; the receiver mirrors it so **both**
     /// parties see the persistent in-chat warning while it is active (invariant).

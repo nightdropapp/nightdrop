@@ -267,6 +267,13 @@ abstract class NightdropCore extends ChangeNotifier {
   /// other message, and the UI must never imply otherwise.
   Future<void> sendBurnMessage(String contactId, String text, int burnSecs);
 
+  /// Send an attachment as a burn message. No thumbnail is produced or sent: a preview of a
+  /// message that has not been revealed would give away exactly what is being withheld.
+  ///
+  /// Throws if the contact's app version cannot burn, like [sendBurnMessage].
+  Future<void> sendBurnMedia(
+      String contactId, List<int> data, String mime, String kind, int burnSecs);
+
   /// The recipient revealed a burn message — start its countdown. Idempotent: reopening a chat
   /// does not restart a clock that is already running.
   Future<void> markBurnViewed(String contactId, String msgId);

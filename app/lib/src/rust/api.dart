@@ -509,6 +509,17 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// location chosen by the user after acknowledging the password, §7 / TODO #4).
   Future<void> saveBackup({required String path});
 
+  /// Send an attachment as a **burn message** (see [`send_burn_message`](Self::send_burn_message)).
+  ///
+  /// No thumbnail is sent: a preview of a message that has not been revealed would give away
+  /// the very thing being withheld. The recipient sees a hidden tile until they open it.
+  Future<List<ChatMessage>> sendBurnMedia(
+      {required String contactId,
+      required List<int> data,
+      required String mime,
+      required String kind,
+      required BigInt burnSecs});
+
   /// Send a **burn message** (`docs/design/burn-messages.md`): it arrives blurred, and is
   /// deleted `burn_secs` after the recipient first reveals it — or after 24h if they never do.
   ///

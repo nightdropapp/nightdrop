@@ -216,6 +216,27 @@ class MockNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> sendBurnMedia(String contactId, List<int> data, String mime,
+      String kind, int burnSecs) async {
+    final id = _token(8);
+    _append(Message(
+      id: id,
+      contactId: contactId,
+      text: '',
+      fromMe: true,
+      at: DateTime.now(),
+      msgId: id,
+      kind: kind,
+      mime: mime,
+      mediaId: id,
+      mediaSize: data.length,
+      transferId: id,
+      burnSecs: burnSecs,
+    ));
+    notifyListeners();
+  }
+
+  @override
   Future<void> markBurnViewed(String contactId, String msgId) async {
     final list = _messages[contactId];
     if (list == null) return;
