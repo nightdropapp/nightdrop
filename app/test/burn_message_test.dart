@@ -187,7 +187,7 @@ void main() {
     // Off: no claim either way.
     await tester.longPress(find.byIcon(Icons.send));
     await tester.pumpAndSettle();
-    expect(find.textContaining('stays on the relay'), findsNothing);
+    expect(find.textContaining('sits on the relay'), findsNothing);
     await tester.tapAt(const Offset(10, 10)); // dismiss
     await tester.pumpAndSettle();
 
@@ -196,7 +196,7 @@ void main() {
     await tester.pump();
     await tester.longPress(find.byIcon(Icons.send));
     await tester.pumpAndSettle();
-    expect(find.textContaining('stays on the relay'), findsOneWidget);
+    expect(find.textContaining('sits on the relay'), findsOneWidget);
 
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();

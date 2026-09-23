@@ -1996,10 +1996,10 @@ abstract class AppLocalizations {
   /// **'Disappears in {time}'**
   String burnExpiresIn(String time);
 
-  /// Shown in the burn menu only when opt-in server storage is enabled for the chat. The relay copy cannot be recalled on burn, because recall would need a read receipt and there deliberately is none — so this is a permanent property to disclose, not a bug.
+  /// Shown in the burn menu only when opt-in server storage is on. The relay copy is removed by the recipient's own drain (Request::Fetch removes), so it normally clears within minutes — 24h is the worst case where they never come back online, not the usual one. Do not restate it as 'stays 24 hours'.
   ///
   /// In en, this message translates to:
-  /// **'Server storage is on for this chat, so a copy stays on the relay for up to 24 hours — even after it burns here.'**
+  /// **'Server storage is on, so a copy sits on the relay until their app next collects it — up to 24 hours if it never does.'**
   String get burnServerStorageCaveat;
 }
 

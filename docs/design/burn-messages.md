@@ -56,9 +56,12 @@ What actually holds, and it is tidier than it sounds: the relay's TTL is 24h and
 horizon is also 24h, so an undelivered burn message expires from the mailbox at exactly the moment
 it would have expired on the device. A burn message's maximum life is 24h everywhere.
 
-The residual case is **opt-in server storage**: with it on, a relay copy can outlive the
-recipient's burn by up to 24h. Bounded, equal to the message's own maximum life, and it needs
-saying in the UI rather than being quietly true.
+The residual case is **opt-in server storage**, and it is smaller than first written here.
+`Request::Fetch` is *remove-and-return*, and the server-storage copy is posted under the
+**recipient's** handle — so their ordinary mailbox drain deletes it, normally within minutes.
+The copy outlives the burn only until their next poll, reaching 24h only if they never come back
+online. Still worth disclosing, and the UI says so in those terms; an earlier version of this note
+and the first shipped wording both claimed a flat 24h, which overstates it.
 
 **No read receipt.** Deliberate: the sender learns nothing about when — or whether — it was
 opened. It keeps the feature from leaking recipient behaviour, and there is no `Read`/`Viewed`
@@ -119,8 +122,9 @@ moment with no way to ignore it.
   towards leaving a "a message expired" marker and that reasoning still stands; it was left out to
   keep the first version small.
 * ~~**The server-storage caveat in the UI**~~ — **done 2026-09-23.** The burn menu now says so
-  outright when, and only when, opt-in server storage is on for that chat: *"a copy stays on the
-  relay for up to 24 hours — even after it burns here."* In the menu, at the moment of choosing,
+  outright when, and only when, opt-in server storage is on for that chat, in terms that match
+  what actually happens: a copy sits there until the recipient's app next collects it, up to 24h
+  only if it never does. In the menu, at the moment of choosing,
   rather than in settings. Pinned by a test that also asserts it stays absent when it does not
   apply — a warning shown when it is untrue trains people to ignore it when it is.
 

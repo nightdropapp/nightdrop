@@ -1163,5 +1163,5 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get burnServerStorageCaveat =>
-      'Server storage is on for this chat, so a copy stays on the relay for up to 24 hours — even after it burns here.';
+      'Server storage is on, so a copy sits on the relay until their app next collects it — up to 24 hours if it never does.';
 }
