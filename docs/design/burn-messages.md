@@ -1,6 +1,6 @@
 # Design — Per-message burn (blur, reveal, countdown)
 
-**Status:** design agreed 2026-09-22, not implemented.
+**Status:** implemented for text 2026-09-23 (§7 records what shipped and what did not).
 **Relates to:** the existing per-chat disappearing timer (`Frame::Disappearing`),
 `screenshot-transparency.md`, `SECURITY.md`.
 
@@ -47,9 +47,18 @@ recording**, and on **a camera pointed at the screen**.
 **Delete means delete**, from the encrypted store, not hide. The `Edit`/unsend path already
 removes messages and is the precedent to follow.
 
-**Recall the relay copy.** `QueuedReceipt` exists so an edit or unsend can pull back every queued
-copy. A burn message must do the same once delivered, or a "burned" message sits in a mailbox for
-up to 24 hours after it vanished from both screens.
+**Recall the relay copy — and the conflict found when building it.** `QueuedReceipt` exists so an
+edit or unsend can pull back every queued copy, and this note originally said a burn must do the
+same. **It cannot.** Recall is sender-driven, and the sender does not know when the message burned
+— because there are deliberately no read receipts (below). Honouring one would require the other.
+
+What actually holds, and it is tidier than it sounds: the relay's TTL is 24h and the unviewed burn
+horizon is also 24h, so an undelivered burn message expires from the mailbox at exactly the moment
+it would have expired on the device. A burn message's maximum life is 24h everywhere.
+
+The residual case is **opt-in server storage**: with it on, a relay copy can outlive the
+recipient's burn by up to 24h. Bounded, equal to the message's own maximum life, and it needs
+saying in the UI rather than being quietly true.
 
 **No read receipt.** Deliberate: the sender learns nothing about when — or whether — it was
 opened. It keeps the feature from leaking recipient behaviour, and there is no `Read`/`Viewed`
@@ -90,3 +99,27 @@ feature will not work for this contact. It cannot be an afterthought.
 * Whether an expired-unviewed message leaves a tombstone ("a message expired") or nothing at all.
   Nothing is quieter; a tombstone is less confusing. Leaning tombstone, on the same reasoning that
   made `"sent"` a visible state rather than silence.
+
+## 7. What shipped, and what did not (2026-09-23)
+
+**Shipped**, core and UI: `Frame::Burn` as a separate variant (fails closed on an old build),
+`Frame::Burns` capability gating with refusal at send time, the duration inside the ciphertext,
+long-press/right-click send with an immediate-send duration menu, blurred placeholder bars, tap to
+reveal, a wall-clock countdown anchored to first view and persisted across restarts, deletion from
+the encrypted store, and the 24h unviewed horizon.
+
+One thing came out stronger than designed: §2 called for the sender to be *warned* when a contact
+cannot burn. The core **refuses** instead, which is the same information delivered at the same
+moment with no way to ignore it.
+
+**Not built:**
+
+* **Media.** Text only. The deletion path already handles sealed media (`sweep_burns` removes
+  `media_id`/`thumb_id`), so what is missing is the blurred-thumbnail UI and the in-transit case —
+  a video whose bytes have not arrived yet. This is the case the feature is most obviously *for*,
+  so it should not sit unbuilt for long.
+* **A tombstone on expiry.** An expired-unviewed message currently just vanishes. §6 leaned
+  towards leaving a "a message expired" marker and that reasoning still stands; it was left out to
+  keep the first version small.
+* **The server-storage caveat in the UI** (see §3). Known, unstated to the user, and the one
+  honesty gap in what shipped.
