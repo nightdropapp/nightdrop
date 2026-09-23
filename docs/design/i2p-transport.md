@@ -115,7 +115,21 @@ cannot evaluate: choosing an anonymity network before first use is a real decisi
 enthusiast.
 
 **Recorded as the agreed form:** if I2P is ever adopted it is exclusive per identity, chosen once,
-never simultaneous — with cross-network pairs understood to be relay-only, or not supported at all.
+never simultaneous. **Cross-network pairs are relay-only rather than unsupported** (decided
+2026-09-23) — two people on different networks can still talk, through a dual-homed relay.
+
+Two consequences of that decision, worth designing in rather than discovering:
+
+* **They lose the 24h backstop.** A same-network pair whose relay copy expires unread can still
+  deliver directly the next time both are online. A cross-network pair has no direct path, so the
+  24h TTL stops being a fallback window and becomes a **hard delivery deadline** — a contact
+  offline for 25 hours receives nothing, rather than receiving it late. No other pair in the
+  system fails this way.
+* **The relay observes every message they exchange, for the life of the contact** — timing and
+  size, with no hot path to fall back to. Per-pair handles (`mailbox-handles.md`) and cover
+  traffic blunt this; they do not remove it. It therefore needs a **persistent in-chat
+  indicator**, in the manner of the server-storage warning and the `v1`-handle notice: the
+  project's rule is that a residual risk the user cannot see is one they cannot consent to.
 
 ## 5. Client-only is possible — the original objection was overstated
 
