@@ -60,8 +60,7 @@ handle = "mbx:" ‖ b64( HKDF(mailbox_secret_AB, "nightdrop/mailbox/v2" ‖ epoc
 * **Computable by both ends** with no extra round trip: each side holds the pair secret.
 
 **Cost:** a recipient polls one handle per contact instead of one in total — and with #17, one per
-contact *per relay*. At the ≤10 contacts a small trusted circle implies that is trivial; it grows
-linearly, so a cap should be stated rather than discovered.
+contact *per relay*. That cost grows linearly and is the reason for a stated contact cap; see §8.
 
 ### 4.1 Where the secret comes from
 
@@ -102,23 +101,20 @@ being fixed**, so the transition is the design, not an afterthought.
 
 ## 5a. Draining must be isolated, or the scheme is undone
 
-**Added after review, 2026-09-22.** Unlinkable deposits are worthless if collection re-links them.
-`drain_relay_mailboxes` (`core/src/node.rs`) currently takes a **single** handle. Per-pair handles
-make it one request per contact — and if those go over one circuit, the relay sees a single client
-asking for `H1…H10` and learns exactly the set this design removed from the deposit side.
+**Added after review, 2026-09-22. The claim stands; the mechanism was corrected the same day — §5c.**
 
-So per-pair handles are **conditional on isolated draining**:
+Unlinkable deposits are worthless if collection re-links them. `drain_relay_mailboxes`
+(`core/src/node.rs`) currently takes a **single** handle. Per-pair handles make it one request per
+contact — and if those go over one circuit, the relay sees a single client asking for `H1…H10` and
+learns exactly the set this design removed from the deposit side.
 
-* `arti-client` 0.43 provides `StreamPrefs::isolate_every_stream()` and `set_isolation(token)`, so
-  each poll can take its own circuit. That is the mechanism.
-* It costs a circuit build per handle — seconds each over Tor — so draining becomes markedly
-  slower, and a background drain of 10 contacts is 10 circuits.
-* **Simultaneous isolated polls still correlate by timing.** Ten circuits opening within the same
-  second is itself a signature. Jitter across the drain is needed, which trades latency for
-  unlinkability.
+So per-pair handles are **conditional on how draining is scheduled**. The mechanism exists:
+`arti-client` 0.43 offers `StreamPrefs::isolate_every_stream()` and `set_isolation(token)`, so
+polls can be placed on separate circuits at whatever granularity is chosen. How much to buy is
+§5c — the first answer given here, one circuit per handle, was the wrong end of the dial.
 
-If isolated draining is not implemented, per-pair handles buy far less than they appear to, and
-the honest thing is to say so rather than ship the appearance of a fix.
+If draining is not isolated at all, per-pair handles buy far less than they appear to, and the
+honest thing is to say so rather than ship the appearance of a fix.
 
 ## 5b. What "ephemeral" and "unlinkable" would actually mean
 
@@ -139,6 +135,46 @@ deliberately not within a pair-day.
 cost of polling a window of unknown depth per contact per relay, and a resync path for when a
 sender outruns the window. Not proposed for 0.1.23; recorded so the next person knows the ceiling
 and what it costs, rather than assuming v2 is the end of the road.
+
+## 5c. How much isolation — and the trap in re-randomising
+
+Three corrections to the first pass, in the order they matter.
+
+**Handles rotate per *epoch*, not per round.** An epoch is a UTC day; a poll round is minutes. So
+the same handle set is polled on the order of **288 times** (5-minute rounds) before anything
+rotates. Rotating *circuits* between rounds therefore buys almost nothing — the relay re-identifies
+the set by the **handles**, which are unchanged, not by the circuit that asked. Circuit rotation is
+near-free and worth doing anyway; it is simply not the control. The only question that matters is
+whether handles are polled **together**.
+
+**Per-handle isolation is the expensive end and not obviously the right one.** It costs
+contacts × relays circuit builds *per round* — at 50 contacts and 5-minute rounds, ~14,400 circuit
+builds a day, on a phone, over Tor. That is not a latency cost to be endured; it is a different
+product.
+
+**The workable middle is a fragmented poll:** fix a partition of the handle set at the start of each
+epoch, give each fragment its own circuit, and randomise when fragments go out. The relay then
+learns "these ~k handles share a client" and no more. Accepting circuit reuse within a fragment for
+**5–30 minutes** is what makes this affordable, and is the trade explicitly agreed.
+
+**The trap: do not re-randomise the partition each round.** It reads as more privacy and is less.
+Over an epoch's ~288 rounds a relay intersects the fragments it has seen and reassembles the full
+set from co-occurrence frequency — handles belonging to one client land together far more often
+than chance. A partition that is **fixed for the epoch** leaks a bounded, stateable amount; a
+partition that churns leaks everything, slowly. Re-draw it only when the handles rotate.
+
+For the same reason the **stagger must be random per round**. A fragment that always polls seven
+minutes after another one has announced their relationship without ever sharing a circuit.
+
+**Bucketed dummy polls** are worth adding and worth not overselling. Pad the polled set to a bucket
+boundary with handles that do not exist — a poll for a nonexistent mailbox and a poll for an empty
+one are indistinguishable, so this hides the contact count from a relay looking at one round. It
+degrades against a long-lived one: a handle polled all week that never receives anything is
+probably a dummy (or a very quiet contact). Cheap, keeps the count fuzzy, does not make it private.
+
+And note it does **not** transfer to deposits — that is §2's failure, and the asymmetry is the whole
+reason it works here. A dummy *poll* is free because empty is a normal answer. A dummy *deposit* is
+never drained, which is what gives it away.
 
 ## 6. What this does not fix
 
@@ -161,3 +197,23 @@ and what it costs, rather than assuming v2 is the end of the road.
 `multi-relay-mailboxes.md` §2 states handles are relay-agnostic — still true, a pair's handle is
 the same on every relay. What changes is §4.2's `drain_all(handle)`: a recipient now drains **one
 handle per contact** on each relay, so the poll count becomes contacts × relays.
+
+## 8. The polling budget, and why the cap is per person
+
+A recipient's work per round is **contacts × relays**, and every one of those is a request over
+Tor. That is the real constraint on this design, so the limit belongs in the design rather than
+being discovered on a phone.
+
+**The cap is on total contacts, not on group size.** A per-group cap of 10 sounds like it bounds
+the problem and does not: someone in eight groups of ten has up to ~70 contacts while no single
+group is oversized. Polling cost, battery, and the fragment count all follow the *total*, so that
+is what must be bounded. Groups inherit the limit instead of setting it.
+
+**Proposed: 50 contacts.** With ~8-handle fragments (§5c) that is 7 circuits per round per relay,
+which a phone can carry. It is a **UI limit, not a cryptographic one** — nothing in the wire format
+enforces it, and a modified client can exceed it and simply pay for it. Stating it as a product
+limit is honest; implying the protocol enforces it would not be.
+
+At the cap the app should refuse a new contact with a reason, not fail quietly — and the reason is
+worth giving plainly, because "this app limits you to 50 contacts so that a relay cannot rebuild
+your address book" is a sentence that explains the product.
