@@ -1451,6 +1451,25 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> sendBurnMessage(String contactId, String text, int burnSecs) async {
+    // No optimistic bubble here, unlike sendMessage. A burn that the core then REFUSES — because
+    // the peer's build cannot burn — must never have appeared on screen as sent: the sender would
+    // have seen their message look delivered and then vanish, which is indistinguishable from it
+    // having burned correctly.
+    final history = await _core!
+        .sendBurnMessage(contactId: contactId, text: text, burnSecs: BigInt.from(burnSecs));
+    _messages[contactId] = _mapMessages(contactId, history);
+    notifyListeners();
+  }
+
+  @override
+  Future<void> markBurnViewed(String contactId, String msgId) async {
+    final history = await _core!.markBurnViewed(contactId: contactId, msgId: msgId);
+    _messages[contactId] = _mapMessages(contactId, history);
+    notifyListeners();
+  }
+
+  @override
   Future<void> editMessage(String contactId, String msgId, String text) async {
     await _core!.editMessage(contactId: contactId, msgId: msgId, text: text);
     await _refresh();
@@ -1601,6 +1620,7 @@ class RustNightdropCore extends NightdropCore {
         verified: c.verified,
         peerVerified: c.peerVerified,
         peerCapturesSilent: c.peerCapturesSilent,
+        peerSupportsBurn: c.peerSupportsBurn,
         peerRelays: c.peerRelays,
         remoteStorageHealthy: c.remoteStorageHealthy,
         lastSeenSecs: c.lastSeenSecs.toInt(),
@@ -1632,6 +1652,11 @@ class RustNightdropCore extends NightdropCore {
               transferId: m.transferId,
               thumbId: m.thumbId,
               delivery: m.delivery,
+              burnSecs: m.burnSecs.toInt(),
+              viewedAt: m.viewedAt == BigInt.zero
+                  ? null
+                  : DateTime.fromMillisecondsSinceEpoch(
+                      m.viewedAt.toInt() * 1000),
             ))
         .toList();
   }

@@ -67,6 +67,7 @@ class Contact {
     this.verified = false,
     this.peerVerified = false,
     this.peerCapturesSilent,
+    this.peerSupportsBurn,
     this.peerRelays = const [],
     this.remoteStorageHealthy = true,
     this.lastSeenSecs = 0,
@@ -116,6 +117,12 @@ class Contact {
   /// render as unknown and never as "captures are visible": assuming the reassuring answer from
   /// silence is exactly the false guarantee this exists to remove.
   bool? peerCapturesSilent;
+
+  /// Whether the peer's build understands burn messages.
+  ///
+  /// `null` means they have not said, and that must render as **unsupported**. Offering a burn
+  /// that silently lands as a permanent message is the one failure this feature cannot have.
+  bool? peerSupportsBurn;
 
   /// The peer's advertised **extra** relay addresses (#17). We fan offline mail out to these
   /// in addition to the shared primary relay, so a message reaches them even if one relay is
@@ -186,6 +193,8 @@ class Message {
     this.delivery = '',
     this.sending = false,
     this.localBytes,
+    this.burnSecs = 0,
+    this.viewedAt,
   });
 
   final String id;
@@ -212,6 +221,34 @@ class Message {
       msgId.isNotEmpty &&
       (delivery == 'queued' ||
           DateTime.now().difference(at) < const Duration(minutes: 15));
+
+  /// Burn timer in seconds (`docs/design/burn-messages.md`); 0 = an ordinary message.
+  final int burnSecs;
+
+  /// When a burn message was first revealed, or null if it has not been. The countdown runs
+  /// from here in wall-clock time and does **not** pause when the app is backgrounded — a timer
+  /// that stopped off-screen would make "30 seconds" mean nothing.
+  final DateTime? viewedAt;
+
+  /// A burn message that is still hidden: shown blurred, with no countdown running yet.
+  bool get isBurnHidden => burnSecs > 0 && viewedAt == null;
+
+  /// A burn message whose countdown is running.
+  bool get isBurning => burnSecs > 0 && viewedAt != null;
+
+  /// How long a revealed burn message has left, floored at zero. Null when not burning.
+  Duration? get burnRemaining {
+    final v = viewedAt;
+    if (v == null || burnSecs == 0) return null;
+    final left = Duration(seconds: burnSecs) - DateTime.now().difference(v);
+    return left.isNegative ? Duration.zero : left;
+  }
+
+  /// When an unopened burn message will be deleted regardless (24h after arrival). Null unless
+  /// this is an unopened burn message. The UI shows this approaching so an unread message does
+  /// not simply vanish unexplained.
+  DateTime? get burnExpiresAt =>
+      isBurnHidden ? at.add(const Duration(hours: 24)) : null;
 
   /// A local system notice (e.g. a chat was deleted or approved) rather than an exchanged
   /// message. Rendered centered, without a sender name or bubble side.

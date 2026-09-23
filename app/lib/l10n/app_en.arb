@@ -351,14 +351,11 @@
   },
   "loadErrorBody": "Night Drop found data saved on this device but couldn’t open it. Two common, fixable causes: Tor hasn’t connected yet, or your system keyring/wallet (e.g. KDE Wallet or GNOME Keyring) is locked — unlock it, then tap Try again. Your existing data is preserved and won’t be overwritten automatically.",
   "@loadErrorBody": {
-    "description": "Desktop wording. Shown only on Linux/macOS/Windows, where a lockable system keyring is the usual cause. Mobile uses loadErrorBodyMobile — naming KDE Wallet on a phone is nonsense and sends the user hunting for something that does not exist there."
+    "description": "Body text of the load-failure recovery screen."
   },
   "loadErrorBodyMobile": "Night Drop found data saved on this device but couldn’t open it. Usually Tor simply hasn’t connected yet — tap Try again. If it keeps failing, the key that unlocks this data is no longer on the device, which can happen after clearing the app’s storage or moving to a new phone; in that case only a backup can bring it back. Your existing data is preserved and won’t be overwritten automatically.",
   "@loadErrorBodyMobile": {
     "description": "Android/iOS wording for the same screen. No mention of desktop keyrings; the phone equivalent is not something the user can unlock by hand."
-  },
-  "@loadErrorBody": {
-    "description": "Body text of the load-failure recovery screen."
   },
   "tryAgain": "Try again",
   "@tryAgain": {
@@ -569,7 +566,7 @@
   "@resetTorRunning": {
     "description": "Snackbar shown while the Tor connection is being reset."
   },
-  "aboutUpdateChecks": "Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don\u2019t do this at all, because F-Droid updates them.",
+  "aboutUpdateChecks": "Update checks: this build asks the Night Drop onion site, over Tor, at most once a day whether a newer version exists, and only ever tells you — it never installs anything. Copies installed from F-Droid don’t do this at all, because F-Droid updates them.",
   "@aboutUpdateChecks": {
     "description": "Shown in the About dialog. Discloses the one outbound connection the app makes on its own behalf, so it is stated somewhere durable rather than only in a banner nobody is looking at."
   },
@@ -630,35 +627,66 @@
   "updateAvailableBody": "Version {version} is available. This build is out of date.",
   "@updateAvailableBody": {
     "description": "Body of the update-available banner. {version} is the newer release, e.g. 0.1.18.",
-    "placeholders": { "version": { "type": "String", "example": "0.1.18" } }
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "0.1.18"
+      }
+    }
   },
   "updateChecking": "Checking for updates…",
-  "@updateChecking": { "description": "Shown while the on-demand update check runs." },
+  "@updateChecking": {
+    "description": "Shown while the on-demand update check runs."
+  },
   "updateCheckFailed": "Could not reach the update site. Try again later.",
-  "@updateCheckFailed": { "description": "Shown when the on-demand update check could not reach the onion site — deliberately distinct from being up to date." },
+  "@updateCheckFailed": {
+    "description": "Shown when the on-demand update check could not reach the onion site — deliberately distinct from being up to date."
+  },
   "updateUpToDate": "Night Drop is up to date.",
-  "@updateUpToDate": { "description": "Shown when the on-demand check finds no newer release." },
+  "@updateUpToDate": {
+    "description": "Shown when the on-demand check finds no newer release."
+  },
   "updateDownload": "Download",
-  "@updateDownload": { "description": "Button that starts the verified download of a newer build." },
+  "@updateDownload": {
+    "description": "Button that starts the verified download of a newer build."
+  },
   "updateHide": "Hide",
-  "@updateHide": { "description": "Button that hides the update banner until a newer version exists." },
+  "@updateHide": {
+    "description": "Button that hides the update banner until a newer version exists."
+  },
   "backgroundStoppedBySystem": "Android stopped background delivery, so messages may not have arrived. Reopen Night Drop to start it again.",
-  "@backgroundStoppedBySystem": { "description": "Shown when the system (not the user) ended the foreground service, e.g. a foreground-service-type time budget running out. The point is that the user could not otherwise tell." },
+  "@backgroundStoppedBySystem": {
+    "description": "Shown when the system (not the user) ended the foreground service, e.g. a foreground-service-type time budget running out. The point is that the user could not otherwise tell."
+  },
   "peerCapturesSilentBanner": "This person's device can't tell them about screenshots, so it won't tell you either. If they capture what you send, you won't hear about it.",
-  "@peerCapturesSilentBanner": { "description": "Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information." },
+  "@peerCapturesSilentBanner": {
+    "description": "Shown to the sender when the peer's device (Android below 14) cannot report screen captures, so the peer's silence carries no information."
+  },
   "updateDownloading": "Downloading over Tor…",
-  "@updateDownloading": { "description": "Shown while the update APK is downloading." },
+  "@updateDownloading": {
+    "description": "Shown while the update APK is downloading."
+  },
   "updateDownloadingPercent": "Downloading over Tor…{percent}",
   "@updateDownloadingPercent": {
     "description": "Shown while the update APK is downloading, with a percentage once one is known. The placeholder already includes its leading space and is empty until the first bytes arrive, so the string must read correctly without it.",
-    "placeholders": { "percent": { "type": "String" } }
+    "placeholders": {
+      "percent": {
+        "type": "String"
+      }
+    }
   },
   "updateDownloaded": "Downloaded and verified. Open it to install.",
-  "@updateDownloaded": { "description": "Shown when the update APK finished downloading and its hash matched." },
+  "@updateDownloaded": {
+    "description": "Shown when the update APK finished downloading and its hash matched."
+  },
   "updateFailed": "Could not download the update.",
-  "@updateFailed": { "description": "Shown when the update download failed or its hash did not match." },
+  "@updateFailed": {
+    "description": "Shown when the update download failed or its hash did not match."
+  },
   "updateApp": "Update app",
-  "@updateApp": { "description": "Menu item that checks for and downloads an update." },
+  "@updateApp": {
+    "description": "Menu item that checks for and downloads an update."
+  },
   "updateHow": "How",
   "@updateHow": {
     "description": "Button on the update banner; opens instructions for updating."
@@ -1174,21 +1202,28 @@
   "bridgesMenu": "Tor bridges",
   "bridgesTitle": "Tor bridges",
   "bridgesBody": "If your network blocks Tor, a bridge is an unlisted way in. Paste the bridge lines you were given — one per line, exactly as they came.",
-  "bridgesLimit": "Bridges get past a network that blocks the public list of Tor relays. Getting past one that inspects traffic and blocks Tor by how it looks needs a WebTunnel bridge, which carries Tor inside ordinary HTTPS \u2014 Night Drop will say so if this build cannot use one. Even then it is not a guarantee: we have tested it against blocked networks and against intrusion-detection tools, never against a national firewall, and the amount of data a chat moves is not disguised. If being identified as a Tor user is itself dangerous where you are, do not rely on this alone.",
+  "bridgesLimit": "Bridges get past a network that blocks the public list of Tor relays. Getting past one that inspects traffic and blocks Tor by how it looks needs a WebTunnel bridge, which carries Tor inside ordinary HTTPS — Night Drop will say so if this build cannot use one. Even then it is not a guarantee: we have tested it against blocked networks and against intrusion-detection tools, never against a national firewall, and the amount of data a chat moves is not disguised. If being identified as a Tor user is itself dangerous where you are, do not rely on this alone.",
   "bridgesHint": "203.0.113.5:9001 A1B2C3…",
   "bridgesWhereToGet": "Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.",
   "bridgesSaved": "{count, plural, =0{No bridges saved} =1{1 bridge saved} other{{count} bridges saved}}",
   "@bridgesSaved": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "bridgesRejected": "{count, plural, =1{1 line was not understood} other{{count} lines were not understood}}",
   "@bridgesRejected": {
-    "placeholders": { "count": { "type": "int" } }
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
   },
   "bridgesRestartTitle": "Reconnect now?",
   "bridgesRestartBody": "Bridges are used when Night Drop connects to Tor, so they take effect on the next connection. Reconnecting now takes a minute or two.",
   "bridgesRestartNow": "Reconnect",
-  "later": "Later",
   "coverTrafficMenu": "Cover traffic",
   "coverTrafficTitle": "Cover traffic",
   "coverTrafficBody": "Sends occasional dummy mail to yourself, so the server that holds your offline messages sees activity it can't tell apart from real messages. Without it, that server can build a picture of when you're awake and active — not what you say, or to whom, but when.",
@@ -1202,11 +1237,75 @@
   "nameContactBody": "A name only you see — it is never sent, and they can''t see or change it. Until you set one, this contact shows as {tag}, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.",
   "@nameContactBody": {
     "description": "Explains the local nickname and the identity tag. Must not imply the tag verifies anyone: it is short enough to grind, so the safety number remains the real check.",
-    "placeholders": { "tag": { "type": "String", "example": "K7QF2M" } }
+    "placeholders": {
+      "tag": {
+        "type": "String",
+        "example": "K7QF2M"
+      }
+    }
   },
   "silenceBanner": "No sign of this person for {days} days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.",
   "@silenceBanner": {
     "description": "Shown in a chat when nothing authenticated has arrived from the peer for a long time. Deliberately states the observation only: the app cannot tell a wiped identity from a lost phone or a holiday, and must not imply it can.",
-    "placeholders": { "days": { "type": "int" } }
+    "placeholders": {
+      "days": {
+        "type": "int"
+      }
+    }
+  },
+  "burnMenuTitle": "Burn after reading",
+  "@burnMenuTitle": {
+    "description": "Header of the menu opened by long-pressing (or right-clicking) the send button."
+  },
+  "burnCaveat": "Hidden until opened, then deleted. A screenshot or a photo of the screen still works.",
+  "@burnCaveat": {
+    "description": "Honest limitation shown in the burn menu. Must never be softened into a guarantee — the feature is a courtesy, not a control (SECURITY.md)."
+  },
+  "burnSeconds": "{count} seconds",
+  "@burnSeconds": {
+    "description": "A burn duration in seconds.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "burnMinutes": "{count} minutes",
+  "@burnMinutes": {
+    "description": "A burn duration in minutes.",
+    "placeholders": {
+      "count": {
+        "type": "int"
+      }
+    }
+  },
+  "burnOneMinute": "1 minute",
+  "@burnOneMinute": {
+    "description": "The one-minute burn duration."
+  },
+  "burnUnsupported": "This contact's app version can't burn messages — it would keep this one. Ask them to update.",
+  "@burnUnsupported": {
+    "description": "Shown instead of the duration list when the peer has not announced burn support. Sending is refused rather than silently downgraded."
+  },
+  "burnTapToReveal": "Tap to reveal",
+  "@burnTapToReveal": {
+    "description": "Label on a blurred, not-yet-opened burn message."
+  },
+  "burnSentLabel": "Burn message",
+  "@burnSentLabel": {
+    "description": "Label on the sender's own copy of a burn message."
+  },
+  "burnSenderNote": "Deleted from your device after 24 hours. You won't be told when it's opened.",
+  "@burnSenderNote": {
+    "description": "Explains to the SENDER why their copy lingers and why there is no read receipt — so its behaviour is not mistaken for a bug."
+  },
+  "burnExpiresIn": "Disappears in {time}",
+  "@burnExpiresIn": {
+    "description": "Countdown on an unopened burn message approaching its 24h expiry.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
   }
 }

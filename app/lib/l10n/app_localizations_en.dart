@@ -1121,4 +1121,43 @@ class AppLocalizationsEn extends AppLocalizations {
   String silenceBanner(int days) {
     return 'No sign of this person for $days days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.';
   }
+
+  @override
+  String get burnMenuTitle => 'Burn after reading';
+
+  @override
+  String get burnCaveat =>
+      'Hidden until opened, then deleted. A screenshot or a photo of the screen still works.';
+
+  @override
+  String burnSeconds(int count) {
+    return '$count seconds';
+  }
+
+  @override
+  String burnMinutes(int count) {
+    return '$count minutes';
+  }
+
+  @override
+  String get burnOneMinute => '1 minute';
+
+  @override
+  String get burnUnsupported =>
+      'This contact\'s app version can\'t burn messages — it would keep this one. Ask them to update.';
+
+  @override
+  String get burnTapToReveal => 'Tap to reveal';
+
+  @override
+  String get burnSentLabel => 'Burn message';
+
+  @override
+  String get burnSenderNote =>
+      'Deleted from your device after 24 hours. You won\'t be told when it\'s opened.';
+
+  @override
+  String burnExpiresIn(String time) {
+    return 'Disappears in $time';
+  }
 }

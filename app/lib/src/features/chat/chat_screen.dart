@@ -1,4 +1,6 @@
+import 'dart:async';
 import 'dart:io';
+import 'dart:ui' show ImageFilter;
 
 import 'package:fc_native_video_thumbnail/fc_native_video_thumbnail.dart';
 import 'package:file_picker/file_picker.dart';
@@ -148,9 +150,16 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
+  /// Pending auto-scroll callbacks, cancelled on dispose (see [_scrollToEnd]).
+  final List<Timer> _scrollTimers = [];
+
   @override
   void dispose() {
     ScreenshotDetector.stop();
+    for (final t in _scrollTimers) {
+      t.cancel();
+    }
+    _scrollTimers.clear();
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -170,6 +179,88 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await NightdropScope.of(context).sendMessage(widget.contactId, text);
       // Only clear the draft once the core has accepted it — a failed send keeps your text.
+      _input.clear();
+      _scrollToEnd();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(_sendErrorText(l10n, e))),
+      );
+    }
+  }
+
+  /// Offer to send the drafted message as a **burn message** (long-press / right-click on send).
+  ///
+  /// Picking a duration sends immediately. The alternative — arming the composer and then tapping
+  /// send — is a mode, and a mode here fails in both directions: a forgotten "on" burns something
+  /// meant to be kept, a forgotten "off" keeps something meant to burn.
+  Future<void> _offerBurn(Offset position) async {
+    final l10n = AppLocalizations.of(context)!;
+    if (_input.text.trim().isEmpty) return;
+    final contact = _contact(NightdropScope.of(context));
+    if (contact == null) return;
+
+    // Unknown support reads as unsupported. Offering a burn that lands as a permanent message is
+    // the one failure this feature must not have, and with no read receipts the sender would
+    // never find out — so the refusal has to happen here, before anything is sent.
+    if (contact.peerSupportsBurn != true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(l10n.burnUnsupported)),
+      );
+      return;
+    }
+
+    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox?;
+    if (overlay == null) return;
+    final theme = Theme.of(context);
+    final secs = await showMenu<int>(
+      context: context,
+      position: RelativeRect.fromRect(
+        Rect.fromLTWH(position.dx, position.dy, 0, 0),
+        Offset.zero & overlay.size,
+      ),
+      items: [
+        PopupMenuItem<int>(
+          enabled: false,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(l10n.burnMenuTitle, style: theme.textTheme.titleSmall),
+              const SizedBox(height: 4),
+              // The caveat sits in the menu, at the moment of choosing — not buried in settings.
+              // It is the difference between a courtesy the user understands and a guarantee they
+              // wrongly believe they have (SECURITY.md).
+              SizedBox(
+                width: 240,
+                child: Text(
+                  l10n.burnCaveat,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const PopupMenuDivider(),
+        PopupMenuItem(value: 10, child: Text(l10n.burnSeconds(10))),
+        PopupMenuItem(value: 30, child: Text(l10n.burnSeconds(30))),
+        PopupMenuItem(value: 60, child: Text(l10n.burnOneMinute)),
+        PopupMenuItem(value: 300, child: Text(l10n.burnMinutes(5))),
+      ],
+    );
+    if (secs == null || !mounted) return;
+    await _sendBurn(secs);
+  }
+
+  Future<void> _sendBurn(int secs) async {
+    final l10n = AppLocalizations.of(context)!;
+    final text = _input.text;
+    if (text.trim().isEmpty) return;
+    try {
+      await NightdropScope.of(context)
+          .sendBurnMessage(widget.contactId, text, secs);
       _input.clear();
       _scrollToEnd();
     } catch (e) {
@@ -326,9 +417,18 @@ class _ChatScreenState extends State<ChatScreen> {
     // Scroll after layout, then settle again shortly after — tall items (images) finish
     // laying out asynchronously, so a single pass lands at the top of the new message.
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       toBottom(animate: true);
-      Future.delayed(const Duration(milliseconds: 350), () => toBottom());
-      Future.delayed(const Duration(milliseconds: 800), () => toBottom());
+      // Held so dispose can cancel them. They used to be bare Future.delayed calls, which fire
+      // after the screen is gone and reach for a disposed ScrollController — harmless only
+      // because of the hasClients guard above, and enough to leave a test hanging on a pending
+      // timer long after the widget it belonged to had been torn down.
+      for (final ms in const [350, 800]) {
+        _scrollTimers.add(Timer(Duration(milliseconds: ms), () {
+          if (mounted) toBottom();
+        }));
+      }
+      _scrollTimers.removeWhere((t) => !t.isActive);
     });
   }
 
@@ -728,6 +828,11 @@ class _ChatScreenState extends State<ChatScreen> {
                                   onLongPress: m.canEdit
                                       ? () => _showMessageMenu(m)
                                       : null,
+                                  onReveal: m.isBurnHidden && !m.fromMe
+                                      ? () => NightdropScope.of(context)
+                                          .markBurnViewed(
+                                              widget.contactId, m.msgId)
+                                      : null,
                                 );
                           // A day separator above the first message of each calendar day
                           // (skipping messages with no real timestamp — pre-timestamp history).
@@ -745,6 +850,7 @@ class _ChatScreenState extends State<ChatScreen> {
               _Composer(
                 controller: _input,
                 onSend: _send,
+              onBurn: _offerBurn,
                 onAttach: _attachMedia,
                 onPaste: _paste,
               ),
@@ -1018,10 +1124,16 @@ class _SystemNotice extends StatelessWidget {
 
 class _Bubble extends StatelessWidget {
   const _Bubble(
-      {required this.message, required this.senderName, this.onLongPress});
+      {required this.message,
+      required this.senderName,
+      this.onLongPress,
+      this.onReveal});
 
   final Message message;
   final String senderName;
+
+  /// Called when the recipient taps a blurred burn message to reveal it. Starts the countdown.
+  final VoidCallback? onReveal;
 
   /// Non-null when this message has long-press actions (own text, within the window or
   /// still queued) — opens the edit / delete menu.
@@ -1078,6 +1190,12 @@ class _Bubble extends StatelessWidget {
                         ),
                       ),
                     ],
+                  )
+                else if (message.burnSecs > 0)
+                  _BurnBody(
+                    message: message,
+                    mine: mine,
+                    onReveal: onReveal,
                   )
                 else if (message.isText)
                   Row(
@@ -1589,12 +1707,19 @@ class _Composer extends StatelessWidget {
   const _Composer({
     required this.controller,
     required this.onSend,
+    required this.onBurn,
     required this.onAttach,
     required this.onPaste,
   });
 
   final TextEditingController controller;
   final Future<void> Function() onSend;
+
+  /// Long-press (or right-click) the send button: offer to send this one message as a burn
+  /// message. Deliberately *not* a mode — a plain tap on send is always an ordinary message, so
+  /// nothing can be burned by forgetting that a toggle was left on, and nothing can be sent in
+  /// the clear by forgetting it was left off.
+  final Future<void> Function(Offset position) onBurn;
   final Future<void> Function() onAttach;
   final Future<void> Function() onPaste;
 
@@ -1633,13 +1758,227 @@ class _Composer extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            IconButton.filled(
-              onPressed: onSend,
-              icon: const Icon(Icons.send),
-            ),
+            Builder(builder: (context) {
+              // Long-press covers touch AND a held mouse button; onSecondaryTap covers the
+              // right-click a desktop user will reach for first. Both, because supporting only
+              // one leaves half the platforms without a discoverable route to the feature.
+              Future<void> open() async {
+                final box = context.findRenderObject() as RenderBox?;
+                final origin = box == null
+                    ? Offset.zero
+                    : box.localToGlobal(box.size.center(Offset.zero));
+                await onBurn(origin);
+              }
+
+              return GestureDetector(
+                onLongPress: open,
+                onSecondaryTap: open,
+                child: IconButton.filled(
+                  onPressed: onSend,
+                  icon: const Icon(Icons.send),
+                ),
+              );
+            }),
           ],
         ),
       ),
     );
   }
+}
+
+/// The body of a burn message (`docs/design/burn-messages.md`).
+///
+/// Three states, and the distinction between the first two is the whole feature:
+///
+/// * **hidden** (recipient, not yet revealed) — blurred, tappable. A **blur, never a padlock**: a
+///   lock icon would claim an enforcement this does not have, while a blur says only "not shown
+///   yet", which is exactly true.
+/// * **burning** (recipient, revealed) — readable, with a circular countdown. The clock is
+///   wall-clock and keeps running while the app is backgrounded, so the display recomputes from
+///   [Message.viewedAt] on every tick rather than counting down a local integer.
+/// * **sender's own copy** — labelled, with a note that it goes after 24h and that they will not
+///   be told when it was opened. Said plainly because there is no read receipt by design, and
+///   silence that is a deliberate choice looks exactly like silence that is a bug.
+class _BurnBody extends StatefulWidget {
+  const _BurnBody({required this.message, required this.mine, this.onReveal});
+
+  final Message message;
+  final bool mine;
+  final VoidCallback? onReveal;
+
+  @override
+  State<_BurnBody> createState() => _BurnBodyState();
+}
+
+class _BurnBodyState extends State<_BurnBody> {
+  Timer? _tick;
+
+  @override
+  void initState() {
+    super.initState();
+    _syncTicker();
+  }
+
+  @override
+  void didUpdateWidget(covariant _BurnBody old) {
+    super.didUpdateWidget(old);
+    _syncTicker();
+  }
+
+  /// Tick once a second only while a countdown is actually running. A blurred message needs no
+  /// ticker, and the sender's copy never counts down at all.
+  void _syncTicker() {
+    final needed = widget.message.isBurning;
+    if (needed && _tick == null) {
+      _tick = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (mounted) setState(() {});
+      });
+    } else if (!needed && _tick != null) {
+      _tick!.cancel();
+      _tick = null;
+    }
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final l10n = AppLocalizations.of(context)!;
+    final m = widget.message;
+    final fg = widget.mine ? scheme.onPrimary : scheme.onSurface;
+
+    if (widget.mine) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(m.text, style: TextStyle(color: fg)),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.local_fire_department,
+                  size: 13, color: fg.withValues(alpha: 0.7)),
+              const SizedBox(width: 4),
+              Text(
+                l10n.burnSentLabel,
+                style: TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.7)),
+              ),
+            ],
+          ),
+          SizedBox(
+            width: 220,
+            child: Text(
+              l10n.burnSenderNote,
+              style: TextStyle(fontSize: 10, color: fg.withValues(alpha: 0.6)),
+            ),
+          ),
+        ],
+      );
+    }
+
+    if (m.isBurnHidden) {
+      final expires = m.burnExpiresAt;
+      return GestureDetector(
+        onTap: widget.onReveal,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Placeholder bars, NOT the real text blurred. Blurring the actual content would
+            // put it in the widget tree (a screen reader reads it out), in the render tree, and
+            // in any screenshot — and a blur over small text is a known de-blurring target. The
+            // content must not be present until it is revealed; only its rough length shows.
+            ExcludeSemantics(
+              child: ImageFiltered(
+                imageFilter: ImageFilter.blur(sigmaX: 4, sigmaY: 4),
+                child: _redactedBars(m.text.length, fg),
+              ),
+            ),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.visibility_outlined,
+                    size: 13, color: fg.withValues(alpha: 0.75)),
+                const SizedBox(width: 4),
+                Text(
+                  l10n.burnTapToReveal,
+                  style:
+                      TextStyle(fontSize: 11, color: fg.withValues(alpha: 0.75)),
+                ),
+              ],
+            ),
+            // An unopened burn message is deleted at 24h regardless. Shown as it approaches, so a
+            // message does not simply disappear unexplained while someone is deciding.
+            if (expires != null)
+              Text(
+                l10n.burnExpiresIn(_shortDuration(expires.difference(DateTime.now()))),
+                style: TextStyle(fontSize: 10, color: fg.withValues(alpha: 0.6)),
+              ),
+          ],
+        ),
+      );
+    }
+
+    final left = m.burnRemaining ?? Duration.zero;
+    final fraction =
+        m.burnSecs == 0 ? 0.0 : left.inMilliseconds / (m.burnSecs * 1000);
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Flexible(child: Text(m.text, style: TextStyle(color: fg))),
+        const SizedBox(width: 8),
+        SizedBox(
+          width: 16,
+          height: 16,
+          child: CircularProgressIndicator(
+            value: fraction.clamp(0.0, 1.0),
+            strokeWidth: 2,
+            color: fg.withValues(alpha: 0.8),
+            backgroundColor: fg.withValues(alpha: 0.2),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Stand-in bars for an unrevealed burn message: enough to show roughly how much text is
+/// waiting, while the text itself stays out of the widget tree entirely.
+Widget _redactedBars(int length, Color fg) {
+  // Coarse, and deliberately so — bucketing to whole lines avoids turning the bar layout into a
+  // precise character count of a message nobody has opened.
+  final lines = (length / 28).ceil().clamp(1, 3);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      for (var i = 0; i < lines; i++) ...[
+        if (i > 0) const SizedBox(height: 5),
+        Container(
+          height: 10,
+          width: i == lines - 1 ? 96 : 150,
+          decoration: BoxDecoration(
+            color: fg.withValues(alpha: 0.45),
+            borderRadius: BorderRadius.circular(5),
+          ),
+        ),
+      ],
+    ],
+  );
+}
+
+/// "3h", "12m", "45s" — a coarse remaining-time label for an unopened burn message.
+String _shortDuration(Duration d) {
+  if (d.isNegative) return '0s';
+  if (d.inHours > 0) return '${d.inHours}h';
+  if (d.inMinutes > 0) return '${d.inMinutes}m';
+  return '${d.inSeconds}s';
 }

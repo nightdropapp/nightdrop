@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
+
 import 'nightdrop_core.dart';
 import 'models.dart';
 
@@ -197,6 +199,47 @@ class MockNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> sendBurnMessage(String contactId, String text, int burnSecs) async {
+    final trimmed = text.trim();
+    if (trimmed.isEmpty) return;
+    final id = _token(8);
+    _append(Message(
+      id: id,
+      contactId: contactId,
+      text: trimmed,
+      fromMe: true,
+      at: DateTime.now(),
+      msgId: id,
+      burnSecs: burnSecs,
+    ));
+    notifyListeners();
+  }
+
+  @override
+  Future<void> markBurnViewed(String contactId, String msgId) async {
+    final list = _messages[contactId];
+    if (list == null) return;
+    for (var i = 0; i < list.length; i++) {
+      final m = list[i];
+      if (m.msgId == msgId && m.burnSecs > 0 && m.viewedAt == null) {
+        list[i] = Message(
+          id: m.id,
+          contactId: m.contactId,
+          text: m.text,
+          fromMe: m.fromMe,
+          at: m.at,
+          msgId: m.msgId,
+          delivery: m.delivery,
+          burnSecs: m.burnSecs,
+          viewedAt: DateTime.now(),
+        );
+        notifyListeners();
+        return;
+      }
+    }
+  }
+
+  @override
   Future<void> sendMessage(String contactId, String text) async {
     final trimmed = text.trim();
     if (trimmed.isEmpty) return;
@@ -326,6 +369,14 @@ class MockNightdropCore extends NightdropCore {
   // --- helpers ---
 
   void _append(Message m) => (_messages[m.contactId] ??= []).add(m);
+
+  /// Inject a message as if it had arrived from the peer. Test-only seam: the mock has no
+  /// transport, so there is no other way to exercise an inbound-message UI path.
+  @visibleForTesting
+  void appendForTest(Message m) {
+    _append(m);
+    notifyListeners();
+  }
 
   Future<void> _fakeWork() =>
       Future<void>.delayed(const Duration(milliseconds: 250));

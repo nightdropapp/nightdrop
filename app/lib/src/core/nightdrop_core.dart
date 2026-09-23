@@ -256,6 +256,21 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Send a 1:1 message.
   Future<void> sendMessage(String contactId, String text);
 
+  /// Send a **burn message**: it arrives blurred, and is deleted [burnSecs] after the recipient
+  /// first reveals it — or after 24 hours if they never do.
+  ///
+  /// **Throws if the contact's app version cannot burn messages**, and callers must surface that
+  /// rather than falling back to [sendMessage]. There are no read receipts here by design, so
+  /// sending is the only moment anyone can learn the feature would not have worked.
+  ///
+  /// Not a security control: the recipient can screenshot or photograph the screen like any
+  /// other message, and the UI must never imply otherwise.
+  Future<void> sendBurnMessage(String contactId, String text, int burnSecs);
+
+  /// The recipient revealed a burn message — start its countdown. Idempotent: reopening a chat
+  /// does not restart a clock that is already running.
+  Future<void> markBurnViewed(String contactId, String msgId);
+
   /// Edit one of our own text messages ([Message.msgId]). Allowed within 15 minutes of
   /// sending, or at any time while still queued on the relay (the peer never saw it —
   /// the queued copy is replaced outright). The bubble shows an "edited" tag.

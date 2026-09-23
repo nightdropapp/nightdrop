@@ -1935,6 +1935,66 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No sign of this person for {days} days. Your messages are still being held for them. There are many reasons someone goes quiet — if it matters, reach them another way.'**
   String silenceBanner(int days);
+
+  /// Header of the menu opened by long-pressing (or right-clicking) the send button.
+  ///
+  /// In en, this message translates to:
+  /// **'Burn after reading'**
+  String get burnMenuTitle;
+
+  /// Honest limitation shown in the burn menu. Must never be softened into a guarantee — the feature is a courtesy, not a control (SECURITY.md).
+  ///
+  /// In en, this message translates to:
+  /// **'Hidden until opened, then deleted. A screenshot or a photo of the screen still works.'**
+  String get burnCaveat;
+
+  /// A burn duration in seconds.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} seconds'**
+  String burnSeconds(int count);
+
+  /// A burn duration in minutes.
+  ///
+  /// In en, this message translates to:
+  /// **'{count} minutes'**
+  String burnMinutes(int count);
+
+  /// The one-minute burn duration.
+  ///
+  /// In en, this message translates to:
+  /// **'1 minute'**
+  String get burnOneMinute;
+
+  /// Shown instead of the duration list when the peer has not announced burn support. Sending is refused rather than silently downgraded.
+  ///
+  /// In en, this message translates to:
+  /// **'This contact\'s app version can\'t burn messages — it would keep this one. Ask them to update.'**
+  String get burnUnsupported;
+
+  /// Label on a blurred, not-yet-opened burn message.
+  ///
+  /// In en, this message translates to:
+  /// **'Tap to reveal'**
+  String get burnTapToReveal;
+
+  /// Label on the sender's own copy of a burn message.
+  ///
+  /// In en, this message translates to:
+  /// **'Burn message'**
+  String get burnSentLabel;
+
+  /// Explains to the SENDER why their copy lingers and why there is no read receipt — so its behaviour is not mistaken for a bug.
+  ///
+  /// In en, this message translates to:
+  /// **'Deleted from your device after 24 hours. You won\'t be told when it\'s opened.'**
+  String get burnSenderNote;
+
+  /// Countdown on an unopened burn message approaching its 24h expiry.
+  ///
+  /// In en, this message translates to:
+  /// **'Disappears in {time}'**
+  String burnExpiresIn(String time);
 }
 
 class _AppLocalizationsDelegate
