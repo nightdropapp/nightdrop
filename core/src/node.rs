@@ -386,6 +386,10 @@ pub struct Node {
     /// What we last told peers about whether this device can report screenshots (#1). `None` until
     /// the UI says; only a change is announced, so a restart does not re-broadcast to every chat.
     captures_visible: Option<bool>,
+    /// Whether this run has already told existing chats that we understand burn messages
+    /// (see [`Node::announce_burns`]). Not persisted: re-announcing once per launch is cheap
+    /// and self-healing if a peer missed it while offline.
+    burns_announced: bool,
     /// Where media attachments are stored at rest: `(dir, key)`. Each attachment is sealed
     /// under `key` into its own file in `dir`, and the message only references its id — so
     /// large media never inflates the JSON state blob. `None` disables media (demo/tests).
@@ -648,6 +652,7 @@ impl Node {
             require_authorization: false,
             last_invite_code: None,
             captures_visible: None,
+            burns_announced: false,
             media_store: None,
             pending_media: Vec::new(),
             tor_state_dir: None,
@@ -938,6 +943,29 @@ impl Node {
                 // never block or noisily retry the way a message does.
                 let _ = self.deliver(&addr, &id, &frame);
             }
+        }
+    }
+
+    /// Tell **every** open chat that this build understands burn messages.
+    ///
+    /// Needed because [`announce_burns_to`](Self::announce_burns_to) only fires at pairing, so a
+    /// chat that already existed before this feature shipped would never hear it — and an
+    /// unannounced peer reads as unsupported, which would leave burn permanently unavailable for
+    /// exactly the contacts someone already talks to. Called once per run; the flag keeps a
+    /// restart from re-announcing to everyone.
+    pub fn announce_burns(&mut self) {
+        if self.burns_announced {
+            return;
+        }
+        self.burns_announced = true;
+        let ids: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(_, c)| !c.closed)
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.announce_burns_to(&id);
         }
     }
 

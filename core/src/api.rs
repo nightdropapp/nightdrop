@@ -655,6 +655,11 @@ impl Inner {
         // enough to run every tick; `sweep_time` still runs it again as the slower backstop.
         let burned = self.me.sweep_burns();
         if relay_due {
+            // Tell pre-existing chats that this build can burn. Self-guarded to once per run, and
+            // done here rather than at startup so the transport has had a chance to warm up —
+            // a chat paired before the feature shipped would otherwise never hear it, leaving
+            // burn unavailable for precisely the contacts someone already talks to.
+            self.me.announce_burns();
             // Inviter side of short-code pairing: answer any joiner's SPAKE2 opener (§5b).
             self.me.service_pending_invites();
             // Retry messages that couldn't reach the peer or any relay when first sent (arti was
