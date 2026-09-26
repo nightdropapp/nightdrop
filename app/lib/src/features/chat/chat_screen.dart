@@ -767,31 +767,12 @@ class _ChatScreenState extends State<ChatScreen> {
                 ),
               ],
             ),
+            // Only the two icons that show a setting's state stay in the bar; everything else is
+            // in the overflow menu. Seven icons filled a phone's app bar edge to edge, and the
+            // verify shield sat right beside Back, so reaching for Back opened the verify screen.
+            // Verification state is still visible without it: the badge beside the name, and the
+            // unverified banner (which opens the same screen).
             actions: [
-              IconButton(
-                tooltip: l10n.verifySafetyNumber,
-                icon: Icon(contact.verified
-                    ? Icons.verified_user
-                    : Icons.shield_outlined),
-                onPressed: () => Navigator.of(context).push(
-                  MaterialPageRoute<void>(
-                    builder: (_) => VerifyScreen(
-                      contactId: contact.id,
-                      name: contact.theirName,
-                    ),
-                  ),
-                ),
-              ),
-              IconButton(
-                tooltip: l10n.nameContactTooltip,
-                icon: const Icon(Icons.drive_file_rename_outline),
-                onPressed: () => _nameContact(contact),
-              ),
-              IconButton(
-                tooltip: l10n.renameYourselfTooltip,
-                icon: const Icon(Icons.badge_outlined),
-                onPressed: () => _renameSelf(contact),
-              ),
               IconButton(
                 tooltip: contact.remoteStorage
                     ? l10n.storedServerTooltipOn
@@ -814,22 +795,44 @@ class _ChatScreenState extends State<ChatScreen> {
                     : Icons.timer_off_outlined),
                 onPressed: () => _pickDisappearing(contact),
               ),
-              IconButton(
-                tooltip: l10n.deleteThisChatTooltip,
-                icon: const Icon(Icons.delete_outline),
-                onPressed: () => _confirmDelete(contact),
-              ),
               PopupMenuButton<String>(
                 tooltip: l10n.more,
                 onSelected: (v) {
-                  if (v == 'backup') {
-                    createAndSaveBackup(context, core,
-                        contactId: widget.contactId);
+                  switch (v) {
+                    case 'verify':
+                      Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => VerifyScreen(
+                            contactId: contact.id,
+                            name: contact.theirName,
+                          ),
+                        ),
+                      );
+                    case 'name':
+                      _nameContact(contact);
+                    case 'rename':
+                      _renameSelf(contact);
+                    case 'backup':
+                      createAndSaveBackup(context, core,
+                          contactId: widget.contactId);
+                    case 'delete':
+                      _confirmDelete(contact);
                   }
                 },
                 itemBuilder: (context) => [
-                  PopupMenuItem(
-                      value: 'backup', child: Text(l10n.backUpThisChat)),
+                  _menuItem('verify',
+                      contact.verified
+                          ? Icons.verified_user
+                          : Icons.shield_outlined,
+                      l10n.verifySafetyNumber),
+                  _menuItem('name', Icons.drive_file_rename_outline,
+                      l10n.nameContactTooltip),
+                  _menuItem('rename', Icons.badge_outlined,
+                      l10n.renameYourselfTooltip),
+                  _menuItem('backup', Icons.save_alt, l10n.backUpThisChat),
+                  const PopupMenuDivider(),
+                  _menuItem('delete', Icons.delete_outline,
+                      l10n.deleteThisChatTooltip),
                 ],
               ),
             ],
@@ -1856,6 +1859,19 @@ class _Composer extends StatelessWidget {
     );
   }
 }
+
+/// One row of the chat's overflow menu: an icon beside its label.
+PopupMenuItem<String> _menuItem(String value, IconData icon, String label) =>
+    PopupMenuItem(
+      value: value,
+      child: Row(
+        children: [
+          Icon(icon, size: 20),
+          const SizedBox(width: 12),
+          Flexible(child: Text(label)),
+        ],
+      ),
+    );
 
 /// The body of a burn message (`docs/design/burn-messages.md`).
 ///
