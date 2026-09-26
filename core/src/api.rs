@@ -402,6 +402,15 @@ pub(crate) fn now_secs() -> u64 {
         .unwrap_or(0)
 }
 
+/// [`now_secs`] rounded **up**. For a burn message's view time: rounding down would start its
+/// countdown up to a second before it was actually shown, and delete it that much early.
+pub(crate) fn now_secs_ceil() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() + u64::from(d.subsec_nanos() > 0))
+        .unwrap_or(0)
+}
+
 impl ChatMessage {
     /// A plain text message with a fresh timestamp; `msg_id` correlates edits.
     pub(crate) fn text(from_me: bool, text: String, msg_id: String) -> Self {
@@ -1727,14 +1736,33 @@ impl NightdropCore {
         Ok(self.lock().me.burn_receipts_enabled())
     }
 
-    /// The recipient revealed a burn message: start its countdown. Idempotent — reopening a
-    /// chat does not restart a clock that is already running.
-    pub fn mark_burn_viewed(&self, contact_id: &str, msg_id: &str) -> Result<Vec<ChatMessage>> {
-        let mut g = self.lock();
-        if g.me.mark_burn_viewed(contact_id, msg_id) {
-            g.save();
+    /// The recipient revealed a burn message at `viewed_at` (unix seconds, 0 = now): start its
+    /// countdown from there. Pass the moment the UI showed it, so the deletion clock and the
+    /// countdown on screen share one start. Idempotent — reopening a chat does not restart a clock
+    /// that is already running.
+    pub fn mark_burn_viewed(
+        &self,
+        contact_id: &str,
+        msg_id: &str,
+        viewed_at: u64,
+    ) -> Result<Vec<ChatMessage>> {
+        let (history, sends) = {
+            let mut g = self.lock();
+            if g.me.mark_burn_viewed(contact_id, msg_id, viewed_at) {
+                g.save();
+            }
+            (g.me.messages(contact_id), g.me.take_detached_sends())
+        };
+        // The opt-in view receipt is a Tor dial, and on failure a relay post — seconds at best.
+        // Off the lock and off this call, so neither the reveal nor anything else waits on it.
+        if !sends.is_empty() {
+            thread::spawn(move || {
+                for s in sends {
+                    s.execute();
+                }
+            });
         }
-        Ok(g.me.messages(contact_id))
+        Ok(history)
     }
 
     /// Send an image/video attachment (E2E-encrypted, sealed at rest). `kind` is

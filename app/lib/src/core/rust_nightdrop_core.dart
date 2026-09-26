@@ -1511,11 +1511,51 @@ class RustNightdropCore extends NightdropCore {
     }
   }
 
+  /// Burn reveals shown on screen but not yet recorded by the core: contact id -> burn id ->
+  /// the view time handed to the core (unix seconds).
+  ///
+  /// The reveal is shown on the **tap**, not when the core call returns. That call needs the core
+  /// lock, which a poller tick can hold for seconds (longer when it is dialling a dead peer), and
+  /// waiting for it made opening a burn message feel broken. Kept here, rather than only patched
+  /// into [_messages], so a refresh that lands in between cannot re-blur what is already shown.
+  final Map<String, Map<String, int>> _pendingReveals = {};
+
   @override
   Future<void> markBurnViewed(String contactId, String msgId) async {
-    final history = await _core!.markBurnViewed(contactId: contactId, msgId: msgId);
+    final pending = _pendingReveals.putIfAbsent(contactId, () => {});
+    if (pending.containsKey(msgId)) return;
+    // Rounded UP, like the core: this is the start of the countdown on screen AND of the deletion
+    // clock, so rounding down would delete it up to a second before the ring runs out.
+    final secs = (DateTime.now().millisecondsSinceEpoch + 999) ~/ 1000;
+    pending[msgId] = secs;
+    final cached = _messages[contactId];
+    if (cached != null) {
+      _messages[contactId] = _withPendingReveals(contactId, cached);
+      notifyListeners();
+    }
+    final List<rust.ChatMessage> history;
+    try {
+      history = await _core!.markBurnViewed(
+          contactId: contactId, msgId: msgId, viewedAt: BigInt.from(secs));
+    } finally {
+      pending.remove(msgId);
+    }
     _messages[contactId] = _mapMessages(contactId, history);
     notifyListeners();
+  }
+
+  /// Overlay [_pendingReveals] on a freshly mapped history.
+  List<Message> _withPendingReveals(String contactId, List<Message> list) {
+    final pending = _pendingReveals[contactId];
+    if (pending == null || pending.isEmpty) return list;
+    return [
+      for (final m in list)
+        if (m.isBurnHidden && !m.fromMe && pending.containsKey(m.burnId))
+          m.revealed(
+              DateTime.fromMillisecondsSinceEpoch(pending[m.burnId]! * 1000))
+        else
+          m,
+    ];
   }
 
   @override
@@ -1679,7 +1719,7 @@ class RustNightdropCore extends NightdropCore {
 
   List<Message> _mapMessages(String contactId, List<rust.ChatMessage> history) {
     var i = 0;
-    return history
+    return _withPendingReveals(contactId, history
         .map((m) => Message(
               id: '$contactId-${i++}',
               contactId: contactId,
@@ -1707,6 +1747,6 @@ class RustNightdropCore extends NightdropCore {
                   : DateTime.fromMillisecondsSinceEpoch(
                       m.viewedAt.toInt() * 1000),
             ))
-        .toList();
+        .toList());
   }
 }

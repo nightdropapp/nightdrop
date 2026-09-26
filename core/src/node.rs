@@ -459,6 +459,9 @@ pub struct Node {
     /// the retry survives a restart mid-outage; re-delivery is idempotent (the peer's ratchet rejects
     /// a replayed marker).
     pending_control: Vec<PendingControl>,
+    /// Frames sealed by a UI call and waiting to be sent **off** the lock by that call's caller
+    /// (see [`DetachedSend`]). Drained by [`Node::take_detached_sends`]; in memory only.
+    detached_sends: Vec<DetachedSend>,
     /// Shared default relays learned from the operator-signed **relay directory** (§3.1): fetched
     /// from a live relay on the poll, verified against the baked-in [`directory::DIRECTORY_PUBKEY`],
     /// and treated like additional primaries (drained, paired over, and posted to). This is how the
@@ -578,6 +581,38 @@ pub(crate) fn execute_sends(plan: &SendPlan) -> SendOutcomes {
     SendOutcomes { items }
 }
 
+/// One already-sealed control frame to deliver **with no core lock held** — a single-frame
+/// [`Node::deliver`] (direct dial, relay fallback) whose routing was snapshotted under the lock.
+///
+/// For frames sent from a **UI call** rather than the poller, where the caller is waiting on the
+/// result. The burn-view receipt is the case that needed it: sent inline, it dialled the peer while
+/// holding the lock, *after* the countdown had started — so the reveal took as long as a Tor dial
+/// (plus a relay post when the peer was offline) to appear, and arrived with that time already gone
+/// from its timer. Taken with [`Node::take_detached_sends`]; best-effort, nothing retries it.
+pub(crate) struct DetachedSend {
+    transport: Arc<dyn Transport>,
+    primary: Option<RelayClient>,
+    peer_relays: Vec<String>,
+    recipient_ik: String,
+    peer_address: String,
+    bytes: Vec<u8>,
+}
+
+impl DetachedSend {
+    /// Deliver it: the peer's onion first, the relay mailbox if that fails. True if either took it.
+    pub(crate) fn execute(&self) -> bool {
+        self.transport.send(&self.peer_address, &self.bytes).is_ok()
+            || queue_on_relays(
+                self.transport.as_ref(),
+                &self.primary,
+                &self.peer_relays,
+                &self.recipient_ik,
+                &self.bytes,
+            )
+            .is_ok()
+    }
+}
+
 /// A message handed to the peer's onion but not yet confirmed by a [`Frame::Delivered`] naming it
 /// (see [`Node::awaiting_receipt`]).
 ///
@@ -671,6 +706,7 @@ impl Node {
             pending_relay: Vec::new(),
             pending_sends: Vec::new(),
             pending_control: Vec::new(),
+            detached_sends: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
             awaiting_receipt: Vec::new(),

@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
@@ -332,10 +332,14 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// have been notified" (§1.3). `0` means every notice was queued/sent.
   Future<int> logout();
 
-  /// The recipient revealed a burn message: start its countdown. Idempotent — reopening a
-  /// chat does not restart a clock that is already running.
+  /// The recipient revealed a burn message at `viewed_at` (unix seconds, 0 = now): start its
+  /// countdown from there. Pass the moment the UI showed it, so the deletion clock and the
+  /// countdown on screen share one start. Idempotent — reopening a chat does not restart a clock
+  /// that is already running.
   Future<List<ChatMessage>> markBurnViewed(
-      {required String contactId, required String msgId});
+      {required String contactId,
+      required String msgId,
+      required BigInt viewedAt});
 
   /// Decrypt and return an attachment's bytes (for inline image display).
   Future<Uint8List> mediaBytes({required String mediaId});

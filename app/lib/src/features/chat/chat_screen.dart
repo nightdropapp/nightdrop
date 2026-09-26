@@ -883,7 +883,7 @@ class _ChatScreenState extends State<ChatScreen> {
                                   onReveal: m.isBurnHidden && !m.fromMe
                                       ? () => NightdropScope.of(context)
                                           .markBurnViewed(
-                                              widget.contactId, m.msgId)
+                                              widget.contactId, m.burnId)
                                       : null,
                                 );
                           // A day separator above the first message of each calendar day

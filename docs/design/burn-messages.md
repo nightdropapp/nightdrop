@@ -44,6 +44,15 @@ recording**, and on **a camera pointed at the screen**.
 **Timer is wall-clock and does not pause.** If it stopped while the app was backgrounded,
 "30 seconds" would mean nothing — backgrounding would hold a message open indefinitely.
 
+**The clock starts when the message is shown, and one clock drives both the ring and the delete.**
+The UI reveals on the tap and passes that moment (unix seconds, rounded *up*) to
+`mark_burn_viewed`, which clamps it to now. The first build stamped the time inside the core
+instead, and then sent the opt-in view receipt — a Tor dial, plus a relay post if the peer was
+offline — while still holding the core lock. So the reveal appeared only after the dial returned,
+with that much of its timer already gone, and the message vanished before the countdown the
+recipient was watching had finished. Rounding down made it up to a second early on top of that. The receipt
+is now sealed under the lock and sent after it is released (`DetachedSend`).
+
 **Delete means delete**, from the encrypted store, not hide. The `Edit`/unsend path already
 removes messages and is the precedent to follow.
 

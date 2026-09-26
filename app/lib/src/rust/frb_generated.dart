@@ -154,7 +154,8 @@ abstract class RustLibApi extends BaseApi {
   Future<List<ChatMessage>> crateApiNightdropCoreMarkBurnViewed(
       {required NightdropCore that,
       required String contactId,
-      required String msgId});
+      required String msgId,
+      required BigInt viewedAt});
 
   Future<Uint8List> crateApiNightdropCoreMediaBytes(
       {required NightdropCore that, required String mediaId});
@@ -998,7 +999,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Future<List<ChatMessage>> crateApiNightdropCoreMarkBurnViewed(
       {required NightdropCore that,
       required String contactId,
-      required String msgId}) {
+      required String msgId,
+      required BigInt viewedAt}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -1006,6 +1008,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         sse_encode_String(msgId, serializer);
+        sse_encode_u_64(viewedAt, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
             funcId: 23, port: port_);
       },
@@ -1014,7 +1017,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_AnyhowException,
       ),
       constMeta: kCrateApiNightdropCoreMarkBurnViewedConstMeta,
-      argValues: [that, contactId, msgId],
+      argValues: [that, contactId, msgId, viewedAt],
       apiImpl: this,
     ));
   }
@@ -1022,7 +1025,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiNightdropCoreMarkBurnViewedConstMeta =>
       const TaskConstMeta(
         debugName: "NightdropCore_mark_burn_viewed",
-        argNames: ["that", "contactId", "msgId"],
+        argNames: ["that", "contactId", "msgId", "viewedAt"],
       );
 
   @override
@@ -3953,12 +3956,16 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
         that: this,
       );
 
-  /// The recipient revealed a burn message: start its countdown. Idempotent — reopening a
-  /// chat does not restart a clock that is already running.
+  /// The recipient revealed a burn message at `viewed_at` (unix seconds, 0 = now): start its
+  /// countdown from there. Pass the moment the UI showed it, so the deletion clock and the
+  /// countdown on screen share one start. Idempotent — reopening a chat does not restart a clock
+  /// that is already running.
   Future<List<ChatMessage>> markBurnViewed(
-          {required String contactId, required String msgId}) =>
+          {required String contactId,
+          required String msgId,
+          required BigInt viewedAt}) =>
       RustLib.instance.api.crateApiNightdropCoreMarkBurnViewed(
-          that: this, contactId: contactId, msgId: msgId);
+          that: this, contactId: contactId, msgId: msgId, viewedAt: viewedAt);
 
   /// Decrypt and return an attachment's bytes (for inline image display).
   Future<Uint8List> mediaBytes({required String mediaId}) =>

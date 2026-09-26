@@ -1227,6 +1227,7 @@ fn wire__crate__api__NightdropCore_mark_burn_viewed_impl(
             >>::sse_decode(&mut deserializer);
             let api_contact_id = <String>::sse_decode(&mut deserializer);
             let api_msg_id = <String>::sse_decode(&mut deserializer);
+            let api_viewed_at = <u64>::sse_decode(&mut deserializer);
             deserializer.end();
             move |context| {
                 transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
@@ -1249,6 +1250,7 @@ fn wire__crate__api__NightdropCore_mark_burn_viewed_impl(
                             &*api_that_guard,
                             &api_contact_id,
                             &api_msg_id,
+                            api_viewed_at,
                         )?;
                         Ok(output_ok)
                     })(),

@@ -264,6 +264,22 @@ void main() {
     await settleScroll(tester);
   });
 
+  // An attachment has no msgId — the core names it by transferId. Revealing it by msgId sent an
+  // empty id, matched nothing, and left every burn attachment blurred until its 24h horizon.
+  testWidgets('revealing a burn attachment names it by its transfer id', (tester) async {
+    final (core, contact) = await pumpChat(tester);
+    core.peerSupportsBurn(true);
+    core.receiveBurnMedia(contact.id, 30);
+    await tester.pump();
+
+    await tester.tap(find.text('Tap to reveal'));
+    await tester.pump();
+
+    expect(core.viewed, ['bm-1']);
+    expect(core.messagesFor(contact.id).last.isBurning, isTrue);
+    await settleScroll(tester);
+  });
+
   // A plain tap must never burn. The gesture split is what keeps this from being a mode, where a
   // forgotten toggle sends the wrong kind of message in either direction.
   testWidgets('a plain tap on send is always an ordinary message', (tester) async {

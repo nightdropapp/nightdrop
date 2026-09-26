@@ -1342,7 +1342,7 @@ fn a_burn_message_arrives_unviewed_and_burns_on_a_view_anchored_clock() {
 
     // Reveal it: the clock starts, once.
     let msg_id = got[0].msg_id.clone();
-    assert!(bob.mark_burn_viewed(&alice_contact, &msg_id));
+    assert!(bob.mark_burn_viewed(&alice_contact, &msg_id, 0));
     let first = bob
         .messages(&alice_contact)
         .into_iter()
@@ -1351,7 +1351,7 @@ fn a_burn_message_arrives_unviewed_and_burns_on_a_view_anchored_clock() {
         .viewed_at;
     assert_ne!(first, 0);
     assert!(
-        !bob.mark_burn_viewed(&alice_contact, &msg_id),
+        !bob.mark_burn_viewed(&alice_contact, &msg_id, 0),
         "reopening a chat must not restart a clock that is already running"
     );
     assert_eq!(
@@ -1478,7 +1478,7 @@ fn a_burn_attachment_sends_no_thumbnail_and_no_preview_placeholder() {
     // Revealing works by transfer_id, since attachments carry no msg_id.
     let tid = got[0].transfer_id.clone();
     assert!(!tid.is_empty());
-    assert!(bob.mark_burn_viewed(&alice_contact, &tid));
+    assert!(bob.mark_burn_viewed(&alice_contact, &tid, 0));
 
     // And it burns, taking the sealed file with it.
     let media_id = got[0].media_id.clone();
@@ -1608,7 +1608,7 @@ fn a_burn_view_receipt_is_silent_unless_the_recipient_turns_it_on() {
         .find(|m| m.burn_secs > 0 && !m.from_me)
         .unwrap()
         .msg_id;
-    assert!(bob.mark_burn_viewed(&alice_contact, &first));
+    assert!(bob.mark_burn_viewed(&alice_contact, &first, 0));
     alice.pump().unwrap();
     assert!(
         alice
@@ -1628,7 +1628,11 @@ fn a_burn_view_receipt_is_silent_unless_the_recipient_turns_it_on() {
         .find(|m| m.burn_secs > 0 && !m.from_me && m.msg_id != first)
         .unwrap()
         .msg_id;
-    assert!(bob.mark_burn_viewed(&alice_contact, &second));
+    assert!(bob.mark_burn_viewed(&alice_contact, &second, 0));
+    // Sealed under the lock, sent by the caller after releasing it (`DetachedSend`).
+    for s in bob.take_detached_sends() {
+        assert!(s.execute());
+    }
     alice.pump().unwrap();
     assert!(
         !alice
@@ -1645,6 +1649,68 @@ fn a_burn_view_receipt_is_silent_unless_the_recipient_turns_it_on() {
             .any(|m| m.msg_id == first),
         "a receipt names ONE message and must not take anything else with it"
     );
+}
+
+/// The reveal must be quick and its clock must match the one on screen: the view time is the one
+/// the UI passes (clamped to now), and an opt-in receipt is only sealed — never dialled while the
+/// caller holds the core lock, which is what made revealing slow and ate into the countdown.
+#[test]
+fn a_burn_reveal_uses_the_shown_time_and_defers_its_receipt() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+    bob.set_burn_receipts(true);
+
+    let viewed = |bob: &Node, id: &str| {
+        bob.messages(&alice_contact)
+            .into_iter()
+            .find(|m| m.msg_id == id)
+            .unwrap()
+            .viewed_at
+    };
+
+    // Shown 5s ago (a poller tick held the lock meanwhile): the clock starts then, not now.
+    alice.send_burn(&bob_contact, "one", 30).unwrap();
+    bob.pump().unwrap();
+    let one = bob.messages(&alice_contact).last().unwrap().msg_id.clone();
+    let shown = crate::api::now_secs() - 5;
+    assert!(bob.mark_burn_viewed(&alice_contact, &one, shown));
+    assert_eq!(viewed(&bob, &one), shown);
+
+    // Sealed, not sent: Alice has heard nothing until the caller runs it.
+    alice.pump().unwrap();
+    assert!(
+        alice.messages(&bob_contact).iter().any(|m| m.msg_id == one),
+        "the receipt must not be dialled inside mark_burn_viewed"
+    );
+    let sends = bob.take_detached_sends();
+    assert_eq!(sends.len(), 1);
+    assert!(sends[0].execute());
+    alice.pump().unwrap();
+    assert!(!alice.messages(&bob_contact).iter().any(|m| m.msg_id == one));
+
+    // A time in the future is clamped: it may only ever shorten a message's life.
+    alice.send_burn(&bob_contact, "two", 30).unwrap();
+    bob.pump().unwrap();
+    let two = bob.messages(&alice_contact).last().unwrap().msg_id.clone();
+    assert!(bob.mark_burn_viewed(&alice_contact, &two, u64::MAX));
+    assert!(viewed(&bob, &two) <= crate::api::now_secs() + 1);
+
+    // Never early: one second short of its timer, it is still there.
+    if let Some(chat) = bob.chats.get_mut(&alice_contact) {
+        for m in chat.history.iter_mut() {
+            if m.msg_id == two {
+                m.viewed_at = crate::api::now_secs() - 29;
+            }
+        }
+    }
+    bob.sweep_burns();
+    assert!(bob.messages(&alice_contact).iter().any(|m| m.msg_id == two));
 }
 
 /// A `Viewed` naming something that is not our own burn message must do nothing — otherwise it
@@ -1675,6 +1741,9 @@ fn a_viewed_receipt_cannot_delete_anything_but_our_own_burn_message() {
     // Bob forges a receipt naming Alice's ordinary message.
     bob.set_burn_receipts(true);
     bob.send_burn_receipt(&alice_contact, &ordinary);
+    for s in bob.take_detached_sends() {
+        s.execute();
+    }
     alice.pump().unwrap();
 
     assert!(

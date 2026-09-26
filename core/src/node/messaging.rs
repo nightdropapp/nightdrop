@@ -1453,12 +1453,19 @@ impl Node {
         Ok(())
     }
 
-    /// Start a burn message's countdown: the recipient just revealed it. Idempotent — a second
-    /// reveal does **not** restart the clock, or closing and reopening the chat would hold a
-    /// message open for ever.
+    /// Start a burn message's countdown: the recipient just revealed it, at `viewed_at` (unix
+    /// seconds; 0 = now). Idempotent — a second reveal does **not** restart the clock, or closing
+    /// and reopening the chat would hold a message open for ever.
     ///
-    /// Returns true if this call started the clock (so the caller knows to persist).
-    pub fn mark_burn_viewed(&mut self, contact_id: &str, msg_id: &str) -> bool {
+    /// `viewed_at` is the moment the UI **showed** it. The UI reveals on the tap and only then
+    /// reaches the core, which can be seconds later when a poller tick holds the lock; stamping it
+    /// here instead would run the deletion clock on a different start than the countdown the
+    /// recipient is watching. Clamped to now, so it can only ever shorten a message's life.
+    ///
+    /// Returns true if this call started the clock (so the caller knows to persist). An opt-in
+    /// receipt is sealed here but **not sent**: it waits in [`take_detached_sends`](Self::take_detached_sends)
+    /// for the caller to deliver once it has released the lock.
+    pub fn mark_burn_viewed(&mut self, contact_id: &str, msg_id: &str, viewed_at: u64) -> bool {
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return false;
         };
@@ -1475,7 +1482,12 @@ impl Node {
         if msg.viewed_at != 0 {
             return false;
         }
-        msg.viewed_at = crate::api::now_secs();
+        let now = crate::api::now_secs_ceil();
+        msg.viewed_at = if viewed_at == 0 {
+            now
+        } else {
+            viewed_at.min(now)
+        };
         // The id to name in the receipt: text carries `msg_id`, an attachment only `transfer_id`.
         let target = if msg.msg_id.is_empty() {
             msg.transfer_id.clone()
@@ -1493,19 +1505,34 @@ impl Node {
     }
 
     /// Tell the sender we opened their burn message, so they can drop their copy now instead of
-    /// waiting out the 24h horizon. Best-effort: see [`Node::mark_burn_viewed`].
+    /// waiting out the 24h horizon. Sealed now (the ratchet must advance under the lock), sent
+    /// later by whoever drains [`take_detached_sends`](Self::take_detached_sends). Best-effort:
+    /// see [`Node::mark_burn_viewed`].
     pub(super) fn send_burn_receipt(&mut self, contact_id: &str, target_id: &str) {
         let from = self.identity_key();
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
         };
         let m = crypto::encrypt(&mut chat.session, target_id.as_bytes());
-        let addr = chat.peer_address.clone();
         let frame = Frame::Viewed {
             from,
             message: WireOlm::from_olm(&m),
         };
-        let _ = self.deliver(&addr, contact_id, &frame);
+        let send = DetachedSend {
+            transport: Arc::clone(&self.transport),
+            primary: self.relay.clone(),
+            peer_relays: chat.contact.peer_relays.clone(),
+            recipient_ik: contact_id.to_string(),
+            peer_address: chat.peer_address.clone(),
+            bytes: wire::encode(&frame),
+        };
+        self.detached_sends.push(send);
+    }
+
+    /// Hand over the frames a UI call sealed, for the caller to [`execute`](DetachedSend::execute)
+    /// **after** releasing the core lock.
+    pub(crate) fn take_detached_sends(&mut self) -> Vec<DetachedSend> {
+        std::mem::take(&mut self.detached_sends)
     }
 
     /// Turn burn-view receipts on or off (recipient-controlled, off by default).

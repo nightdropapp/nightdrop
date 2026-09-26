@@ -253,18 +253,8 @@ class MockNightdropCore extends NightdropCore {
     if (list == null) return;
     for (var i = 0; i < list.length; i++) {
       final m = list[i];
-      if (m.msgId == msgId && m.burnSecs > 0 && m.viewedAt == null) {
-        list[i] = Message(
-          id: m.id,
-          contactId: m.contactId,
-          text: m.text,
-          fromMe: m.fromMe,
-          at: m.at,
-          msgId: m.msgId,
-          delivery: m.delivery,
-          burnSecs: m.burnSecs,
-          viewedAt: DateTime.now(),
-        );
+      if (m.burnId == msgId && m.burnSecs > 0 && m.viewedAt == null) {
+        list[i] = m.revealed(DateTime.now());
         notifyListeners();
         return;
       }

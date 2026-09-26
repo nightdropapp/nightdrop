@@ -230,6 +230,33 @@ class Message {
   /// that stopped off-screen would make "30 seconds" mean nothing.
   final DateTime? viewedAt;
 
+  /// The id that names this message to the core for a burn reveal: text carries [msgId], an
+  /// attachment has none and is named by [transferId].
+  String get burnId => msgId.isNotEmpty ? msgId : transferId;
+
+  /// This message revealed at [at] — for showing a burn reveal before the core has recorded it.
+  Message revealed(DateTime at) => Message(
+        id: id,
+        contactId: contactId,
+        text: text,
+        fromMe: fromMe,
+        at: this.at,
+        msgId: msgId,
+        edited: edited,
+        system: system,
+        kind: kind,
+        mime: mime,
+        mediaId: mediaId,
+        mediaSize: mediaSize,
+        transferId: transferId,
+        thumbId: thumbId,
+        delivery: delivery,
+        sending: sending,
+        localBytes: localBytes,
+        burnSecs: burnSecs,
+        viewedAt: at,
+      );
+
   /// A burn message that is still hidden: shown blurred, with no countdown running yet.
   bool get isBurnHidden => burnSecs > 0 && viewedAt == null;
 
