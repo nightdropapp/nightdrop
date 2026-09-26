@@ -1312,6 +1312,13 @@ impl Node {
         self.relay = Some(relay);
     }
 
+    /// The live transport's [`abort_handle`](Transport::abort_handle), taken while it is live so
+    /// a later teardown can use it without the core lock.
+    #[cfg(any(feature = "tor", test))]
+    pub(crate) fn transport_abort_handle(&self) -> Option<crate::transport::AbortHandle> {
+        self.transport.abort_handle()
+    }
+
     /// Tear down the network side: swap the live transport for an inert [`ClosedTransport`] and
     /// drop the primary relay, so everything they hold is released. Identity and chats survive,
     /// but the node can no longer send or receive.

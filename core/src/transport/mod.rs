@@ -44,6 +44,9 @@ pub struct FileFetch<'a> {
     pub resume_from: u64,
 }
 
+/// Makes a transport abandon network work in flight; see [`Transport::abort_handle`].
+pub type AbortHandle = Arc<dyn Fn() + Send + Sync>;
+
 /// One endpoint on an anonymity network. Frames are opaque, already-encrypted bytes
 /// (see [`crate::wire`]); the transport never inspects them.
 pub trait Transport: Send + Sync {
@@ -75,6 +78,17 @@ pub trait Transport: Send + Sync {
     /// background poller, so composing a message never blocks the UI on a Tor round-trip (§6).
     fn is_synchronous(&self) -> bool {
         false
+    }
+
+    /// A call that makes this transport abandon network work already in flight —
+    /// a peer dial or a relay request — instead of running it to its timeout. `None` for
+    /// transports with nothing slow to abandon (tests, TCP).
+    ///
+    /// For tearing down a core whose poller is **holding the core lock** inside a dial: the usual
+    /// close needs that lock, so without a lock-free way in, it waits out the whole dial. See
+    /// `retire_previous_tor_core` in `api.rs`.
+    fn abort_handle(&self) -> Option<AbortHandle> {
+        None
     }
 
     /// Build a relay round-trip dialer for an **arbitrary** relay address, if this transport can

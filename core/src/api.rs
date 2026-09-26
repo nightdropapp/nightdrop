@@ -957,6 +957,7 @@ impl NightdropCore {
     ) -> Result<NightdropCore> {
         #[cfg(feature = "tor")]
         {
+            retire_previous_tor_core();
             // The store key is needed BEFORE Tor starts now: the onion identity is sealed under it
             // and has to be in the keystore before the service launches, or arti generates a new
             // one and our address changes (`onion-key-at-rest.md` §4).
@@ -1052,6 +1053,7 @@ impl NightdropCore {
             inner.lock().unwrap().save(); // create the file on first run
             let poller = StopSignal::new();
             spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
+            register_tor_core(&inner, &poller);
             Ok(Self {
                 inner,
                 poller: Some(poller),
@@ -1080,6 +1082,7 @@ impl NightdropCore {
     ) -> Result<NightdropCore> {
         #[cfg(feature = "tor")]
         {
+            retire_previous_tor_core();
             let blob = std::fs::read(&backup_path)?;
             // Decrypt the backup FIRST (password-derived key). This also lets us restore the
             // onion keystore onto disk *before* Tor bootstraps, so the device comes back up on
@@ -1131,6 +1134,7 @@ impl NightdropCore {
             inner.lock().unwrap().save();
             let poller = StopSignal::new();
             spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
+            register_tor_core(&inner, &poller);
             Ok(Self {
                 inner,
                 poller: Some(poller),
@@ -1171,6 +1175,7 @@ impl NightdropCore {
     ) -> Result<NightdropCore> {
         #[cfg(feature = "tor")]
         {
+            retire_previous_tor_core();
             let transport = crate::transport::tor::TorTransport::bootstrap(
                 "nightdrop",
                 state_dir.as_deref(),
@@ -1214,6 +1219,7 @@ impl NightdropCore {
             inner.lock().unwrap().save();
             let poller = StopSignal::new();
             spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
+            register_tor_core(&inner, &poller);
             Ok(Self {
                 inner,
                 poller: Some(poller),
@@ -1257,66 +1263,7 @@ impl NightdropCore {
     /// [`RelayClient`]: crate::relay_client::RelayClient
     /// [`TorTransport::make_relay_dialer`]: crate::transport::tor::TorTransport::make_relay_dialer
     pub fn shutdown(&self) {
-        if let Some(poller) = &self.poller {
-            poller.stop();
-        }
-        // Close the transport early if we can — that flips the Tor transport's closing flag, which
-        // cuts short a relay dial the poller may be sitting in.
-        //
-        // **Try**, never block. This was `self.lock()`, and that made the whole "bounded" promise
-        // a lie: the poller holds the core lock across a tick, and a tick contains peer dials
-        // (PEER_DIAL_TIMEOUT) and relay round-trips (RELAY_DIAL_TIMEOUT), so on a device whose
-        // circuits are timing out the lock is held for minutes. Measured on a phone, 2026-08-03:
-        // the user tapped "Reset Tor connection", `shutdown` blocked here, and nothing happened at
-        // all — no teardown, no reset, no rebuild, no error. The wait below was bounded and
-        // irrelevant, because control never reached it.
-        let closed_early = self.try_close_transport(LOCK_TRY_TIMEOUT);
-        if let Some(poller) = &self.poller {
-            if !poller.wait_for_exit(POLLER_EXIT_TIMEOUT) {
-                crate::diag!(
-                    "shutdown: the poller was still running {}s after being stopped — it is \
-                     probably inside a relay round-trip; whatever it holds (on Tor, arti's state \
-                     lock) is released late, so a core rebuilt now may come up read-only",
-                    POLLER_EXIT_TIMEOUT.as_secs()
-                );
-            }
-        }
-        // Once the poller is gone the lock is uncontended, so this is where a close that lost the
-        // race above still happens. Bounded too: if the poller never exited, the lock may still be
-        // held, and hanging here would be the same bug in a different place.
-        if !closed_early && !self.try_close_transport(LOCK_TRY_TIMEOUT) {
-            crate::diag!(
-                "shutdown: could not take the core lock to close the transport — it is still held \
-                 by work that has not finished; the transport closes when that work drops it"
-            );
-        }
-    }
-
-    /// Close the transport if the core lock can be taken within `bound`. `false` = it could not.
-    ///
-    /// Deliberately never blocks: see [`shutdown`](Self::shutdown) for what blocking here cost.
-    fn try_close_transport(&self, bound: Duration) -> bool {
-        let deadline = std::time::Instant::now() + bound;
-        loop {
-            match self.inner.try_lock() {
-                Ok(mut g) => {
-                    g.me.close_transport();
-                    return true;
-                }
-                // Poisoned: some thread panicked holding it. Recover rather than give up — the
-                // whole point of §1.5.3 is that a panic must not brick the core.
-                Err(std::sync::TryLockError::Poisoned(e)) => {
-                    e.into_inner().me.close_transport();
-                    return true;
-                }
-                Err(std::sync::TryLockError::WouldBlock) => {
-                    if std::time::Instant::now() >= deadline {
-                        return false;
-                    }
-                    thread::sleep(Duration::from_millis(25));
-                }
-            }
-        }
+        shutdown_core(&self.inner, self.poller.as_ref());
     }
 
     /// Acquire the inner lock, **recovering from poisoning** (§1.5.3). If some thread panicked
@@ -2373,6 +2320,130 @@ fn decode_store_key(b64: &str) -> Result<crate::storage::StoreKey> {
     key
 }
 
+/// The body of [`NightdropCore::shutdown`], on the core's parts rather than the core itself, so
+/// [`retire_previous_tor_core`] can run it on a core whose owner has already let go of it.
+fn shutdown_core(inner: &Arc<Mutex<Inner>>, poller: Option<&Arc<StopSignal>>) {
+    if let Some(poller) = poller {
+        poller.stop();
+    }
+    // Close the transport early if we can — that flips the Tor transport's closing flag, which
+    // cuts short a relay dial the poller may be sitting in.
+    //
+    // **Try**, never block. This was `self.lock()`, and that made the whole "bounded" promise
+    // a lie: the poller holds the core lock across a tick, and a tick contains peer dials
+    // (PEER_DIAL_TIMEOUT) and relay round-trips (RELAY_DIAL_TIMEOUT), so on a device whose
+    // circuits are timing out the lock is held for minutes. Measured on a phone, 2026-08-03:
+    // the user tapped "Reset Tor connection", `shutdown` blocked here, and nothing happened at
+    // all — no teardown, no reset, no rebuild, no error. The wait below was bounded and
+    // irrelevant, because control never reached it.
+    let closed_early = try_close_transport(inner, LOCK_TRY_TIMEOUT);
+    if let Some(poller) = poller {
+        if !poller.wait_for_exit(POLLER_EXIT_TIMEOUT) {
+            crate::diag!(
+                "shutdown: the poller was still running {}s after being stopped — it is \
+                 probably inside a relay round-trip; whatever it holds (on Tor, arti's state \
+                 lock) is released late, so a core rebuilt now may come up read-only",
+                POLLER_EXIT_TIMEOUT.as_secs()
+            );
+        }
+    }
+    // Once the poller is gone the lock is uncontended, so this is where a close that lost the
+    // race above still happens. Bounded too: if the poller never exited, the lock may still be
+    // held, and hanging here would be the same bug in a different place.
+    if !closed_early && !try_close_transport(inner, LOCK_TRY_TIMEOUT) {
+        crate::diag!(
+            "shutdown: could not take the core lock to close the transport — it is still held \
+             by work that has not finished; the transport closes when that work drops it"
+        );
+    }
+}
+
+/// Close the transport if the core lock can be taken within `bound`. `false` = it could not.
+///
+/// Deliberately never blocks: see [`NightdropCore::shutdown`] for what blocking here cost.
+fn try_close_transport(inner: &Mutex<Inner>, bound: Duration) -> bool {
+    let deadline = std::time::Instant::now() + bound;
+    loop {
+        match inner.try_lock() {
+            Ok(mut g) => {
+                g.me.close_transport();
+                return true;
+            }
+            // Poisoned: some thread panicked holding it. Recover rather than give up — the
+            // whole point of §1.5.3 is that a panic must not brick the core.
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                e.into_inner().me.close_transport();
+                return true;
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                if std::time::Instant::now() >= deadline {
+                    return false;
+                }
+                thread::sleep(Duration::from_millis(25));
+            }
+        }
+    }
+}
+
+/// The Tor core most recently started in this process, held **weakly** so this never keeps one
+/// alive. See [`retire_previous_tor_core`].
+#[cfg(any(feature = "tor", test))]
+static LIVE_TOR_CORE: Mutex<Option<LiveCore>> = Mutex::new(None);
+
+/// A running core's parts, as [`shutdown_core`] takes them.
+#[cfg(any(feature = "tor", test))]
+type LiveCore = (
+    std::sync::Weak<Mutex<Inner>>,
+    Arc<StopSignal>,
+    Option<crate::transport::AbortHandle>,
+);
+
+/// Shut down, and wait for, any Tor core an earlier UI left running in this process, before a new
+/// one bootstraps over the same state directory.
+///
+/// On Android the process outlives its UI. Swipe the app away and the activity and its Flutter
+/// engine are destroyed while the process lives on; the next launch is a fresh engine with no
+/// reference to the old core, so it cannot call `shutdown()` on it. Dropping the old core only
+/// *asks* its poller to stop, and the poller keeps arti's state lock until it finishes a tick that
+/// can be tens of seconds of Tor dials. A launch inside that window failed with "State already
+/// locked", which the app reads as an unreadable state file: the recovery screen, and "Try again"
+/// failing identically until the old poller let go. Seen on the S25, 2026-09-26.
+#[cfg(any(feature = "tor", test))]
+fn retire_previous_tor_core() {
+    let previous = LIVE_TOR_CORE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .take();
+    if let Some((inner, poller, abort)) = previous {
+        // Gone already: its poller exited and the last handle dropped, so the lock is free.
+        if let Some(inner) = inner.upgrade() {
+            // Raised first, and without the core lock: the old poller may be *holding* that lock
+            // inside a peer dial, which is exactly what made the plain shutdown below time out on
+            // the S25. Abandoning the dial lets its tick end, so the poller can see the stop.
+            poller.stop();
+            if let Some(abort) = &abort {
+                abort();
+            }
+            crate::diag!(
+                "launch: an earlier core is still running in this process — shutting it down first"
+            );
+            shutdown_core(&inner, Some(&poller));
+        }
+    }
+}
+
+/// Record a freshly started Tor core for [`retire_previous_tor_core`].
+#[cfg(any(feature = "tor", test))]
+fn register_tor_core(inner: &Arc<Mutex<Inner>>, poller: &Arc<StopSignal>) {
+    let abort = inner
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .me
+        .transport_abort_handle();
+    *LIVE_TOR_CORE.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((Arc::downgrade(inner), Arc::clone(poller), abort));
+}
+
 /// Background poll loop (real mode): pump the transport often (cheap, local), hit the
 /// relay on a timed cadence (expensive: one Tor round-trip per poll).
 ///
@@ -3225,6 +3296,53 @@ mod tests {
             b.messages(&b_contact).last().unwrap().text,
             "while you were gone"
         );
+    }
+
+    /// A launch must wait out the core a destroyed UI left running in the same process, not race
+    /// it for the state lock. Android keeps the process when the app is swiped away; the next
+    /// launch is a fresh engine that cannot reach the old core, whose drop only *asks* its poller
+    /// to stop. Here the old poller is held mid-tick (the core lock is taken on another thread,
+    /// standing in for a slow Tor dial), so an unwaited launch would find it still running.
+    #[test]
+    fn a_launch_retires_the_core_an_earlier_ui_left_running() {
+        use std::time::{Duration, Instant};
+
+        let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();
+        let old = NightdropCore::new_networked("127.0.0.1:0".into(), relay_addr).unwrap();
+        register_tor_core(&old.inner, old.poller.as_ref().unwrap());
+        let poller = Arc::clone(old.poller.as_ref().unwrap());
+
+        // A tick in progress: the poller cannot finish until this lets go.
+        let inner = Arc::clone(&old.inner);
+        let tick = thread::spawn(move || {
+            let _held = inner.lock().unwrap();
+            thread::sleep(Duration::from_millis(1500));
+        });
+        thread::sleep(Duration::from_millis(100));
+
+        // The engine goes away: Dart's finalizer drops the core, which only asks the poller to stop.
+        drop(old);
+        assert!(
+            !poller.wait_for_exit(Duration::ZERO),
+            "the old poller is still running — this is the window a new launch used to hit"
+        );
+
+        let started = Instant::now();
+        retire_previous_tor_core();
+        assert!(
+            poller.wait_for_exit(Duration::ZERO),
+            "the new launch must not proceed until the old poller has exited"
+        );
+        assert!(
+            started.elapsed() >= Duration::from_millis(1000),
+            "it waited for the tick"
+        );
+        tick.join().unwrap();
+
+        // Nothing is registered any more, so a second launch has nothing to wait for.
+        let again = Instant::now();
+        retire_previous_tor_core();
+        assert!(again.elapsed() < Duration::from_millis(100));
     }
 
     #[test]

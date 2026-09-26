@@ -883,10 +883,14 @@ class RustNightdropCore extends NightdropCore {
             // Distinguish a Tor-connection failure (data is fine — just retry) from an actual
             // unreadable/corrupt state (preserve the bytes before anything can overwrite them).
             final msg = e.toString().toLowerCase();
+            // A held state lock is transient too: an earlier core in this process still shutting
+            // down (the core now waits for one, bounded — past the bound this is what surfaces).
+            // Filing it as unreadable put another copy of the state file aside on every retry.
             final connectFailure = msg.contains('tor') ||
                 msg.contains('connect') ||
                 msg.contains('bootstrap') ||
-                msg.contains('circuit');
+                msg.contains('circuit') ||
+                msg.contains('lock');
             if (!connectFailure) {
               await _preserveUnreadableState(statePath);
             }
@@ -918,7 +922,6 @@ class RustNightdropCore extends NightdropCore {
       // same reason as the update check: it puts a frame on the wire per contact.
       unawaited(_announceCaptureReporting());
       unawaited(_restoreCoverTraffic());
-    unawaited(_restoreBurnReceipts());
       unawaited(_restoreBurnReceipts());
       // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
       // this one dials Tor. It self-limits to one check a day, so calling it on every start is

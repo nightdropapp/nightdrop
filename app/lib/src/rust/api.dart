@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `shutdown_core`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`

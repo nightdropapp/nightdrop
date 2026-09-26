@@ -748,8 +748,17 @@ impl Transport for TorTransport {
         Ok(())
     }
 
+    fn abort_handle(&self) -> Option<crate::transport::AbortHandle> {
+        let closing = Arc::clone(&self.closing);
+        Some(Arc::new(move || closing.stop()))
+    }
+
     fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        if self.closing.stopped() {
+            anyhow::bail!("peer send abandoned: the transport is closing");
+        }
         let client = Arc::clone(&self.client);
+        let closing = Arc::clone(&self.closing);
         let peer = peer.to_string();
         let frame = frame.to_vec();
         // Reuse a warm stream to this peer if we have one; otherwise dial. On any write
@@ -764,22 +773,36 @@ impl Transport for TorTransport {
             .map(|(s, _)| s);
         let peer2 = peer.clone();
         let stream = self.runtime.block_on(async move {
-            if let Some(mut s) = existing.take() {
-                if write_frame(&mut s, &frame).await.is_ok() && s.flush().await.is_ok() {
-                    return Ok::<DataStream, anyhow::Error>(s);
+            let exchange = async {
+                if let Some(mut s) = existing.take() {
+                    if write_frame(&mut s, &frame).await.is_ok() && s.flush().await.is_ok() {
+                        return Ok::<DataStream, anyhow::Error>(s);
+                    }
+                    // stale (peer closed it / circuit gone): drop and reconnect.
                 }
-                // stale (peer closed it / circuit gone): drop and reconnect.
+                let mut s = tokio::time::timeout(
+                    PEER_DIAL_TIMEOUT,
+                    client.connect((peer2.as_str(), NIGHTDROP_PORT)),
+                )
+                .await
+                .map_err(|_| anyhow::anyhow!("peer dial timed out"))?
+                .context("dial peer onion")?;
+                write_frame(&mut s, &frame).await?;
+                s.flush().await?;
+                Ok(s)
+            };
+            // Raced against `closing`, as relay requests are (see `make_relay_dialer`). A send runs
+            // under the core lock when the poller retries a control frame, so an unraced dial to an
+            // unreachable peer held that lock — and arti's state lock behind it — for the whole
+            // PEER_DIAL_TIMEOUT, past any bounded shutdown.
+            let exchange = std::pin::pin!(exchange);
+            let closed = std::pin::pin!(transport_closed(&closing));
+            match futures::future::select(exchange, closed).await {
+                futures::future::Either::Left((result, _)) => result,
+                futures::future::Either::Right(((), _)) => Err(anyhow::anyhow!(
+                    "peer send abandoned: the transport is closing"
+                )),
             }
-            let mut s = tokio::time::timeout(
-                PEER_DIAL_TIMEOUT,
-                client.connect((peer2.as_str(), NIGHTDROP_PORT)),
-            )
-            .await
-            .map_err(|_| anyhow::anyhow!("peer dial timed out"))?
-            .context("dial peer onion")?;
-            write_frame(&mut s, &frame).await?;
-            s.flush().await?;
-            Ok(s)
         })?;
         self.out_streams
             .lock()
