@@ -1,0 +1,5 @@
+Burn messages: long-press Send (or attach) to send a message or photo that arrives blurred and is deleted a set time after it is opened, or after 24h unopened. A courtesy, not a control: a screenshot or a camera still works. Both sides need this version.
+
+Fixed: reopening the app just after closing it could show "Couldn't open your saved session".
+
+Back is no longer next to Verify: most chat-header icons moved to the ⋮ menu.
