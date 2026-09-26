@@ -18,6 +18,8 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  # Manual runs, e.g. from a branch trying a new runner image before `ubuntu-latest` moves to it.
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref to save CI minutes.
 concurrency:
@@ -29,7 +31,7 @@ jobs:
     name: Rust core + relay
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # rust-toolchain.toml pins the channel + clippy/rustfmt components.
       - uses: dtolnay/rust-toolchain@stable
@@ -62,7 +64,7 @@ jobs:
     name: Flutter app
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # The bridge test builds and loads the real libnightdrop.so, so this job needs Rust too.
       - uses: dtolnay/rust-toolchain@stable

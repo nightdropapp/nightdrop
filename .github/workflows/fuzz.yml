@@ -54,7 +54,7 @@ jobs:
       run:
         working-directory: core
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
@@ -87,7 +87,7 @@ jobs:
       matrix:
         target: [wire_decode, relay_handle_line, directory_from_wire]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
@@ -101,7 +101,7 @@ jobs:
       # Persist the corpus between runs so coverage accumulates. A unique key per run saves a
       # fresh snapshot; restore-keys pulls the most recent prior corpus for this target.
       - name: Restore corpus
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: core/fuzz/corpus/${{ matrix.target }}
           key: fuzz-corpus-${{ matrix.target }}-${{ github.run_id }}
@@ -119,7 +119,7 @@ jobs:
       # A crash writes fuzz/artifacts/<target>/crash-*; keep it so the failure is reproducible.
       - name: Upload crash artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: fuzz-artifacts-${{ matrix.target }}
           path: core/fuzz/artifacts/${{ matrix.target }}/
