@@ -37,13 +37,25 @@ void main() {
     final core = _BridgeCore();
     await tester.pumpWidget(NightdropScope(
       core: core,
-      // ignore: prefer_const_constructors — the delegates list is not a const expression here
+      // Opened from a page, as the app does (the welcome screen or the home menu), so "Save goes
+      // back" has somewhere to go back to.
       child: MaterialApp(
         localizationsDelegates: AppLocalizations.localizationsDelegates,
         supportedLocales: AppLocalizations.supportedLocales,
-        home: const BridgesScreen(),
+        home: Builder(
+          builder: (context) => Scaffold(
+            body: Center(
+              child: TextButton(
+                onPressed: () => Navigator.of(context)
+                    .push(MaterialPageRoute<void>(builder: (_) => const BridgesScreen())),
+                child: const Text('previous page'),
+              ),
+            ),
+          ),
+        ),
       ),
     ));
+    await tester.tap(find.text('previous page'));
     await tester.pumpAndSettle();
     return core;
   }
@@ -63,6 +75,9 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(core.saved, contains('38.229.33.83:80'));
+    // Saved: back on the page it was opened from, with the confirmation still showing.
+    expect(find.byType(BridgesScreen), findsNothing);
+    expect(find.text('previous page'), findsOneWidget);
     expect(find.text('1 bridge saved'), findsOneWidget);
   });
 
@@ -81,6 +96,8 @@ void main() {
 
     expect(core.saved, isEmpty);
     expect(find.text('1 line was not understood'), findsOneWidget);
+    // Something was rejected: stay on the screen, so the user can fix it.
+    expect(find.byType(BridgesScreen), findsOneWidget);
     // Twice: still in the box the user typed it into, and again in the rejects list below.
     expect(find.text('this is not a bridge'), findsNWidgets(2));
     expect(find.text('not a valid bridge line'), findsOneWidget);

@@ -64,36 +64,39 @@ class _BridgesScreenState extends State<BridgesScreen> {
       _saving = false;
     });
     final messenger = ScaffoldMessenger.of(context);
+    // The snackbar belongs to the app-level messenger, so it stays visible after we go back.
     messenger.showSnackBar(SnackBar(content: Text(l10n.bridgesSaved(result.accepted))));
-    // Bridges are read when the Tor client is built, so nothing changes until it is rebuilt. Offer
-    // that plainly instead of leaving the user to guess whether it took effect.
-    //
+    // Anything rejected: stay, so the user can see which line and why, and fix it.
+    if (result.rejected.isNotEmpty) return;
     // Reached from onboarding there is no connection to reconnect yet, and the bridges will be
-    // picked up by the core that identity creation builds a moment later — so offering it there
-    // would only invite a pointless two-minute wait.
-    if (result.rejected.isEmpty && core.identity != null) {
-      final restart = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(l10n.bridgesRestartTitle),
-          content: Text(l10n.bridgesRestartBody),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(l10n.later),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text(l10n.bridgesRestartNow),
-            ),
-          ],
-        ),
-      );
-      if (restart == true && mounted) {
-        await core.retryStart();
-        if (mounted) Navigator.of(context).pop();
-      }
+    // picked up by the core that identity creation builds a moment later — so go straight back.
+    if (core.identity == null) {
+      Navigator.of(context).pop();
+      return;
     }
+    // Bridges are read when the Tor client is built, so nothing changes until it is rebuilt. Offer
+    // that plainly instead of leaving the user to guess whether it took effect; go back either way.
+    final restart = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l10n.bridgesRestartTitle),
+        content: Text(l10n.bridgesRestartBody),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: Text(l10n.later),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: Text(l10n.bridgesRestartNow),
+          ),
+        ],
+      ),
+    );
+    if (restart == true && mounted) {
+      await core.retryStart();
+    }
+    if (mounted) Navigator.of(context).pop();
   }
 
   /// "Get bridges": ask first, because this one request does NOT go through Tor (it exists for when
