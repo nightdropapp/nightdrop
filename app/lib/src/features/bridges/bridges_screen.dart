@@ -28,6 +28,7 @@ class BridgesScreen extends StatefulWidget {
 
 class _BridgesScreenState extends State<BridgesScreen> {
   final _controller = TextEditingController();
+  final _scroll = ScrollController();
   List<RejectedBridge> _rejected = const [];
   bool _loading = true;
   bool _saving = false;
@@ -51,6 +52,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
   @override
   void dispose() {
     _controller.dispose();
+    _scroll.dispose();
     super.dispose();
   }
 
@@ -66,8 +68,17 @@ class _BridgesScreenState extends State<BridgesScreen> {
     final messenger = ScaffoldMessenger.of(context);
     // The snackbar belongs to the app-level messenger, so it stays visible after we go back.
     messenger.showSnackBar(SnackBar(content: Text(l10n.bridgesSaved(result.accepted))));
-    // Anything rejected: stay, so the user can see which line and why, and fix it.
-    if (result.rejected.isNotEmpty) return;
+    // Anything rejected: stay, and bring the list of rejected lines (at the end) into view - with
+    // Save pinned below the list, nothing else would scroll there.
+    if (result.rejected.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scroll.hasClients) {
+          _scroll.animateTo(_scroll.position.maxScrollExtent,
+              duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+        }
+      });
+      return;
+    }
     // Reached from onboarding there is no connection to reconnect yet, and the bridges will be
     // picked up by the core that identity creation builds a moment later — so go straight back.
     if (core.identity == null) {
@@ -154,6 +165,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : ListView(
+              controller: _scroll,
               padding: const EdgeInsets.all(20),
               children: [
                 Text(l10n.bridgesBody, style: theme.textTheme.bodyMedium),
@@ -220,8 +232,19 @@ class _BridgesScreenState extends State<BridgesScreen> {
                       ),
                     ),
                 ],
-                const SizedBox(height: 20),
-                FilledButton(
+              ],
+            ),
+      // Save lives outside the list, pinned to the bottom: always visible without scrolling, kept
+      // clear of Android's navigation bar by SafeArea (the app draws edge to edge), and below the
+      // snackbars - the Scaffold shows those above its bottom bar, so "Added 2 bridges. Tap Save"
+      // can no longer cover the very button it points to.
+      bottomNavigationBar: _loading
+          ? null
+          : SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
+                child: FilledButton(
                   onPressed: _saving ? null : () => _save(core),
                   child: _saving
                       ? const SizedBox(
@@ -230,7 +253,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2))
                       : Text(l10n.save),
                 ),
-              ],
+              ),
             ),
     );
   }
