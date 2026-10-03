@@ -2734,6 +2734,7 @@ dependencies = [
  "serde",
  "serde_json",
  "webpki-roots",
+ "webtunnel-client",
 ]
 
 [[package]]

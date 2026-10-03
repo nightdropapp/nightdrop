@@ -209,7 +209,8 @@ on a re-pair (new session) exactly like `verified`.
 
   **Getting bridges** (0.1.28): the bridge screen can fetch WebTunnel bridges from the Tor
   Project's moat service through the `moat` crate — the **one sanctioned direct, non-Tor network
-  path** in the app, because it exists for when Tor is blocked. Domain-fronted (meek via CDN77),
+  path** in the app, because it exists for when Tor is blocked. Domain-fronted (meek via CDN77,
+  opening with the same Chrome handshake WebTunnel uses),
   user-initiated after an explicit consent dialog, never automatic; it reaches only the CDN fronts
   and `bridges.torproject.org`, never a Night Drop server, and carries nothing about the user.
   Decided 2026-10-03; details `docs/design/android-bridges.md` §7a.1, user-facing limit in

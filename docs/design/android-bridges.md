@@ -501,8 +501,20 @@ lines at once so one going down is not fatal.
 and `api::fetch_bridges`, with a "Get WebTunnel bridges from the Tor Project" button and a consent
 dialog on the bridges screen. **Decided by Shawn, 2026-10-03:** allowed as the app's one direct,
 non-Tor request, only after the user agrees to a dialog saying it does not go through Tor, who
-sees the IP address, and that nothing is sent to Night Drop. The outer TLS is plain rustls offering
-HTTP/1.1 for now (not Chrome-identical); Tor Browser's own meek client is not browser-like either.
+sees the IP address, and that nothing is sent to Night Drop.
+
+**The connection to the front opens with Chrome's handshake** (in builds with WebTunnel, i.e. the
+shipped app): the same BoringSSL profile WebTunnel uses, exposed as `webtunnel_client::chrome`, so
+there is one Chrome fingerprint in the codebase. The "Chrome offers `h2`" question resolves itself:
+Chrome's **WebSocket** ClientHello offers `http/1.1` only, so meek keeps speaking HTTP/1.1 and the
+handshake is still byte-for-byte Chrome's - an observer sees what looks like Chrome holding a
+WebSocket open to a CDN, which a long-lived, two-way, encrypted connection is consistent with.
+`moat/tests/fingerprint.rs` drives the real meek connection at a capturing listener and asserts the
+JA4 equals `CHROME_WEBSOCKET_JA4` (shared with WebTunnel's own test), ALPN is exactly `http/1.1`,
+the SNI is the front and the reflector never appears in the handshake; a rustls hello fails it.
+Live, 2026-10-03: CDN77 accepts it, and the fetch returns as before (two WebTunnel lines for `cn`).
+Builds without WebTunnel fall back to rustls, recognisably so. Tor Browser's own meek client uses
+Go's TLS, which is not browser-like either.
 
 Read from primary sources (rdsys `doc/moat.md`, Tor Browser 16.0's `Moat.sys.mjs`,
 `DomainFrontedRequests.sys.mjs` and `000-tor-browser.js`, lyrebird's `transports/meeklite`, Briar's

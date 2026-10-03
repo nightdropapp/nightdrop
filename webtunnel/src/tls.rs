@@ -20,6 +20,8 @@
 
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "chrome-proto")]
+pub use backend::connect_blocking;
 pub(crate) use backend::{connect_tls, TlsStream};
 
 /// lyrebird's certificate-chain hash (`certiChainHashCalc.GenerateCertChainHash`):
@@ -266,6 +268,26 @@ AES256-GCM-SHA384:AES128-SHA:AES256-SHA";
         // `sni` is the SNI sent; verification is governed by the block above, not by this name.
         tokio_boring::connect(cc, sni, tcp)
             .await
+            .map_err(|e| Error::Tls(e.to_string()))
+    }
+
+    /// The same Chrome ClientHello over any blocking stream, with ordinary WebPKI verification of
+    /// `sni` against Mozilla's roots. For clients that are not WebTunnel but want to look like the
+    /// same browser — the `moat` crate's meek connection to a CDN front. `std` I/O, no tokio.
+    pub fn connect_blocking<S: std::io::Read + std::io::Write>(
+        stream: S,
+        sni: &str,
+    ) -> Result<boring::ssl::SslStream<S>, Error> {
+        let mut cc = CHROME_CONNECTOR
+            .configure()
+            .map_err(|e| Error::Tls(format!("TLS configure: {e}")))?;
+        cc.set_enable_ech_grease(true);
+        // The connector verifies PEER against Mozilla's roots; check the name we connect to.
+        cc.set_verify_hostname(false);
+        cc.param_mut()
+            .set_host(sni)
+            .map_err(|e| Error::Config(format!("verify host {sni:?}: {e}")))?;
+        cc.connect(sni, stream)
             .map_err(|e| Error::Tls(e.to_string()))
     }
 

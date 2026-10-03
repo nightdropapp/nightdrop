@@ -14,6 +14,7 @@
 pub mod args;
 pub mod client;
 pub mod config;
+pub mod ja4;
 pub mod socks;
 mod tls;
 
@@ -21,6 +22,15 @@ pub use args::PtArgs;
 pub use client::{connect, WebTunnelStream};
 pub use config::ClientConfig;
 pub use tls::chain_hash;
+
+/// Chrome's TLS ClientHello for other blocking clients — the profile WebTunnel uses, so there is
+/// one Chrome fingerprint in the codebase and one test that pins it (`tests/fingerprint.rs`).
+#[cfg(feature = "chrome-proto")]
+pub mod chrome {
+    pub use crate::tls::connect_blocking as connect;
+    /// What [`connect`] returns: BoringSSL's stream, `Read + Write` like any other.
+    pub type Stream<S> = boring::ssl::SslStream<S>;
+}
 
 /// The transport name bridge lines use: `Bridge webtunnel <addr> <fingerprint> url=…`.
 pub const TRANSPORT_NAME: &str = "webtunnel";

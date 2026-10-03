@@ -20,5 +20,12 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
 
+# Chrome's TLS handshake for the connection to the CDN front, shared with WebTunnel. Pulls
+# BoringSSL (C/cmake), so it is a feature; the app turns it on together with WebTunnel.
+webtunnel-client = { path = "../webtunnel", optional = true }
+
+[features]
+chrome = ["dep:webtunnel-client", "webtunnel-client/chrome-proto"]
+
 [dev-dependencies]
 rcgen = "0.13"

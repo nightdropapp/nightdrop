@@ -31,11 +31,10 @@ pub const TRANSPORTS: &[&str] = &["webtunnel"];
 /// be. Blocking, and can take a minute on a bad network: call it off the UI thread.
 pub fn fetch_bridges(country: Option<&str>) -> Result<Fetched> {
     let targets = targets::parse(TARGETS)?;
-    let front_tls = meek::front_tls_config();
     let mut new_tunnel = move || -> Result<Box<dyn meek::RoundTrip>> {
         Ok(Box::new(meek::FrontedMeek::new(
             targets.clone(),
-            front_tls.clone(),
+            meek::default_tls(),
             meek::FrontedMeek::default_dialer(),
         )?))
     };

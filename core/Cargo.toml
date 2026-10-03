@@ -95,7 +95,9 @@ tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell
 # ON by default (app/rust_builder/cargokit builder.dart); `NIGHTDROP_WEBTUNNEL=0` opts out.
 # Still untried: iOS and macOS, where BoringSSL has never been built — expect to need a toolchain
 # file there as Android did (webtunnel/android/README.md).
-webtunnel = ["tor", "dep:webtunnel-client", "webtunnel-client/chrome-proto"]
+# Also gives "Get bridges" (moat) the same Chrome handshake to the CDN front: BoringSSL is already
+# here for WebTunnel, so the bridge fetch looks like the same browser at no extra cost.
+webtunnel = ["tor", "dep:webtunnel-client", "webtunnel-client/chrome-proto", "moat/chrome"]
 
 # "Fetch bridges" (docs/design/android-bridges.md §7a.1): moat over meek, deliberately NOT through
 # Tor - it is for when Tor is blocked. Part of `tor`, since bridges only matter there.

@@ -39,7 +39,14 @@ const IO_TIMEOUT: Duration = Duration::from_secs(30);
 /// Attempts per round trip, rotating through the fronts, before giving up.
 const MAX_ATTEMPTS: usize = 4;
 
-type TlsStream = rustls::StreamOwned<rustls::ClientConnection, TcpStream>;
+/// The encrypted connection to a front, whichever TLS library made it.
+pub trait ReadWrite: Read + Write + Send {}
+impl<T: Read + Write + Send> ReadWrite for T {}
+
+/// Wraps a TCP connection to `front` in TLS (SNI and certificate check both for `front`). Which
+/// library does it decides what the network sees of the handshake: [`chrome_tls`] makes it
+/// Chrome's; [`rustls_tls`] is recognisably rustls.
+pub type TlsConnect = Box<dyn Fn(TcpStream, &str) -> Result<Box<dyn ReadWrite>> + Send>;
 
 /// How to open the TCP connection to a front. Real use resolves `front:443`; tests point it at a
 /// local server.
@@ -50,16 +57,16 @@ pub struct FrontedMeek {
     targets: Vec<Target>,
     current: usize,
     session_id: String,
-    tls: Arc<rustls::ClientConfig>,
+    tls: TlsConnect,
     dial: Dialer,
-    conn: Option<TlsStream>,
+    conn: Option<Box<dyn ReadWrite>>,
     /// Which front carried the last successful round trip (for the caller's diagnostics).
     pub last_front: Option<String>,
 }
 
 impl FrontedMeek {
-    /// `tls` verifies the **front's** certificate (Mozilla roots in production).
-    pub fn new(targets: Vec<Target>, tls: Arc<rustls::ClientConfig>, dial: Dialer) -> Result<Self> {
+    /// `tls` makes the encrypted connection to a front and verifies the **front's** certificate.
+    pub fn new(targets: Vec<Target>, tls: TlsConnect, dial: Dialer) -> Result<Self> {
         if targets.is_empty() {
             bail!("no meek targets");
         }
@@ -93,17 +100,16 @@ impl FrontedMeek {
         &self.session_id
     }
 
-    fn connect(&mut self) -> Result<&mut TlsStream> {
+    fn connect(&mut self) -> Result<&mut Box<dyn ReadWrite>> {
         if self.conn.is_none() {
             let t = &self.targets[self.current];
             let tcp = (self.dial)(&t.front)
                 .with_context(|| format!("connecting to front {}", t.front))?;
             tcp.set_read_timeout(Some(IO_TIMEOUT))?;
             tcp.set_write_timeout(Some(IO_TIMEOUT))?;
-            let name = rustls::pki_types::ServerName::try_from(t.front.clone())
-                .map_err(|_| anyhow!("front {} is not a valid TLS name", t.front))?;
-            let tls = rustls::ClientConnection::new(self.tls.clone(), name)?;
-            self.conn = Some(rustls::StreamOwned::new(tls, tcp));
+            let stream =
+                (self.tls)(tcp, &t.front).with_context(|| format!("TLS to front {}", t.front))?;
+            self.conn = Some(stream);
         }
         Ok(self.conn.as_mut().expect("just set"))
     }
@@ -181,6 +187,39 @@ fn session_id() -> Result<String> {
         .fill(&mut b)
         .map_err(|_| anyhow!("no system randomness"))?;
     Ok(b.iter().map(|x| format!("{x:02x}")).collect())
+}
+
+/// rustls to the front, with `cfg`'s roots (Mozilla's in production, a test CA in tests).
+pub fn rustls_tls(cfg: Arc<rustls::ClientConfig>) -> TlsConnect {
+    Box::new(move |tcp: TcpStream, front: &str| {
+        let name = rustls::pki_types::ServerName::try_from(front.to_string())
+            .map_err(|_| anyhow!("front {front} is not a valid TLS name"))?;
+        let conn = rustls::ClientConnection::new(cfg.clone(), name)?;
+        Ok(Box::new(rustls::StreamOwned::new(conn, tcp)) as Box<dyn ReadWrite>)
+    })
+}
+
+/// Chrome's ClientHello to the front - the profile WebTunnel uses (`webtunnel_client::chrome`):
+/// what Chrome sends opening a WebSocket, whose ALPN is `http/1.1` only, so meek keeps speaking
+/// HTTP/1.1 without the handshake giving it away. Mozilla roots.
+#[cfg(feature = "chrome")]
+pub fn chrome_tls() -> TlsConnect {
+    Box::new(|tcp: TcpStream, front: &str| {
+        let s = webtunnel_client::chrome::connect(tcp, front).map_err(|e| anyhow!("{e}"))?;
+        Ok(Box::new(s) as Box<dyn ReadWrite>)
+    })
+}
+
+/// The TLS this build uses for the front: Chrome's when built with `chrome`, else rustls.
+pub fn default_tls() -> TlsConnect {
+    #[cfg(feature = "chrome")]
+    {
+        chrome_tls()
+    }
+    #[cfg(not(feature = "chrome"))]
+    {
+        rustls_tls(front_tls_config())
+    }
 }
 
 /// TLS settings for the outer (front) connection: Mozilla roots, HTTP/1.1 only.
@@ -318,7 +357,7 @@ pub(crate) mod tests {
         });
         // The fake's certificate is ours, so `client_cfg` trusts it instead of the Mozilla roots.
         let t = crate::targets::parse(targets).unwrap();
-        FrontedMeek::new(t, client_cfg, dial).unwrap()
+        FrontedMeek::new(t, rustls_tls(client_cfg), dial).unwrap()
     }
 
     #[test]
