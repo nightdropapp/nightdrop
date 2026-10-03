@@ -2,7 +2,7 @@
 # The Flutter app lives in app/ and is built separately with the Flutter toolchain.
 [workspace]
 resolver = "2"
-members = ["core", "relay", "webtunnel"]
+members = ["core", "relay", "webtunnel", "moat"]
 # Patched dependencies, built through [patch.crates-io] below, not workspace members.
 exclude = ["third_party/saturating-time", "third_party/tor-hsservice"]
 

@@ -2724,6 +2724,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "moat"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rcgen",
+ "ring",
+ "rustls",
+ "serde",
+ "serde_json",
+ "webpki-roots",
+]
+
+[[package]]
 name = "module-lattice"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

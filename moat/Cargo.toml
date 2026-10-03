@@ -1,0 +1,24 @@
+# Fetch Tor bridge lines from the Tor Project's moat "Circumvention Settings" API, over meek
+# (domain fronting), for a client whose Tor connection is blocked. See
+# docs/design/android-bridges.md §7a.1. Deliberately NOT routed through Tor: it exists for the
+# moment Tor does not work. It contacts only the configured CDN fronts, and through them only
+# bridges.torproject.org - never any Night Drop server.
+[package]
+name = "moat"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+# Same rustls + ring + Mozilla roots as webtunnel-client, so no second crypto backend.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+ring = "0.17"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+
+[dev-dependencies]
+rcgen = "0.13"
