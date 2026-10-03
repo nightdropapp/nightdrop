@@ -394,6 +394,12 @@ abstract class NightdropCore extends ChangeNotifier {
   Future<BridgeSave> writeBridges(String text) async =>
       const BridgeSave(accepted: 0, rejected: []);
 
+  /// Fetch WebTunnel bridges from the Tor Project, **not through Tor** (it exists for when Tor is
+  /// blocked). Only call this after the user has agreed to that. Nothing is saved. Throws when it
+  /// fails, with a message fit to show; the default (mock/demo) has no network and always throws.
+  Future<FetchedBridges> fetchBridges({String? country}) async =>
+      throw UnsupportedError('Fetching bridges needs the Tor build');
+
   /// Whether cover traffic (#4) is on.
   Future<bool> coverTrafficEnabled() async => false;
 

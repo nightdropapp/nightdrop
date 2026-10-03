@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io' show Directory, File, FileSystemEntity, Platform;
 
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' show AnyhowException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
 
@@ -231,6 +232,18 @@ class RustNightdropCore extends NightdropCore {
         for (final b in r.rejected) RejectedBridge(line: b.line, reason: b.reason),
       ],
     );
+  }
+
+  @override
+  Future<FetchedBridges> fetchBridges({String? country}) async {
+    try {
+      final f = await rust.fetchBridges(country: country);
+      return FetchedBridges(lines: f.lines, country: f.country, fromDefaults: f.fromDefaults);
+    } on AnyhowException catch (e) {
+      // The core's errors are written to be shown ("the Tor Project has no webtunnel bridges that
+      // work in this country"); pass them on as the message, not as a stack trace.
+      throw StateError(e.message);
+    }
   }
 
   @override

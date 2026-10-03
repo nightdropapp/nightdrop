@@ -497,6 +497,13 @@ lines at once so one going down is not fatal.
 
 #### 7a.1 Moat, researched 2026-10-03 (for 0.1.28)
 
+**Status: built on branch `0.1.28`** — the `moat` crate (targets, HTTP, meek, tunnel, moat API)
+and `api::fetch_bridges`, with a "Get WebTunnel bridges from the Tor Project" button and a consent
+dialog on the bridges screen. **Decided by Shawn, 2026-10-03:** allowed as the app's one direct,
+non-Tor request, only after the user agrees to a dialog saying it does not go through Tor, who
+sees the IP address, and that nothing is sent to Night Drop. The outer TLS is plain rustls offering
+HTTP/1.1 for now (not Chrome-identical); Tor Browser's own meek client is not browser-like either.
+
 Read from primary sources (rdsys `doc/moat.md`, Tor Browser 16.0's `Moat.sys.mjs`,
 `DomainFrontedRequests.sys.mjs` and `000-tor-browser.js`, lyrebird's `transports/meeklite`, Briar's
 `moat-api`), then exercised end to end from this machine with a throwaway prototype.

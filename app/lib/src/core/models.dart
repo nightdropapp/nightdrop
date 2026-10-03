@@ -361,3 +361,17 @@ class BridgeSave {
   final int accepted;
   final List<RejectedBridge> rejected;
 }
+
+/// Bridge lines fetched from the Tor Project's bridge service (moat), not yet saved.
+class FetchedBridges {
+  const FetchedBridges({required this.lines, this.country, this.fromDefaults = false});
+
+  /// WebTunnel bridge lines, best first, each already accepted by the same check saving uses.
+  final List<String> lines;
+
+  /// The country the Tor Project answered for, as a two-letter code, when it said.
+  final String? country;
+
+  /// True when there was no recommendation for the country and these are generic defaults.
+  final bool fromDefaults;
+}

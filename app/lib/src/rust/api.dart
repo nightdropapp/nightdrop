@@ -145,6 +145,18 @@ Future<BridgeSaveResult> writeBridges(
         {required String dir, required String text}) =>
     RustLib.instance.api.crateApiWriteBridges(dir: dir, text: text);
 
+/// Fetch WebTunnel bridges from the Tor Project's bridge service (moat), for `country` (two-letter
+/// lowercase code) or, when `None`, for wherever this device appears to be.
+///
+/// **This does not go through Tor, on purpose**: it exists for when Tor cannot connect. The request
+/// is domain-fronted (meek) through a CDN, so the network sees a connection to a CDN, while the CDN
+/// and the Tor Project see this device's IP address (the Tor Project uses it to pick the country).
+/// It carries nothing about the user, and contacts no Night Drop server. Call it only after the
+/// user has agreed to exactly that (`docs/design/android-bridges.md` §7a.1). Blocking; may take a
+/// minute on a bad network. Nothing is saved: the caller shows the lines for the user to save.
+Future<FetchedBridges> fetchBridges({String? country}) =>
+    RustLib.instance.api.crateApiFetchBridges(country: country);
+
 /// Validate a bridge line without saving, for live feedback while typing.
 Future<String?> checkBridge({required String line}) =>
     RustLib.instance.api.crateApiCheckBridge(line: line);
@@ -1030,6 +1042,36 @@ class Contact {
           identityTag == other.identityTag &&
           lastSeenSecs == other.lastSeenSecs &&
           peerOnOldVersion == other.peerOnOldVersion;
+}
+
+/// Bridge lines fetched from the Tor Project (see [`fetch_bridges`]).
+class FetchedBridges {
+  /// The country the Tor Project answered for: the one asked for, or the one it detected.
+  final String? country;
+
+  /// WebTunnel bridge lines, best first, each already accepted by [`check_bridge`].
+  final List<String> lines;
+
+  /// True when no recommendation existed for the country and these are generic defaults.
+  final bool fromDefaults;
+
+  const FetchedBridges({
+    this.country,
+    required this.lines,
+    required this.fromDefaults,
+  });
+
+  @override
+  int get hashCode => country.hashCode ^ lines.hashCode ^ fromDefaults.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is FetchedBridges &&
+          runtimeType == other.runtimeType &&
+          country == other.country &&
+          lines == other.lines &&
+          fromDefaults == other.fromDefaults;
 }
 
 /// An anonymous, device-held identity handle (just its public id for the UI).

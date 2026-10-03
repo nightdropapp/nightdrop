@@ -1900,6 +1900,60 @@ abstract class AppLocalizations {
   /// **'Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.'**
   String get bridgesWhereToGet;
 
+  /// Button on the bridges screen that requests bridges from the Tor Project's bridge service (moat).
+  ///
+  /// In en, this message translates to:
+  /// **'Get WebTunnel bridges from the Tor Project'**
+  String get bridgesFetchButton;
+
+  /// Title of the consent dialog before fetching bridges.
+  ///
+  /// In en, this message translates to:
+  /// **'Get bridges from the Tor Project?'**
+  String get bridgesFetchTitle;
+
+  /// Consent text before fetching bridges. Must say plainly: not through Tor, who sees the IP address, nothing about the user, nothing sent to Night Drop.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop will ask the Tor Project\'s bridge service for WebTunnel bridges.\n\nThis request does not go through Tor — it\'s meant for when Tor can\'t connect. Your network sees a connection to a content-delivery network. That network and the Tor Project see your IP address; the Tor Project uses it to choose bridges for your country.\n\nThe request contains nothing about you, and nothing is sent to Night Drop. Once you save the bridges, your Tor connection goes through them.'**
+  String get bridgesFetchBody;
+
+  /// Label of the optional two-letter country code field in the fetch-bridges dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Country (optional)'**
+  String get bridgesFetchCountryLabel;
+
+  /// Helper under the country field.
+  ///
+  /// In en, this message translates to:
+  /// **'Two letters, e.g. ir. Leave empty to let the Tor Project detect it.'**
+  String get bridgesFetchCountryHint;
+
+  /// Confirm button in the fetch-bridges consent dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Get bridges'**
+  String get bridgesFetchGo;
+
+  /// Shown while bridges are being fetched.
+  ///
+  /// In en, this message translates to:
+  /// **'Contacting the Tor Project…'**
+  String get bridgesFetching;
+
+  /// After a successful fetch; the lines are in the editor but not saved yet.
+  ///
+  /// In en, this message translates to:
+  /// **'{count, plural, =1{Added 1 WebTunnel bridge. Tap Save to use it.} other{Added {count} WebTunnel bridges. Tap Save to use them.}}'**
+  String bridgesFetchAdded(int count);
+
+  /// Shown when fetching bridges failed. {reason} is the technical reason.
+  ///
+  /// In en, this message translates to:
+  /// **'Couldn\'t get bridges: {reason}\n\nIf this network blocks that too, use one of the other ways below.'**
+  String bridgesFetchFailed(String reason);
+
   /// No description provided for @bridgesSaved.
   ///
   /// In en, this message translates to:

@@ -263,6 +263,17 @@
            ordinary the handshake is. If being identified as a Tor user is itself dangerous where
            you are, do not rely on this alone.</p>
       </div>
+      <div class="callout warn" style="margin-top: 20px;">
+        <h3>&ldquo;Get bridges&rdquo; does not go through Tor.</h3>
+        <p>From 0.1.28 the bridges screen can ask the Tor Project for WebTunnel bridges. That one
+           request has to work when Tor cannot, so it goes <strong>directly</strong>, disguised as
+           a connection to a content-delivery network. That network and the Tor Project see your
+           IP address &mdash; the Tor Project uses it to pick bridges for your country.</p>
+        <p>The request contains nothing about you, and <strong>nothing is sent to Night Drop</strong>.
+           It only runs when you tap the button and agree, and nothing is saved until you save the
+           bridges yourself. If being seen contacting the Tor Project is itself dangerous where you
+           are, get bridges another way.</p>
+      </div>
       <div class="grid" style="margin-top: 28px;">
         <article class="card">
           <h3>🧪 Real-world Tor testing is ongoing <span class="pill">in progress</span></h3>

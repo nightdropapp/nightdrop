@@ -77,6 +77,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   Contact dco_decode_contact(dynamic raw);
 
   @protected
+  FetchedBridges dco_decode_fetched_bridges(dynamic raw);
+
+  @protected
   Identity dco_decode_identity(dynamic raw);
 
   @protected
@@ -206,6 +209,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   Contact sse_decode_contact(SseDeserializer deserializer);
+
+  @protected
+  FetchedBridges sse_decode_fetched_bridges(SseDeserializer deserializer);
 
   @protected
   Identity sse_decode_identity(SseDeserializer deserializer);
@@ -346,6 +352,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_contact(Contact self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_fetched_bridges(
+      FetchedBridges self, SseSerializer serializer);
 
   @protected
   void sse_encode_identity(Identity self, SseSerializer serializer);

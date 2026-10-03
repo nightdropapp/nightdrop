@@ -2762,6 +2762,7 @@ dependencies = [
  "hkdf",
  "libsqlite3-sys",
  "ml-kem",
+ "moat",
  "rand 0.8.6",
  "rustls",
  "safelog",

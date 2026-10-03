@@ -83,7 +83,7 @@ libsqlite3-sys = { version = "0.37", features = ["bundled"], optional = true }
 [features]
 # Enables the embedded Tor (arti) transport. Off by default so the core builds fast and
 # the bridge/tests don't pull the (large) arti dependency tree.
-tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell", "dep:safelog", "dep:tokio", "dep:futures", "dep:libsqlite3-sys", "dep:rustls", "dep:tor-hscrypto", "dep:tor-keymgr", "dep:tor-llcrypto", "dep:tor-config-path", "dep:tor-config", "dep:tracing-subscriber"]
+tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell", "dep:safelog", "dep:tokio", "dep:futures", "dep:libsqlite3-sys", "dep:rustls", "dep:tor-hscrypto", "dep:tor-keymgr", "dep:tor-llcrypto", "dep:tor-config-path", "dep:tor-config", "dep:tracing-subscriber", "dep:moat"]
 
 # In-process WebTunnel pluggable transport (docs/design/android-bridges.md §5): at Tor startup
 # the core runs webtunnel-client's SOCKS listener and points arti's `webtunnel` transport at it,
@@ -96,6 +96,12 @@ tor = ["dep:arti-client", "dep:tor-rtcompat", "dep:tor-hsservice", "dep:tor-cell
 # Still untried: iOS and macOS, where BoringSSL has never been built — expect to need a toolchain
 # file there as Android did (webtunnel/android/README.md).
 webtunnel = ["tor", "dep:webtunnel-client", "webtunnel-client/chrome-proto"]
+
+# "Fetch bridges" (docs/design/android-bridges.md §7a.1): moat over meek, deliberately NOT through
+# Tor - it is for when Tor is blocked. Part of `tor`, since bridges only matter there.
+[dependencies.moat]
+path = "../moat"
+optional = true
 
 [dependencies.webtunnel-client]
 path = "../webtunnel"

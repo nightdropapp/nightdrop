@@ -162,6 +162,17 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   sending little does not resemble reading a web page, whatever the handshake looks like. Treat
   this as good odds against commodity blocking, not as protection where being identified as a Tor
   user is itself the danger.
+- **"Get bridges" does not go through Tor.** *(Known limit, by design; from 0.1.28.)* The bridge
+  screen can ask the Tor Project's bridge service (moat) for WebTunnel bridges. That one request has
+  to work when Tor cannot, so it goes **directly**: domain-fronted through a content-delivery
+  network (meek), so the network sees a connection to that CDN; the CDN and the Tor Project see the
+  device's IP address, which the Tor Project uses to choose bridges for the country. The request
+  carries nothing about the user — no identity, contacts or messages — and **no Night Drop server
+  is contacted**: the only names the code can reach are the CDN fronts and `bridges.torproject.org`
+  (pinned by a test). It runs only when the user taps the button, after a dialog that says all of
+  this; it is never automatic. Nothing is saved until the user saves the lines like any others.
+  Where being seen contacting the Tor Project is itself the danger, use one of the other ways to
+  get bridges instead. See `docs/design/android-bridges.md` §7a.1.
 - **A copy inside Samsung Secure Folder receives nothing while the folder is locked.** *(Known
   limit, imposed by the platform.)* Secure Folder is a separate Android user and freezes the apps
   inside it whenever it is locked, so the inner Night Drop is not running: it holds no circuits,

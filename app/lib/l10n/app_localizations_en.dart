@@ -1086,6 +1086,45 @@ class AppLocalizationsEn extends AppLocalizations {
       'Get bridges from bridges.torproject.org — add ?transport=webtunnel for a WebTunnel bridge, which looks like ordinary HTTPS traffic. Or email bridges@torproject.org with \"get transport none\" in the body.';
 
   @override
+  String get bridgesFetchButton => 'Get WebTunnel bridges from the Tor Project';
+
+  @override
+  String get bridgesFetchTitle => 'Get bridges from the Tor Project?';
+
+  @override
+  String get bridgesFetchBody =>
+      'Night Drop will ask the Tor Project\'s bridge service for WebTunnel bridges.\n\nThis request does not go through Tor — it\'s meant for when Tor can\'t connect. Your network sees a connection to a content-delivery network. That network and the Tor Project see your IP address; the Tor Project uses it to choose bridges for your country.\n\nThe request contains nothing about you, and nothing is sent to Night Drop. Once you save the bridges, your Tor connection goes through them.';
+
+  @override
+  String get bridgesFetchCountryLabel => 'Country (optional)';
+
+  @override
+  String get bridgesFetchCountryHint =>
+      'Two letters, e.g. ir. Leave empty to let the Tor Project detect it.';
+
+  @override
+  String get bridgesFetchGo => 'Get bridges';
+
+  @override
+  String get bridgesFetching => 'Contacting the Tor Project…';
+
+  @override
+  String bridgesFetchAdded(int count) {
+    String _temp0 = intl.Intl.pluralLogic(
+      count,
+      locale: localeName,
+      other: 'Added $count WebTunnel bridges. Tap Save to use them.',
+      one: 'Added 1 WebTunnel bridge. Tap Save to use it.',
+    );
+    return '$_temp0';
+  }
+
+  @override
+  String bridgesFetchFailed(String reason) {
+    return 'Couldn\'t get bridges: $reason\n\nIf this network blocks that too, use one of the other ways below.';
+  }
+
+  @override
   String bridgesSaved(int count) {
     String _temp0 = intl.Intl.pluralLogic(
       count,

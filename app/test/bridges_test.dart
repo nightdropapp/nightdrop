@@ -55,6 +55,10 @@ void main() {
 
     await tester.enterText(find.byType(TextField),
         '38.229.33.83:80 0BAC39417268B96B9F514E7F63FA6FBA1A788955');
+    // Save sits below the fold on the test's 800x600 surface: scroll to it, and let the scroll
+    // lay out before tapping.
+    await tester.ensureVisible(find.text('Save'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 
@@ -68,6 +72,10 @@ void main() {
     final core = await pumpBridges(tester);
 
     await tester.enterText(find.byType(TextField), 'this is not a bridge');
+    // Save sits below the fold on the test's 800x600 surface: scroll to it, and let the scroll
+    // lay out before tapping.
+    await tester.ensureVisible(find.text('Save'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Save'));
     await tester.pumpAndSettle();
 

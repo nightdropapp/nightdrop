@@ -2204,6 +2204,62 @@ pub fn write_bridges(dir: String, text: String) -> Result<BridgeSaveResult> {
     Ok(BridgeSaveResult { accepted, rejected })
 }
 
+/// Bridge lines fetched from the Tor Project (see [`fetch_bridges`]).
+pub struct FetchedBridges {
+    /// The country the Tor Project answered for: the one asked for, or the one it detected.
+    pub country: Option<String>,
+    /// WebTunnel bridge lines, best first, each already accepted by [`check_bridge`].
+    pub lines: Vec<String>,
+    /// True when no recommendation existed for the country and these are generic defaults.
+    pub from_defaults: bool,
+}
+
+/// Fetch WebTunnel bridges from the Tor Project's bridge service (moat), for `country` (two-letter
+/// lowercase code) or, when `None`, for wherever this device appears to be.
+///
+/// **This does not go through Tor, on purpose**: it exists for when Tor cannot connect. The request
+/// is domain-fronted (meek) through a CDN, so the network sees a connection to a CDN, while the CDN
+/// and the Tor Project see this device's IP address (the Tor Project uses it to pick the country).
+/// It carries nothing about the user, and contacts no Night Drop server. Call it only after the
+/// user has agreed to exactly that (`docs/design/android-bridges.md` §7a.1). Blocking; may take a
+/// minute on a bad network. Nothing is saved: the caller shows the lines for the user to save.
+pub fn fetch_bridges(country: Option<String>) -> Result<FetchedBridges> {
+    #[cfg(feature = "tor")]
+    {
+        let f = moat::fetch_bridges(country.as_deref())?;
+        let total = f.lines.len();
+        // The same parse the Tor bootstrap uses, so nothing reaches the editor that saving would
+        // then reject.
+        let lines: Vec<String> = f
+            .lines
+            .into_iter()
+            .filter(|l| check_bridge_line(l).is_ok())
+            .collect();
+        crate::diag!(
+            "bridges: fetched {} usable of {total} from the Tor Project ({})",
+            lines.len(),
+            if f.from_defaults {
+                "defaults"
+            } else {
+                "country recommendation"
+            }
+        );
+        if lines.is_empty() {
+            anyhow::bail!("the Tor Project sent no bridge this build can use");
+        }
+        Ok(FetchedBridges {
+            country: f.country,
+            lines,
+            from_defaults: f.from_defaults,
+        })
+    }
+    #[cfg(not(feature = "tor"))]
+    {
+        let _ = country;
+        anyhow::bail!("this build has no Tor support, so it cannot use bridges")
+    }
+}
+
 /// Validate a bridge line without saving, for live feedback while typing.
 pub fn check_bridge(line: String) -> Option<String> {
     check_bridge_line(&line).err()
@@ -2723,6 +2779,26 @@ fn random_secret_words() -> String {
 
 #[cfg(test)]
 mod tests {
+    /// "Fetch bridges" end to end through the core, over the real network: the Tor Project's
+    /// answer for China, filtered by the same check saving uses. Needs a WebTunnel-capable build:
+    /// `cargo test -p nightdrop --features webtunnel fetch_bridges_live -- --ignored`.
+    #[cfg(feature = "webtunnel")]
+    #[test]
+    #[ignore]
+    fn fetch_bridges_live() {
+        let f = super::fetch_bridges(Some("cn".into())).unwrap();
+        assert!(!f.lines.is_empty());
+        for l in &f.lines {
+            assert_eq!(super::check_bridge(l.clone()), None, "{l}");
+        }
+        println!(
+            "{} line(s) for {:?}, defaults: {}",
+            f.lines.len(),
+            f.country,
+            f.from_defaults
+        );
+    }
+
     use super::*;
 
     /// The background cadence is what the mailbox design is costed at; a faster one multiplies
