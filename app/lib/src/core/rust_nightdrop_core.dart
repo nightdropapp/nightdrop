@@ -472,6 +472,7 @@ class RustNightdropCore extends NightdropCore {
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
+    unawaited(_scheduleUpdateChecks()); // the old core's loop ended with it
     notifyListeners();
   }
 
@@ -1164,6 +1165,9 @@ class RustNightdropCore extends NightdropCore {
     unawaited(_announceAppVersion());
     unawaited(_announceCaptureReporting());
     unawaited(_restoreCoverTraffic());
+    // A first install has no core at launch, so the launch-time loop ended at once; this core
+    // gets its own (it waits for Tor first).
+    unawaited(_scheduleUpdateChecks());
     notifyListeners();
   }
 
@@ -1327,6 +1331,7 @@ class RustNightdropCore extends NightdropCore {
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
+    unawaited(_scheduleUpdateChecks()); // a new core: the previous one's loop ended with it
   }
 
   @override
@@ -1353,6 +1358,7 @@ class RustNightdropCore extends NightdropCore {
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
+    unawaited(_scheduleUpdateChecks()); // a new core: the previous one's loop ended with it
   }
 
   @override
