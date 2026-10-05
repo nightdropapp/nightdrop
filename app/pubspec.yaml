@@ -17,21 +17,21 @@ dependencies:
   # Backup save/load picker. The 12.x beta is REQUIRED on this toolchain: stable v11
   # pins Kotlin Gradle Plugin 1.8.22, which silently fails under Gradle 9 / AGP 9
   # built-in Kotlin (its classes never compile → "cannot find symbol" at :app).
-  file_picker: ^12.0.0-beta.7
+  file_picker: ^12.3.0
   path_provider: ^2.1.4 # default backup locations (Documents/Desktop) + persisted state dir
-  flutter_secure_storage: ^10.3.1 # OS-backed keystore for the at-rest persistence key
+  flutter_secure_storage: ^10.3.4 # OS-backed keystore for the at-rest persistence key
   open_filex: ^4.5.0 # open a received video/file in the system player (cross-platform)
-  image: ^4.9.1 # downscale/recompress images before sending (big speed win over Tor)
+  image: ^4.10.1 # downscale/recompress images before sending (big speed win over Tor)
   # Preview frame for sent videos (Android/iOS/macOS/Windows; no Linux). Replaced the
   # unmaintained `video_thumbnail`, whose 2023-era Gradle config breaks under AGP 9.
   fc_native_video_thumbnail: ^3.0.1
-  flutter_local_notifications: ^22.0.1 # local notifications for new messages/requests
+  flutter_local_notifications: ^22.3.1 # local notifications for new messages/requests
   flutter_rust_bridge: 2.12.0 # Dart <-> Rust FFI bridge (matches the codegen version)
   # cargokit plugin that builds core/ and bundles libnightdrop into each platform target.
   nightdrop:
     path: rust_builder
   flutter_launcher_icons: ^0.14.4
-  flutter_foreground_task: ^10.0.0 # opt-in Android background-delivery foreground service (#13)
+  flutter_foreground_task: ^11.0.3 # opt-in Android background-delivery foreground service (#13)
   flutter_zxing: ^2.3.0 # on-device QR scanning for pairing (§5a); Apache-2.0 ZXing, no Google Play Services / ML Kit
   permission_handler: ^12.0.0 # runtime camera-permission request + open-settings for the scanner (no phone-home; see DEPENDENCIES.md)
 

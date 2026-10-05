@@ -350,15 +350,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
   /// content the feature exists to withhold, so it must not be produced, let alone transmitted.
   Future<void> _attachMedia({int burnSecs = 0}) async {
     final l10n = AppLocalizations.of(context)!;
-    final result = await FilePicker.pickFiles(
+    final picked = await FilePicker.pickFile(
       type:
           FileType.media, // images + videos; we read large files from the path
     );
-    final picked = result?.files.single;
     final path = picked?.path;
     if (path == null) return;
 
-    final size = picked!.size;
+    // file_picker 12 reports the length it already has, or null when the platform did not
+    // say; then ask the file itself.
+    final size = picked!.lengthSync() ?? await File(path).length();
     if (size > kMaxMediaBytes) {
       _toast(l10n.fileTooLarge(formatBytes(size), formatBytes(kMaxMediaBytes)));
       return;

@@ -6,7 +6,7 @@ import FlutterMacOS
 import Foundation
 
 import fc_native_video_thumbnail
-import file_picker
+import file_picker_darwin
 import file_selector_macos
 import flutter_local_notifications
 import flutter_secure_storage_darwin

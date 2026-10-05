@@ -2,6 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show visibleForTesting;
 
 /// Helpers for choosing where an encrypted backup is written or read from (§7).
 ///
@@ -34,23 +35,33 @@ class BackupFiles {
   /// (or null if cancelled). file_picker ≥ 12 writes the bytes itself on every platform —
   /// a Save dialog on desktop (defaulting to the Desktop), the SAF picker on mobile (so
   /// the file lands somewhere reachable from the phone's Files app).
-  static Future<String?> saveBackup(List<int> bytes) {
-    return FilePicker.saveFile(
+  static Future<String?> saveBackup(List<int> bytes) async {
+    final saved = await FilePicker.saveFile(
       dialogTitle: 'Save your encrypted backup',
       fileName: _defaultFileName(),
       initialDirectory: _desktopDir(),
       type: FileType.any,
       bytes: Uint8List.fromList(bytes),
     );
+    return saved == null ? null : describeSaved(saved);
+  }
+
+  /// Where a saved file went, for the "saved to" message: the path for a `file:` URI; for
+  /// Android's `content:` URIs (the SAF picker) the readable tail, e.g. `primary:Download/x`.
+  @visibleForTesting
+  static String describeSaved(Uri uri) {
+    if (uri.scheme == 'file') return uri.toFilePath();
+    final segments = uri.pathSegments;
+    return segments.isEmpty ? uri.toString() : Uri.decodeComponent(segments.last);
   }
 
   /// Ask the user to pick a backup file to import and return its absolute path (or null).
   static Future<String?> choosePickPath() async {
-    final result = await FilePicker.pickFiles(
+    final picked = await FilePicker.pickFile(
       dialogTitle: 'Choose a backup file',
       type: FileType.any,
       initialDirectory: _desktopDir(),
     );
-    return result?.files.single.path;
+    return picked?.path;
   }
 }
