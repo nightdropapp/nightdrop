@@ -421,9 +421,13 @@ struct Inner {
     /// [`Reactor::upload_descriptor_with_retries`]).
     last_uploaded: Option<Instant>,
     /// A max-heap containing the time periods for which we need to reupload the descriptor.
-    ///
-    /// Holds at most one entry per time period: scheduling a reupload replaces any earlier
-    /// one for the same period, because only the latest reupload time matters.
+    // TODO: we are currently reuploading more than nececessary.
+    // Ideally, this shouldn't contain contain duplicate TimePeriods,
+    // because we only need to retain the latest reupload time for each time period.
+    //
+    // Currently, if, for some reason, we upload the descriptor multiple times for the same TP,
+    // we will end up with multiple ReuploadTimer entries for that TP,
+    // each of which will (eventually) result in a reupload.
     //
     // TODO: maybe this should just be a HashMap<TimePeriod, Instant>
     //
@@ -883,12 +887,6 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
             humantime::format_duration(duration),
         );
 
-        // Replace, don't add: an earlier timer for this period would trigger a reupload of
-        // its own, which would schedule yet another timer, so every extra upload (an IPT
-        // change, a failed round) would make the reupload rate grow with uptime.
-        inner
-            .reupload_timers
-            .retain(|timer| timer.period != time_period);
         inner.reupload_timers.push(ReuploadTimer {
             period: time_period,
             when: reupload_when,

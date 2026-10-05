@@ -204,7 +204,7 @@ pub struct RestrictedDiscoveryConfig {
     pub(crate) enabled: bool,
 
     /// If true, the provided `key_dirs` will be watched for changes.
-    #[deftly(tor_config(default, serde = "skip"))]
+    #[deftly(tor_config(default, attr = serde(skip)))]
     #[getter(as_mut, as_copy)]
     watch_configuration: bool,
 
@@ -416,6 +416,7 @@ mod test {
     #![allow(clippy::unchecked_time_subtraction)]
     #![allow(clippy::useless_vec)]
     #![allow(clippy::needless_pass_by_value)]
+    #![allow(clippy::string_slice)] // See arti#2571
     //! <!-- @@ end test lint list maintained by maint/add_warning @@ -->
 
     use super::*;

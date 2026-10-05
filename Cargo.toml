@@ -4,21 +4,20 @@
 resolver = "2"
 members = ["core", "relay", "webtunnel", "moat"]
 # Patched dependencies, built through [patch.crates-io] below, not workspace members.
-exclude = ["third_party/saturating-time", "third_party/tor-hsservice"]
+exclude = ["third_party/tor-hsservice"]
 
 [workspace.package]
 edition = "2021"
 license = "AGPL-3.0-or-later"
 # Bumped 1.75 -> 1.85 for the hybrid PQ pairing (§4.1): the vetted `ml-kem` (FIPS 203) crate
-# requires 1.85. No active users, so raising the toolchain floor is acceptable.
-rust-version = "1.85"
+# requires 1.85. Then 1.85 -> 1.92 for arti 0.47 (its MSRV); F-Droid builds with 1.96.
+rust-version = "1.92"
 
 # Build the security-critical core with overflow checks even in release.
 [profile.release]
 overflow-checks = true
 
-# saturating-time 0.3.0 loops forever on Windows, which hangs Tor over bridges (arti#2726).
-# See third_party/saturating-time/NIGHTDROP-PATCH.md; remove once arti ships the fix.
+# tor-hsservice: descriptor reupload timers pile up, so a long-running client reuploads ever more
+# often. See third_party/tor-hsservice/NIGHTDROP-PATCH.md; remove once arti ships the fix.
 [patch.crates-io]
-saturating-time = { path = "third_party/saturating-time" }
 tor-hsservice = { path = "third_party/tor-hsservice" }

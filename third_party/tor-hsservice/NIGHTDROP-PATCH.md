@@ -1,4 +1,4 @@
-# Patched copy of tor-hsservice 0.43.0
+# Patched copy of tor-hsservice 0.47.0
 
 Upstream: <https://crates.io/crates/tor-hsservice> (part of arti), MIT OR Apache-2.0
 (`LICENSE-MIT`, `LICENSE-APACHE`, from the arti repository). Used through `[patch.crates-io]` in
@@ -9,7 +9,8 @@ runs. `publish/reactor.rs` keeps reupload timers in a `BinaryHeap` and never rem
 timer for the same time period, so every extra upload round (an IPT change, a network change, a
 failed round) leaves a timer behind that reschedules itself. On a phone this grew to 200-270 HSDir
 uploads an hour after about a day, most of Night Drop's background traffic. Arti's own comment on
-the field described the problem as a TODO; still unfixed in tor-hsservice 0.47.0.
+the field described the problem as a TODO; still unfixed in 0.47.0, the version vendored here
+(re-applied 2026-10-05 for 0.1.28; the patch applied with line offsets only).
 Measurements: `docs/background-traffic.md`.
 
 **What changed:**

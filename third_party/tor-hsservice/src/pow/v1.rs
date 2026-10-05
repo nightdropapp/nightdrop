@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tor_basic_utils::RngExt as _;
 use tor_cell::relaycell::hs::pow::{ProofOfWork, v1::ProofOfWorkV1};
-use tor_checkable::timed::TimerangeBound;
+use tor_checkable::timed::TimeRangeBound;
 use tor_error::warn_report;
 use tor_hscrypto::{
     pk::HsBlindIdKey,
@@ -499,7 +499,6 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> PowManagerGeneric<R, Q
     /// This also pokes the publisher when needed to cause rotated seeds to be published.
     ///
     /// Returns the next time this function should be called again.
-    #[allow(clippy::cognitive_complexity)]
     async fn rotate_seeds_if_expiring(&self) -> Option<SystemTime> {
         let mut expired_verifiers = vec![];
         let mut new_verifiers = vec![];
@@ -664,7 +663,7 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> PowManagerGeneric<R, Q
         };
 
         Ok(PowParams::V1(PowParamsV1::new(
-            TimerangeBound::new(seed, ..expiration),
+            TimeRangeBound::new(seed, ..expiration),
             suggested_effort,
         )))
     }
@@ -971,9 +970,10 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> RendRequestReceiver<R,
 
         let decay_adjustment_fraction = net_params.hs_pow_v1_default_decay_adjustment.as_fraction();
 
-        if inner.num_dequeued != 0 {
-            let update_period_duration = inner.runtime.now() - inner.update_period_start;
+        let update_period_duration = inner.runtime.now() - inner.update_period_start;
+        if inner.num_dequeued != 0 && update_period_duration.as_millis() != 0 {
             let avg_request_duration = update_period_duration / inner.num_dequeued;
+            let num_dequeued = f64::from(inner.num_dequeued);
             if inner.queue.is_empty() {
                 let now = inner.runtime.now();
                 let last_transition = inner.last_transition;
@@ -991,24 +991,27 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> RendRequestReceiver<R,
 
             let mut suggested_effort = inner.suggested_effort.lock().expect("Lock poisoned");
             let suggested_effort_inner: u32 = (*suggested_effort).into();
+            let suggested_effort_inner_f64 = f64::from(suggested_effort_inner);
 
             if busy_fraction == 0.0 {
+                // Infallible, this takes the previous suggested effort and
+                // reduces it, so overflow is not possible, since the netdir
+                // code enforces that it's in the range of 0.0 - 0.99.
+                debug_assert!(decay_adjustment_fraction < 1.0);
                 let new_suggested_effort =
-                    u32::from_f64(f64::from(suggested_effort_inner) * decay_adjustment_fraction)
+                    u32::from_f64(suggested_effort_inner_f64 * decay_adjustment_fraction)
                         .expect("Conversion error");
                 *suggested_effort = Effort::from(new_suggested_effort);
             } else {
-                let theoretical_num_dequeued =
-                    f64::from(inner.num_dequeued) * (1.0 / busy_fraction);
-                let num_enqueued_gte_suggested_f64 =
-                    f64::from_usize(inner.num_enqueued_gte_suggested).expect("Conversion error");
+                // The rust `as` operator is used here to provide saturating conversions,
+                // to avoid panicking if the effort calculation would be lossy due to extremely
+                // large values. In practice, the values should be low enough that this shouldn't
+                // come up, but it is worth being defensive.
+                let theoretical_num_dequeued = num_dequeued * (1.0 / busy_fraction);
+                let num_enqueued_gte_suggested_f64 = inner.num_enqueued_gte_suggested as f64;
 
                 if num_enqueued_gte_suggested_f64 >= theoretical_num_dequeued {
-                    let effort_per_dequeued = u32::from_f64(
-                        f64::from_u64(inner.total_effort).expect("Conversion error")
-                            / f64::from(inner.num_dequeued),
-                    )
-                    .expect("Conversion error");
+                    let effort_per_dequeued = (inner.total_effort as f64 / num_dequeued) as u32;
                     *suggested_effort = Effort::from(std::cmp::max(
                         effort_per_dequeued,
                         suggested_effort_inner + 1,
@@ -1016,9 +1019,7 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> RendRequestReceiver<R,
                 } else {
                     let decay = num_enqueued_gte_suggested_f64 / theoretical_num_dequeued;
                     let adjusted_decay = decay + ((1.0 - decay) * decay_adjustment_fraction);
-                    let new_suggested_effort =
-                        u32::from_f64(f64::from(suggested_effort_inner) * adjusted_decay)
-                            .expect("Conversion error");
+                    let new_suggested_effort = (suggested_effort_inner_f64 * adjusted_decay) as u32;
                     *suggested_effort = Effort::from(new_suggested_effort);
                 }
             }
@@ -1038,7 +1039,6 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> RendRequestReceiver<R,
 
     /// Loop to accept message from the wrapped [`mpsc::Receiver`], validate PoW solves, and
     /// enqueue onto the priority queue.
-    #[allow(clippy::cognitive_complexity)]
     fn accept_loop<P: MockablePowManager>(
         self,
         runtime: &R,
@@ -1071,11 +1071,35 @@ impl<R: Runtime, Q: MockableRendRequest + Send + 'static> RendRequestReceiver<R,
 
         cfg_if::cfg_if! {
             if #[cfg(feature = "metrics")] {
-                let counter_rendrequest_error_total = metrics::counter!("arti_hss_pow_rendrequest_error_total", "nickname" => nickname.clone());
-                let counter_rendrequest_verification_failure = metrics::counter!("arti_hss_pow_rendrequest_verification_failure_total", "nickname" => nickname.clone());
-                let counter_rend_queue_overflow = metrics::counter!("arti_hss_pow_rend_queue_overflow_total", "nickname" => nickname.clone());
-                let counter_rendrequest_enqueued = metrics::counter!("arti_hss_pow_rendrequest_enqueued_total", "nickname" => nickname.clone());
-                let histogram_rendrequest_effort = metrics::histogram!("arti_hss_pow_rendrequest_effort_hist", "nickname" => nickname.clone());
+                let counter_rendrequest_error_total = metrics::counter!(
+                    description: "Number of errors processing rendezvous requests in the PoW subsystem.",
+                    unit: metrics::Unit::Count,
+                    "arti_hss_pow_rendrequest_error_total",
+                    "nickname" => nickname.clone()
+                );
+                let counter_rendrequest_verification_failure = metrics::counter!(
+                    description: "Number of PoW verification failures.",
+                    unit: metrics::Unit::Count,
+                    "arti_hss_pow_rendrequest_verification_failure_total",
+                    "nickname" => nickname.clone()
+                );
+                let counter_rend_queue_overflow = metrics::counter!(
+                    description: "Number of times the PoW rendezvous request queue overflowed, leading to dropped requests.",
+                    unit: metrics::Unit::Count,
+                    "arti_hss_pow_rend_queue_overflow_total",
+                    "nickname" => nickname.clone()
+                );
+                let counter_rendrequest_enqueued = metrics::counter!(
+                    description: "Number of rendezvous requests enqueued in the PoW subsystem.",
+                    unit: metrics::Unit::Count,
+                    "arti_hss_pow_rendrequest_enqueued_total",
+                    "nickname" => nickname.clone()
+                );
+                let histogram_rendrequest_effort = metrics::histogram!(
+                    description: "Histogram of effort values seen for incoming PoW requests.",
+                    "arti_hss_pow_rendrequest_effort_hist",
+                    "nickname" => nickname.clone()
+                );
             }
         }
 

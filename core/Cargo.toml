@@ -37,7 +37,7 @@ flutter_rust_bridge = "=2.12.0" # Dart <-> Rust bridge (must match the codegen v
 # Uses the **rustls** TLS backend (pure Rust) instead of native-tls, so the core
 # cross-compiles to Android without a system/vendored OpenSSL. rustls 0.23 needs a crypto
 # provider installed at process start (done in transport::tor) — we use ring.
-arti-client = { version = "0.43", default-features = false, features = [
+arti-client = { version = "0.47", default-features = false, features = [
     "tokio", "rustls", "onion-service-client", "onion-service-service",
     # Onion-service client authorization (restricted discovery, TODO #22). These pull arti's
     # EXPERIMENTAL, semver-unstable API surface (`__is_experimental`) — pinned arti required.
@@ -55,21 +55,21 @@ arti-client = { version = "0.43", default-features = false, features = [
     # transports.txt — see docs/bridges.md; arti launches the binary on demand).
     "bridge-client", "pt-client",
 ], optional = true }
-tor-rtcompat = { version = "0.43", features = ["tokio", "rustls"], optional = true }
+tor-rtcompat = { version = "0.47", features = ["tokio", "rustls"], optional = true }
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
-tor-hsservice = { version = "0.43", optional = true }
-tor-cell = { version = "0.43", optional = true }
+tor-hsservice = { version = "0.47", optional = true }
+tor-cell = { version = "0.47", optional = true }
 # Onion-service client authorization (restricted discovery, TODO #22): the config builders come
 # from tor-hsservice; these add the types arti-client doesn't re-export — HsId (parse a peer onion),
 # KeystoreSelector (client-key generation), and CfgPath (the authorized-keys directory path).
-tor-hscrypto = { version = "0.43", optional = true }
-tor-keymgr = { version = "0.43", optional = true }
+tor-hscrypto = { version = "0.47", optional = true }
+tor-keymgr = { version = "0.47", optional = true }
 # ExpandedKeypair, to round-trip the onion identity through our own sealed store.
-tor-llcrypto = { version = "0.43", optional = true }
-tor-config-path = { version = "0.43", optional = true }
+tor-llcrypto = { version = "0.47", optional = true }
+tor-config-path = { version = "0.47", optional = true }
 # ExplicitOrAuto, for selecting the keystore kind.
-tor-config = { version = "0.43", optional = true }
-safelog = { version = "0.8", optional = true } # DisplayRedacted, to render the onion address
+tor-config = { version = "0.47", optional = true }
+safelog = { version = "0.10", optional = true } # DisplayRedacted, to render the onion address
 # Routes arti's own tracing to the diagnostics channel (logcat on Android) — only when the diag
 # flag is on at runtime, so a normal release stays silent. Needed to debug why a Tor bootstrap
 # stalls in the field (guard/circuit/dir-download failures that never otherwise surface).

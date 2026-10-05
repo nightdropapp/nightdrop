@@ -11,9 +11,9 @@
 
 [package]
 edition = "2024"
-rust-version = "1.89"
+rust-version = "1.92"
 name = "tor-hsservice"
-version = "0.43.0"
+version = "0.47.0"
 authors = [
     "The Tor Project, Inc.",
     "Nick Mathewson <nickm@torproject.org>",
@@ -46,6 +46,7 @@ experimental = [
     "experimental-api",
     "hs-pow-full",
     "metrics",
+    "negotiate-extensions",
     "onion-service-cli-extra",
 ]
 experimental-api = ["__is_experimental"]
@@ -95,6 +96,7 @@ metrics = [
     "dep:metrics",
     "__is_experimental",
 ]
+negotiate-extensions = ["__is_experimental"]
 onion-service-cli-extra = [
     "tor-keymgr/onion-service-cli-extra",
     "__is_experimental",
@@ -125,7 +127,7 @@ version = "1.5.1"
 version = "1.0.0"
 
 [dependencies.derive-deftly]
-version = "~1.11.0"
+version = "~1.12.0"
 features = [
     "full",
     "beta",
@@ -146,11 +148,11 @@ version = "0.10.0"
 version = "0.4.22"
 
 [dependencies.equix]
-version = "0.6.0"
+version = "0.8.0"
 optional = true
 
 [dependencies.fs-mistrust]
-version = "0.14.2"
+version = "0.16.0"
 features = ["serde"]
 
 [dependencies.futures]
@@ -166,13 +168,13 @@ version = "0.4"
 version = "2"
 
 [dependencies.itertools]
-version = "0.14.0"
+version = "0.15.0"
 
 [dependencies.k12]
 version = "0.3.0"
 
 [dependencies.metrics]
-version = "0.24.1"
+version = "0.24.6"
 optional = true
 
 [dependencies.num-traits]
@@ -183,7 +185,7 @@ optional = true
 version = "1"
 
 [dependencies.oneshot-fused-workaround]
-version = "0.6.0"
+version = "0.8.0"
 
 [dependencies.postage]
 version = "0.5.0"
@@ -197,10 +199,10 @@ version = "0.10.1"
 version = "0.10.1"
 
 [dependencies.retry-error]
-version = "0.12.0"
+version = "0.14.0"
 
 [dependencies.safelog]
-version = "0.8.2"
+version = "0.10.0"
 
 [dependencies.serde]
 version = "1.0.103"
@@ -217,78 +219,78 @@ features = ["derive"]
 version = "2"
 
 [dependencies.tor-async-utils]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-basic-utils]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-bytes]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-cell]
-version = "0.43.0"
+version = "0.47.0"
 features = ["hs"]
 
 [dependencies.tor-checkable]
-version = "0.43.0"
+version = "0.47.0"
 optional = true
 
 [dependencies.tor-circmgr]
-version = "0.43.0"
+version = "0.47.0"
 features = [
     "hs-service",
     "send-control-msg",
 ]
 
 [dependencies.tor-config]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-config-path]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-dirclient]
-version = "0.43.0"
+version = "0.47.0"
 features = ["hs-service"]
 default-features = false
 
 [dependencies.tor-error]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-hscrypto]
-version = "0.43.0"
+version = "0.47.0"
 features = ["ope"]
 
 [dependencies.tor-keymgr]
-version = "0.43.0"
+version = "0.47.0"
 features = ["keymgr"]
 
 [dependencies.tor-linkspec]
-version = "0.43.0"
+version = "0.47.0"
 features = [
     "verbatim",
     "decode",
 ]
 
 [dependencies.tor-llcrypto]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-log-ratelim]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-netdir]
-version = "0.43.0"
+version = "0.47.0"
 features = ["hs-service"]
 
 [dependencies.tor-netdoc]
-version = "0.43.0"
+version = "0.47.0"
 features = ["hs-service"]
 
 [dependencies.tor-persist]
-version = "0.43.0"
+version = "0.47.0"
 features = ["state-dir"]
 
 [dependencies.tor-proto]
-version = "0.43.0"
+version = "0.47.0"
 features = [
     "experimental-api",
     "hs-service",
@@ -296,13 +298,13 @@ features = [
 ]
 
 [dependencies.tor-protover]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-relay-selection]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tor-rtcompat]
-version = "0.43.0"
+version = "0.47.0"
 
 [dependencies.tracing]
 version = "0.1.36"
@@ -311,7 +313,7 @@ version = "0.1.36"
 version = "1"
 
 [dependencies.web-time-compat]
-version = "0.1.0"
+version = "0.3.0"
 
 [dev-dependencies.libc]
 version = "0.2"
@@ -324,45 +326,45 @@ version = "1"
 version = "1.0.104"
 
 [dev-dependencies.slotmap-careful]
-version = "0.7.0"
+version = "0.9.0"
 
 [dev-dependencies.tempfile]
 version = "3"
 
 [dev-dependencies.test-temp-dir]
-version = "0.7.0"
+version = "0.9.0"
 
 [dev-dependencies.tor-config]
-version = "0.43.0"
+version = "0.47.0"
 features = ["testing"]
 
 [dev-dependencies.tor-key-forge]
-version = "0.43.0"
+version = "0.47.0"
 
 [dev-dependencies.tor-keymgr]
-version = "0.43.0"
+version = "0.47.0"
 features = [
     "keymgr",
     "testing",
 ]
 
 [dev-dependencies.tor-netdir]
-version = "0.43.0"
+version = "0.47.0"
 features = [
     "hs-service",
     "testing",
 ]
 
 [dev-dependencies.tor-netdoc]
-version = "0.43.0"
+version = "0.47.0"
 features = ["testing"]
 
 [dev-dependencies.tor-persist]
-version = "0.43.0"
+version = "0.47.0"
 features = ["testing"]
 
 [dev-dependencies.tor-rtmock]
-version = "0.43.0"
+version = "0.47.0"
 
 [dev-dependencies.tracing-test]
 version = "0.2.4"
