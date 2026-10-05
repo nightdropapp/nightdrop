@@ -88,9 +88,16 @@ device**, marked **"Waiting for {name} to come online"**, and is retried directl
   the held queue is stored with the chat. It holds only messages explicitly marked held, *not*
   everything in the "sent" state: `awaiting_receipt`'s doc comment records why seeding a retry
   queue from history sent a burst of duplicates.
-* **Retry:** back off from 1 min to a cap of 15 min, on the poll cadence. Every retry is a
-  descriptor fetch plus a circuit, so it has a battery cost, which has to be measured the way
-  `background-traffic.md` measured the mailbox checks before the cap is fixed.
+* **Retry (decided 2026-10-05):** back off from 1 min to a cap of **5 min while the app is open**
+  and **15 min in the background**, on the poll cadence. Every retry is a descriptor fetch plus a
+  circuit, so the background cap has a battery cost that should be measured the way
+  `background-traffic.md` measured the mailbox checks.
+* **No "I'm online" signal (decided 2026-10-05),** but build it switched off. A direct-only device
+  could tell its contacts it has just come online, so they flush held messages at once instead of
+  waiting for their next retry. It is not wanted now: it would announce presence to every contact
+  on each launch. The implementation includes it behind a single core constant
+  (`ANNOUNCE_ONLINE_ON_START = false`, beside the other announce settings in `node.rs`), with a
+  test that runs both settings, so turning it on later is a one-line change, not a design.
 * **Flush at once on any inbound frame from that peer:** hearing from them proves they are online
   right now, and costs nothing extra.
 * **Control frames** (receipts, `Version`, `Address`, `ClientKey`, edits, unsends, burns) follow
@@ -141,7 +148,8 @@ today to restore keys after a restart). So:
   first contact for everyone, so one path is tested instead of two.
 
 **Short codes need the rendezvous**, which lives on a relay, so a direct-only user can neither
-create nor join one (decided). QR stays available. See §11 for a possible one-off exception.
+create nor join one (decided), not even once through the Night Drop rendezvous (decided 2026-10-05).
+QR stays available.
 
 ## 6. What else depends on the relay
 
@@ -232,14 +240,11 @@ Changing relay TTLs. Groups (`group-chat.md`, 0.3), which will inherit whatever 
 
 ## 11. Open questions
 
-* **One-off short code for a direct-only user**, using the Night Drop rendezvous once with explicit
-  consent. That would make direct only less isolating, at the price of a relay contact the user
-  said they wanted to avoid. Default: no.
 * **Directory staleness** for a user who removed Night Drop but sends to contacts who use it. Their
   copy of the directory ages, because only a listed relay is asked for it. Options: refresh it
   anyway when posting to a contact's Night Drop entry (they are talking to that relay regardless),
   or accept the baked-in default plus the last list.
-* **An "I'm online" ping** from a direct-only device at startup, so contacts flush held messages at
-  once instead of waiting up to 15 min. Faster, but it announces presence to every contact on each
-  launch. Default: no ping; rely on flush-on-inbound and the retry cap.
-* Whether the retry cap should be shorter while the app is in the foreground.
+
+**Decided 2026-10-05:** no one-off short code for direct-only users (they pair by QR only); no
+"I'm online" signal, built switched off (§4); retry cap 5 min while open, 15 min in the background
+(§4).
