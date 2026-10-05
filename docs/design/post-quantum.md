@@ -8,7 +8,7 @@ crypto.
 
 ## 1. Where we are today
 
-- Crypto core is **vodozemac 0.8** (Matrix's pure-Rust Olm/Megolm): **X3DH-style** initial key
+- Crypto core is **vodozemac** (0.8 when this was written; 0.11 from 0.1.28; Matrix's pure-Rust Olm/Megolm): **X3DH-style** initial key
   agreement + **Double Ratchet**, all over **Curve25519 / Ed25519** — entirely **classical**.
 - As of 2026, vodozemac has **no PQXDH / PQ key agreement** (verified: upstream still ships the
   classical Olm ratchet). Signal's PQXDH (X25519 **+ CRYSTALS-Kyber/ML-KEM**) is the reference for

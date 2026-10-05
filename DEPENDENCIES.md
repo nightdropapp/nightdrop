@@ -7,18 +7,26 @@ This document records the audit of every direct dependency for network / phone-h
 behavior, the transitive concerns worth calling out, and a checklist to re-run when
 dependencies change.
 
-**Bottom line:** the **only** network egress in the whole app is Tor. There is no
+**Bottom line:** all app traffic goes through Tor. The only other connections are the two
+user-initiated ones described next, neither of which carries app data. There is no other
 clearnet path by design (invariant: "Tor by default, never hardcode a non-anonymized
 network path"). No Firebase, no FCM/APNs push SDK, no Google Play Services (GMS), no
 analytics, no crash reporter, no ad SDK appears anywhere in the resolved tree.
 
-The one deliberate exception is a **user-configured bridge**, which is how Tor itself is
+The first deliberate exception is a **user-configured bridge**, which is how Tor itself is
 reached where the public relays are blocked (`docs/bridges.md`, `docs/design/android-bridges.md`):
 connecting to *any* bridge is a clearnet connection to that bridge by design. A **WebTunnel**
 bridge (`webtunnel` feature, off by default) additionally does a clearnet DNS lookup of the
 bridge's `url=` host — the same name the TLS SNI to that bridge already carries. This carries no
 app data: it is Tor's own entry hop, disguised, chosen and pasted by the user. All message
 traffic still flows through Tor inside it.
+
+The second, approved 2026-10-03, is **"Get WebTunnel bridges"** on the bridges screen (the
+`moat` crate, below). It exists for when Tor is blocked, so it cannot use Tor: after a consent
+dialog that says so, it asks the Tor Project's bridge distributor (`bridges.torproject.org`, via
+its meek domain-fronted CDN, with a Chrome-shaped TLS handshake) for WebTunnel bridges. It sends
+only an optional two-letter country code and receives bridge lines; nothing goes to Night Drop,
+and it runs only when the user taps it.
 
 ## How this was audited
 
@@ -43,16 +51,17 @@ anonymized transport.
 | Dependency | Purpose | Network? |
 |---|---|---|
 | `anyhow` | error handling | none |
-| `vodozemac` 0.8 | Olm/Megolm X3DH + Double Ratchet (matrix.org, audited) | none |
+| `vodozemac` 0.11 (`experimental-session-config`, for session version 2) | Olm/Megolm X3DH + Double Ratchet (matrix.org, audited) | none |
 | `spake2` 0.4 | PAKE bouncer for short-code pairing | none |
 | `ml-kem` 0.3 | ML-KEM-768 (FIPS 203) hybrid PQ pairing | none |
 | `hkdf`, `sha2`, `chacha20poly1305`, `argon2`, `ed25519-dalek` | RustCrypto primitives (at-rest AEAD, KDF, backup hashing, directory signing) | none |
 | `rand`, `zeroize`, `base64`, `serde`, `serde_json` | RNG, memory wipe, encoding | none |
 | `flutter_rust_bridge` 2.12 | Dart↔Rust FFI | none (in-process) |
-| **`arti-client` + `tor-*` 0.43** (`tor` feature) | embedded Tor client + onion service | **Tor only** — this *is* the transport; connects to the Tor network and the configured relay/peer onions, never clearnet, never analytics |
+| **`arti-client` + `tor-*` 0.47** (`tor` feature; `tor-hsservice` patched, `third_party/`) | embedded Tor client + onion service | **Tor only** — this *is* the transport; connects to the Tor network and the configured relay/peer onions, never clearnet, never analytics |
 | `rustls` 0.23 (ring) | TLS *inside* Tor circuits | no independent egress |
 | `tokio`, `futures` | async runtime for the Tor stack | none of its own |
 | `libsqlite3-sys` (bundled) | arti's **local** on-disk state store | none (local file) |
+| `moat` (this repo; rustls, ring, webpki-roots, serde) | "Get WebTunnel bridges": the Tor Project's bridge distributor over meek | **clearnet, user-initiated only** — the CDN fronts and `bridges.torproject.org`, after consent; see above |
 
 The **relay** (`relay/`) depends on the core plus the same arti stack; it publishes
 its own onion service and store-and-forwards opaque, E2E-encrypted, fixed-size blobs.
