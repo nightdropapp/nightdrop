@@ -4283,8 +4283,6 @@ dependencies = [
 [[package]]
 name = "saturating-time"
 version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a586db154f85f3faf78398c37b6792d71f99d2253d3277571e14f8a8c6e49a65"
 dependencies = [
  "web-time-compat",
 ]
