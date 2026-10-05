@@ -759,6 +759,14 @@ skip the check** — never fall back. There is no clearnet path to disable becau
 clearnet path to begin with. Reaching a v3 onion authenticates the site by construction: the
 address *is* the public key, so there is no CA in the trust path and nothing to spoof.
 
+**When it asks** (`app/lib/src/core/update_schedule.dart`): at most once a day, so the request
+is not a heartbeat that counts installs. The first check of a run waits for our onion service to
+come up (at most 5 minutes), and a running app looks every hour whether a check is due — up to
+0.1.27 it checked only at launch, so a desktop window left open for days never noticed a release.
+A check the site did not answer is due again after 3 hours, not a day, and still not on every
+launch. F-Droid installs skip it (F-Droid is their updater); "Check for updates" in the menu always
+asks.
+
 **The manifest cannot drift from what is served.** `scripts/gen-update-manifest.sh` (run by
 `make config`) takes the version from `app/pubspec.yaml` and each APK's SHA-256 from the file
 actually sitting in `website/applications/android/`. An APK that is not present is simply
