@@ -78,7 +78,7 @@ tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "time
 futures = { version = "0.3", optional = true }
 # arti's dir cache pulls rusqlite; bundle SQLite from source so we don't need a system
 # libsqlite3 (feature unifies across the dep graph).
-libsqlite3-sys = { version = "0.37", features = ["bundled"], optional = true }
+libsqlite3-sys = { version = "0.38", features = ["bundled"], optional = true }
 
 [features]
 # Enables the embedded Tor (arti) transport. Off by default so the core builds fast and

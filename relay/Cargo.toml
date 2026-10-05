@@ -34,7 +34,7 @@ safelog = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util"] }
 futures = "0.3"
 # arti's dir cache pulls rusqlite; bundle SQLite from source (no system libsqlite3 needed).
-libsqlite3-sys = { version = "0.37", features = ["bundled"] }
+libsqlite3-sys = { version = "0.38", features = ["bundled"] }
 
 # Dev-only live dashboard (TUI) over the relay flow (NIGHTDROP_RELAY_TUI=1). ratatui re-exports
 # crossterm for terminal handling.

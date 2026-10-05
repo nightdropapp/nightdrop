@@ -60,7 +60,7 @@ anonymized transport.
 | **`arti-client` + `tor-*` 0.47** (`tor` feature; `tor-hsservice` patched, `third_party/`) | embedded Tor client + onion service | **Tor only** — this *is* the transport; connects to the Tor network and the configured relay/peer onions, never clearnet, never analytics |
 | `rustls` 0.23 (ring) | TLS *inside* Tor circuits | no independent egress |
 | `tokio`, `futures` | async runtime for the Tor stack | none of its own |
-| `libsqlite3-sys` (bundled) | arti's **local** on-disk state store | none (local file) |
+| `libsqlite3-sys` 0.38 (bundled SQLite 3.53) | arti's **local** on-disk state store | none (local file) |
 | `moat` (this repo; rustls, ring, webpki-roots, serde) | "Get WebTunnel bridges": the Tor Project's bridge distributor over meek | **clearnet, user-initiated only** — the CDN fronts and `bridges.torproject.org`, after consent; see above |
 
 The **relay** (`relay/`) depends on the core plus the same arti stack; it publishes
