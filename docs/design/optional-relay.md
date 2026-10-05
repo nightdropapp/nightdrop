@@ -121,10 +121,22 @@ today to restore keys after a restart). So:
 * **Reply (joiner → inviter):** the joiner does the same in reverse. It mints a keypair, authorizes
   it on its own onion, and puts the secret inside its `Hello`, which is E2E as a pre-key message.
   The inviter can then reach the joiner even if the joiner's onion is restricted too.
-* **Lifetime:** both are pairing credentials. Each is replaced by the peer's own `ClientKey` (the
-  existing exchange) and then revoked. An unused QR credential is revoked after 24 h. It grants
-  only the ability to dial: the `Hello` still has to pass authorization-before-first-message,
-  so a leaked QR gives reachability and nothing more, the same as a leaked QR does today.
+* **Two separate gates, and the pass opens only the first.** Onion client auth decides who can
+  *reach* the device. Chat approval decides who can *talk* to the user. A pass gets a `Hello`
+  delivered and nothing else. That `Hello` lands as a **chat request the user must Accept**,
+  exactly as every inbound `Hello` does today (`frames.rs`: `require_authorization` is set on every
+  real constructor, and the branch logs "held as a request pending approval"). Nobody is approved
+  automatically. Showing a QR is not consent to whoever scans it.
+* **Tighten onion authorization to follow the user's decision.** Today a pending request's
+  `ClientKey` is authorized on our onion as soon as it arrives (`frames.rs`, the `ClientKey` arm
+  authorizes any contact with a chat, *pending included*). In 0.2 a request gets onion access
+  only when the user taps **Accept**, and a **Decline** leaves it with none. The same goes for
+  the joiner's reply pass: we hold it unused until Accept.
+* **Lifetime:** the QR pass is **single-use**. It is revoked as soon as a `Hello` arrives that
+  used that QR's one-time key, which is single-use anyway, and after 24 h if nobody scans it. A
+  QR screenshot posted online therefore lets at most one stranger knock, as a request the user
+  can decline, within a day. The joiner's reply pass is replaced by the normal `ClientKey`
+  exchange after Accept, then revoked.
 * This applies to **every** pairing in 0.2, not only to direct-only users. It removes the relay from
   first contact for everyone, so one path is tested instead of two.
 
