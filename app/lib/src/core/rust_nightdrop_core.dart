@@ -16,6 +16,7 @@ import 'notifications.dart';
 import 'install_source.dart';
 import 'public_downloads.dart';
 import 'screenshot_detector.dart';
+import 'update_schedule.dart';
 
 /// [NightdropCore] backed by the real Rust security core via flutter_rust_bridge.
 ///
@@ -648,10 +649,9 @@ class RustNightdropCore extends NightdropCore {
   static const _kUpdateCheckedAt = 'nightdrop_update_checked_at';
   static const _kUpdateHidden = 'nightdrop_update_hidden_version';
 
-  /// How often we ask the onion site. Daily is often enough to matter for a security fix and
-  /// rare enough that the request is not a heartbeat: a beacon every launch would let anyone
-  /// counting requests infer how many installs exist and how often they run.
-  static const _updateCheckInterval = Duration(hours: 24);
+  /// How long the first check of a launch waits for our onion service to come up: a check made
+  /// while Tor is still starting only fails. After this it asks anyway.
+  static const _updateWaitForTor = Duration(minutes: 5);
 
   String? _updateAvailable;
 
@@ -811,6 +811,24 @@ class RustNightdropCore extends NightdropCore {
     }
   }
 
+  /// The automatic update check for this run of the core: first once our onion service is up (or
+  /// after [_updateWaitForTor]), then every [updateDueTick] while the app keeps running — a desktop
+  /// window can stay open for days, and checking only at launch left one on 0.1.24 after 0.1.27
+  /// shipped. Ends when this core is replaced or closed, like the guard heal.
+  Future<void> _scheduleUpdateChecks() async {
+    final core = _core;
+    if (core == null) return;
+    final waitUntil = DateTime.now().add(_updateWaitForTor);
+    while (identical(_core, core) && DateTime.now().isBefore(waitUntil)) {
+      if (await onionReady()) break;
+      await Future.delayed(const Duration(seconds: 15));
+    }
+    while (identical(_core, core)) {
+      await maybeCheckForUpdate();
+      await Future.delayed(updateDueTick);
+    }
+  }
+
   @override
   Future<bool> checkForUpdateNow() async {
     // Clear both gates: the daily timer and the hidden-version marker. Asking explicitly is the
@@ -838,15 +856,15 @@ class RustNightdropCore extends NightdropCore {
     // outcome on a slow or offline network, and it must look exactly like "nothing to report".
     try {
       final last = int.tryParse(await _secure.read(key: _kUpdateCheckedAt) ?? '') ?? 0;
-      final since = DateTime.now().millisecondsSinceEpoch - last;
-      if (last != 0 && since < _updateCheckInterval.inMilliseconds) return false;
+      if (!updateCheckDue(last, DateTime.now())) return false;
 
       final result = await _core?.checkForUpdate(currentVersion: kAppVersion);
-      // Record the attempt, not the success: a site that is down must not turn into a retry on
-      // every launch, which is the beacon we are avoiding.
+      // Record the attempt either way, so a site that is down never turns into a retry on every
+      // launch (the beacon we are avoiding) — but a failed one is due again in a few hours, not a
+      // day (update_schedule.dart).
       await _secure.write(
         key: _kUpdateCheckedAt,
-        value: '${DateTime.now().millisecondsSinceEpoch}',
+        value: '${lastCheckedToStore(DateTime.now(), answered: result != null)}',
       );
       // Null means the site did not answer (down, slow, or no anonymized path). Do NOT let that
       // read as "no update": the caller reports it separately.
@@ -1027,9 +1045,9 @@ class RustNightdropCore extends NightdropCore {
       unawaited(_restoreCoverTraffic());
       unawaited(_restoreBurnReceipts());
       // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
-      // this one dials Tor. It self-limits to one check a day, so calling it on every start is
-      // free after the first.
-      unawaited(maybeCheckForUpdate());
+      // this one dials Tor. It self-limits (update_schedule.dart), so running it on every start
+      // and every hour after is free when nothing is due.
+      unawaited(_scheduleUpdateChecks());
     }
   }
 
