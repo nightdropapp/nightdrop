@@ -34,8 +34,18 @@ with a restricted onion (§5 below).
   added. The symbolic form matters: the directory exists so the Night Drop relays can rotate
   without an app update, and a contact's copy of "Night Drop" must follow that rotation rather
   than freeze a list of onions from the day it was announced.
-* **At most 4 entries**, which settles #17's open question. Every sender posts each message to
-  every entry, so this bounds the fan-out cost.
+* **At most 4 entries in *your own* list**, the relays where *you* receive. This settles #17's
+  open question. Someone writing to you posts each offline message to every entry, so the cap
+  bounds how many copies one message makes. It does **not** limit how many relays you can send
+  *to*: each contact has their own list, and you post to theirs. Ten contacts on ten different
+  self-hosted relays all get their offline mail. The same cap applies to a list a contact
+  announces to us (extra entries are ignored), so a hostile contact cannot make us post a message
+  a thousand times.
+* **Relays never see anyone's list.** Lists travel only between contacts, end to end encrypted
+  (§3). The Night Drop directory is the opposite direction and the only thing a relay serves: a
+  list of *Night Drop's own* relays, signed by us. Nothing about any other relay is ever sent to
+  a Night Drop relay. Someone running their own relay shares it with their contacts, and only the
+  app does that, automatically and E2E, when they add it to their list.
 * **Empty = direct only.** No special flag: the list itself is the state, so there is no way for
   "direct only" and a non-empty list to disagree.
 * **Migration from 0.1.x:** an upgraded identity starts with `[Night Drop] + my_relays`, which is
