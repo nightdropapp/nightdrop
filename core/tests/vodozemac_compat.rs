@@ -11,8 +11,9 @@
 //!   upgrade, which Bob's restored account must still accept.
 //!
 //! The test restores all of it with the vodozemac this crate builds with and keeps the
-//! conversations going in both directions. Regenerate the fixture only on purpose, with the old
-//! version: `NIGHTDROP_WRITE_FIXTURE=1 cargo test -p nightdrop --test vodozemac_compat -- --ignored`.
+//! conversations going in both directions. The generator was the `generate_fixture` test in commit
+//! c031723, written against the 0.8 API, which no longer compiles; the fixture itself must never be
+//! regenerated with a newer vodozemac, or it stops testing anything.
 
 use nightdrop::wire::WireOlm;
 use serde::{Deserialize, Serialize};
@@ -71,74 +72,6 @@ impl WireOlmJson {
     }
 }
 
-fn first_otk(account: &mut Account) -> Curve25519PublicKey {
-    account.generate_one_time_keys(1);
-    let key = *account
-        .one_time_keys()
-        .values()
-        .next()
-        .expect("one-time key");
-    account.mark_keys_as_published();
-    key
-}
-
-#[test]
-#[ignore = "writes the fixture; run only with the OLD vodozemac, on purpose"]
-fn generate_fixture() {
-    if std::env::var("NIGHTDROP_WRITE_FIXTURE").as_deref() != Ok("1") {
-        return;
-    }
-    let alice = Account::new();
-    let mut bob = Account::new();
-    let carol = Account::new();
-
-    // Alice opens a session to Bob, as after a QR pairing; they talk a little.
-    let bob_otk = first_otk(&mut bob);
-    let mut a =
-        alice.create_outbound_session(SessionConfig::version_2(), bob.curve25519_key(), bob_otk);
-    let first = a.encrypt(b"hello bob");
-    let OlmMessage::PreKey(pre) = &first else {
-        panic!("first message is pre-key")
-    };
-    let mut b = bob
-        .create_inbound_session(alice.curve25519_key(), pre)
-        .unwrap()
-        .session;
-    for i in 0..3 {
-        let m = b.encrypt(format!("bob {i}").as_bytes());
-        assert_eq!(a.decrypt(&m).unwrap(), format!("bob {i}").as_bytes());
-        let m = a.encrypt(format!("alice {i}").as_bytes());
-        assert_eq!(b.decrypt(&m).unwrap(), format!("alice {i}").as_bytes());
-    }
-
-    // Bob publishes another one-time key; Carol (still on the old app) starts a chat with it.
-    let bob_otk2 = first_otk(&mut bob);
-    let mut c =
-        carol.create_outbound_session(SessionConfig::version_2(), bob.curve25519_key(), bob_otk2);
-    let carol_first = c.encrypt(b"hi bob, it's carol");
-
-    // Each side sends one more message that the other has not received; the app saves its state
-    // after sending, so the pickles below already include these sends.
-    let pending_to_bob = a.encrypt(b"sent before bob updated");
-    let pending_to_alice = b.encrypt(b"sent before alice updated");
-
-    let fixture = Fixture {
-        vodozemac: "0.8.1".into(),
-        alice_account: alice.pickle().encrypt(&KEY),
-        alice_session: a.pickle().encrypt(&KEY),
-        bob_account: bob.pickle().encrypt(&KEY),
-        bob_session: b.pickle().encrypt(&KEY),
-        alice_identity_key: alice.curve25519_key().to_base64(),
-        bob_identity_key: bob.curve25519_key().to_base64(),
-        carol_identity_key: carol.curve25519_key().to_base64(),
-        pending_to_bob: (&pending_to_bob).into(),
-        pending_to_alice: (&pending_to_alice).into(),
-        carol_prekey_to_bob: (&carol_first).into(),
-    };
-    std::fs::create_dir_all(std::path::Path::new(FIXTURE).parent().unwrap()).unwrap();
-    std::fs::write(FIXTURE, serde_json::to_string_pretty(&fixture).unwrap()).unwrap();
-}
-
 #[test]
 fn state_saved_by_vodozemac_0_8_keeps_working() {
     let f: Fixture = serde_json::from_str(&std::fs::read_to_string(FIXTURE).unwrap()).unwrap();
@@ -156,6 +89,12 @@ fn state_saved_by_vodozemac_0_8_keeps_working() {
     let mut a = restore_session(&f.alice_session);
     let mut b = restore_session(&f.bob_session);
 
+    // Sessions keep the version they were made with. Night Drop uses version 2 everywhere, and
+    // vodozemac >= 0.10 defaults to version 1: a session restored as version 1 would stop talking
+    // to every peer still on the old app.
+    assert_eq!(a.session_config(), SessionConfig::version_2());
+    assert_eq!(b.session_config(), SessionConfig::version_2());
+
     // Identities survive: the same long-term keys contacts know them by.
     assert_eq!(alice.curve25519_key().to_base64(), f.alice_identity_key);
     assert_eq!(bob.curve25519_key().to_base64(), f.bob_identity_key);
@@ -172,9 +111,9 @@ fn state_saved_by_vodozemac_0_8_keeps_working() {
 
     // The conversation goes on, both ways, ratchet and all.
     for i in 0..5 {
-        let m = a.encrypt(format!("after {i}").as_bytes());
+        let m = a.encrypt(format!("after {i}").as_bytes()).unwrap();
         assert_eq!(b.decrypt(&m).unwrap(), format!("after {i}").as_bytes());
-        let m = b.encrypt(format!("reply {i}").as_bytes());
+        let m = b.encrypt(format!("reply {i}").as_bytes()).unwrap();
         assert_eq!(a.decrypt(&m).unwrap(), format!("reply {i}").as_bytes());
     }
 
@@ -185,6 +124,19 @@ fn state_saved_by_vodozemac_0_8_keeps_working() {
     let carol = Curve25519PublicKey::from_base64(&f.carol_identity_key).unwrap();
     let accepted = nightdrop_accept(&mut bob, carol, &pre);
     assert_eq!(accepted, b"hi bob, it's carol");
+
+    // For the opposite direction (this version -> a peer still on 0.8), write messages sealed by
+    // the restored, upgraded sessions; an out-of-tree 0.8 program decrypts them with the fixture's
+    // original sessions. Only when asked: NIGHTDROP_INTEROP_OUT=<file>.
+    if let Ok(out) = std::env::var("NIGHTDROP_INTEROP_OUT") {
+        let mut a2 = restore_session(&f.alice_session);
+        let mut b2 = restore_session(&f.bob_session);
+        let msgs: Vec<WireOlmJson> = vec![
+            (&b2.encrypt(b"from bob on the new version").unwrap()).into(),
+            (&a2.encrypt(b"from alice on the new version").unwrap()).into(),
+        ];
+        std::fs::write(out, serde_json::to_string(&msgs).unwrap()).unwrap();
+    }
 
     // And the restored sessions still save and load again.
     let again = Session::from_pickle(
@@ -199,7 +151,7 @@ fn nightdrop_accept(
     carol: Curve25519PublicKey,
     pre: &vodozemac::olm::PreKeyMessage,
 ) -> Vec<u8> {
-    bob.create_inbound_session(carol, pre)
+    bob.create_inbound_session(SessionConfig::version_2(), carol, pre)
         .expect("inbound session")
         .plaintext
 }

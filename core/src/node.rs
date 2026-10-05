@@ -1479,7 +1479,8 @@ impl Node {
     ) -> Option<(Address, Frame)> {
         let from = self.identity_key();
         let chat = self.chats.get_mut(contact_id)?;
-        let sealed = WireOlm::from_olm(&crypto::encrypt(&mut chat.session, marker));
+        // `None` too if the session is unusable (non-contributory ratchet key).
+        let sealed = WireOlm::from_olm(&crypto::encrypt(&mut chat.session, marker).ok()?);
         Some((chat.peer_address.clone(), build(from, sealed)))
     }
 

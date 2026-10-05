@@ -461,12 +461,16 @@ impl Node {
             let confirm = pair
                 .peer
                 .map(|peer| confirm_hash(&pair_secret(&me, contact_id, &pair.own, &peer)));
+            let payload = encode_payload(&pair.own, confirm.as_ref());
+            // Sealed before anything is marked sent: an unusable session (non-contributory ratchet
+            // key) sends nothing and must not leave `confirm_sent` set.
+            let Ok(message) = crypto::encrypt(&mut chat.session, &payload) else {
+                return false;
+            };
             if confirm.is_some() {
                 pair.confirm_sent = true;
             }
             frame_confirms = confirm.is_some();
-            let payload = encode_payload(&pair.own, confirm.as_ref());
-            let message = crypto::encrypt(&mut chat.session, &payload);
             (
                 chat.peer_address.clone(),
                 Frame::MailboxKey {

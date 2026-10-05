@@ -421,7 +421,7 @@ mod tests {
         let bundle = bob.publish_prekey_bundle();
         let mut session = crypto::open_outbound(&alice, &bundle).unwrap();
 
-        let original = crypto::encrypt(&mut session, b"over the wire");
+        let original = crypto::encrypt(&mut session, b"over the wire").unwrap();
         let wired = WireOlm::from_olm(&original);
         let bytes = serde_json::to_vec(&wired).unwrap();
         let back: WireOlm = serde_json::from_slice(&bytes).unwrap();

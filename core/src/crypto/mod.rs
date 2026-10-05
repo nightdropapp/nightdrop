@@ -21,11 +21,12 @@ pub fn open_outbound(local: &LocalIdentity, bundle: &PreKeyBundle) -> Result<Ses
         Curve25519PublicKey::from_base64(&bundle.identity_key).context("bundle identity key")?;
     let one_time_key =
         Curve25519PublicKey::from_base64(&bundle.one_time_key).context("bundle one-time key")?;
-    Ok(local.account().create_outbound_session(
-        SessionConfig::version_2(),
-        identity_key,
-        one_time_key,
-    ))
+    // Fails if the bundle's keys are not contributory (low-order points): a key no honest
+    // client generates, which would give an insecure shared secret (vodozemac >= 0.10).
+    local
+        .account()
+        .create_outbound_session(SessionConfig::version_2(), identity_key, one_time_key)
+        .context("create outbound session")
 }
 
 /// The result of accepting a peer's first (pre-key) message: the established session and
@@ -51,9 +52,11 @@ pub fn accept_inbound(
             anyhow::bail!("first message must be a pre-key message to open a session")
         }
     };
+    // Every Night Drop build opens sessions as version 2 (`open_outbound`), and vodozemac no
+    // longer infers it, so it is stated here; a version-1 peer is not one of ours.
     let result = local
         .account_mut()
-        .create_inbound_session(their_key, pre_key)
+        .create_inbound_session(SessionConfig::version_2(), their_key, pre_key)
         .context("create inbound session")?;
     Ok(Accepted {
         session: result.session,
@@ -61,9 +64,13 @@ pub fn accept_inbound(
     })
 }
 
-/// Encrypt one message on an established session (advances the ratchet).
-pub fn encrypt(session: &mut Session, plaintext: &[u8]) -> OlmMessage {
-    session.encrypt(plaintext)
+/// Encrypt one message on an established session (advances the ratchet). Fails only if the
+/// peer's ratchet key is not contributory (a low-order point): no honest client sends one, so the
+/// session is unusable and nothing must be sent on it.
+pub fn encrypt(session: &mut Session, plaintext: &[u8]) -> Result<OlmMessage> {
+    session
+        .encrypt(plaintext)
+        .context("encrypt: the peer's ratchet key is unusable")
 }
 
 /// Decrypt one message on an established session (advances the ratchet).
@@ -85,7 +92,7 @@ mod tests {
 
         // Alice opens an outbound session and sends the first (pre-key) message.
         let mut alice_session = open_outbound(&alice, &bob_bundle).unwrap();
-        let first = encrypt(&mut alice_session, b"hi bob");
+        let first = encrypt(&mut alice_session, b"hi bob").unwrap();
 
         // Bob accepts it, deriving his session and the first plaintext.
         let alice_identity = alice.curve25519().to_base64();
@@ -94,16 +101,16 @@ mod tests {
         assert_eq!(accepted.first_plaintext, b"hi bob");
 
         // Bob replies; Alice decrypts. Then several more rounds to exercise the ratchet.
-        let reply = encrypt(&mut bob_session, b"hi alice");
+        let reply = encrypt(&mut bob_session, b"hi alice").unwrap();
         assert_eq!(decrypt(&mut alice_session, &reply).unwrap(), b"hi alice");
 
         for i in 0..5 {
             let a = format!("from alice #{i}");
-            let m = encrypt(&mut alice_session, a.as_bytes());
+            let m = encrypt(&mut alice_session, a.as_bytes()).unwrap();
             assert_eq!(decrypt(&mut bob_session, &m).unwrap(), a.as_bytes());
 
             let b = format!("from bob #{i}");
-            let m = encrypt(&mut bob_session, b.as_bytes());
+            let m = encrypt(&mut bob_session, b.as_bytes()).unwrap();
             assert_eq!(decrypt(&mut alice_session, &m).unwrap(), b.as_bytes());
         }
     }
@@ -116,12 +123,38 @@ mod tests {
         let alice_identity = alice.curve25519().to_base64();
 
         let mut s = open_outbound(&alice, &bundle).unwrap();
-        let first = encrypt(&mut s, b"once");
+        let first = encrypt(&mut s, b"once").unwrap();
         assert!(accept_inbound(&mut bob, &alice_identity, &first).is_ok());
 
         // Replaying against the same consumed one-time key must fail.
         let mut s2 = open_outbound(&alice, &bundle).unwrap();
-        let replay = encrypt(&mut s2, b"again");
+        let replay = encrypt(&mut s2, b"again").unwrap();
         assert!(accept_inbound(&mut bob, &alice_identity, &replay).is_err());
+    }
+
+    /// vodozemac >= 0.10 refuses keys without contributory behaviour (low-order points), which
+    /// would give a shared secret an attacker can predict. A bundle carrying one must not open a
+    /// session. (The all-zero point is the simplest low-order point.)
+    #[test]
+    fn a_bundle_with_a_low_order_key_is_refused() {
+        let alice = LocalIdentity::generate();
+        let mut bob = LocalIdentity::generate();
+        let good = bob.publish_prekey_bundle();
+        let zero = Curve25519PublicKey::from_bytes([0u8; 32]).to_base64();
+
+        let bad_identity = PreKeyBundle {
+            identity_key: zero.clone(),
+            ..good.clone()
+        };
+        assert!(open_outbound(&alice, &bad_identity).is_err());
+        let bad_one_time = PreKeyBundle {
+            one_time_key: zero,
+            ..good.clone()
+        };
+        assert!(open_outbound(&alice, &bad_one_time).is_err());
+        assert!(
+            open_outbound(&alice, &good).is_ok(),
+            "an honest bundle still works"
+        );
     }
 }

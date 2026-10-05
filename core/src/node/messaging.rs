@@ -94,7 +94,7 @@ impl Node {
         } else {
             pack_burn(burn_secs, text)
         };
-        let message = crypto::encrypt(&mut chat.session, &plaintext);
+        let message = crypto::encrypt(&mut chat.session, &plaintext)?;
         let wire_olm = WireOlm::from_olm(&message);
         let frame = if burn_secs == 0 {
             Frame::Message {
@@ -263,7 +263,10 @@ impl Node {
             };
             // Re-sealed rather than re-posted verbatim: the original bytes are long gone, and the
             // ratchet advancing again is harmless — the id is what the peer dedups on.
-            let message = crypto::encrypt(&mut chat.session, text.as_bytes());
+            // An unusable session (non-contributory ratchet key) gets no retry.
+            let Ok(message) = crypto::encrypt(&mut chat.session, text.as_bytes()) else {
+                continue;
+            };
             let frame = Frame::Message {
                 from: from.clone(),
                 id: a.msg_id.clone(),
@@ -719,7 +722,7 @@ impl Node {
             let recalled_all =
                 recall_receipts(self.transport.as_ref(), &self.relay, contact_id, &copies);
             if recalled_all {
-                let message = crypto::encrypt(&mut chat.session, new_text.as_bytes());
+                let message = crypto::encrypt(&mut chat.session, new_text.as_bytes())?;
                 let frame = Frame::Message {
                     from,
                     id: msg_id.to_string(),
@@ -740,7 +743,7 @@ impl Node {
 
         // Path 2: the peer (may) have the original — send an explicit edit.
         let envelope = pack_edit(msg_id, new_text);
-        let message = crypto::encrypt(&mut chat.session, &envelope);
+        let message = crypto::encrypt(&mut chat.session, &envelope)?;
         let frame = Frame::Edit {
             from,
             message: WireOlm::from_olm(&message),
@@ -800,7 +803,7 @@ impl Node {
 
         // Path 2: the peer (may) have the original — tell them to delete it.
         let envelope = pack_unsend(msg_id);
-        let message = crypto::encrypt(&mut chat.session, &envelope);
+        let message = crypto::encrypt(&mut chat.session, &envelope)?;
         let frame = Frame::Unsend {
             from,
             message: WireOlm::from_olm(&message),
@@ -891,7 +894,7 @@ impl Node {
                     anyhow::bail!("this chat was deleted; create a new one to keep talking");
                 }
                 let env = pack_media_incoming(&transfer_id, kind, mime, data.len() as u64, thumb);
-                let m = crypto::encrypt(&mut chat.session, &env);
+                let m = crypto::encrypt(&mut chat.session, &env)?;
                 let bytes = wire::encode(&Frame::MediaIncoming {
                     from: from.clone(),
                     message: WireOlm::from_olm(&m),
@@ -925,7 +928,7 @@ impl Node {
             } else {
                 pack_burn_media(burn_secs, &transfer_id, kind, mime, data)
             };
-            let m = crypto::encrypt(&mut chat.session, &env);
+            let m = crypto::encrypt(&mut chat.session, &env)?;
             let wire_olm = WireOlm::from_olm(&m);
             let bytes = wire::encode(&if burn_secs == 0 {
                 Frame::Media {
@@ -1380,7 +1383,7 @@ impl Node {
                 .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
             chat.contact.my_name = resolved.clone();
             if chat.authorized && !chat.closed {
-                let message = crypto::encrypt(&mut chat.session, resolved.as_bytes());
+                let message = crypto::encrypt(&mut chat.session, resolved.as_bytes())?;
                 let frame = Frame::Name {
                     from,
                     message: WireOlm::from_olm(&message),
@@ -1412,7 +1415,7 @@ impl Node {
             chat.remote_storage_healthy = true;
             if chat.authorized && !chat.closed {
                 let payload: &[u8] = if enabled { b"on" } else { b"off" };
-                let message = crypto::encrypt(&mut chat.session, payload);
+                let message = crypto::encrypt(&mut chat.session, payload)?;
                 let frame = Frame::Storage {
                     from,
                     message: WireOlm::from_olm(&message),
@@ -1448,7 +1451,9 @@ impl Node {
             let Some(chat) = self.chats.get_mut(contact_id) else {
                 continue;
             };
-            let message = crypto::encrypt(&mut chat.session, address.as_bytes());
+            let Ok(message) = crypto::encrypt(&mut chat.session, address.as_bytes()) else {
+                continue; // unusable session: nothing can be sent on it
+            };
             let frame = Frame::Address {
                 from: from.clone(),
                 message: WireOlm::from_olm(&message),
@@ -1540,7 +1545,9 @@ impl Node {
             let Some(chat) = self.chats.get_mut(contact_id) else {
                 continue;
             };
-            let message = crypto::encrypt(&mut chat.session, list.as_bytes());
+            let Ok(message) = crypto::encrypt(&mut chat.session, list.as_bytes()) else {
+                continue; // unusable session: nothing can be sent on it
+            };
             let frame = Frame::Relays {
                 from: from.clone(),
                 message: WireOlm::from_olm(&message),
@@ -1567,7 +1574,7 @@ impl Node {
                 disappearing_label(secs)
             )));
             if chat.authorized && !chat.closed {
-                let message = crypto::encrypt(&mut chat.session, secs.to_string().as_bytes());
+                let message = crypto::encrypt(&mut chat.session, secs.to_string().as_bytes())?;
                 let frame = Frame::Disappearing {
                     from,
                     message: WireOlm::from_olm(&message),
@@ -1644,7 +1651,9 @@ impl Node {
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
         };
-        let m = crypto::encrypt(&mut chat.session, target_id.as_bytes());
+        let Ok(m) = crypto::encrypt(&mut chat.session, target_id.as_bytes()) else {
+            return; // best-effort, like the rest of the receipt
+        };
         let frame = Frame::Viewed {
             from,
             message: WireOlm::from_olm(&m),
