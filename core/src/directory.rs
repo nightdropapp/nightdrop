@@ -30,6 +30,44 @@ pub const DIRECTORY_PUBKEY: [u8; 32] = [
     61, 145, 225, 209, 136, 253, 4, 131, 143, 195, 240,
 ];
 
+/// Where the app fetches the signed list: our own onion site (the same one the update check uses,
+/// [`crate::update::UPDATE_ONION`]), file `website/relays.json` — published there as-is from
+/// `nightdrop-relay sign-directory`. Fetching it from the site rather than from relays means losing
+/// every relay a user knows no longer strands them (`docs/design/optional-relay.md` §2).
+pub const SITE_PATH: &str = "/relays.json";
+
+/// A signed list is a few hundred bytes; anything far larger is not one.
+pub const MAX_SITE_BYTES: usize = 16 * 1024;
+
+/// After a successful fetch, the next one is a day later.
+pub const CHECK_INTERVAL_SECS: u64 = 24 * 3600;
+
+/// After a failed one, a few hours: soon enough that one bad moment (Tor still starting, the site
+/// briefly down) does not cost a day, rare enough not to become a beacon.
+pub const RETRY_INTERVAL_SECS: u64 = 3 * 3600;
+
+/// Fetch the signed list from our onion site over Tor. `None` when the transport has no anonymized
+/// path (tests, LAN): then there is nothing to fetch, as for the update check.
+pub fn fetch_from_site(
+    transport: &dyn crate::transport::Transport,
+) -> Option<crate::Result<String>> {
+    let fetched = transport.onion_get_capped(
+        crate::update::UPDATE_ONION,
+        crate::update::UPDATE_PORT,
+        SITE_PATH,
+        MAX_SITE_BYTES,
+    )?;
+    Some(fetched.and_then(|body| {
+        if body.len() > MAX_SITE_BYTES {
+            anyhow::bail!(
+                "relay list is {} bytes, over the {MAX_SITE_BYTES} limit",
+                body.len()
+            );
+        }
+        Ok(String::from_utf8(body)?)
+    }))
+}
+
 /// The signed payload: the current shared relay set + a monotonic version and issue time.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct RelayDirectory {
@@ -119,6 +157,23 @@ pub fn sign_list(
 mod tests {
     use super::*;
     use ed25519_dalek::SigningKey;
+
+    /// What the website publishes (`website/relays.json`, written by `sign-directory.sh`) must
+    /// verify with the key built into the app, or every app silently ignores it.
+    #[test]
+    fn the_published_list_verifies_with_the_built_in_key() {
+        let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../website/relays.json");
+        let wire = std::fs::read_to_string(path).expect("website/relays.json is published");
+        let signed = SignedDirectory::from_wire(wire.trim()).expect("parses");
+        let dir = signed
+            .verify(&DIRECTORY_PUBKEY)
+            .expect("signed with the operator key");
+        assert!(!dir.relays.is_empty());
+        assert!(dir
+            .relays
+            .iter()
+            .all(|r| r.ends_with(".onion") && r.len() == 62));
+    }
 
     #[test]
     fn signed_directory_round_trips_and_rejects_tampering() {

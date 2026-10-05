@@ -603,53 +603,112 @@ impl Node {
         }
     }
 
-    /// Fetch the operator-signed relay directory (§3.1), verify it against the baked-in key, and —
-    /// if strictly newer than the version we hold — adopt its relay set as our shared defaults.
-    /// Tries every relay we currently know (primary + my_relays + discovered) so a **rotated**
-    /// primary (its onion lost) doesn't block discovery: whichever live relay serves the newer,
-    /// validly-signed list wins. Blocking (one small round-trip per relay until one answers), run
-    /// on the relay-poll cadence. Returns true (and marks state dirty to persist) if the set changed.
-    pub(crate) fn refresh_directory(&mut self) -> bool {
-        let mut clients: Vec<RelayClient> = Vec::new();
-        if let Some(primary) = &self.relay {
-            clients.push(primary.clone());
-        }
+    /// The relays to ask for the list when our onion site cannot be reached: the primary, our own
+    /// and the discovered ones. Snapshotted under the lock; asked off it (`fetch_directory`).
+    pub(crate) fn directory_relays(&self) -> Vec<RelayClient> {
+        let mut clients: Vec<RelayClient> = self.relay.iter().cloned().collect();
         for addr in self.my_relays.iter().chain(self.discovered_relays.iter()) {
             clients.push(build_relay(self.transport.as_ref(), addr));
         }
-        for client in &clients {
-            let Ok(Some(wire)) = client.get_directory() else {
-                continue;
-            };
-            let Some(signed) = crate::directory::SignedDirectory::from_wire(&wire) else {
-                continue;
-            };
-            // Verified against DIRECTORY_PUBKEY — an unsigned/forged list can't move our relay set.
-            let Some(dir) = signed.verify(&crate::directory::DIRECTORY_PUBKEY) else {
-                continue;
-            };
-            if dir.version <= self.directory_version {
-                continue; // not newer (monotonic anti-rollback)
-            }
-            let cleaned: Vec<String> = dir
-                .relays
-                .into_iter()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .collect();
-            let changed = cleaned != self.discovered_relays;
-            self.discovered_relays = cleaned;
-            self.directory_version = dir.version;
-            // Forget health for relays we no longer advertise/discover.
-            let keep = self.discovered_relays.clone();
-            self.relay_reachable
-                .retain(|addr, _| keep.contains(addr) || self.my_relays.contains(addr));
-            if changed {
-                self.dirty = true;
-            }
-            return changed;
+        clients
+    }
+
+    /// Adopt a signed relay list if it verifies against `pubkey` and is newer than ours.
+    /// `pubkey` is [`DIRECTORY_PUBKEY`](crate::directory::DIRECTORY_PUBKEY) outside tests.
+    pub(crate) fn adopt_directory(&mut self, wire: &str, pubkey: &[u8; 32]) -> DirectoryOutcome {
+        let Some(signed) = crate::directory::SignedDirectory::from_wire(wire) else {
+            return DirectoryOutcome::Invalid;
+        };
+        // Verified against the operator key: an unsigned or forged list can't move our relay set,
+        // wherever it came from (a relay, or a compromised website).
+        let Some(dir) = signed.verify(pubkey) else {
+            return DirectoryOutcome::Invalid;
+        };
+        if dir.version <= self.directory_version {
+            return DirectoryOutcome::Current; // not newer (monotonic anti-rollback)
         }
-        false
+        let cleaned: Vec<String> = dir
+            .relays
+            .into_iter()
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        let changed = cleaned != self.discovered_relays;
+        self.discovered_relays = cleaned;
+        self.directory_version = dir.version;
+        // Forget health for relays we no longer advertise/discover.
+        let keep = self.discovered_relays.clone();
+        self.relay_reachable
+            .retain(|addr, _| keep.contains(addr) || self.my_relays.contains(addr));
+        self.dirty = true; // the version moved, even when the set did not
+        DirectoryOutcome::Applied { changed }
+    }
+
+    /// Whether to fetch the relay list from our onion site now (`directory::SITE_PATH`): once Tor
+    /// is up (a fetch before that only fails), and on the persisted daily / retry schedule.
+    pub(crate) fn directory_fetch_due(&self, now: u64) -> bool {
+        self.announce_ready() && now >= self.directory_next_check
+    }
+
+    /// A fetch is starting: returns what it needs to run without the lock. The next fetch is pushed
+    /// out by the retry interval first, so one that never comes back (the app is killed mid-way)
+    /// cannot turn into one per launch.
+    pub(crate) fn begin_directory_fetch(&mut self, now: u64) -> DirectoryFetchPlan {
+        self.directory_next_check = now + crate::directory::RETRY_INTERVAL_SECS;
+        self.dirty = true;
+        DirectoryFetchPlan {
+            transport: Arc::clone(&self.transport),
+            relays: self.directory_relays(),
+        }
+    }
+
+    /// Apply a fetch's result. A site list that verifies, newer or not, counts as success: the next
+    /// fetch is a day away. Otherwise the relays' answers are used (every build up to 0.1.27 asked
+    /// them on every poll) and the site is tried again after the retry interval.
+    pub(crate) fn finish_directory_fetch(
+        &mut self,
+        result: DirectoryFetchResult,
+        now: u64,
+        pubkey: &[u8; 32],
+    ) {
+        let DirectoryFetchResult {
+            site: fetched,
+            relay_lists,
+        } = result;
+        let outcome = match &fetched {
+            Some(Ok(wire)) => self.adopt_directory(wire, pubkey),
+            _ => DirectoryOutcome::Invalid,
+        };
+        match outcome {
+            DirectoryOutcome::Applied { .. } | DirectoryOutcome::Current => {
+                crate::diag!(
+                    "directory: site list OK (version {}, {} relay(s))",
+                    self.directory_version,
+                    self.discovered_relays.len()
+                );
+                self.directory_next_check = now + crate::directory::CHECK_INTERVAL_SECS;
+            }
+            DirectoryOutcome::Invalid => {
+                match &fetched {
+                    None => crate::diag!("directory: no anonymized path; asking the relays"),
+                    Some(Err(e)) => {
+                        crate::diag!("directory: site fetch failed ({e:#}); asking the relays")
+                    }
+                    Some(Ok(_)) => {
+                        crate::diag!("directory: site list did not verify; asking the relays")
+                    }
+                }
+                // What the relays answered (asked off the lock, `fetch_directory`): the first list
+                // that is genuine and newer wins, as relay polling always did.
+                for wire in &relay_lists {
+                    if let DirectoryOutcome::Applied { .. } = self.adopt_directory(wire, pubkey) {
+                        break;
+                    }
+                }
+                self.directory_next_check = now + crate::directory::RETRY_INTERVAL_SECS;
+            }
+        }
+        self.dirty = true;
     }
 
     /// Joiner side of short-code pairing: show a notice that nothing will be delivered until the

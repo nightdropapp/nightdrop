@@ -284,6 +284,10 @@ pub struct PersistedState {
     pub discovered_relays: Vec<String>,
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub directory_version: u64,
+    /// When the relay list is next fetched from the onion site (unix seconds). 0 = due once Tor is
+    /// up; older state files have none.
+    #[serde(default, skip_serializing_if = "is_zero_u64")]
+    pub directory_next_check: u64,
     /// Undelivered chat-delete `Closed` signals (§11.6), persisted so a delete isn't lost across a
     /// restart before the retry lands. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -427,6 +431,7 @@ mod tests {
             my_relays: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
+            directory_next_check: 0,
             pending_control: Vec::new(),
             pending_invites: Vec::new(),
             poll_seed: None,

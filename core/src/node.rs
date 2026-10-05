@@ -438,6 +438,48 @@ fn random_msg_id() -> String {
     base64_handle(&b)
 }
 
+/// What a relay-list fetch needs off the core lock: the transport for our onion site, and the
+/// relays to ask if the site cannot be reached.
+pub(crate) struct DirectoryFetchPlan {
+    transport: Arc<dyn Transport>,
+    relays: Vec<RelayClient>,
+}
+
+/// What a relay-list fetch brought back, applied under the lock by
+/// [`Node::finish_directory_fetch`].
+pub(crate) struct DirectoryFetchResult {
+    /// The site's answer: `None` when the transport has no anonymized path.
+    pub(crate) site: Option<Result<String>>,
+    /// Lists served by relays, asked only when the site gave nothing usable.
+    pub(crate) relay_lists: Vec<String>,
+}
+
+/// Run a relay-list fetch: our onion site first, then (only if that gave nothing) each relay.
+/// Network I/O, so never under the core lock.
+pub(crate) fn fetch_directory(plan: &DirectoryFetchPlan) -> DirectoryFetchResult {
+    let site = crate::directory::fetch_from_site(plan.transport.as_ref());
+    let relay_lists = if matches!(site, Some(Ok(_))) {
+        Vec::new()
+    } else {
+        plan.relays
+            .iter()
+            .filter_map(|c| c.get_directory().ok().flatten())
+            .collect()
+    };
+    DirectoryFetchResult { site, relay_lists }
+}
+
+/// What [`Node::adopt_directory`] made of a signed relay list.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum DirectoryOutcome {
+    /// Did not parse, or did not verify against the operator key.
+    Invalid,
+    /// Genuine, but not newer than the list we already have.
+    Current,
+    /// Adopted; `changed` when the relay set itself moved.
+    Applied { changed: bool },
+}
+
 /// A recall receipt for one still-queued copy of a message, in the form we can both **use**
 /// (reconstruct a [`RelayClient`] from `relay_addr` and delete the blob) and **persist**. `relay_addr`
 /// is `None` for the primary relay, or an advertised extra relay's address (#17). See
@@ -645,6 +687,9 @@ pub struct Node {
     /// Version of the last relay directory we accepted; a fetched list is applied only if newer
     /// (monotonic anti-rollback). Persisted.
     directory_version: u64,
+    /// When the relay list is next fetched from our onion site (unix seconds; 0 = as soon as Tor is
+    /// up). Persisted, so the daily schedule holds across restarts.
+    directory_next_check: u64,
     /// Directly-sent messages still waiting for a receipt that names them; swept by
     /// [`sweep_unconfirmed`](Self::sweep_unconfirmed).
     ///
@@ -933,6 +978,7 @@ impl Node {
             receipt_sends: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
+            directory_next_check: 0,
             awaiting_receipt: Vec::new(),
             pending_receipts: Vec::new(),
             direct_failures: 0,
@@ -2192,5 +2238,7 @@ fn base64_handle(bytes: &[u8]) -> String {
 mod tests_a;
 #[cfg(test)]
 mod tests_b;
+#[cfg(test)]
+mod tests_directory;
 #[cfg(test)]
 mod tests_mailbox;

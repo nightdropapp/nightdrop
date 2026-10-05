@@ -16,6 +16,11 @@
 #   relay/deploy/sign-directory.sh --version N <relay.onion> ...          # force an explicit version
 #   relay/deploy/sign-directory.sh --state DIR <relay.onion> ...          # explicit state dir
 #
+# The list is also copied to <repo>/website/relays.json (override with $NIGHTDROP_WEBSITE), which
+# is where 0.1.28+ apps fetch it, daily, over Tor from our onion site. The onion site serves
+# website/ live from disk, so that copy IS the publish there; run deploy-local.sh for the clearnet
+# copy (not needed by the app, which only asks the onion).
+#
 # The private key is read from <state>/directory-signing-key (created by
 # `nightdrop-relay gen-directory-key`). Keep it secret and backed up — losing it means you can no
 # longer sign updates, which defeats the whole point of the directory.
@@ -101,6 +106,15 @@ for r in "${RELAYS[@]}"; do echo "    $r"; done
 PRIV="$(cat "$KEYFILE")"
 "$BIN" sign-directory "$PRIV" "$VERSION" "${RELAYS[@]}" > "$LISTFILE"
 ok "wrote $LISTFILE (version $VERSION)"
+
+# Where apps from 0.1.28 fetch it (core/src/directory.rs SITE_PATH): our onion site.
+WEB_DIR="${NIGHTDROP_WEBSITE:-$REPO_ROOT/website}"
+if [ -d "$WEB_DIR" ]; then
+  cp "$LISTFILE" "$WEB_DIR/relays.json"
+  ok "published $WEB_DIR/relays.json (the onion site serves it live; commit it)"
+else
+  warn "no website dir at $WEB_DIR: copy $LISTFILE to website/relays.json by hand"
+fi
 
 echo
 warn "This list is a FULL REPLACEMENT and lives on ONE relay so far ($STATE_DIR)."

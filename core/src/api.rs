@@ -735,9 +735,6 @@ impl Inner {
             // Retry any chat-delete Closed signal (§11.6) that couldn't reach the peer or a relay
             // when the chat was deleted (arti cold / relay briefly down), so it isn't lost.
             self.me.flush_pending_control();
-            // Adopt a newer operator-signed relay directory if any relay serves one (§3.1 —
-            // relay rotation without an app update). Its dirty flag drives persistence below.
-            self.me.refresh_directory();
             // Put a relay copy behind any message the peer's onion accepted but never receipted:
             // a successful dial is not delivery, and a frame lost to a torn-down core would
             // otherwise never be asked for again.
@@ -2587,6 +2584,10 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
         // run inline, every message composed meanwhile sat "held" until it finished (2026-09-27).
         // Off this thread, sends keep going every tick while it runs.
         let mut drain_job: Option<thread::JoinHandle<RelayHarvest>> = None;
+        // The relay list fetched from our onion site (`directory::SITE_PATH`, §3.1 — relay
+        // rotation without an app update): daily, and on its own thread for the same reason as the
+        // drain — an onion fetch can take minutes and must not hold the core lock.
+        let mut directory_job: Option<thread::JoinHandle<crate::node::DirectoryFetchResult>> = None;
         let mut next_cover: Option<std::time::Instant> = None;
         let mut cover_delay = next_cover_delay();
         while !stop.stopped() {
@@ -2639,6 +2640,30 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
                         drain_job = Some(thread::spawn(move || drain_relay_mailboxes(&plan)));
                     }
                     None => relay_applied = true, // no relay: still run the chores on cadence
+                }
+            }
+            if directory_job.as_ref().is_some_and(|j| j.is_finished()) {
+                if let Some(fetched) = directory_job.take().and_then(|j| j.join().ok()) {
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                        g.me.finish_directory_fetch(
+                            fetched,
+                            now_secs(),
+                            &crate::directory::DIRECTORY_PUBKEY,
+                        );
+                    }));
+                }
+            }
+            if relay_due && directory_job.is_none() {
+                let plan = {
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    let now = now_secs();
+                    g.me.directory_fetch_due(now)
+                        .then(|| g.me.begin_directory_fetch(now))
+                };
+                if let Some(plan) = plan {
+                    directory_job =
+                        Some(thread::spawn(move || crate::node::fetch_directory(&plan)));
                 }
             }
             // Same three phases for OUTBOUND messages, and for the same reason — more so, in fact.
@@ -2711,6 +2736,11 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
                     g.maybe_flush();
                 }));
             }
+        }
+        // A relay-list fetch holds a transport handle; let it end (the closing transport abandons
+        // it) so nothing outlives the poller. Its result is not needed.
+        if let Some(job) = directory_job.take() {
+            let _ = job.join();
         }
         // Drop our handle on the core — and through it the transport, if we are the last holder —
         // *before* the exit guard fires. `wait_for_exit` promises the caller that this thread is

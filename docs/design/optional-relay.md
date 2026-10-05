@@ -239,7 +239,7 @@ a direct-only user's contacts see their messages arrive the moment that user com
 
 ## 9. Implementation plan (0.2, in order)
 
-0. **Relay directory from the onion website (§2).** Independent of everything below and not a
+0. **Relay directory from the onion website (§2). Built for 0.1.28.** Independent of everything below and not a
    protocol change, so it ships in **0.1.28** (decided 2026-10-05): `relays.json` on the site, published by
    `nightdrop-relay sign-directory`; a daily `onion_get` in the core; relays kept as the fallback.
 1. **Core list model:** a `RelayEntry { NightDrop | Onion(String) }` list, a cap of 4, the

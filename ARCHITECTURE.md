@@ -452,8 +452,12 @@ on a re-pair (new session) exactly like `verified`.
   - **Signed relay directory — rotate the relay set without an app update (#17 tail).** Each relay
     can serve an **operator-signed** relay list (`Request::GetDirectory` → one-line
     `SignedDirectory` JSON). The operator holds an **Ed25519** key whose public half is **baked
-    into the app** (`directory::DIRECTORY_PUBKEY`); on every relay poll the app fetches the list
-    from whatever relay it can still reach (primary **or** any advertised/discovered relay),
+    into the app** (`directory::DIRECTORY_PUBKEY`). **From 0.1.28** the app fetches it once a day
+    over Tor from **our onion site** (`website/relays.json`, `directory::SITE_PATH`; daily after a
+    good fetch, 3 h after a failed one, schedule persisted), so losing every relay a user knows no
+    longer stops them learning the replacements; only when the site fails does it ask the relays,
+    once. Up to 0.1.27 it asked on every relay poll, from whatever relay it could still reach
+    (primary **or** any advertised/discovered relay),
     verifies the signature against that baked-in key, and — only if the payload's monotonic
     `version` is newer than what it already trusts — adopts the relays as `discovered_relays`
     (shared defaults it drains, pairs over, and posts to, alongside `my_relays`). Because trust is

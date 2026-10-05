@@ -196,9 +196,14 @@ nightdrop-relay gen-directory-key
 relay/deploy/sign-directory.sh --restart  relay-1.onion  relay-2.onion  relay-3.onion
 ```
 
+The script also writes the same file to **`website/relays.json`**, which is where apps from 0.1.28
+fetch it: once a day, over Tor, from our onion site (`core/src/directory.rs` `SITE_PATH`). The
+onion site serves `website/` live, so that copy is published the moment it is written; commit it.
+This is the copy that matters most, because it does not depend on the user reaching any relay.
+
 Then **copy the resulting `<state>/relay-list.json` to every relay's state dir** (the script prints
-the exact `scp` lines). Distributing to all relays is what makes rotation resilient: a client that
-can only reach a surviving relay still gets the update.
+the exact `scp` lines). Relays still serve it, for apps up to 0.1.27 and as the fallback when the
+site cannot be reached.
 
 Key rules:
 

@@ -101,6 +101,7 @@ impl Node {
             my_relays: self.my_relays.clone(),
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
+            directory_next_check: self.directory_next_check,
             pending_control: self.export_pending_control(),
             pending_invites: self.export_pending_invites(),
             poll_seed: Some(base64_handle(&self.poll_seed)),
@@ -302,6 +303,7 @@ impl Node {
         node.my_relays = state.my_relays.clone();
         node.discovered_relays = state.discovered_relays.clone();
         node.directory_version = state.directory_version;
+        node.directory_next_check = state.directory_next_check;
         // Keep the polling partition fixed across the restart (`mailbox.rs`). An older state file
         // has none: the fresh random seed from `Node::new` stands, and is saved on the next write.
         if let Some(seed) = state.poll_seed.as_deref().and_then(|b| {
