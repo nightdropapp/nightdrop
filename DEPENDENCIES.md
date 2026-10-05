@@ -57,7 +57,7 @@ anonymized transport.
 | `hkdf`, `sha2`, `chacha20poly1305`, `argon2`, `ed25519-dalek` | RustCrypto primitives (at-rest AEAD, KDF, backup hashing, directory signing) | none |
 | `rand`, `zeroize`, `base64`, `serde`, `serde_json` | RNG, memory wipe, encoding | none |
 | `flutter_rust_bridge` 2.12 | Dart↔Rust FFI | none (in-process) |
-| **`arti-client` + `tor-*` 0.47** (`tor` feature; `tor-hsservice` patched, `third_party/`) | embedded Tor client + onion service | **Tor only** — this *is* the transport; connects to the Tor network and the configured relay/peer onions, never clearnet, never analytics |
+| **`arti-client` + `tor-*` 0.47** (`tor` feature; `tor-hsservice` and `saturating-time` patched, `third_party/`) | embedded Tor client + onion service | **Tor only** — this *is* the transport; connects to the Tor network and the configured relay/peer onions, never clearnet, never analytics |
 | `rustls` 0.23 (ring) | TLS *inside* Tor circuits | no independent egress |
 | `tokio`, `futures` | async runtime for the Tor stack | none of its own |
 | `libsqlite3-sys` 0.38 (bundled SQLite 3.53) | arti's **local** on-disk state store | none (local file) |
