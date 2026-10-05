@@ -52,13 +52,27 @@ with a restricted onion (§5 below).
   exactly what it was already using. Nothing changes for anyone who does not open the screen.
 * **Removing a relay keeps draining it for 24 h** (the relay TTL). Mail already queued there for
   us would otherwise be lost. Posting to it stops at once.
-* **The directory is refreshed whenever this device talks to a Night Drop relay** (decided
-  2026-10-05): on its own polls while the Night Drop entry is in the list, *and* when posting to a
-  contact whose set includes Night Drop. A user who removed the entry still sends to those contacts
-  (§3), and their copy of the directory must follow a relay rotation or that mail would go to a
-  dead address and be held. The refresh rides the connection the post already makes, so the relay
-  learns nothing it did not already see. A direct-only user never contacts a relay, so it never
-  refreshes, and has nothing to send there anyway.
+* **The directory comes from our onion website, not from the relays** (decided 2026-10-05).
+  Today it is served only by relays (`GetDirectory`, asked of the primary, the discovered relays
+  *and* the user's own relays). So if every relay a user knows goes down, they can no longer learn
+  the replacement, which is exactly the case the directory exists for. Instead:
+  * The signed list is published as a file on the onion site (`website/relays.json`, the existing
+    `SignedDirectory` format, Ed25519-signed with the offline directory key, monotonic version).
+    It is public information, already in every app build, so it is **signed, not encrypted**:
+    encryption would protect nothing, and the signature is what stops a compromised website or
+    anyone else from pointing apps at their own relay.
+  * The app fetches it **over Tor from `UPDATE_ONION`** (`Transport::onion_get`, as the update
+    check does), at most **once a day**, with the same record-the-attempt rule so a down site never
+    turns into a retry on every launch.
+  * It is **not** gated like the update check. F-Droid installs skip the update check because
+    F-Droid is their updater; the relay list is not an update, it is how the app finds its relay.
+  * **Every user with a relay list fetches it,** including someone who removed the Night Drop
+    entry but writes to contacts who use it (§3). Their copy must follow a relay rotation, or that
+    mail goes to a dead address and is held. This replaces the earlier "refresh while sending",
+    and no relay is ever asked for the list. A direct-only user skips the fetch, since they never
+    post to a relay.
+  * The relays keep answering `GetDirectory` through 0.2, for 0.1.x clients. After that it can go,
+    and our self-hosters' relays stop being asked for a list that was never theirs.
 
 ## 3. Telling contacts
 
@@ -174,7 +188,7 @@ QR stays available.
 | Server backup (§7c) | yes | no; file export and device transfer still work |
 | Per-chat server storage | when **both** sides have relays | hidden, with the reason |
 | Cover traffic | optional | off and hidden (no mailbox to cover) |
-| Relay directory refresh | while Night Drop is listed | no |
+| Relay directory (from the onion website, §2) | daily | no (never posts to a relay) |
 | Update check (§10a, our own onion) | yes | yes, not a relay |
 | "Get bridges" (moat) | yes | yes, not a relay |
 
@@ -225,6 +239,9 @@ a direct-only user's contacts see their messages arrive the moment that user com
 
 ## 9. Implementation plan (0.2, in order)
 
+0. **Relay directory from the onion website (§2).** Independent of everything below and not a
+   protocol change, so it can ship before 0.2: `relays.json` on the site, published by
+   `nightdrop-relay sign-directory`; a daily `onion_get` in the core; relays kept as the fallback.
 1. **Core list model:** a `RelayEntry { NightDrop | Onion(String) }` list, a cap of 4, the
    migration in §2, and the 24 h drain-out. `queue_on_relays` stops taking an implicit primary.
 2. **`Frame::RelaySet`** replacing `Frame::Relays`, the set inside pairing, and "unknown = hold".
@@ -258,4 +275,4 @@ None remaining.
 
 **Decided 2026-10-05:** no one-off short code for direct-only users (they pair by QR only); no
 "I'm online" signal, built switched off (§4); retry cap 5 min while open, 15 min in the background
-(§4); the directory is refreshed while sending through a contact's Night Drop entry (§2).
+(§4); the relay directory is fetched from the onion website, not from relays (§2).
