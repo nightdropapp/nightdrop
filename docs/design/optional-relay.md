@@ -42,9 +42,13 @@ with a restricted onion (§5 below).
   exactly what it was already using. Nothing changes for anyone who does not open the screen.
 * **Removing a relay keeps draining it for 24 h** (the relay TTL). Mail already queued there for
   us would otherwise be lost. Posting to it stops at once.
-* **The directory is refreshed only while the Night Drop entry is in the list.** A user who removed
-  it still posts to contacts who use it (§3), using the baked-in default plus the last directory
-  they accepted. See §11 on staleness.
+* **The directory is refreshed whenever this device talks to a Night Drop relay** (decided
+  2026-10-05): on its own polls while the Night Drop entry is in the list, *and* when posting to a
+  contact whose set includes Night Drop. A user who removed the entry still sends to those contacts
+  (§3), and their copy of the directory must follow a relay rotation or that mail would go to a
+  dead address and be held. The refresh rides the connection the post already makes, so the relay
+  learns nothing it did not already see. A direct-only user never contacts a relay, so it never
+  refreshes, and has nothing to send there anyway.
 
 ## 3. Telling contacts
 
@@ -240,11 +244,8 @@ Changing relay TTLs. Groups (`group-chat.md`, 0.3), which will inherit whatever 
 
 ## 11. Open questions
 
-* **Directory staleness** for a user who removed Night Drop but sends to contacts who use it. Their
-  copy of the directory ages, because only a listed relay is asked for it. Options: refresh it
-  anyway when posting to a contact's Night Drop entry (they are talking to that relay regardless),
-  or accept the baked-in default plus the last list.
+None remaining.
 
 **Decided 2026-10-05:** no one-off short code for direct-only users (they pair by QR only); no
 "I'm online" signal, built switched off (§4); retry cap 5 min while open, 15 min in the background
-(§4).
+(§4); the directory is refreshed while sending through a contact's Night Drop entry (§2).
