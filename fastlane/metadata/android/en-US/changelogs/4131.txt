@@ -1,0 +1,3 @@
+Uses much less data and battery in the background. A bug in the Tor library made the app re-publish its address more and more often the longer it ran; in our overnight test this cuts its upload traffic by about 70%.
+
+Night Drop 0.2 is coming, and it won't be able to message 0.1 apps. The app now says so: update when 0.2 arrives, and ask your contacts to update too.

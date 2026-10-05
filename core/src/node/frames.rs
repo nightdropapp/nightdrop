@@ -320,6 +320,7 @@ impl Node {
                     return Ok(None);
                 }
                 chat.contact.peer_app_version = Some(version.to_string());
+                crate::diag!("version: a contact runs {version}");
                 Ok(Some((from, String::new())))
             }
             Frame::Edit { from, message } => {

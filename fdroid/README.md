@@ -81,7 +81,10 @@ compared built binary to supplied reference binary successfully
    `changelogs/1012.txt`, `2012.txt`, `4012.txt`, not the pubspec's base. F-Droid resolves
    `changelogs/<versionCode>.txt` and reads it from the *tagged commit*, so a missing file means
    the release ships with no "What's New" and cannot be fixed afterwards.
-   `check-metadata.sh` fails if any is missing. Commit, tag, push.
+   `check-metadata.sh` fails if any is missing. Commit and push - **without a tag yet**. Tags are
+   immutable on GitHub since 2026-10-01 (ruleset "Release tags are immutable"), and F-Droid's bot
+   builds whatever a tag points at, so tag only after step 3's builds verify (CLAUDE.md, "Cutting a
+   release").
 3. Update the recipe's `commit:`/`versionName`/`versionCode`/`CurrentVersion*`, then build the
    release artifact with `SKIP_BINARY=1 ./fdroid/build-locally.sh --fresh` (the flag is needed
    because `binary:` makes fdroidserver download an APK that does not exist yet).

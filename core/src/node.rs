@@ -1307,6 +1307,8 @@ impl Node {
         };
         if self.deliver(&addr, contact_id, &frame).is_ok() {
             self.version_announced.insert(contact_id.to_string());
+            // Counts and versions only, never who: diag runs in field builds.
+            crate::diag!("version: told a contact we run {version}");
         }
     }
 

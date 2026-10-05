@@ -85,6 +85,24 @@ screen off 99.5%, 82.6% deep doze, but **23 network changes** (Run 3: 6).
   no longer multiply, but they still cost circuits. Intro-point churn (~5-6/h) is the other driver
   of republishing.
 
+## Run 5: no wake lock, daytime 2026-10-03 12:45 to 15:23 - the wake lock stays
+
+Build: branch `nowake-diag` (main with the reupload fix + timing logs + EXPERIMENT `2cb172d`: the
+background service holds no CPU or Wi-Fi lock), installed 08:56; verified before the run that
+`dumpsys power` showed no wake lock for the app. Mobile data, screen off 98.3%, but daytime:
+59% deep doze (night runs: 83-85%), Bluetooth on, 10 network changes - so the whole-phone figure
+(233 mAh, 88 mAh/h) is not comparable with the overnight runs.
+
+- **Night Drop: 52 mAh in 2 h 38 min = 19.8 mAh/h**, against Run 4's 34.4 mAh/h. The difference
+  is the wake lock's own cost (Run 4: 132 mAh, ~18 mAh/h); radio 19.3 vs 15.8 mAh/h, CPU 0.5 vs
+  0.7 mAh/h. The CPU was awake 28% of the time instead of all of it.
+- **But background mailbox checks slowed from every 5 min to every 14-26 min** (12:56, 13:11,
+  13:25, 13:47, 14:11, 14:35, 14:54, 15:20): without the lock the timer only runs in Android's
+  maintenance windows. Offline mail to an idle phone arrives that much later.
+
+**Decision (Shawn, 2026-10-03): keep the wake lock.** Dropping it saves about 18 mAh an hour and
+costs 3-5x slower message checks; that is not worth it. The EXPERIMENT commit is not merged.
+
 ## The runs
 
 | | Run 2 | Run 3 |
