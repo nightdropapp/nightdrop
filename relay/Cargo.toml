@@ -43,3 +43,4 @@ ratatui = "0.30"
 # Optional arti/relay diagnostics: when RUST_LOG is set, surface arti's tracing (onion-service
 # publish, descriptor upload, circuit health). Off unless RUST_LOG is present — no logs by default.
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1" # stream-failure diagnostics, only emitted when RUST_LOG is set
