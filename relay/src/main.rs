@@ -305,8 +305,10 @@ fn main() -> anyhow::Result<()> {
         let active = Arc::new(AtomicUsize::new(0));
         let mut streams = handle_rend_requests(rend_requests);
         while let Some(request) = streams.next().await {
-            if active.fetch_add(1, Ordering::Relaxed) >= MAX_CONCURRENT_STREAMS {
+            let open = active.fetch_add(1, Ordering::Relaxed);
+            if open >= MAX_CONCURRENT_STREAMS {
                 active.fetch_sub(1, Ordering::Relaxed);
+                tracing::warn!(target: "nightdrop_relay::streams", open, "at capacity: dropped a rendezvous");
                 continue; // at capacity — drop the rendezvous; the client retries
             }
             let core = Arc::clone(&core);
@@ -314,14 +316,25 @@ fn main() -> anyhow::Result<()> {
             let served = Arc::clone(&last_served);
             tokio::spawn(async move {
                 let _guard = guard; // decrements the counter when this task ends
-                if let Ok(stream) = request.accept(Connected::new_empty()).await {
-                    // Someone reached this onion. The watchdog reads this as proof that the
-                    // service is live even when its own self-dial is failing. Our own probe lands
-                    // here too, which is harmless: the watchdog only consults this while a dark
-                    // spell is running, and every probe during one has failed — a probe that
-                    // reached us would have ended the spell instead.
-                    served.store(start.elapsed().as_secs(), Ordering::Relaxed);
-                    let _ = serve_stream(stream, core).await;
+                // Failures are traced, not swallowed: clients have seen "Stream not connected" on
+                // takes, and without this the relay side said nothing. Only the error and how many
+                // streams were open — no handle, no address, nothing about who (§11.10). Emitted
+                // only when RUST_LOG is set (see the tracing setup above).
+                match request.accept(Connected::new_empty()).await {
+                    Ok(stream) => {
+                        // Someone reached this onion. The watchdog reads this as proof that the
+                        // service is live even when its own self-dial is failing. Our own probe
+                        // lands here too, which is harmless: the watchdog only consults this while
+                        // a dark spell is running, and every probe during one has failed — a probe
+                        // that reached us would have ended the spell instead.
+                        served.store(start.elapsed().as_secs(), Ordering::Relaxed);
+                        if let Err(e) = serve_stream(stream, core).await {
+                            tracing::info!(target: "nightdrop_relay::streams", open, "stream ended with an error: {e:#}");
+                        }
+                    }
+                    Err(e) => {
+                        tracing::info!(target: "nightdrop_relay::streams", open, "stream accept failed: {e:#}");
+                    }
                 }
             });
         }
