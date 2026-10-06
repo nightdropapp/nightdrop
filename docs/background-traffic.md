@@ -1,6 +1,7 @@
 # Background traffic and battery on Android: investigation
 
-Status: **cause found and fixed locally, verified on a phone (Run 4); not released.** Night Drop
+Status: **cause found and fixed, verified on a phone (Run 4), released in 0.1.27; 0.1.28's
+dependency round measured lower again (Run 6).** Night Drop
 uploaded far more in the background than its own work explains. The main cause was an arti bug: the
 onion service republished its descriptor more and more often the longer the process ran (below).
 Once the fix ships, the conclusion moves to `ARCHITECTURE.md` and this file is cut down to the
@@ -102,6 +103,29 @@ background service holds no CPU or Wi-Fi lock), installed 08:56; verified before
 
 **Decision (Shawn, 2026-10-03): keep the wake lock.** Dropping it saves about 18 mAh an hour and
 costs 3-5x slower message checks; that is not worth it. The EXPERIMENT commit is not merged.
+
+## Run 6: the 0.1.28 branch, overnight 2026-10-05/06 - lower again
+
+Build: branch `0.1.28` at `6a4c2f3` (arti 0.47 with both patches, vodozemac 0.11, SQLite 3.53,
+Flutter 3.47.6, the relay list fetched daily from the onion site instead of asked of the relay on
+every poll), release-signed, diagnostics on, wake lock as released. Installed 2026-10-05 22:05 UTC
+over 0.1.27; same process all night. Window: `batterystats` since unplug, 9 h 46 min, mobile data,
+screen off 93.0% (41 min on, mostly the morning), **40 network changes** (Run 4: 23).
+
+| | Run 4 (0.1.26 + fix) | Run 6 (0.1.28 branch) |
+|---|---|---|
+| Night Drop (batterystats) | 253 mAh, 34.4 mAh/h | **291 mAh, 29.8 mAh/h** |
+| ...mobile radio | 116 mAh, ~15.7 mAh/h | **122 mAh, 12.5 mAh/h** |
+| ...wake lock | 132 mAh, ~17.9 mAh/h | 167 mAh, 17.1 mAh/h |
+| Night Drop mobile traffic | ~1.6 MB/h up, ~1.4 down | **~0.8 MB/h up, ~1.0 down** (7.66 / 9.44 MB) |
+| Whole phone, unplugged screen-off stretch | 81.8 mAh/h | ~64 mAh/h (charge counter, 5 h 40 min) |
+
+- About 13% less battery and half the upload, with more network changes than Run 4. The radio is
+  where it went; the wake lock costs the same, as expected.
+- The relay list was fetched once (22:07 UTC) and not again overnight, and the update check ran
+  once; up to 0.1.27 the relay was asked for the list on every poll.
+- Not separated: arti 0.43 -> 0.47 and the relay-list change landed together, so this run cannot
+  say which saved what. One night, n=1, like the others.
 
 ## The runs
 

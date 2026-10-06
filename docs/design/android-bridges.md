@@ -426,6 +426,29 @@ pass from that; run with `-k none --set stream.checksum-validation=no`.
 JA4 is also not the only fingerprint. JA4S, HTTP/2 settings fingerprints, packet timing and flow
 shape are all available to a determined censor, and none of them are addressed here.
 
+### 6.6 Directory freshness over WebTunnel (2026-10-03 and 2026-10-06)
+
+On the first Linux bridge test (2026-10-03, arti 0.43, two moat bridges for `cn`) the first
+consensus to arrive was already ~2.5 h old (fresh until 18:00 at 19:31 UTC) and every refresh
+failed for the rest of the session ("Unable to finish bootstrapping a directory"); Tor still ran
+and published, since a consensus stays usable until its valid-until. The question was whether
+consensus refreshes over WebTunnel fail in general.
+
+**They do not.** A Windows client (0.1.28 branch, arti 0.47, two fresh moat bridges) left running
+overnight 2026-10-05/06 replaced its consensus seven times, every time **before** the old one's
+valid-until (e.g. 02:48 for one valid until 03:00, 03:52 for one valid until 04:00), and never ran
+on an expired one. Two things in that log look alarming and are normal:
+
+- Refreshes happen *after* fresh-until. Tor clients deliberately fetch at a random point between
+  fresh-until and valid-until, to spread load on the directory caches; arti does the same.
+- What arrives can itself be past fresh-until (at 02:48: fresh until 02:00). Bridges serve their
+  cached copy, which lags the authorities by up to about an hour; it is still valid.
+
+So the 2026-10-03 session was those two bridges failing, not WebTunnel or our client: the same
+"Invalid document ... line truncated" and unreachable-bridge errors appeared when a later pair of
+bridges died mid-download (2026-10-05: one host returned 502, the other a bad TLS certificate).
+Bridges handed out by moat can be dead on arrival or die later; another fetch gets others.
+
 ## 7. Why Night Drop does not run its own bridge (2026-09-21)
 
 Asked, reasonably: we operate a relay, so why not operate a WebTunnel bridge too, as a fallback
