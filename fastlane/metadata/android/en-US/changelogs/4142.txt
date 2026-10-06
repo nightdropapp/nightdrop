@@ -1,0 +1,5 @@
+Tor blocked? The bridges screen can now get WebTunnel bridges from the Tor Project in one tap. It asks first: that one request does not go through Tor.
+
+Security updates to Tor, the encryption library, TLS and image decoding. Less background data: the relay list now comes from our site once a day. Desktop apps check for updates while they stay open. Windows: emoji show again.
+
+Night Drop 0.2 won't be able to message 0.1 apps: update when it arrives.
