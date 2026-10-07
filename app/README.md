@@ -1,17 +1,12 @@
-# night_drop
+# Night Drop — Flutter app
 
-A new Flutter project.
+The UI shell over the Rust security core (`../core`). It talks only to the abstract
+`NightdropCore` seam (`lib/src/core/nightdrop_core.dart`); no keys, crypto or transport live here.
 
-## Getting Started
-
-This project is a starting point for a Flutter application.
-
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+- Project overview: [`../README.md`](../README.md)
+- Design and invariants: [`../ARCHITECTURE.md`](../ARCHITECTURE.md)
+- Dev builds: [`../BUILD_AND_DEPLOY.md`](../BUILD_AND_DEPLOY.md); toolchain, tests, releases:
+  [`../MAINTENANCE.md`](../MAINTENANCE.md)
+- Translations: drop `lib/l10n/app_<locale>.arb` and run `flutter gen-l10n` — no code changes
+  (English is the only locale so far). Time formatting is not localized: chat times use a fixed
+  12-hour clock (`lib/src/features/chat/chat_screen.dart`).

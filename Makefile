@@ -10,7 +10,7 @@ help:
 	@echo "Core + relay (Rust):"
 	@echo "  make core-build   cargo build -p nightdrop (produces libnightdrop.so)"
 	@echo "  make core-test    cargo test  -p nightdrop"
-	@echo "  make relay-run    cargo run   -p nightdrop_relay"
+	@echo "  make relay-run    a dev relay (state in relay-state-dev/, never the production relay-state/)"
 	@echo "  make gen-bridge   regenerate flutter_rust_bridge bindings"
 	@echo "  make fmt          cargo fmt"
 	@echo "  make clippy       cargo clippy --all-targets"
@@ -51,7 +51,9 @@ gen-bridge:   ; flutter_rust_bridge_codegen generate
 
 core-build:   ; cargo build -p nightdrop
 core-test:    ; cargo test  -p nightdrop
-relay-run:    ; cargo run   -p nightdrop_relay
+# A DEV relay, with its own state: ./relay-state is the production relay's keystore, served by the
+# nightdrop-relay user service, and a second process on the same key would publish the same onion.
+relay-run:    ; NIGHTDROP_RELAY_STATE=$${NIGHTDROP_RELAY_STATE:-relay-state-dev} cargo run -p nightdrop_relay
 fmt:          ; cargo fmt
 clippy:       ; cargo clippy --all-targets
 

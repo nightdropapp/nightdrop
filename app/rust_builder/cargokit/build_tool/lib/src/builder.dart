@@ -146,8 +146,8 @@ class RustBuilder {
   /// Night Drop customization: build the core with the in-process WebTunnel transport
   /// (BoringSSL). ON by default since the Android cross-compile and F-Droid reproducibility were
   /// proven; set `NIGHTDROP_WEBTUNNEL=0` to build without it. That escape hatch exists because
-  /// BoringSSL has only ever been cross-compiled for Android and built natively for Linux — iOS
-  /// and macOS are untried, and whoever tries them first will want a way to build meanwhile.
+  /// BoringSSL has only been built for Android, Linux and Windows — iOS and macOS are untried,
+  /// and whoever tries them first will want a way to build meanwhile.
   /// See `webtunnel/android/README.md`.
   bool get _webtunnelEnabled =>
       Platform.environment['NIGHTDROP_WEBTUNNEL'] != '0';

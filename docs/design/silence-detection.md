@@ -1,6 +1,6 @@
 # Design draft — "No sign of them" (peer-side silence detection)
 
-**Status:** 🟡 core done, UI in progress.
+**Status:** 🟢 implemented — core and the in-chat banner (`silenceBanner`, `chat_screen.dart`), commit 7b15b54.
 **Relates to:** `docs/design/duress-wipe.md` §5, which is why this exists.
 
 ## 1. Why this exists

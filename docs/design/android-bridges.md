@@ -1,11 +1,11 @@
 # Design draft — Bridges and pluggable transports on Android
 
-**Status:** 🟢 in-app **bridge** configuration implemented (2026-08-01), not yet exercised on a
-device. PT binaries are a separate, larger piece (§3) and are **not** included. 🟢 An in-process
-**WebTunnel** client (§5) is built in `webtunnel/` instead: steps 1–3 done, the BoringSSL
-Android cross-compile proven for all ABIs, and a real `NIGHTDROP_WEBTUNNEL=1` APK built with
-BoringSSL + WebTunnel linked in (2026-09-20). Remaining: on-device "block Tor → fall back" test
-and F-Droid reproducibility. Off by default, so nothing ships yet.
+**Status:** 🟢 **shipped.** In-app bridge configuration (2026-08-01), reachable from onboarding. The
+in-process **WebTunnel** client (§5, `webtunnel/`) shipped in **0.1.22, on by default** — exercised
+on the S25 (§6), against a router block with a control, and reproducible in F-Droid's container.
+"Get bridges" (§7a.1) shipped in **0.1.28**. Not done: separate PT binaries (§3), and any test from
+inside a censored country (`SECURITY.md` states that limit). The sections below are kept as the
+design record, in the order the work happened.
 **Relates to:** `docs/bridges.md` (the file formats and where to get bridge lines),
 `ARCHITECTURE.md` §6 (censorship resistance), `core/src/transport/tor.rs`
 (`apply_bridges` / `apply_transports`).
@@ -520,9 +520,9 @@ lines at once so one going down is not fatal.
 
 #### 7a.1 Moat, researched 2026-10-03 (for 0.1.28)
 
-**Status: built on branch `0.1.28`** — the `moat` crate (targets, HTTP, meek, tunnel, moat API)
+**Status: shipped in 0.1.28** — the `moat` crate (targets, HTTP, meek, tunnel, moat API)
 and `api::fetch_bridges`, with a "Get WebTunnel bridges from the Tor Project" button and a consent
-dialog on the bridges screen. **Decided by Shawn, 2026-10-03:** allowed as the app's one direct,
+dialog on the bridges screen. **Decided by the maintainer, 2026-10-03:** allowed as the app's one direct,
 non-Tor request, only after the user agrees to a dialog saying it does not go through Tor, who
 sees the IP address, and that nothing is sent to Night Drop.
 

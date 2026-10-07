@@ -7,8 +7,8 @@ No accounts, no server-side keys, no logs.
 Free, with no accounts and nothing to sell — it runs on donations: see [Support](#support).
 
 See [`ARCHITECTURE.md`](ARCHITECTURE.md) for the full design and threat model, and
-[`MAINTENANCE.md`](MAINTENANCE.md) for how to update, verify, and release the app
-(toolchain, dependency upgrades, rename variables, release checklist).
+[`MAINTENANCE.md`](MAINTENANCE.md) for how to update, verify, release and operate it
+(toolchain, dependency upgrades, the release procedure, publishing, device testing).
 
 ## Where to get it
 
@@ -26,8 +26,8 @@ Downloads on both are the same artifacts, and every release is signed — see
 
 ## Status
 
-**Feature-complete and verified end to end** (184 Rust tests + 75 Flutter tests, all passing
-as of 0.1.22; `cargo clippy` and `flutter analyze` clean):
+**Feature-complete and verified end to end** (Rust and Flutter test suites passing, `cargo
+clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
 
 - **E2E crypto** (`core/crypto`, `identity`, `pake`): Signal Double Ratchet via
   `vodozemac` (X3DH + ratchet), a SPAKE2 "bouncer", anonymous device identities.
@@ -42,6 +42,8 @@ as of 0.1.22; `cargo clippy` and `flutter analyze` clean):
   configured to block Tor, and against an IDS with 52,311 signatures (zero alerts). Limits are
   stated plainly in `SECURITY.md`: never tested against a national firewall, and traffic
   *shape* is not disguised. See [`docs/design/android-bridges.md`](docs/design/android-bridges.md).
+  From 0.1.28 the bridges screen can also **get WebTunnel bridges from the Tor Project** in one
+  tap — the app's one direct, non-Tor request, made only after a consent dialog that says so.
 - **Live event-driven core**: `NightdropCore::new_with_transport` runs a background poller
   that delivers unsolicited inbound messages and emits a push-event stream. A
   deterministic integration test drives two real cores over an injected transport + relay
@@ -83,9 +85,10 @@ as of 0.1.22; `cargo clippy` and `flutter analyze` clean):
 - **Media messages**: sealed attachments, streamed and stored encrypted at rest.
 - **Silence detection**: tells you when nothing has arrived for long enough that the *transport*
   is the likely explanation, rather than leaving you to guess.
-- **Update checks over Tor** (`core/update`): signed manifest fetched through the anonymized
-  path only — there is deliberately **no** clearnet fallback, so the update check can never
-  become the thing that deanonymizes you.
+- **Update checks over Tor** (`core/update`): the manifest is fetched from our own onion site
+  only — a v3 onion authenticates itself, and each download is checked against the manifest's
+  SHA-256 before it lands. There is deliberately **no** clearnet fallback, so the update check can
+  never become the thing that deanonymizes you.
 - **Dart ↔ Rust bridge** + **cargokit** (`app/rust_builder`): the **Linux desktop GUI
   builds** (bundles `libnightdrop`) and the **Android APK builds** (cargokit
   cross-compiles the core into `arm64-v8a`, `armeabi-v7a`, `x86_64`) — both verified.
@@ -103,9 +106,9 @@ as of 0.1.22; `cargo clippy` and `flutter analyze` clean):
 - **iOS/macOS** builds need a Mac with Xcode (not buildable on Linux).
 - **Windows** builds run on Windows (Flutter cannot cross-compile it); toolchain, long-path
   setup and known limits are in `docs/building-windows.md`.
-- The demo app still pairs with an in-process peer (two real `Node`s) until you start it
-  via `new_with_transport` pointed at Tor + a deployed relay — that swap doesn't change the
-  `NightdropCore` API.
+- A bare `flutter run` starts the **demo core** (an in-process peer, two real `Node`s) for UI
+  work. Real builds pass `--dart-define=NIGHTDROP_TOR=1` and the relay address (the install
+  scripts and the F-Droid recipe do), which selects `new_with_transport` — same `NightdropCore` API.
 - The `#[ignore]`d Tor and `integration_test/` suites run where a network / device (or
   `xvfb`) is available.
 
@@ -118,7 +121,12 @@ core/           Rust security core: api, node, wire, identity, crypto, pake, tra
                 (+ transport/tor behind `tor`), relay_client, storage.
 relay/          Minimal server binary: rendezvous mailbox + 24h store-and-forward.
 website/        Static marketing/features site.
-scripts/        Build/install + deploy helpers (desktop, Android, onion service, VPS).
+scripts/        Build/install + publish helpers (desktop, Android, AppImage, Windows, website).
+webtunnel/      In-process WebTunnel client (Tor inside HTTPS, Chrome-identical TLS).
+moat/           "Get bridges" client for the Tor Project's bridge distributor.
+third_party/    Vendored, patched crates (each with a NIGHTDROP-PATCH.md).
+fdroid/         F-Droid recipe and the reproducible-build tooling.
+docs/           Design records (docs/design/), field advisories, operations.
 ```
 
 ## Prerequisites
@@ -157,12 +165,15 @@ make app-run       # cd app && flutter run
 
 ## Local dev helpers
 
-Run the **relay** locally (dev TUI dashboard; its `.onion` persists across restarts via
-`relay-state/`, see [`ARCHITECTURE.md`](ARCHITECTURE.md) §11.9):
+Run a **dev relay** locally (live TUI dashboard; its `.onion` persists across restarts in its
+own state dir, see [`ARCHITECTURE.md`](ARCHITECTURE.md) §11.9):
 
 ```sh
-NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay    # or: make relay-run
+NIGHTDROP_RELAY_TUI=1 make relay-run    # state in relay-state-dev/
 ```
+
+Never point a second process at `relay-state/`: on the maintainer's machine that is the
+production relay's keystore, already served by the `nightdrop-relay` user service.
 
 Preview the **website** locally (loopback only — don't expose the dev server to the LAN):
 
@@ -170,8 +181,8 @@ Preview the **website** locally (loopback only — don't expose the dev server t
 python3 -m http.server --bind 127.0.0.1 --directory website 8000
 ```
 
-Build/install helpers (Linux desktop + Android installers, onion service, VPS deploy) live
-in [`scripts/`](scripts/); each is self-documenting via `--help`.
+Build/install and publishing helpers live in [`scripts/`](scripts/); `MAINTENANCE.md` §8 lists
+them, with the environment variables that change what they build.
 
 ## Regenerating the bridge
 

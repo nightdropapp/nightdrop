@@ -1,698 +1,96 @@
-# Night Drop: Build, Compile & Deploy Guide
+# Night Drop: building and running for development
 
-Complete guide to build and deploy Night Drop on Desktop (Linux) and Mobile (Android) with relay store-and-forward messaging.
+Day-to-day dev builds on Linux and Android. Releases are a different, ordered procedure:
+`MAINTENANCE.md` §11. Windows has its own page: [`docs/building-windows.md`](docs/building-windows.md).
+Toolchain prerequisites: `MAINTENANCE.md` §2.
 
-Windows has its own page: [`docs/building-windows.md`](docs/building-windows.md).
+Before anything else, two rules that each destroyed or nearly published something once:
 
----
-
-## 🎯 Quick Start
-
-### Desktop (Tor Mode + Relay)
-```bash
-cd ~/night-drop
-scripts/install-desktop-app.sh --run
-```
-
-### Android (Tor Mode + Relay)
-```bash
-cd ~/night-drop
-scripts/install-android-app.sh
-```
+- **`scripts/install-android-app.sh --release` publishes** the APK to the live onion site. For a
+  test build, use the default (debug) mode or build by hand.
+- **Never install a debug build over a release install of `app.nightdrop`**, and never
+  `adb uninstall` a real install: both destroy that device's identity. Put test builds beside it
+  under their own app id (below).
 
 ---
 
-## 🖥️ Desktop Application (Linux)
+## Desktop (Linux)
 
-### Prerequisites
-
-**Tools Required:**
-```bash
-flutter --version          # Flutter SDK 3.0+
-rustc --version            # Rust toolchain
-clang --version            # C compiler
-cmake --version            # Build system
-ninja --version            # Build parallelizer
-pkg-config --version       # Package config
+```sh
+make app-run                              # demo core: an in-process peer, for UI work
+scripts/install-desktop-app.sh --run      # real build: Tor + relay baked in, installed and launched
 ```
 
-**Installation (Ubuntu/Debian):**
-```bash
-sudo apt-get update
-sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev
+`install-desktop-app.sh` reads the relay address from `relay-state/onion`, passes
+`--dart-define=NIGHTDROP_TOR=1 --dart-define=NIGHTDROP_RELAY=…`, builds the Rust core and the
+Flutter release bundle, and installs a `.desktop` entry, icons and `~/.local/bin/nightdrop`
+(`--no-build`, `--uninstall`). On desktop the same two settings can instead come from environment
+variables at run time, for a hot-reload loop against the real network:
+
+```sh
+cd app && flutter run -d linux \
+  --dart-define=NIGHTDROP_TOR=1 --dart-define="NIGHTDROP_RELAY=$(cat ../relay-state/onion)"
 ```
 
-### Build Modes
+Without `NIGHTDROP_RELAY` the app is P2P-only: QR pairing works, short codes and offline delivery
+do not. First Tor bootstrap takes ~30–60 s; the onion is reachable after ~1–3 min.
 
-#### 1. Tor Mode + Relay Fallback (RECOMMENDED)
-```bash
-cd ~/night-drop
-scripts/install-desktop-app.sh --run
-```
+## Android
 
-**Features:**
-- ✅ Full P2P via Tor (.onion addresses)
-- ✅ Relay fallback for offline delivery (24h store-and-forward)
-- ✅ Complete anonymity
-- ✅ Works anywhere (LTE, WiFi, VPN, etc.)
-- ✅ Encrypted end-to-end (Signal Double Ratchet)
+Connect the phone (USB debugging, or wireless debugging: discover the current address with
+`adb mdns services | grep _adb-tls-connect` — it changes whenever wireless debugging is toggled),
+then:
 
-**First Run:** 30-60 seconds (Tor bootstrap)
-**Subsequent Runs:** 5-10 seconds (cached state)
+```sh
+# A test build BESIDE the real install (its own data, its own identity):
+NIGHTDROP_APP_ID=app.nightdrop.test NIGHTDROP_APP_NAME="ND Test" scripts/install-android-app.sh
 
-**What It Does:**
-1. Auto-detects the relay address from `relay-state/onion`
-2. Bakes `NIGHTDROP_TOR` + `NIGHTDROP_RELAY` into the build via `--dart-define`
-3. Builds the Rust core (`libnightdrop.so`) + the Flutter release bundle
-4. Installs the desktop app (`.desktop` entry, icons, `~/.local/bin/nightdrop`) and launches it
-5. App shows a QR code for pairing
-
-For quick dev iteration without installing, use `make app-run` (see Manual Build below).
-
-#### 2. Manual Build
-```bash
-# Get relay address
-RELAY_ADDR=$(cat ~/night-drop/relay-state/onion)
-
-# Set environment
-export FLUTTER_HOME=~/flutter
-export PROJECT_ROOT=~/night-drop
-export NIGHTDROP_TOR=1
-export NIGHTDROP_RELAY="$RELAY_ADDR"
-
-# Build Rust core first
-cd $PROJECT_ROOT
-make core-build
-
-# Run app
-cd $PROJECT_ROOT/app
-$FLUTTER_HOME/bin/flutter run -d linux --dart-define=NIGHTDROP_TOR=1
-```
-
-#### 3. Release Build (Optimized)
-```bash
-cd ~/night-drop
-scripts/install-desktop-app.sh          # builds + installs the desktop app (Tor + relay baked in)
-scripts/install-desktop-app.sh --run    # ...and launches it afterwards
-# Manual equivalent:
-#   cd app && flutter build linux --release \
-#     --dart-define=NIGHTDROP_TOR=1 --dart-define="NIGHTDROP_RELAY=$(cat ../relay-state/onion)"
-```
-
-**Output:** ~80-120 MB standalone binary
-
-#### 4. Demo Mode (Local Testing)
-```bash
-cd ~/night-drop/app
-~/flutter/bin/flutter run -d linux
-```
-
-**Note:** Both sender and receiver in same app, no relay, for UI testing only.
-
----
-
-## 📱 Android Application (Phone)
-
-### Prerequisites
-
-**Tools Required:**
-```bash
-flutter --version              # Flutter SDK 3.0+
-adb --version                  # Android Debug Bridge
-```
-
-**Find adb:**
-```bash
-which adb                      # If in PATH
-# OR
-~/android-sdk/platform-tools/adb --version
-```
-
-### Device Connection
-
-#### USB Connection
-1. Connect phone via USB cable
-2. Enable USB Debugging: Settings → Developer Options → USB Debugging
-3. Run installer (auto-detects device)
-
-#### WiFi Connection
-```bash
-# Enable wireless debugging on phone
-adb tcpip 5555
-
-# Connect wirelessly
-scripts/install-android-app.sh --wireless 192.168.X.X 5555
-
-# Disconnect USB (stays connected via WiFi)
-```
-
-### Build & Install
-
-#### Automatic (Recommended)
-```bash
-cd ~/night-drop
-scripts/install-android-app.sh
-```
-
-**What It Does:**
-1. ✅ Validates adb and device
-2. ✅ Detects relay address
-3. ✅ Builds APK with relay configured (`--dart-define=NIGHTDROP_RELAY=...`)
-4. ✅ Installs on connected device
-5. ✅ Auto-launches Night Drop
-
-**Build Time:** 3-5 min (first), 30-90 sec (subsequent)
-
-#### Build-Only (Skip Install)
-```bash
-scripts/install-android-app.sh --build-only
-# APK output: app/build/app/outputs/flutter-apk/app-debug.apk
-```
-
-#### Install Existing APK
-```bash
-scripts/install-android-app.sh --install-only
-```
-
-#### Manual Build with Relay
-```bash
-# Get relay address
-RELAY_ADDR=$(cat ~/night-drop/relay-state/onion)
-
-# Build with relay embedded (compile-time constant)
-cd ~/night-drop/app
-~/flutter/bin/flutter build apk --debug \
-  --dart-define=NIGHTDROP_TOR=1 \
-  --dart-define="NIGHTDROP_RELAY=$RELAY_ADDR"
-
-# Install
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
-
-# Launch
-adb shell monkey -p app.nightdrop -c android.intent.category.LAUNCHER 1
-```
-
-#### List Connected Devices
-```bash
+scripts/install-android-app.sh --build-only     # APK only: app/build/app/outputs/flutter-apk/
+scripts/install-android-app.sh --install-only   # install the last build
 scripts/install-android-app.sh --list-devices
+scripts/install-android-app.sh --diag           # opt-in field diagnostics (ARCHITECTURE.md §6)
 ```
 
----
+The script builds only the ABI of the connected device unless `--universal` is given, bakes the
+relay in from `relay-state/onion`, installs and launches. Logs: `adb logcat | grep nd-` on a
+`--diag` build. More device-testing notes, including why a black screenshot is not a blank
+screen: `MAINTENANCE.md` §13.
 
-## 🔗 Relay Configuration
+## A dev relay
 
-### What Is Relay?
-- Opaque encrypted blob store (can't read plaintext)
-- 24-hour default message TTL (time-to-live)
-- No keys or identity data stored (full E2E)
-- Location: `bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion`
+The production relay runs as the `nightdrop-relay` user service on the maintainer's machine, from
+`relay-state/` (`MAINTENANCE.md` §14). For a relay of your own while developing:
 
-### How It Works
-
-**Message Flow (Offline Delivery):**
-```
-Sender sends message
-  ↓
-[Try 1] Direct P2P via Tor
-  ├─ Recipient online?
-  │  └─ Success → Delivered instantly ✅
-  │
-  └─ Recipient offline?
-     ↓
-     [Try 2] Store on relay
-       ├─ Relay configured?
-       │  └─ Success → Message queued 24h ✅
-       │
-       └─ No relay?
-          └─ Fail ❌
-
-Recipient comes online
-  ↓
-  Polls relay regularly
-  ↓
-  Relay returns queued messages ✅
-  ↓
-  Messages displayed in chat ✅
+```sh
+NIGHTDROP_RELAY_TUI=1 make relay-run      # state in relay-state-dev/ — never relay-state/
+cat relay-state-dev/onion                 # its address, to build an app against
 ```
 
-### Platform Differences
+A second process on `relay-state/` would publish the production onion from two places at once.
+Running a relay for real (service, private relays, the signed directory): `relay/README.md`,
+`RELAYS.md`.
 
-#### Desktop: Runtime Configuration
-```bash
-# Set before running
-export NIGHTDROP_RELAY=$(cat relay-state/onion)
+## Tests
 
-# App reads: Platform.environment['NIGHTDROP_RELAY']
-scripts/install-desktop-app.sh --run
+```sh
+make core-test && make clippy && make app-test
 ```
 
-#### Android: Build-Time Configuration
-```bash
-# Embedded in APK during build
---dart-define=NIGHTDROP_RELAY=$(cat relay-state/onion)
-
-# App reads: String.fromEnvironment('NIGHTDROP_RELAY')
-flutter build apk --debug --dart-define=NIGHTDROP_RELAY=...
-```
-
-**Why Different?** Android is sandboxed; runtime env vars inaccessible. Values must be baked in at build time.
-
-### Verify Relay Configured
-
-**Desktop:**
-```bash
-scripts/install-desktop-app.sh --run
-# Look for: "✓ Relay configured for store-and-forward: ..."
-```
-
-**Android:**
-```bash
-scripts/install-android-app.sh
-# Look for: "Relay configured for store-and-forward: ..."
-```
-
----
-
-## 📋 Full Workflow: Build Both Platforms
-
-### Step 1: Start Relay Server
-```bash
-cd ~/night-drop
-
-# Start relay (if not already running)
-NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
-
-# Verify relay is up
-sleep 2
-cat relay-state/onion
-# Should output: bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion
-```
-
-### Step 2: Build & Run Desktop
-```bash
-# Terminal 1
-cd ~/night-drop
-scripts/install-desktop-app.sh --run
-
-# Wait for app window to open
-# Look for QR code display
-# Desktop is now waiting to pair
-```
-
-### Step 3: Build & Deploy Android
-```bash
-# Terminal 2
-cd ~/night-drop
-
-# Connect phone (USB or WiFi)
-scripts/install-android-app.sh --wireless 192.168.X.X 5555  # If WiFi
-
-# Build, install, and launch
-scripts/install-android-app.sh
-
-# Wait for app to launch on phone
-# Phone is now ready to pair
-```
-
-### Step 4: Pair Devices
-```
-Desktop App:
-  1. Shows QR code with .onion address
-
-Phone App:
-  1. New Chat → Scan QR Code
-  2. Scan desktop's QR
-  3. Confirm pairing on both devices
-```
-
-### Step 5: Test Messaging
-```
-Both devices online:
-  Desktop → Send message → Phone ✅ (instant P2P)
-  Phone → Send message → Desktop ✅ (instant P2P)
-
-Phone offline:
-  Desktop → Send message
-  → Message stored on relay for 24h
-  Phone online:
-    → Retrieves message ✅
-    → Appears in chat
-
-Desktop offline:
-  Phone → Send message
-  → Message stored on relay for 24h
-  Desktop online:
-    → Retrieves message ✅
-    → Appears in chat
-```
-
----
-
-## ⏱️ Build Times
-
-| Task | Time | Notes |
-|------|------|-------|
-| Desktop (first) | 3-7 min | Tor bootstrap 30-60s |
-| Desktop (rebuild) | 30-90 sec | Incremental |
-| Desktop (hot reload) | <2 sec | Code changes only |
-| Desktop (release) | 5-10 min | Fully optimized |
-| Android (first) | 3-5 min | Gradle downloads deps |
-| Android (rebuild) | 30-90 sec | Cached |
-| Rust core | 1-2 min | Incremental |
-
----
-
-## 🔧 Manual Commands
-
-### Desktop Compilation Only
-```bash
-# Just build core
-make core-build
-# Output: target/debug/libnightdrop.so
-
-# Clean build
-flutter clean && cargo clean
-make core-build
-
-# Test everything
-make core-test && make app-test
-```
-
-### Android Compilation Only
-```bash
-# Just build APK
-scripts/install-android-app.sh --build-only
-
-# Rebuild (clear cache first)
-cd app && flutter clean && flutter pub get
-scripts/install-android-app.sh --build-only
-
-# Build without relay (P2P only)
-cd app
-~/flutter/bin/flutter build apk --debug \
-  --dart-define=NIGHTDROP_TOR=1
-```
-
-### Environment Variables (Optional)
-
-Set these if tools aren't in PATH:
-```bash
-export FLUTTER_HOME=~/flutter
-export PROJECT_ROOT=~/night-drop
-export ADB=~/android-sdk/platform-tools/adb
-
-# Rebuild apps
-scripts/install-desktop-app.sh --run
-scripts/install-android-app.sh
-```
-
----
-
-## 🧹 Cleanup & Reset
-
-### Clear Desktop Tor State
-```bash
-# Removes .onion address, forces new one on next run
-rm -rf ~/.local/share/app.nightdrop/arti-state/
-
-# Run again - generates new .onion
-scripts/install-desktop-app.sh --run
-```
-
-### Uninstall Android App
-```bash
-adb uninstall app.nightdrop
-```
-
-### Clear All Build Artifacts
-```bash
-cd ~/night-drop
-
-# Flutter
-cd app
-flutter clean
-
-# Rust
-cd ..
-cargo clean
-
-# Rebuild from scratch
-make core-build
-scripts/install-desktop-app.sh --run
-```
-
----
-
-## 📂 Key Files
-
-| File | Purpose |
-|------|---------|
-| `scripts/install-desktop-app.sh` | Build + install the Linux desktop app (relay auto-configured); `--run`, `--no-build`, `--uninstall` |
-| `scripts/install-android-app.sh` | Build + install the APK (relay auto-configured); `--wireless IP PORT`, `--build-only`, `--install-only` |
-| `Makefile` | Build commands (`core-build`, `app-run`, `relay-run`, tests, etc.) |
-| `relay-state/onion` | Relay .onion address |
-| `app/lib/src/core/rust_nightdrop_core.dart` | Transport config (Tor, Demo, Networked) |
-| `core/src/api.rs` | FFI API surface |
-
----
-
-## 🐛 Troubleshooting
-
-### Desktop Issues
-
-**"Flutter command not found"**
-```bash
-export FLUTTER_HOME=~/flutter
-export PATH=$FLUTTER_HOME/bin:$PATH
-scripts/install-desktop-app.sh --run
-```
-
-**"libnightdrop.so not found"**
-```bash
-make core-build
-scripts/install-desktop-app.sh --run
-```
-
-**"GTK libraries not found"**
-```bash
-sudo apt-get install libgtk-3-dev
-flutter clean
-scripts/install-desktop-app.sh --run
-```
-
-**"Relay configured for store-and-forward" not showing**
-```bash
-# Check relay is running
-ps aux | grep relay
-
-# Check relay state file
-ls -la ~/night-drop/relay-state/onion
-
-# Restart script
-scripts/install-desktop-app.sh --run
-```
-
-### Android Issues
-
-**"adb command not found"**
-```bash
-export ADB=~/android-sdk/platform-tools/adb
-scripts/install-android-app.sh
-```
-
-**"No Android devices found"**
-```bash
-# USB: Verify USB cable and USB Debugging enabled
-adb devices -l
-
-# WiFi: Run adb tcpip first
-adb tcpip 5555
-scripts/install-android-app.sh --wireless 192.168.X.X 5555
-```
-
-**"Build fails"**
-```bash
-cd ~/night-drop/app
-flutter clean
-flutter pub get
-cd ..
-scripts/install-android-app.sh --build-only
-```
-
-**"Installation fails"**
-```bash
-# Uninstall old app
-adb uninstall app.nightdrop
-
-# Reinstall
-scripts/install-android-app.sh --install-only
-```
-
----
-
-## 🔐 Security & Privacy
-
-### Messages
-- ✅ End-to-end encrypted (Signal Double Ratchet)
-- ✅ Relay cannot read plaintext
-- ✅ Device-to-device encryption
-- ✅ No server-side keys
-
-### Identity
-- ✅ Anonymous (no phone/email/username)
-- ✅ Device-generated keypair
-- ✅ Pairing via QR code or short code
-- ✅ Authorization required before first message
-
-### Transport
-- ✅ Tor by default (P2P via .onion)
-- ✅ Relay fallback (opaque blobs only)
-- ✅ No IP addresses exposed (Tor)
-- ✅ Works on any network
-
-### Storage
-- ✅ Local-first (messages stored on device)
-- ✅ Relay storage optional (24h opt-in)
-- ✅ Backup encrypted with user password
-- ✅ Device-held keypair, never synced
-
----
-
-## 📞 Common Tasks
-
-| Task | Command | Time |
-|------|---------|------|
-| Install + run desktop | `scripts/install-desktop-app.sh --run` | 1-2 min |
-| Dev run desktop (no install) | `make app-run` | 1-2 min |
-| Build Android | `scripts/install-android-app.sh` | 3-5 min |
-| Build Android (no install) | `scripts/install-android-app.sh --build-only` | 3-5 min |
-| Connect phone WiFi | `scripts/install-android-app.sh --wireless 192.168.X.X 5555` | 5 sec |
-| Run tests | `make core-test && make app-test` | 5-10 min |
-| Release build | `flutter build linux --release` | 5-10 min |
-| Hot reload | Press 'r' in terminal | <1 sec |
-
----
-
-## ✨ Tips for Future Builds
-
-### Quick Development Cycle
-```bash
-# Terminal 1: Run desktop
-scripts/install-desktop-app.sh --run
-
-# Terminal 2: Edit code
-nano app/lib/src/main.dart
-
-# Back to Terminal 1: Press 'r' for hot reload
-# Changes appear instantly!
-```
-
-### Rebuild Android with New Relay
-```bash
-# Old relay stopped? Start new one
-NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
-
-# Update Android APK with new relay
-scripts/install-android-app.sh --build-only
-
-# Uninstall old app
-adb uninstall app.nightdrop
-
-# Install new APK
-adb install -r app/build/app/outputs/flutter-apk/app-debug.apk
-```
-
-### Skip Desktop Tor Bootstrap
-```bash
-# First run: 30-60 seconds
-scripts/install-desktop-app.sh --run
-
-# Subsequent runs: 5-10 seconds (state cached)
-# Just run again, faster now
-scripts/install-desktop-app.sh --run
-```
-
-### Run Without Relay (P2P Only)
-```bash
-# Desktop (no relay config needed)
-cd app
-~/flutter/bin/flutter run -d linux --dart-define=NIGHTDROP_TOR=1
-
-# Android (build without relay)
-cd app
-~/flutter/bin/flutter build apk --debug \
-  --dart-define=NIGHTDROP_TOR=1
-adb install -r build/app/outputs/flutter-apk/app-debug.apk
-```
-
----
-
-## 🚀 One-Command Deployment
-
-```bash
-#!/bin/bash
-# Deploy both platforms in parallel
-
-cd ~/night-drop
-
-# Start desktop (background)
-scripts/install-desktop-app.sh --run &
-DESKTOP_PID=$!
-
-# Build and deploy Android
-scripts/install-android-app.sh
-
-# Wait for desktop to start
-sleep 5
-
-echo "✅ Both platforms deployed!"
-echo "Desktop PID: $DESKTOP_PID"
-echo "Pair with QR code from desktop app"
-```
-
----
-
-## 📚 Related Documentation
-
-- **ARCHITECTURE.md** — System design & threat model
-- **CLAUDE.md** — Developer conventions & invariants
-
----
-
-## 📝 Version Info
-
-- **Night Drop:** Feature-complete, tested
-- **Rust Core:** 30+ tests, clippy clean
-- **Flutter App:** 8+ tests, analyze clean
-- **Tor Transport:** Embedded arti, verified live
-- **Relay:** 24h store-and-forward, verified working
-- **E2E Crypto:** Signal Double Ratchet + SPAKE2 PAKE
-
----
-
-## Quick Reference
-
-```bash
-# Everything in one place
-
-# 1. Start relay (if needed)
-NIGHTDROP_RELAY_TUI=1 cargo run -p nightdrop_relay
-
-# 2. Build & run desktop
-scripts/install-desktop-app.sh --run
-
-# 3. Build & install Android  
-scripts/install-android-app.sh
-
-# 4. Monitor logs
-tail -f /tmp/night-drop-tor.log
-tail -f /tmp/relay-*.log
-
-# 5. See relay activity
-ps aux | grep relay
-
-# 6. Check relay state
-cat relay-state/onion
-```
-
-Done! Everything you need to build and deploy both platforms with full relay support. 🚀
+The full loop, including the integration test and the Tor test targets nothing builds
+automatically: `MAINTENANCE.md` §3.
+
+## Troubleshooting
+
+- **`flutter: command not found` / the wrong Flutter.** The scripts use `FLUTTER_HOME` (default
+  `~/flutter`), not `PATH`; point it at the SDK matching `app/.fvmrc`.
+- **`libnightdrop.so` not found** on a bare `flutter run`: `make core-build` first.
+- **CMake "Permission denied" on `/usr/local`**, or Android "No Android SDK found":
+  `MAINTENANCE.md` §9.
+- **No relay in the build** (short codes fail, "P2P only" in the script output): `relay-state/onion`
+  is missing — in a worktree, copy just that file in (`MAINTENANCE.md` §8).
+- **The app cannot reach anyone after deleting its Tor state.** `~/.local/share/<app-id>/arti-state/`
+  holds the device's onion key. Deleting it gives the device a new address its contacts never
+  learn — don't, unless the identity is disposable.
+- **Install fails with a signature or version conflict.** You are installing a debug build over a
+  release one, or a lower versionCode over a higher one. Install under a test app id instead of
+  uninstalling the real one.

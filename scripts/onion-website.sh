@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
 # Serve the Night Drop website as a Tor v3 onion service, for local testing in Tor Browser.
 #
-# It runs a localhost-only static file server over website/ and puts a tor hidden service in
-# front of it. Nothing is exposed on your LAN — the HTTP server binds 127.0.0.1 only, and the
+# It runs nginx as a localhost-only static file server over website/ and puts a tor hidden service
+# in front of it. Nothing is exposed on your LAN — the HTTP server binds 127.0.0.1 only, and the
 # only reachable endpoint is the .onion (which you control).
 #
-# Requires the tor daemon:   sudo dnf install -y tor
+# Requires tor and nginx:    sudo dnf install -y tor nginx
 #
 # Usage:
 #   scripts/onion-website.sh [PORT]
@@ -59,6 +59,11 @@ WEB="$REPO/website"
 if ! command -v tor >/dev/null 2>&1; then
   echo "error: the 'tor' daemon is not installed." >&2
   echo "       install it with:  sudo dnf install -y tor" >&2
+  exit 1
+fi
+if ! command -v nginx >/dev/null 2>&1; then
+  echo "error: nginx is not installed (it serves website/ on localhost)." >&2
+  echo "       install it with:  sudo dnf install -y nginx" >&2
   exit 1
 fi
 if [ ! -f "$WEB/index.html" ]; then

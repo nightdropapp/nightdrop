@@ -104,7 +104,7 @@ onion identity) on the following start. The counter behind that is `<state>/unhe
 
 ## Use it in the app
 
-In **Settings → Relays**, add your relay's `.onion` address to your **extra relays**. Your
+In the home menu → **My relays…**, add your relay's `.onion` address to your **extra relays**. Your
 contacts add it too (share it out-of-band). From then on, pairing and offline mail fan out to
 your relay alongside the default — so your group isn't dependent on any single operator.
 

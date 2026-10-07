@@ -1,6 +1,6 @@
 # Design — Per-pair, epoch-rotating mailbox handles
 
-**Status:** design agreed 2026-09-22; implemented on branch `mailbox-v2` 2026-09-26 for 0.1.25. Where
+**Status:** design agreed 2026-09-22; implemented on branch `mailbox-v2` 2026-09-26 and shipped in **0.1.26** (planned for 0.1.25). Where
 the build departs from or sharpens the text below, §9 says so.
 **Relates to:** `ARCHITECTURE.md` §6 (relay, store-and-forward) and §11.2, `multi-relay-mailboxes.md`
 (#17), `cover-traffic.md` (#4). Group chat (0.3) depends on this but does not block it.

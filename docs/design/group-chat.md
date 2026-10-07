@@ -37,7 +37,7 @@ half the members are offline. A single owner is the design a ten-person group ac
 
 ## 3. Joining: in-band, no new pairing surface
 
-Shawn's question was whether groups need their own joining page. They do not, and should not have
+The question was whether groups need their own joining page. They do not, and should not have
 one.
 
 A group invite is a `GroupInvite` frame sent **over an existing 1:1 channel** — so you can only be

@@ -35,7 +35,7 @@ Documentation=file://$SCRIPT_DIR/onion-website.sh
 
 [Service]
 # notify: the script sends readiness + the .onion address (systemd-notify), so the address
-# shows up in `systemctl --user status` and the unit only reports "active" once it's serving.
+# shows up in \`systemctl --user status\` and the unit only reports "active" once it's serving.
 Type=notify
 # systemd-notify runs as a child (not the main PID), so accept notifications from the cgroup.
 NotifyAccess=all

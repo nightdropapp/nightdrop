@@ -16,8 +16,9 @@ analytics, no crash reporter, no ad SDK appears anywhere in the resolved tree.
 The first deliberate exception is a **user-configured bridge**, which is how Tor itself is
 reached where the public relays are blocked (`docs/bridges.md`, `docs/design/android-bridges.md`):
 connecting to *any* bridge is a clearnet connection to that bridge by design. A **WebTunnel**
-bridge (`webtunnel` feature, off by default) additionally does a clearnet DNS lookup of the
-bridge's `url=` host — the same name the TLS SNI to that bridge already carries. This carries no
+bridge (`webtunnel` feature: off for a bare `cargo build`, on in every app build since 0.1.22 —
+the patched cargokit adds it unless `NIGHTDROP_WEBTUNNEL=0`) additionally does a clearnet DNS
+lookup of the bridge's `url=` host — the same name the TLS SNI to that bridge already carries. This carries no
 app data: it is Tor's own entry hop, disguised, chosen and pasted by the user. All message
 traffic still flows through Tor inside it.
 

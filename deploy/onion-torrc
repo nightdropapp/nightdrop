@@ -1,10 +1,10 @@
-# Tor onion-service config for the VPS. Append to /etc/tor/torrc (or drop in
-# /etc/tor/torrc.d/), then: systemctl enable --now tor && systemctl reload tor
+# Tor onion-service config for a host the onion site is MOVED to (docs/hosting.md §6). Append to
+# /etc/tor/torrc (or drop in /etc/tor/torrc.d/), then: systemctl enable --now tor && systemctl reload tor
 #
-# This publishes the SAME .onion you already use, IF you migrate the existing key. On the VPS:
+# This publishes the SAME .onion you already use, IF you migrate the existing key. On the new host:
 #
 #   sudo install -d -m 700 -o debian-tor -g debian-tor /var/lib/tor/nightdrop   # (user is 'toranon' on Fedora)
-#   # copy the 3 files from ~/.local/share/nightdrop-website-onion/hs/ on your laptop:
+#   # copy the 3 files from ~/.local/share/nightdrop-website-onion/hs/ on the current host:
 #   #   hs_ed25519_secret_key  hs_ed25519_public_key  hostname
 #   sudo scp/rsync them into /var/lib/tor/nightdrop/ then:
 #   sudo chown -R debian-tor:debian-tor /var/lib/tor/nightdrop

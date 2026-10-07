@@ -1,8 +1,9 @@
 # Reproducible builds & F-Droid — status and recipe
 
 Goal: a third party (and F-Droid) can rebuild the shipped APK **bit-for-bit from source** and
-verify it matches the developer-signed release. This is the trust gate for the privacy audience
-(`IMPROVEMENT_PLAN.md` §5.1, `TODO.md` #15).
+verify it matches the developer-signed release. This is the trust gate for the privacy audience.
+Status: **achieved** — F-Droid rebuilds every release from our tag and verifies it against the APKs
+we publish (`binary:`); the release procedure that keeps it so is `MAINTENANCE.md` §11.
 
 This is harder than a plain Android app because the build has two halves — a **Flutter** app and a
 cross-compiled **Rust** core (`libnightdrop.so`, built by cargokit through the NDK). Each half must
@@ -100,15 +101,15 @@ the box. What's proven vs. left:
    prescribes. Verified by building 0.1.8 at two unrelated paths and matching the published APK
    both times (`WS_PATH=… ./fdroid/build-locally.sh`). NDK is pinned at r28c.
 5. ~~**Release builds don't apply the flags.**~~ ✅ **Resolved in 0.1.8.** The published `v0.1.6`
-   APK was built without the remap flags (~826 `/home/shawn/…` strings in the shipped `.so`), so
+   APK was built without the remap flags (~826 `/home/<user>/…` strings in the shipped `.so`), so
    it could never be byte-matched; `v0.1.7` had the flags but not the fixed path. Releases are
    now *built by the F-Droid recipe itself* via `./fdroid/build-locally.sh` and only signed
    afterwards, so the release path cannot diverge from the recipe by construction. Sign with
    `apksigner --alignment-preserved`, or the re-aligned zip breaks signature copying. Full
    release procedure: `fdroid/README.md`.
-6. **KGP plugin (`TODO.md` #5).** `flutter_foreground_task` applies its own Kotlin Gradle Plugin —
-   resolve (bump to a migrated release, or vendor with the upstream migration diff) to keep the
-   Gradle build clean and future-proof. Didn't block reproducibility, but worth clearing.
+6. ~~**KGP plugin.**~~ ✅ **Resolved in 0.1.28.** `flutter_foreground_task` 11 moved to Flutter's
+   built-in Kotlin; it was the last plugin applying the Kotlin Gradle Plugin. It never blocked
+   reproducibility.
 
 ## Confirmed in production: 0.1.22 with BoringSSL (2026-09-23)
 
@@ -124,30 +125,20 @@ The load-bearing detail is in `webtunnel/android/boringssl-toolchain.cmake`: the
 NDK resets `CMAKE_<LANG>_FLAGS_INIT` and the flag vanishes with no error — the build succeeds, the
 APK works, and only F-Droid's rebuild would ever have shown it as unreproducible.
 
-## Getting into F-Droid
+## In F-Droid
 
-The build recipe is **merged** ([MR !43625](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/43625),
-merged 2026-08-14), so `app.nightdrop` lives in fdroiddata `master` and releases are picked up from
-this repo's **tags** — no per-release MR. It is mirrored byte-for-byte at [`../fdroid/app.nightdrop.yml`](../fdroid/app.nightdrop.yml); see
-[`../fdroid/README.md`](../fdroid/README.md) for its shape and how to validate it locally. It
-extracts the Flutter version from `app/.fvmrc`, provisions Rust 1.96.0 + the Android targets,
-patches cargokit's hardcoded `stable`, builds at a fixed path with the repro
-`CARGO_ENCODED_RUSTFLAGS`, and pins the signing key. `binary:` is declared, so F-Droid rebuilds
-and verifies against the developer-signed APK. The **store listing** (title, summary, full description, and the
-v1 changelog) is in place under [`../fastlane/metadata/android/en-US/`](../fastlane/metadata/android/en-US/),
-which F-Droid pulls automatically — only screenshots remain to be dropped in (see the images README
-there). Remaining steps:
-
-1. Fill the recipe's TODOs: a **public git repo** with **tagged releases** (semver + monotonic
-   `versionCode`), and a **stable production relay `.onion`** to bake in (the placeholder is the
-   current dev relay).
-2. Add **screenshots** to `fastlane/metadata/android/en-US/images/phoneScreenshots/` (captured with
-   throwaway test identities so no real data is shown).
-3. **Stand up a local F-Droid repo first** with `fdroidserver` — build the app in F-Droid's offline
-   environment on your own machine to validate the recipe and no-network-at-build compliance (Cargo
-   crates + pub packages must fetch deterministically) *before* submitting to `fdroiddata`.
-4. Submit the metadata, flagged for **reproducible** verification, and publish the recipe so third
-   parties can reproduce independently.
+The build recipe was **merged** on 2026-08-14 ([MR !43625](https://gitlab.com/fdroid/fdroiddata/-/merge_requests/43625)),
+so `app.nightdrop` lives in fdroiddata `master` and releases are picked up from this repo's
+**tags** — no per-release MR. The current release's build entries are mirrored at
+[`../fdroid/app.nightdrop.yml`](../fdroid/app.nightdrop.yml) (fdroiddata additionally keeps the
+older ones); see [`../fdroid/README.md`](../fdroid/README.md) for its shape and how to validate and
+build it locally. It extracts the Flutter version from `app/.fvmrc`, provisions the Rust version
+from `rust-toolchain.toml` + the Android targets, patches cargokit's hardcoded `stable`, builds at
+a fixed path with the repro `CARGO_ENCODED_RUSTFLAGS`, and pins the signing key. `binary:` is
+declared, so F-Droid rebuilds and verifies against the developer-signed APKs. The store listing
+(title, summary, description, per-release changelogs, screenshots) lives under
+[`../fastlane/metadata/android/en-US/`](../fastlane/metadata/android/en-US/), which F-Droid pulls
+automatically.
 
 ## Verify locally (any time)
 

@@ -18,8 +18,10 @@ directory (the same directory that contains `arti-state/`):
   `~/.local/share/<app-id>/bridges.txt` (alongside `arti-state/`).
 - **Android:** the state directory is app-private, so there is no file to drop. Use the in-app
   editor instead — **menu → Tor bridges** — which validates each line with the same parser this
-  file describes and writes it there for you (`docs/design/android-bridges.md`). Pluggable
-  transports remain desktop-only: they need a client binary Android has no way to provide yet.
+  file describes and writes it there for you (`docs/design/android-bridges.md`). The same screen
+  exists on every platform. Of the pluggable transports, **WebTunnel** is built into the app (next
+  section); obfs4/Snowflake remain desktop-only, since they need a client binary Android has no way
+  to provide yet.
 
 Format — one bridge per line; blank lines and `#` comments are ignored; an optional
 leading `Bridge` keyword (torrc style) is tolerated:
@@ -40,6 +42,24 @@ Bridges are distributed out-of-band so a censor can't just block them all:
 - <https://bridges.torproject.org/> (choose "vanilla"/without transport for the above)
 - Email `bridges@torproject.org` from a Gmail/Riseup address with `get transport none`
   in the body.
+
+## WebTunnel (built in, every platform, since 0.1.22)
+
+Where a network inspects traffic and blocks Tor by how it *looks*, a **WebTunnel** bridge carries
+Tor inside ordinary HTTPS to a normal-looking web server, with a TLS handshake matched byte for byte
+to Chrome's. The client runs inside the app (`webtunnel/`, no separate binary), so a `webtunnel`
+bridge line pasted into the bridges screen just works:
+
+```
+webtunnel [2001:db8::1]:443 <FINGERPRINT> url=https://example.com/<secret-path> ver=0.0.1
+```
+
+**Getting WebTunnel bridges in one tap (0.1.28):** the bridges screen can ask the Tor Project's
+bridge distributor (moat) for WebTunnel bridges, optionally for a chosen country. Because it exists
+for when Tor is blocked, that one request does **not** go through Tor: it is domain-fronted through a
+CDN, runs only after a consent dialog saying so, sends nothing about the user and nothing to Night
+Drop. The limits — what was tested, what was not — are in `SECURITY.md` and
+`docs/design/android-bridges.md` §6–§7a.
 
 ## obfs4 / Snowflake (pluggable transports)
 
@@ -91,6 +111,5 @@ Two pieces are needed:
   `PATH`). Shipping the binaries *inside* the app so no separate install is needed —
   especially on mobile, where they'd be packaged as native assets and unpacked to the
   app-private state dir — is a larger, platform-specific effort still to do.
-- **Android UI.** Because the Android state dir is app-private, bridge/PT entry there needs
-  an in-app settings screen that writes `bridges.txt` + `transports.txt` (or passes them
-  through the FFI). Desktop works via the files today.
+- **`transports.txt` from the app.** The in-app bridges screen writes `bridges.txt`; pointing at
+  external PT binaries is still a file edit (desktop only, where those binaries can exist).

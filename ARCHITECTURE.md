@@ -3,8 +3,9 @@
 A privacy-first 1:1 messenger. No server-side keys, no logs, P2P over an anonymity
 network, with messages stored on-device by default. Anonymous identities only.
 
-This document is the design source of truth. It precedes implementation; sections
-marked _(planned)_ describe intended structure, not existing code.
+This document is the design source of truth: when code and doc disagree, reconcile them in the
+same change. It began as the plan; sections still marked _(planned)_ describe intended structure,
+not existing code. Procedures (releases, publishing, operations) are in `MAINTENANCE.md`.
 
 ---
 
@@ -27,6 +28,40 @@ marked _(planned)_ describe intended structure, not existing code.
 - Account recovery via a central service. Identity is device-held (see §7).
 - Any feature requiring a persistent, identity-linked server account.
 
+### 1a. Non-negotiable invariants
+
+These define the product. Do not violate them, and flag any change that would:
+
+- **No server-side keys, no logs.** Any server (the relay) handles only opaque, E2E-encrypted blobs
+  and must not learn or store keys, plaintext, or persistent identity-linked metadata.
+- **Local-first storage.** Messages live on the device by default. Server storage is **opt-in,
+  capped at 24h**, and while active **both parties see a persistent in-chat warning** that messages
+  are stored remotely.
+- **Anonymous identities only.** No phone numbers, emails, or accounts. Identity is a device-held
+  keypair.
+- **Security-critical code lives in the Rust `core/`**, never in Dart. Key material, ratchet state,
+  transport, and at-rest crypto stay in Rust; Dart handles plaintext only at the UI edge.
+- **Authorization before first message.** A stranger cannot message a user until authorized: QR =
+  pre-authorized pre-key bundle; short code = PAKE secret required (§5).
+- **Tor by default**, behind a pluggable `Transport` interface — never hardcode a non-anonymized
+  network path. **One approved exception** (decided 2026-10-03): "Get bridges" on the bridges screen
+  (the `moat` crate, 0.1.28) fetches WebTunnel bridges from the Tor Project directly, because it
+  exists for when Tor is blocked. It runs only after a consent dialog saying it is not through Tor
+  and that nothing goes to Night Drop, and it may reach only the CDN fronts and
+  `bridges.torproject.org`. Do not add another direct path without the same explicit decision.
+- **Backups are user-owned secrets.** The backup password is randomly generated, shown once, never
+  persisted, and zeroized when its window closes. The server-stored backup (opt-in, default 24h /
+  max 36h) holds an opaque encrypted blob only and never receives the password; losing it means
+  losing the backup, by design (§7).
+- **Backups bundle the Tor onion keystore**, not just identity and sessions. The `.onion` is not
+  derivable from the identity, and each chat stores the *peer's* address with nothing refreshing it
+  after pairing — a restore without the key yields a new onion, stale peer addresses everywhere, and
+  **both sides restored = permanently "peer offline"**. A stable onion is not a privacy leak: v3
+  descriptors are published under blinded keys, so only someone already given it can reach you.
+- **Prefer audited crates** (`vodozemac`, `arti`, a vetted PAKE) over hand-rolled crypto; any new
+  cryptographic primitive needs explicit justification.
+- **v1 is 1:1 only.** No group-chat assumptions (MLS later; `docs/design/group-chat.md`).
+
 ---
 
 ## 2. Technology Decisions
@@ -47,26 +82,34 @@ raw key material or plaintext beyond what it must render.
 
 ---
 
-## 3. Component Overview _(planned layout)_
+## 3. Component Overview
 
 ```
 night-drop/
 ├── app/                 # Flutter application (UI, navigation, platform shells)
-├── core/                # Rust security core (compiled to a per-platform lib)
-│   ├── identity/        # keypair generation, anonymous identity, QR/short-code
+├── core/src/            # Rust security core (compiled to a per-platform lib)
+│   ├── api.rs           # the FFI surface (flutter_rust_bridge)
+│   ├── node.rs, node/   # the protocol engine: pairing, messaging, mailboxes, backup
+│   ├── identity/        # keypair generation, anonymous identity
 │   ├── crypto/          # vodozemac wrapper: X3DH + Double Ratchet
-│   ├── pake/            # SPAKE2 bouncer handshake for short codes
-│   ├── transport/       # pluggable Transport trait; arti (Tor) implementation
+│   ├── pake/, pqkem.rs  # SPAKE2 bouncer for short codes; ML-KEM hybrid
+│   ├── wire/            # versioned, padded frames
+│   ├── transport/       # pluggable Transport trait; arti (Tor), LAN, client auth
 │   ├── relay_client/    # client side of the relay: rendezvous mailbox + 24h blobs
-│   └── storage/         # encrypted local store + keystore integration
+│   ├── storage/         # encrypted local store + keystore integration
+│   ├── directory.rs     # the signed relay directory
+│   └── update.rs, diag.rs, lifecycle.rs
 ├── relay/               # Minimal server (Rust): rendezvous mailbox + store-and-forward
-├── website/             # Marketing / features site (static)
+├── webtunnel/, moat/    # in-process WebTunnel client; "Get bridges" client
+├── third_party/         # vendored, patched crates
+├── website/             # Marketing / features site (static), also the onion update channel
 └── ARCHITECTURE.md
 ```
 
-The Dart↔Rust boundary is a small, explicit FFI surface (e.g. via `flutter_rust_bridge`):
-high-level calls like `createIdentity`, `beginPairing`, `acceptPairing`,
-`sendMessage`, `pollRelay`. Plaintext crosses the boundary only at the UI edge.
+The Dart↔Rust boundary is a small, explicit FFI surface (`core/src/api.rs`, mirrored by the Dart
+seam `app/lib/src/core/nightdrop_core.dart`): high-level calls like `createIdentity`,
+`createInvite`, `joinWithShortCode`, `authorize`, `sendMessage`, `setRemoteStorage`. Plaintext
+crosses the boundary only at the UI edge.
 
 ---
 
@@ -133,7 +176,7 @@ without a fresh online handshake, and the sealed payload is readable only by a p
 completes SPAKE2 with the right words. The rendezvous is therefore **never trusted** — a
 guessed or random slot yields only un-attackable protocol messages. (The earlier scheme
 sealed the payload under an Argon2 key from the words with a fixed salt, which *was*
-offline-attackable for low-entropy codes; `TODO.md` #3 replaced it.) The tradeoff is that
+offline-attackable for low-entropy codes; SPAKE2 replaced it.) The tradeoff is that
 pairing is now **interactive**: the inviter must be reachable to answer, which the poller
 handles automatically while a code is outstanding.
 
@@ -204,8 +247,10 @@ on a re-pair (new session) exactly like `verified`.
   through them (arti `bridge-client`). Where even bridge IPs are DPI-blocked,
   **obfs4/Snowflake pluggable transports** disguise the traffic: a PT bridge line in
   `bridges.txt` plus a `transports.txt` mapping the transport to its client binary (arti
-  `pt-client`, launched on demand). Bundling the PT binaries — especially on mobile — is the
-  remaining follow-up. See `docs/bridges.md`.
+  `pt-client`, launched on demand). **WebTunnel** needs no binary: since 0.1.22 an in-process
+  client (`webtunnel/`, Chrome-identical TLS via BoringSSL) is in every app build, on every
+  platform. Bundling the obfs4/Snowflake binaries — especially on mobile — is the remaining
+  follow-up. See `docs/bridges.md` and `docs/design/android-bridges.md`.
 
   **Getting bridges** (0.1.28): the bridge screen can fetch WebTunnel bridges from the Tor
   Project's moat service through the `moat` crate — the **one sanctioned direct, non-Tor network
@@ -364,7 +409,7 @@ on a re-pair (new session) exactly like `verified`.
   replaced.
 
   The second was arti's own `bootstrap_status()`. It cannot answer this question either.
-  `BlockageKind::CantReachTor` is unreachable in arti 0.43 — its match arm has no corresponding
+  `BlockageKind::CantReachTor` is unreachable in arti 0.43 (and still in 0.47) — its match arm has no corresponding
   `ConnBlockage` variant — and the kinds that *are* reachable cannot be acted on, because `online`
   is derived from `last_tcp_success` across relay connections only. A dead guard set and a dead
   network are therefore indistinguishable from inside arti, and rotating guards because the device
@@ -413,8 +458,9 @@ on a re-pair (new session) exactly like `verified`.
   Two consequences worth keeping: `shutdown` **tries** for the lock with a bound and proceeds
   without it rather than waiting (an unbounded acquire made "bounded shutdown" a lie), and the
   transport is held as an `Arc` so a send can carry a handle across the unlocked window.
-  `service_pending_invites`, `flush_pending_control` and `refresh_directory` still do their I/O
-  under the lock — the same treatment is owed to them.
+  `service_pending_invites` and `flush_pending_control` still do their I/O under the lock — the
+  same treatment is owed to them. (The relay-directory fetch got it in 0.1.28:
+  `begin_directory_fetch` → `fetch_directory` → `finish_directory_fetch`.)
 - **Offline / space-saving path:** a **minimal relay** stores **E2E-encrypted blobs
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.
@@ -464,11 +510,11 @@ on a re-pair (new session) exactly like `verified`.
     anchored in a key **only the operator holds**, a hostile relay cannot inject relays, and the
     monotonic version blocks rollback to a stale list. This closes the "lost the primary relay's
     onion key → every user is stranded" failure: publish a new signed list (carrying the new
-    onion) from *any* still-live relay and every app migrates itself. The feature is **inert until
-    a real key is baked in** (the all-zero default key verifies nothing). Operator flow:
+    onion) from *any* still-live relay and every app migrates itself. The production key is baked
+    in (`directory::DIRECTORY_PUBKEY`; an all-zero key would verify nothing). Operator flow:
     `nightdrop-relay gen-directory-key` (mint the key, paste the public half into the app, rebuild)
-    → `nightdrop-relay sign-directory <priv> <version> <onion…>` → drop the output as
-    `<state>/relay-list.json` on each relay. `discovered_relays` + `directory_version` persist in
+    → `relay/deploy/sign-directory.sh` (wraps `nightdrop-relay sign-directory`), which writes
+    `website/relays.json` (the copy apps fetch) and `<state>/relay-list.json` for each relay. `discovered_relays` + `directory_version` persist in
     the encrypted store and travel in backups.
   - **Private (restricted) relays — self-host for just your circle (§3.2).** A relay can gate its
     onion to **authorized clients only** using the same Tor **restricted discovery** as onion client
@@ -645,7 +691,7 @@ Design record, including how this constrains the planned duress wipe: `docs/desi
 - Network observers / the relay operator reading message content → E2E + Tor.
 - The relay correlating who-talks-to-whom → minimized metadata, per-pair daily handles polled
   in isolated fragments (`mailbox-handles.md`; linkable within a pair-day, and a static handle
-  for peers on builds before 0.1.25), onion addressing, 24h cap.
+  for peers on 0.1.25 or older), onion addressing, 24h cap.
 - Stranger spam / unsolicited contact → QR pre-auth and short-code PAKE gating.
 - Device theft (at rest) → encrypted local store, keys in OS keystore.
 - MITM during pairing → PAKE for short codes; scanned bundle for QR.
@@ -683,8 +729,9 @@ E2E blobs — but observation ≠ decryption):
   time _T_, and that **someone** later polled/retrieved that slot. It cannot read it,
   size it meaningfully, or tie it to a real identity.
 - **Liveness/timing** of a mailbox: rough activity patterns (when a slot receives or
-  is drained). v1 ships **no cover traffic**, so timing is not obfuscated — an
-  adversary who watches a slot sees the cadence of real events, just not their content.
+  is drained). Cover traffic is **opt-in and off by default** (`docs/design/cover-traffic.md`),
+  so for most users timing is not obfuscated — an adversary who watches a slot sees the cadence
+  of real events, just not their content.
 - With **multi-relay fan-out** (#17), the same hash-dedup'd blob is posted to the
   recipient-chosen relay set at about the same time. This buys availability and
   censorship-resistance; the cost is that a **colluding set of those relays** could
@@ -694,9 +741,9 @@ E2E blobs — but observation ≠ decryption):
 **Residual correlation risks** (honest limits, out of scope to fully defeat in v1)
 - **Traffic-analysis / timing correlation.** An adversary positioned to watch both
   ends' relay traffic (or a global passive adversary against Tor) can attempt to
-  correlate send/receive timing across a conversation. We do not add latency or
-  cover traffic in v1, so this is not defended — it is the classic limit of a
-  low-latency anonymity network.
+  correlate send/receive timing across a conversation. We add no latency, and the opt-in cover
+  traffic blurs per-mailbox volume rather than end-to-end timing, so this is not defended — it is
+  the classic limit of a low-latency anonymity network.
 - **Rendezvous pairing.** The short-code mailbox (§5c) sees only ciphertext; the slot
   is a **non-secret** lookup key. A passive observer learns "two parties exchanged
   something under slot _N_ at time _T_," never the secret words, the identities, or
@@ -768,16 +815,18 @@ launch. F-Droid installs skip it (F-Droid is their updater); "Check for updates"
 asks.
 
 **The manifest cannot drift from what is served.** `scripts/gen-update-manifest.sh` (run by
-`make config`) takes the version from `app/pubspec.yaml` and each APK's SHA-256 from the file
+`make update-manifest` at publish time, deliberately *not* by `make config` — `MAINTENANCE.md` §12)
+takes the version from `app/pubspec.yaml` and each APK's SHA-256 from the file
 actually sitting in `website/applications/android/`. An APK that is not present is simply
 omitted, which the app reads as "a newer version exists, but there is no download to offer" —
 tell the user something, promise nothing.
 
-**It must be this device's per-ABI build, never the universal one.** `--split-per-abi` numbers
-the per-ABI APKs `base*10 + abi` (4031/4032/4033) and leaves the universal APK on the bare base
-(403), so offering the universal build to anyone on a per-ABI install is a *downgrade by
-versionCode* and Android refuses to install it — after the whole download, with no way for the
-app to learn why. F-Droid ships per-ABI, so that is most users. `update::native_abi` picks from
+**It must be this device's per-ABI build, never the universal one.** The per-ABI APKs are
+numbered `base*10 + abi` (4141/4142/4143 for base 414) and the universal APK takes slot 4 (4144).
+Through 0.1.17 the universal APK sat on the bare base (e.g. 403), so offering it to anyone on a
+per-ABI install was a *downgrade by versionCode* that Android refused — after the whole download,
+with no way for the app to learn why. Slot 4 fixed the ordering; the app still offers the per-ABI
+build, which is smaller and is what F-Droid users already run. F-Droid ships per-ABI, so that is most users. `update::native_abi` picks from
 the architecture the core was compiled for, which is by definition the ABI Android chose at
 install time; the Dart side is not consulted because it cannot know better.
 
@@ -895,11 +944,10 @@ must stay byte-identical for every install.
 
 ## 11. Relay store-and-forward & backup evolution — implementation plan
 
-Status: **planned, not yet built.** This section is the agreed source of truth for the next
-build. The current Tor build pairs **direct onion-to-onion with no relay** (the `relay/` box
-exists with a rendezvous mailbox + 24h store-and-forward but is **not wired into the Tor
-path**). Distributed/federated relays and erasure-coded blob splitting are **explicitly
-deferred** — single relay only for now. Brute-force of E2E content is **not a threat** and is
+Status: **built** — the phases in §11.7 are done, and later work extended it (multi-relay fan-out
+and the signed directory in §6, rotating mailbox handles in §11.2). Kept as the record of the
+decisions. Distributed/federated relays and erasure-coded blob splitting remain **explicitly
+deferred**. Brute-force of E2E content is **not a threat** and is
 **not** a design driver (X25519 + AES-256/ChaCha20 are not brute-forceable); the rationale for
 short retention is **metadata minimization, exposure window, and user control**, not "anti
 brute force."
@@ -935,12 +983,14 @@ it is an onion service it is reachable **from any network — LTE, NAT, café Wi
 port-forwarding, or public IP** (Tor solves reachability; the old LAN/TCP pain is gone). Clients
 dial it **through their own Tor client** (`RelayClient` must dial via the Tor client, not plain
 TCP). Dev: run it on the dev box with a **persisted state dir so its `.onion` is stable** across
-restarts; its address goes in config (`config/app_config.json` `relay` field, overridable by
-`NIGHTDROP_RELAY`). Ships externally unchanged (drop on a VPS; same onion via its state dir).
+restarts; its address is baked into each build with `--dart-define=NIGHTDROP_RELAY=…` (from
+`relay-state/onion` in the install scripts, from `fdroid/app.nightdrop.yml` in the F-Droid and
+Windows builds; desktop also reads it from the environment). Ships externally unchanged (any host;
+same onion via its state dir).
 
 All payloads are opaque E2E blobs; the relay learns no keys, no plaintext, no identity. Mailbox
 handle = a derived key both peers can compute, never the identity/onion. Two exist
-(`docs/design/mailbox-handles.md`). **v2** (`node::mailbox`, from 0.1.25): HKDF over a per-chat
+(`docs/design/mailbox-handles.md`). **v2** (`node::mailbox`, from 0.1.26): HKDF over a per-chat
 secret agreed in-band (`Frame::MailboxKey`), the recipient's key and the UTC day — different per
 sender and per day, so a relay cannot link two senders' deposits for one person or one day's to
 the next; it can still link one pair's deposits within a day. A side posts v2 only once the peer
@@ -1179,15 +1229,15 @@ showing **everything the relay can see** — timestamp, op (`POST/PEEK/FETCH/REC
 queue depth, result, source = "anonymous (Tor)". Doubles as proof the relay knows only opaque
 handles/sizes/timings — no identities, content, or keys.
 
-**TUI dashboard (planned dev tool):** a live in-terminal dashboard (Rust `ratatui` + `crossterm`)
+**TUI dashboard (dev tool, `NIGHTDROP_RELAY_TUI=1`):** a live in-terminal dashboard (Rust `ratatui` + `crossterm`)
 layered on the **same event stream** as the flow-log — a header (onion address, uptime, queued /
 reaped totals), a per-mailbox table (handle, depth, oldest age, sizes), and a live flow pane. It
-is a thin presentation layer over the log (no extra relay logic), enabled by the same dev flag
-and stripped from production. Build order: flow-log first (raw source), dashboard right after.
+is a thin presentation layer over the log (no extra relay logic), and is never enabled in
+production.
 
 ### 11.10 Invariant compliance
 All of the above keep: opaque E2E blobs only, no server-side keys/logs, no persistent
-identity-linked metadata (mailbox handles carry no identity — rotating per pair and day from 0.1.25,
+identity-linked metadata (mailbox handles carry no identity — rotating per pair and day from 0.1.26,
 see §11.2 for what a relay can still link — and capability tokens carry no identity),
 opt-in + 24h cap + persistent warning for server storage, Tor by default. The one area needing
 care is the **notification path**: keep it **content-free** (local notifications generated

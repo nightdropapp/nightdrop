@@ -1,7 +1,7 @@
 # Design — Optional relay, and "direct only"
 
 **Status:** design agreed 2026-10-05, for 0.2 (the protocol release). Not implemented. Decisions
-marked **(decided)** were made by Shawn on 2026-10-03 or 2026-10-05.
+marked **(decided)** were made by the maintainer on 2026-10-03 or 2026-10-05.
 **Relates to:** `multi-relay-mailboxes.md` (#17, the relay set this generalises),
 `mailbox-handles.md`, `onion-client-auth.md` (§5 below depends on it), `cover-traffic.md`,
 `ARCHITECTURE.md` §5c, §6, §7c and §11. Prompted by issue #16 ("How is this app secured compared

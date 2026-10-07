@@ -243,8 +243,8 @@ hasn't been altered.
 
 **Signing key** — `Night Drop Security <security@nightdrop.app>`
 Fingerprint: `079B A016 9201 A8AB 11F3  2385 884E ACB8 89D0 2002`
-The public key ships with each release as `nightdrop-signing-key.asc` (and is the same key used
-to sign the operator-signed relay directory).
+The public key ships with each release as `nightdrop-signing-key.asc`. (The signed relay
+directory uses a separate Ed25519 key, whose public half is built into the app; see `RELAYS.md` §6.)
 
 **Verify (Linux/macOS):**
 

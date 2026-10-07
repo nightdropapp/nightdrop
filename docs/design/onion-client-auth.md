@@ -36,7 +36,7 @@ encrypts its published descriptor to a set of authorized client **x25519 descrip
 (`KS_hsc_desc_enc`). A client without an authorized key cannot decrypt the descriptor, so it cannot
 learn the introduction points — it can't connect, and the HSDir can't even confirm the service to it.
 
-## 3. arti 0.43 API (verified present in-tree)
+## 3. arti 0.43 API (verified present in-tree; re-checked in 0.47, where `generate_service_discovery_key` is still in `arti-client`)
 
 **Service side** (`tor-hsservice`):
 - `OnionServiceConfigBuilder::restricted_discovery(RestrictedDiscoveryConfig)`.

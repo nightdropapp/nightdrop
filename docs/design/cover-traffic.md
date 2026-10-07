@@ -1,7 +1,8 @@
 # Design draft — Cover traffic (#4)
 
-**Status:** 🟢 implemented (2026-08-01), opt-in and off by default. Not yet exercised on a
-device; the default 30-minute mean is an untested guess at the battery cost (§6).
+**Status:** 🟢 implemented (2026-08-01), opt-in and off by default. Measured on a device in one
+pair of overnight runs (§6: ~78 mAh a night, ~6 mAh per post); n=1 each, so the default mean is
+not moved on it alone.
 **Relates to:** `ARCHITECTURE.md` §6 (relay, store-and-forward) and the fixed-size framing note in
 §11; `website/limits.html`, which must not be allowed to overstate this.
 

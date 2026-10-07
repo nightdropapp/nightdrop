@@ -50,7 +50,7 @@ pub fn fetch_bridges(country: Option<&str>) -> Result<Fetched> {
 mod tests {
     use super::*;
 
-    /// Shawn's requirement, 2026-10-03: fetching bridges must not involve any Night Drop server.
+    /// The maintainer's requirement, 2026-10-03: fetching bridges must not involve any Night Drop server.
     /// The only names this crate can contact are the fronts and reflector in [`TARGETS`] (the CDN)
     /// and [`MOAT_HOST`] (the Tor Project), so pin exactly those.
     #[test]

@@ -105,13 +105,15 @@ reinstall (same identity restored), and an in-place upgrade.
 
 - **No background delivery.** Android keeps a foreground service running; Windows has no equivalent
   wired up, so messages arrive while the app is open and wait on the relay (24 h) otherwise.
-- **Tor over bridges needed a patched dependency.** `saturating-time` 0.3.0 loops forever on
-  Windows' 100 ns clock, which hung every bridge bootstrap at one core, 100% CPU. The tree carries a
-  fix in `third_party/saturating-time/` (see its `NIGHTDROP-PATCH.md`); do not drop it until arti
-  ships the upstream fix.
+- **Tor over bridges needs a patched dependency.** `saturating-time` loops forever on Windows'
+  100 ns clock, which hung every bridge bootstrap at one core, 100% CPU (arti#2726). The tree
+  carries a fix in `third_party/saturating-time/` (on 0.5.0; see its `NIGHTDROP-PATCH.md`). Do not
+  drop it on a release note's word: 0.5.0 was said to contain the fix and does not — read the
+  upstream source first.
 - **Bridge bootstraps can take longer than the app's 120 s limit** on slow volunteer bridges. This
   is not Windows-specific: the same bridges measured 9–88 s on Linux and 10–73 s on Windows.
-- **Not reproducible or code-signed yet**, unlike the Android and Linux releases.
+- **Not reproducible or code-signed yet**, unlike the Android APKs (which F-Droid rebuilds and
+  verifies). Verify the installer against `SHA256SUMS` and its `.asc` signature.
 
 ## Testing in a VM
 

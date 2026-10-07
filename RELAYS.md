@@ -99,7 +99,7 @@ self-hosting case, and most of it works with **no special setup** — it's chann
 ### 4a. The simple version (private by obscurity of the address)
 
 1. Run a relay (section 3), note its `.onion`.
-2. In the app: **Settings → My relays**, add the `.onion`, save.
+2. In the app: home menu → **My relays…**, add the `.onion`, save.
 3. The app announces it in-band to your contacts; from then on your pairings and offline mail fan
    out to your relay alongside the shared default.
 
@@ -159,7 +159,7 @@ an admin credential to the relay lightly.
 Just run it (section 3) and leave it PUBLIC (the default — no authorized clients). Then get people to
 add it. Two ways:
 
-- **Ad-hoc:** share the `.onion` out-of-band; people add it under **Settings → My relays**. No
+- **Ad-hoc:** share the `.onion` out-of-band; people add it under home menu → **My relays…**. No
   blessing needed — it's their choice to trust your relay for availability (they lose nothing if it's
   malicious, since blobs are opaque).
 - **Official default:** if you run *the* app deployment, add it to the **signed directory** (next
@@ -175,9 +175,10 @@ caps; 24h TTL). A public relay is hosting time-boxed encrypted noise for anonymo
 ## 6. The signed directory — rotating the public default set (§3.1)
 
 The signed directory lets the app operator **change the shared relay set without shipping an app
-update**. Relays serve an operator-signed list; the app fetches it on every poll from whatever relay
-it can still reach, verifies the signature against a key **baked into the app**, and adopts the
-relays if the list's version is newer. This closes the "lost the primary relay's onion key → everyone
+update**. The operator signs a relay list; from 0.1.28 the app fetches it once a day over Tor from
+our onion site (relays serve the same list as the fallback, and to apps up to 0.1.27, which asked
+on every poll), verifies the signature against a key **baked into the app**, and adopts the relays
+if the list's version is newer. This closes the "lost the primary relay's onion key → everyone
 stranded" failure: publish a new signed list from any surviving relay and every app migrates itself.
 
 ### One-time setup (per deployment)
@@ -255,6 +256,7 @@ relay-state/
 ├── onion                        # the published .onion (convenience, written on start)
 ├── queue.json                   # persisted store-and-forward queue (opaque blobs; unless EPHEMERAL)
 ├── relay-list.json              # the signed directory this relay serves (optional, §6)
+├── unhealthy-restarts           # watchdog counter: escalates to a guard reset (relay/README.md)
 ├── directory-signing-key        # operator's PRIVATE directory key (secret! optional, §6)
 └── authorized-clients/*.auth    # authorized client keys → PRIVATE mode (optional, §4b)
 ```

@@ -14,10 +14,10 @@ donation addresses and download links.
 
 ## Serve over Tor (.onion)
 
-To test the site as a Tor onion service (localhost-only HTTP behind a v3 hidden service):
+To serve the site as a Tor onion service (nginx on localhost behind a v3 hidden service):
 
 ```sh
-sudo dnf install -y tor          # one-time: the tor daemon
+sudo dnf install -y tor nginx    # one-time
 scripts/onion-website.sh         # prints the http://<...>.onion address; Ctrl-C to stop
 ```
 
@@ -75,10 +75,10 @@ Console / Bing Webmaster Tools.
 
 ## Publishing
 
-Two independent targets, from this one directory — see **`docs/hosting.md`** for the full
-procedure, and read it before touching the onion.
+Two targets, from this one directory — see **`docs/hosting.md`** for the full procedure, and read
+it before touching the onion. The release-time steps are in `MAINTENANCE.md` §11–§12.
 
-- **Clear web** (`https://nightdrop.app`): `scripts/deploy-vps.sh user@host`. It regenerates
+- **Clear web** (`https://nightdrop.app`): `scripts/deploy-clearnet.sh`. It regenerates
   `config.js`, stages `SECURITY.md` into the web root (`security.txt` advertises it as the
   `Policy:` URL, and it lives at the repo root), and rsyncs everything except `applications/`
   and this README.

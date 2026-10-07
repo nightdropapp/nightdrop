@@ -101,7 +101,7 @@ background service holds no CPU or Wi-Fi lock), installed 08:56; verified before
   13:25, 13:47, 14:11, 14:35, 14:54, 15:20): without the lock the timer only runs in Android's
   maintenance windows. Offline mail to an idle phone arrives that much later.
 
-**Decision (Shawn, 2026-10-03): keep the wake lock.** Dropping it saves about 18 mAh an hour and
+**Decision (maintainer, 2026-10-03): keep the wake lock.** Dropping it saves about 18 mAh an hour and
 costs 3-5x slower message checks; that is not worth it. The EXPERIMENT commit is not merged.
 
 ## Run 6: the 0.1.28 branch, overnight 2026-10-05/06 - lower again
