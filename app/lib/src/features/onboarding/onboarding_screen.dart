@@ -122,7 +122,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  /// Restore an existing identity + chats from a password-encrypted backup (§7, TODO #5):
+  /// Restore an existing identity + chats from a password-encrypted backup (§7):
   /// pick the file, enter the recovery password, decrypt and load it.
   Future<void> _restore() async {
     final path = await BackupFiles.choosePickPath();

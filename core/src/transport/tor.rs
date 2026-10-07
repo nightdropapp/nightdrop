@@ -604,6 +604,10 @@ impl Transport for TorTransport {
         self.onion.clone()
     }
 
+    fn onion_identity(&self) -> Option<[u8; 64]> {
+        self.onion_key_material()
+    }
+
     /// True once the onion descriptor is published and the service is reachable (arti reports
     /// `Running`/`DegradedReachable`). False during the ~1–3 min republish window after launch.
     ///
@@ -961,9 +965,6 @@ impl TorTransport {
     }
 }
 
-/// Build the arti client config. With `state_dir` we point arti's state + cache at an
-/// explicit writable base (required on Android) and relax fs-mistrust's permission checks,
-/// since app-sandbox directories don't match arti's default ownership expectations.
 /// How many times the client will try to fetch an onion descriptor / build an intro+rendezvous
 /// circuit before giving up (arti defaults both to 6). On a slow or lossy path 6 is too few — the
 /// relay itself may take dozens of circuit tries just to *publish* — so a client that quits after
@@ -1038,6 +1039,9 @@ fn forget_stale_ipts(state_dir: Option<&str>, nickname: &str) {
     }
 }
 
+/// Build the arti client config. With `state_dir` we point arti's state + cache at an
+/// explicit writable base (required on Android) and relax fs-mistrust's permission checks,
+/// since app-sandbox directories don't match arti's default ownership expectations.
 fn tor_config(
     state_dir: Option<&str>,
     on_disk_keystore: bool,
@@ -1402,10 +1406,13 @@ async fn write_frame<W: futures::AsyncWrite + Unpin>(w: &mut W, frame: &[u8]) ->
 
 /// Read one length-prefixed frame.
 async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Vec<u8>> {
-    let mut len = [0u8; 4];
-    r.read_exact(&mut len).await?;
-    let mut buf = vec![0u8; u32::from_be_bytes(len) as usize];
-    r.read_exact(&mut buf).await?;
+    let mut prefix = [0u8; 4];
+    r.read_exact(&mut prefix).await?;
+    let len = crate::wire::frame_len(prefix)?;
+    // Grow as bytes arrive rather than allocating the announced length up front.
+    let mut buf = Vec::new();
+    (&mut *r).take(len as u64).read_to_end(&mut buf).await?;
+    anyhow::ensure!(buf.len() == len, "connection closed mid-frame");
     Ok(buf)
 }
 

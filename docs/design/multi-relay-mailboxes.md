@@ -1,7 +1,7 @@
 # Design — Self-hostable & multi-relay mailboxes
 
 **Status:** ✅ **implemented** (`core/src/node.rs`: `my_relays`/`set_my_relays`,
-`queue_on_relays`, `announce_relays`, `Frame::Relays`, `seen_relay_blobs` dedup; UI: "My relays…"
+`queue_on_relays`, `announce_relays`, `Frame::Relays`, `seen_frames` dedup; UI: "My relays…"
 on the home menu). This document is retained as the design rationale.
 **Relates to:** `ARCHITECTURE.md` §5–§6 (transport/relay), the non-negotiable invariants in
 `CLAUDE.md` (no server-side keys/logs; Tor by default; local-first).
@@ -51,14 +51,15 @@ So "add a relay" reduces to "post/poll the same handle on more than one endpoint
 ## 4. Wire / API changes
 
 ### 4.1 Advertising a relay set
-- **Pairing payloads** carry the inviter's relay set:
-  - QR: extend `nightdrop://pair?addr=…&ik=…&otk=…` with `&relays=<b64url csv of onion addrs>`.
-  - Short-code path: include the relay set inside the (already E2E-sealed) invite response
-    (`build_invite_response`), not in the rendezvous cleartext.
-- **In-band updates** (mirrors onion rotation #11 / `Frame::Address`): new
-  `Frame::Relays { from, message }` where `message` is the E2E-encrypted, comma-joined relay
-  list. Receiver replaces `peer_relays` and shows an optional system notice. Sent by
-  `announce_relays_if_changed()` on startup and on user edit, exactly like `announce_address`.
+- **As built, only in-band** (mirrors onion rotation #11 / `Frame::Address`): `Frame::Relays { from,
+  message }`, where `message` is the E2E-encrypted, comma-joined relay list. The receiver replaces
+  `peer_relays` silently (no system notice), and only for an approved chat. Sent by
+  `announce_relays` to every approved chat when the user edits the list, and by
+  `announce_relays_to` to one chat as it becomes a contact: the joiner at pairing and again on
+  `Approved` (the first copy lands on a request and is dropped), the inviter on approval.
+- **Not built:** carrying the set in the pairing payloads (QR `&relays=`, or inside the sealed
+  short-code invite response). The in-band frame right after pairing covers the same ground, and
+  until it lands the peer still reaches us through the primary and the directory's relays.
 
 ### 4.2 Node/relay surface
 - Replace `relay: Option<RelayClient>` with `relays: Vec<RelayClient>` **for my own polling**,
@@ -81,6 +82,13 @@ So "add a relay" reduces to "post/poll the same handle on more than one endpoint
 ## 5. De-duplication & receipts
 
 The same sealed blob lands in N mailboxes, so the recipient must not process/notify N times.
+
+> **As built** (the plan below differs in two places): there is no `post_id` — the recipient hashes
+> each frame *inside* the relay envelope into `Node::seen_frames` (bounded, in memory) and drops a
+> second copy, plus an id-level dedup in `process_frame` for re-sealed re-sends. And `Frame::Ack`
+> no longer confirms anything: a message is `delivered` only on its own `Frame::Delivered`
+> receipt (ARCHITECTURE.md §11.3). There is no `RelayPool` type either (§4.2); the fan-out lives in
+> `queue_on_relays` and the drain in `drain_relay_mailboxes`.
 
 - Each queued frame already rides inside a sealed blob; add a random **`post_id`** to the
   relay-wrap envelope (not the inner E2E frame). Recipient keeps a small **seen-`post_id` set**
@@ -116,7 +124,7 @@ travel only in QR or **E2E** frames — never in rendezvous/relay cleartext.
 1. **Configurable single relay** (unblocks self-hosting): surface the already-parameterised
    relay address in settings + `set_my_relays`/persistence; still one relay per chat. Small.
 2. **Redundant multi-relay:** `RelayPool` fan-out + `post_id` de-dup + per-relay `relay_receipts`.
-3. **Advertise & sync:** `relays=` in QR + `Frame::Relays` in-band update + `announce_relays_if_changed`.
+3. **Advertise & sync:** `Frame::Relays` in-band, on edit and at pairing (§4.1; not in the QR).
 4. **UX polish:** reachability probe, health/backoff, "run your own relay" docs (ties into
    `BUILD_AND_DEPLOY.md`, which already covers running `relay/`).
 

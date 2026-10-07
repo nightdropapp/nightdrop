@@ -6,7 +6,7 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'app_process.dart';
 
-/// Opt-in **Android foreground-service background delivery** (§11.8, TODO #13).
+/// Opt-in **Android foreground-service background delivery** (§11.8, #13).
 ///
 /// Wake-from-killed is deliberately out of scope (it would need FCM/APNs device tokens — an
 /// anonymity leak). This instead keeps the app **process** alive with a persistent notification,

@@ -21,9 +21,9 @@ use crate::storage::{open, seal, StoreKey};
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
-/// Argon2id cost for a **user-chosen** secret: 64 MiB, 3 passes. Roughly half a second on a
-/// mid-range phone, which is tolerable once per unlock and about 25× the memory of the crate
-/// default used for random backup passwords. Persisted per lock so these can be raised later
+/// Argon2id cost for a **user-chosen** secret: 64 MiB, 3 passes — about 3.4× the memory and 5× the
+/// work of the crate default (19 MiB, 2 passes) used for random backup passwords. Measured at about
+/// 0.14 s per unlock on a Galaxy S25 and 0.13 s on a desktop (`docs/design/app-lock.md` §7). Persisted per lock so these can be raised later
 /// without stranding an existing lock file.
 const M_COST_KIB: u32 = 64 * 1024;
 const T_COST: u32 = 3;
@@ -179,11 +179,13 @@ fn read(dir: &str) -> Result<LockV2> {
 /// Write `lock` atomically, so a crash mid-write cannot leave a truncated file — which would make
 /// the store permanently unopenable.
 fn write(dir: &str, lock: &LockV2) -> Result<()> {
+    write_bytes(dir, &serde_json::to_vec(lock)?)
+}
+
+/// [`write`] for raw bytes (also how a failed duress arm restores the previous file).
+fn write_bytes(dir: &str, bytes: &[u8]) -> Result<()> {
     std::fs::create_dir_all(dir).ok();
-    let tmp = path(dir).with_extension("lock.tmp");
-    std::fs::write(&tmp, serde_json::to_vec(lock)?)?;
-    std::fs::rename(&tmp, path(dir))?;
-    Ok(())
+    crate::storage::write_atomic(&path(dir), bytes)
 }
 
 fn derive(passphrase: &str, salt: &[u8], m: u32, t: u32, p: u32) -> Result<StoreKey> {
@@ -279,7 +281,7 @@ pub fn set_duress(dir: &str, passphrase: &str, duress: &str) -> Result<()> {
     // On failure, put the previous lock back rather than leaving a lock nobody understands.
     if !matches!(unlock(dir, duress), Ok(Opened::Duress)) {
         if let Some(bytes) = previous {
-            std::fs::write(path(dir), bytes)?;
+            write_bytes(dir, &bytes)?;
         }
         anyhow::bail!("could not arm the duress secret");
     }

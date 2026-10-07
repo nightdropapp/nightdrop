@@ -1,6 +1,7 @@
 //! [`Node`] pairing & verification: safety numbers, pre-key bundle/connect, and the
 //! short-code SPAKE2 invite hosting/join. Split out of `node.rs`.
 use super::*;
+use sha2::Digest as _;
 
 impl Node {
     // -------- Safety numbers & verification (§5, key-verification design) --------
@@ -134,46 +135,11 @@ impl Node {
                     .to_string(),
             ));
         } else {
+            // We initiated this chat, so it is authorized at once. The joiner already knows the
+            // chat is live; the code is tracked on the inviter side for the approval echo.
             self.chats.insert(
                 contact_id.clone(),
-                Chat {
-                    contact: Contact {
-                        id: contact_id.clone(),
-                        their_name: DEFAULT_NAME.to_string(),
-                        my_name: DEFAULT_NAME.to_string(),
-                        remote_storage: false,
-                        disappearing_secs: 0,
-                        backed_up: false,
-                        peer_backed_up: false,
-                        verified: false,
-                        peer_verified: false,
-                        peer_captures_silent: None,
-                        peer_relays: Vec::new(),
-                        peer_supports_burn: None,
-                        peer_app_version: None,
-                        remote_storage_healthy: true,
-                        last_seen_secs: 0, // these three are filled in `contacts()` from the chat
-                        local_name: String::new(),
-                        identity_tag: String::new(),
-                        peer_on_old_version: false,
-                    },
-                    peer_address: peer_address.to_string(),
-                    session,
-                    history: Vec::new(),
-                    authorized: true, // we initiated this chat
-                    // The joiner already knows the chat is live (no approval to wait on); the
-                    // code is tracked on the inviter side for the approval echo.
-                    code: None,
-                    closed: false,
-                    relay_receipts: HashMap::new(),
-                    // Pairing is itself contact: start the clock rather than reporting a
-                    // brand-new chat as silent.
-                    last_seen: Some(crate::api::now_secs()),
-                    client_key: None, // minted and announced immediately after pairing
-                    local_name: String::new(),
-                    remote_storage_healthy: true,
-                    mailbox: None,
-                },
+                Chat::new_paired(&contact_id, peer_address, session, true, None),
             );
         }
         // Onion client auth (#22): hand the inviter our client key for their onion so they can
@@ -184,6 +150,7 @@ impl Node {
         self.announce_captures_to(&contact_id);
         self.announce_burns_to(&contact_id);
         self.announce_version_to(&contact_id);
+        self.announce_relays_to(&contact_id);
         // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
         // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
         self.send_mailbox_key(&contact_id);
@@ -194,7 +161,7 @@ impl Node {
 impl Node {
     // -------- Short-code pairing via the rendezvous mailbox (§5b/§5c) --------
     //
-    // Interactive SPAKE2 (`TODO.md` #3). The old scheme sealed the invite under an Argon2 key
+    // Interactive SPAKE2. The old scheme sealed the invite under an Argon2 key
     // derived from the short-code words with a *fixed* salt, so the relay — holding that
     // ciphertext — could try candidate codes offline until one decrypted (low-entropy codes
     // made that practical). SPAKE2 removes the offline attack: neither the joiner's opener nor
@@ -232,6 +199,7 @@ impl Node {
             payload,
             ttl,
             expiry: Instant::now() + ttl,
+            openers: Vec::new(),
         });
         Ok(())
     }
@@ -246,7 +214,7 @@ impl Node {
     /// rendezvous, and drop expired invites. Best-effort — a transient relay error is swallowed
     /// so it never aborts the wider poll cycle. Cheap when no invite is outstanding.
     ///
-    /// Broadcasts across the whole rendezvous set (primary + our configured extras, §3.1): we
+    /// Broadcasts across the whole rendezvous set ([`rendezvous_relays`](Self::rendezvous_relays)): we
     /// look for a joiner's opener on **every** relay and post our answer to **all** of them, so a
     /// joiner reaches us over any relay they share with us — losing the single primary no longer
     /// stops pairing, as long as both sides share one live relay.
@@ -265,13 +233,18 @@ impl Node {
                 before - self.pending_invites.len()
             );
         }
-        // Snapshot the minimal data so we don't borrow `self` across the relay round-trips.
-        let invites: Vec<(String, String, String, Duration)> = self
-            .pending_invites
-            .iter()
-            .map(|p| (p.slot.clone(), p.secret.clone(), p.payload.clone(), p.ttl))
-            .collect();
-        for (slot, secret, payload, ttl) in invites {
+        // A snapshot, so `self` is not borrowed across the relay round-trips.
+        let invites = self.pending_invites.clone();
+        let mut retired: Vec<String> = Vec::new();
+        for PendingInvite {
+            slot,
+            secret,
+            payload,
+            ttl,
+            openers: mut seen,
+            ..
+        } in invites
+        {
             // Both handles depend only on the slot, so compute them once per invite rather than
             // rebuilding them for every relay and every opener inside the loops below.
             let joiner_handle = rendezvous_handle(&slot, RDV_JOINER);
@@ -285,6 +258,20 @@ impl Node {
                 }
                 crate::diag!("invite: took {} opener(s) from a relay", openers.len());
                 for opener in openers {
+                    // Each *distinct* opener is one guess at the code (MAX_OPENERS_PER_INVITE).
+                    let digest: [u8; 32] = sha2::Sha256::digest(&opener).into();
+                    if !seen.contains(&digest) {
+                        if seen.len() >= super::MAX_OPENERS_PER_INVITE {
+                            crate::diag!(
+                                "invite: more than {} different openers for one code — retiring \
+                                 it; the joiner needs a fresh code",
+                                super::MAX_OPENERS_PER_INVITE
+                            );
+                            retired.push(slot.clone());
+                            break;
+                        }
+                        seen.push(digest);
+                    }
                     match build_invite_response(&secret, &payload, &opener) {
                         Ok(response) => {
                             // Post the answer to every relay so the joiner finds it wherever they poll.
@@ -309,12 +296,19 @@ impl Node {
                         Err(_) => crate::diag!("invite: could not build a response for an opener"),
                     }
                 }
+                if retired.contains(&slot) {
+                    break;
+                }
+            }
+            if let Some(p) = self.pending_invites.iter_mut().find(|p| p.slot == slot) {
+                p.openers = seen;
             }
         }
+        self.pending_invites.retain(|p| !retired.contains(&p.slot));
     }
 
     /// The relays used for short-code pairing rendezvous (§3.1): the primary shared default plus
-    /// our configured extras (#17 `my_relays`), so pairing broadcasts across the whole set and
+    /// our configured extras (#17 `my_relays`) and the directory's shared relays, so pairing broadcasts across the whole set and
     /// survives loss of any single relay both sides don't uniquely depend on. Clients are cheap
     /// clones; built once per call for driving the joiner handshake outside the lock.
     pub fn rendezvous_relays(&self) -> Vec<RelayClient> {
@@ -329,7 +323,6 @@ impl Node {
     }
 
     /// A clone of the attached primary relay client, for the paths that still use a single relay.
-    #[allow(dead_code)] // retained for symmetry / non-rendezvous callers; tests use it
     pub fn relay_client(&self) -> Option<RelayClient> {
         self.relay.clone()
     }

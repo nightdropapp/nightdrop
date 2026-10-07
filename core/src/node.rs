@@ -31,7 +31,7 @@ const EDIT_WINDOW: Duration = Duration::from_secs(15 * 60);
 
 /// Maximum attachment size (100 MB). Larger files are rejected — they would be slow over
 /// Tor and memory-heavy to carry through one frame.
-const MAX_MEDIA_BYTES: u64 = 100 * 1024 * 1024;
+pub(crate) const MAX_MEDIA_BYTES: u64 = 100 * 1024 * 1024;
 
 /// Backup salt length and the server-backup retention cap (§7c: default 24h, max 36h).
 const BACKUP_SALT_LEN: usize = 16;
@@ -46,16 +46,18 @@ const SERVER_BACKUP_DEFAULT_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const MARK_CLOSED: &[u8] = b"nightdrop/ctl/closed/v1";
 const MARK_ACK: &[u8] = b"nightdrop/ctl/ack/v1";
 const MARK_BACKEDUP: &[u8] = b"nightdrop/ctl/backedup/v1";
+/// A screenshot of the chat was taken on the peer's device (#1).
+const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
 /// Two markers for the safety-number verification signal (§5b′): the state is carried by *which*
 /// one the receiver's ratchet decrypts, so it's authenticated with no tamperable plaintext flag.
-const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
 const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
 const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
-/// Two markers for the screenshot-capability signal (#1), same shape as the verification pair: the
-/// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
+/// The peer's build understands burn messages (`Frame::Burns`).
 const MARK_BURNS_V1: &[u8] = b"nightdrop/ctl/burns/v1";
 /// Prefix of a [`Frame::Version`] plaintext; the app version follows it (`"...:0.1.27"`).
 const MARK_VERSION_PREFIX: &[u8] = b"nightdrop/ctl/version/v1:";
+/// Two markers for the screenshot-capability signal (#1), same shape as the verification pair: the
+/// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
 const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
 const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
 
@@ -79,10 +81,10 @@ macro_rules! devlog {
 /// does not hide that two deposits are for the same person, so a relay can build a contact graph
 /// from co-occurrence and a per-mailbox behavioural profile over time. Do not describe it as
 /// unlinkable — it is unlinkable to the identity, not across messages.
-/// `docs/design/mailbox-handles.md` specifies the replacement: a per-pair secret combined with a
-/// daily epoch, so two senders to the same recipient produce different handles and nothing links
-/// across days. Migration is capability-gated because a v1 sender posting to a v2-only reader
-/// loses the message silently.
+/// Since 0.1.26 a confirmed pair uses the v2 handle instead (`mailbox.rs`,
+/// `docs/design/mailbox-handles.md`): a per-pair secret combined with the UTC day, so two senders
+/// to one recipient produce different handles and nothing links across days. This v1 handle
+/// remains for peers on older builds, posted and polled until 0.2 drops it.
 fn mailbox_handle(recipient_identity_key: &str) -> String {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new();
@@ -298,17 +300,6 @@ pub(crate) fn drain_relay_mailboxes(plan: &RelayDrainPlan) -> RelayHarvest {
 /// `handle` is the mailbox to post under — [`Node::post_handle`] for a live chat (v2 once the pair
 /// is confirmed), v1 where there is no chat state to consult. It is recorded in each receipt, so a
 /// later recall targets the handle the copy actually went to.
-/// A version string worth storing or announcing: `MAJOR.MINOR.PATCH` digits only, kept short. A
-/// peer's announce is untrusted input that ends up in the UI, so anything else is ignored.
-fn is_plausible_version(v: &str) -> bool {
-    let parts: Vec<&str> = v.split('.').collect();
-    v.len() <= 16
-        && parts.len() == 3
-        && parts
-            .iter()
-            .all(|p| !p.is_empty() && p.len() <= 4 && p.bytes().all(|b| b.is_ascii_digit()))
-}
-
 fn queue_on_relays(
     transport: &dyn Transport,
     primary: &Option<RelayClient>,
@@ -365,6 +356,17 @@ fn queue_on_relays(
         anyhow::bail!("peer offline and no relay accepted the message");
     }
     Ok(copies)
+}
+
+/// A version string worth storing or announcing: `MAJOR.MINOR.PATCH` digits only, kept short. A
+/// peer's announce is untrusted input that ends up in the UI, so anything else is ignored.
+fn is_plausible_version(v: &str) -> bool {
+    let parts: Vec<&str> = v.split('.').collect();
+    v.len() <= 16
+        && parts.len() == 3
+        && parts
+            .iter()
+            .all(|p| !p.is_empty() && p.len() <= 4 && p.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Recall every still-queued copy named by `receipts` — reconstructing each [`RelayClient`] from its
@@ -532,7 +534,7 @@ struct Chat {
     /// old version. With multi-relay fan-out (#17) a message is queued on **several** relays, so
     /// we hold one receipt per copy and recall them all. **Persisted** (`queued_receipts`) so a
     /// recall still works after an app restart — otherwise an unsent-but-undelivered message would
-    /// reach the peer and only then be tombstoned (§11.3, `IMPROVEMENT_PLAN.md` §1.1).
+    /// reach the peer and only then be tombstoned (§11.3).
     relay_receipts: HashMap<String, Vec<QueuedReceipt>>,
     /// Whether the **last** opt-in-server-storage attempt for this chat reached a relay while the
     /// peer was already online (§6). Goes false when server storage is on but no relay accepted a
@@ -542,6 +544,68 @@ struct Chat {
     remote_storage_healthy: bool,
     /// Our side of the v2 mailbox agreement (`mailbox.rs`). `None` until we first announce.
     mailbox: Option<mailbox::MailboxPair>,
+}
+
+impl Chat {
+    /// A chat just opened by pairing (either side): no history, no names, nothing verified.
+    /// Pairing is itself contact, so the silence clock starts now rather than reporting a brand-new
+    /// chat as silent. The client key is minted and announced right after pairing.
+    fn new_paired(
+        contact_id: &str,
+        peer_address: &str,
+        session: Session,
+        authorized: bool,
+        code: Option<String>,
+    ) -> Self {
+        Chat {
+            contact: Contact {
+                id: contact_id.to_string(),
+                their_name: DEFAULT_NAME.to_string(),
+                my_name: DEFAULT_NAME.to_string(),
+                remote_storage: false,
+                disappearing_secs: 0,
+                backed_up: false,
+                peer_backed_up: false,
+                verified: false,
+                peer_verified: false,
+                peer_captures_silent: None,
+                peer_relays: Vec::new(),
+                peer_supports_burn: None,
+                peer_app_version: None,
+                remote_storage_healthy: true,
+                // These four are filled in `contacts()` from the chat.
+                last_seen_secs: 0,
+                local_name: String::new(),
+                identity_tag: String::new(),
+                peer_on_old_version: false,
+            },
+            peer_address: peer_address.to_string(),
+            session,
+            history: Vec::new(),
+            last_seen: Some(crate::api::now_secs()),
+            local_name: String::new(),
+            client_key: None,
+            authorized,
+            code,
+            closed: false,
+            relay_receipts: HashMap::new(),
+            remote_storage_healthy: true,
+            mailbox: None,
+        }
+    }
+}
+
+/// Where a relay copy for a contact goes besides the implicit primary: their advertised relays
+/// (#17) plus our shared discovered ones (§3.1), without duplicates. Every relay post to a contact
+/// uses this set, so a copy is never missing from a relay the peer polls.
+fn relay_targets(peer_relays: &[String], discovered: &[String]) -> Vec<String> {
+    let mut targets = peer_relays.to_vec();
+    for r in discovered {
+        if !targets.contains(r) {
+            targets.push(r.clone());
+        }
+    }
+    targets
 }
 
 /// One device. Owns the identity, the transport endpoint, and all chats. A contact is
@@ -580,8 +644,8 @@ pub struct Node {
     /// for that chat until the app is restarted. Not persisted — re-announcing on a fresh launch
     /// is cheap and self-heals.
     burns_announced: std::collections::HashSet<String>,
-    /// This build's app version (`"0.1.27"`), set by the app via [`set_app_version`]
-    /// (Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
+    /// This build's app version (`"0.1.27"`), set by the app via
+    /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
     /// announced until then: a guessed version would be worse than none.
     app_version: Option<String>,
     /// Contacts this run has told our app version (see [`Node::announce_version`]). Per run and
@@ -591,9 +655,16 @@ pub struct Node {
     /// Per run, like [`burns_announced`](Self::burns_announced): an unconfirmed pair is retried on
     /// every launch, which is what heals a lost frame.
     mailbox_announced: std::collections::HashSet<String>,
+    /// Contacts this run has told our address (see [`Node::reannounce_address`]). Per run and
+    /// success-gated, like [`burns_announced`](Self::burns_announced).
+    address_announced: std::collections::HashSet<String>,
     /// Keys our polling-fragment partition (`mailbox.rs`, `poll_fragments`). Random per device,
     /// persisted, so a partition stays fixed for its epoch across restarts.
     poll_seed: [u8; 32],
+    /// Our access keys for PRIVATE relays (§3.2): `(relay onion, public key string, secret)`.
+    /// Persisted and re-inserted at startup ([`restore_client_keys`](Self::restore_client_keys)),
+    /// because the keystore is in memory and the operator authorized this exact key.
+    relay_keys: Vec<(String, String, [u8; 32])>,
     /// Yesterday's epoch once a drain past the skew margin emptied it on every relay, so it is no
     /// longer polled (`mailbox.rs`, `polled_epochs`). In memory only: after a restart it is polled
     /// again until the next such drain, which costs a few requests and loses nothing.
@@ -609,10 +680,11 @@ pub struct Node {
     /// large media never inflates the JSON state blob. `None` disables media (demo/tests).
     media_store: Option<(String, StoreKey)>,
     /// Attachments decoded from a restored backup, waiting to be written into the media store
-    /// once one is configured (the store is set after the node is built). See [`set_media_store`].
+    /// once one is configured (the store is set after the node is built). See [`set_media_store`](Self::set_media_store).
     pending_media: Vec<crate::storage::PersistedMedia>,
-    /// Arti's base state dir (the one passed to the Tor transport), so a backup can fold in the
-    /// onion keystore and restore the same `.onion`. `None` when Tor/persistence isn't used.
+    /// Arti's base state dir (the one passed to the Tor transport). A backup copies any keystore
+    /// files arti still keeps on disk there (installs not yet migrated off the 0.1.15 layout); the
+    /// onion identity itself comes from the transport. `None` when Tor isn't used.
     tor_state_dir: Option<String>,
     /// Set whenever an inbound frame mutated state (including silent control frames like Ack),
     /// so the driver refreshes/persists the UI even when no user message was produced.
@@ -620,7 +692,9 @@ pub struct Node {
     /// Outstanding short-code invites this device is hosting (§5b). Each holds the SPAKE2
     /// secret words and the pre-key/onion payload to hand out; the background poller answers a
     /// joiner's SPAKE2 opener from these (see [`service_pending_invites`](Self::service_pending_invites)).
-    /// In-memory only — a code not completed before the app closes is simply reissued.
+    /// **Persisted** (`export_pending_invites`), so a code survives a core rebuild or restart within
+    /// its TTL — a rebuild mid-pairing used to leave the joiner waiting on an inviter that had
+    /// forgotten the code (`ARCHITECTURE.md` §5b).
     pending_invites: Vec<PendingInvite>,
     /// Our own address as of the last persisted state (empty for a brand-new node). Compared
     /// against the live transport address on startup: if the onion changed (e.g. a rebuilt Tor
@@ -641,7 +715,7 @@ pub struct Node {
     /// only.
     seen_frames: std::collections::HashSet<[u8; 32]>,
     /// Reachability of **our own** advertised extra relays (`my_relays`, #17), keyed by address,
-    /// as observed on the last [`poll_relay`](Self::poll_relay). `false` = that relay (e.g. one the
+    /// as observed on the last relay drain. `false` = that relay (e.g. one the
     /// user self-hosts) did not answer our drain, so contacts' mail to us via it may be stuck. Drives
     /// the "your relay is offline — add a backup" warning. Absent = not yet probed (treated as up).
     relay_reachable: std::collections::HashMap<String, bool>,
@@ -659,12 +733,13 @@ pub struct Node {
     /// next poll tick (~80 ms), so a restart in that window just leaves the message "queued" — the
     /// same recovery profile as [`pending_relay`](Self::pending_relay).
     pending_sends: Vec<PendingRelaySend>,
-    /// Authenticated `Closed` signals (chat deletes, §11.6) that reached neither the peer nor any
-    /// relay when the chat was torn down (arti still cold, or the relay briefly unreachable). Unlike
-    /// [`pending_relay`](Self::pending_relay) these are **chat-independent** — the chat is already
-    /// gone — so they carry their own recipient + sealed bytes and are retried by the poller until a
-    /// relay accepts a copy. **Persisted** (a delete is a one-shot the peer must eventually see), so
-    /// the retry survives a restart mid-outage; re-delivery is idempotent (the peer's ratchet rejects
+    /// Authenticated control frames that reached neither the peer nor any relay when sent (arti
+    /// still cold, or the relay briefly unreachable): `Closed` signals (chat deletes, §11.6) and
+    /// screenshot notices ([`report_screenshot`](Self::report_screenshot)). Unlike
+    /// [`pending_relay`](Self::pending_relay) these are **chat-independent** — a deleted chat is
+    /// already gone — so they carry their own recipient + sealed bytes and are retried by the poller
+    /// until a relay accepts a copy. **Persisted** (each is a one-shot the peer must eventually see),
+    /// so the retry survives a restart mid-outage; re-delivery is idempotent (the peer's ratchet rejects
     /// a replayed marker).
     pending_control: Vec<PendingControl>,
     /// Frames sealed by a UI call and waiting to be sent **off** the lock by that call's caller
@@ -679,7 +754,8 @@ pub struct Node {
     /// relay retry, which is receipted again when it lands.
     receipt_sends: Vec<DetachedSend>,
     /// Shared default relays learned from the operator-signed **relay directory** (§3.1): fetched
-    /// from a live relay on the poll, verified against the baked-in [`directory::DIRECTORY_PUBKEY`],
+    /// daily from our onion site (a relay is asked only when the site cannot be reached), verified
+    /// against the baked-in [`crate::directory::DIRECTORY_PUBKEY`],
     /// and treated like additional primaries (drained, paired over, and posted to). This is how the
     /// relay set rotates **without an app update** — a lost/rotated relay onion no longer strands
     /// users once a newer signed list names its replacement. Persisted.
@@ -891,8 +967,9 @@ struct PendingRelaySend {
     bytes: Vec<u8>,
 }
 
-/// An authenticated control signal (a chat-delete `Closed`) awaiting delivery after its chat was
-/// already removed (see [`Node::pending_control`]). Carries its own routing so it survives the chat.
+/// An authenticated control signal awaiting delivery: a chat-delete `Closed` (its chat already
+/// removed) or a screenshot notice (see [`Node::pending_control`]). Carries its own routing so it
+/// survives the chat.
 struct PendingControl {
     /// The peer's identity key — seals + addresses the relay copy (its mailbox handle).
     recipient_ik: String,
@@ -905,9 +982,13 @@ struct PendingControl {
     bytes: Vec<u8>,
 }
 
-/// One in-flight short-code invite awaiting a joiner (§5b, `TODO.md` #3). The `secret` never
+/// One in-flight short-code invite awaiting a joiner (§5b). The `secret` never
 /// leaves the device; only SPAKE2 protocol messages and a payload sealed under the derived
 /// key ever reach the untrusted rendezvous, so the relay cannot brute-force the code offline.
+///
+/// Online, each opener is one guess at the code, so an invite answers at most
+/// [`MAX_OPENERS_PER_INVITE`] *distinct* openers and is then retired (`openers`).
+#[derive(Clone)]
 struct PendingInvite {
     slot: String,
     secret: String,
@@ -918,7 +999,21 @@ struct PendingInvite {
     ttl: Duration,
     /// Stop hosting this invite after this instant (the code has expired).
     expiry: Instant,
+    /// SHA-256 of each distinct opener answered so far. A joiner re-posts the *same* opener while
+    /// it waits, which is answered again; every *different* opener is another guess.
+    openers: Vec<[u8; 32]>,
 }
+
+/// How many distinct SPAKE2 openers a short-code invite answers before it is retired.
+///
+/// SPAKE2 stops an observer testing guesses offline, but each opener is still one online guess:
+/// the inviter answers it, and the answer lets whoever sent it check that one guess. The code's
+/// secret is four words from sixteen (about 15 bits), and the relay operator sees the slot's
+/// mailbox, so an invite answering every opener could be ground through in its 10-minute life.
+/// A real joiner sends one opener and re-posts it unchanged; three leaves room for someone who
+/// gives up and tries the code again. The cost of a cap is that three junk openers burn a code,
+/// which the joiner sees as a timeout and fixes with a fresh code.
+pub(crate) const MAX_OPENERS_PER_INVITE: usize = 3;
 
 mod backup;
 mod frames;
@@ -952,12 +1047,14 @@ impl Node {
             app_version: None,
             version_announced: std::collections::HashSet::new(),
             mailbox_announced: std::collections::HashSet::new(),
+            address_announced: std::collections::HashSet::new(),
             poll_seed: {
                 use rand::RngCore;
                 let mut seed = [0u8; 32];
                 rand::thread_rng().fill_bytes(&mut seed);
                 seed
             },
+            relay_keys: Vec::new(),
             prev_epoch_drained: None,
             started: std::time::Instant::now(),
             #[cfg(test)]
@@ -987,22 +1084,21 @@ impl Node {
         }
     }
 
-    /// Take and clear the "inbound frame changed state" flag (see [`dirty`]). The driver ORs
+    /// Take and clear the "inbound frame changed state" flag (see [`dirty`](Self::dirty)). The driver ORs
     /// this into its change detection so silent control frames (Ack, name, etc.) refresh the UI.
     pub fn take_dirty(&mut self) -> bool {
         std::mem::take(&mut self.dirty)
     }
 
-    /// Tell the node where arti keeps its state, so [`backup`](Self::backup) can fold in the
-    /// onion keystore (and restore can reproduce the same `.onion`).
-    #[allow(dead_code)] // used by the Tor-backed api path (`--features tor`)
+    /// Tell the node where arti keeps its state, so a backup can fold in any keystore files left
+    /// on disk there (see [`tor_state_dir`](Self::tor_state_dir)).
+    #[cfg_attr(not(feature = "tor"), allow(dead_code))]
     pub fn set_tor_state_dir(&mut self, dir: String) {
         self.tor_state_dir = Some(dir);
     }
 
     /// Enable at-rest media storage: attachments are sealed under `key` into `dir`. If a
     /// restored backup carried attachments, they are sealed into the store now.
-    #[allow(dead_code)] // used by the Tor-backed api path (`--features tor`) + tests
     pub fn set_media_store(&mut self, dir: String, key: StoreKey) {
         std::fs::create_dir_all(&dir).ok();
         // Flush any backup-carried attachments into the store, preserving their original ids so
@@ -1067,7 +1163,16 @@ impl Node {
     pub fn authorize(&mut self, contact_id: &str, accept: bool) -> Result<()> {
         if !accept {
             devlog!("[nightdrop] authorize: declining request {contact_id}");
-            self.chats.remove(contact_id);
+            // A pending request has already exchanged onion client keys (#22: we answer a `Hello`
+            // with ours, and accept theirs), so a decline must undo both, as `delete_chat` does —
+            // or a stranger we turned away keeps permission to reach us, and our key for them
+            // stays on disk in a directory named after their onion.
+            if let Some(chat) = self.chats.remove(contact_id) {
+                let _ = self.transport.revoke_client(contact_id);
+                if !chat.peer_address.is_empty() {
+                    let _ = self.transport.forget_peer_key(&chat.peer_address);
+                }
+            }
             return Ok(());
         }
         let (peer_address, code, already_authorized) = {
@@ -1122,6 +1227,8 @@ impl Node {
         let code = code.unwrap_or_default();
         devlog!("[nightdrop] authorize: approved {contact_id}; sending approval (code='{code}')");
         self.deliver(&peer_address, contact_id, &Frame::Approved { from, code })?;
+        // A request could not be told our extra relays while it was one.
+        self.announce_relays_to(contact_id);
         Ok(())
     }
 
@@ -1147,16 +1254,12 @@ impl Node {
             let bytes = wire::encode(&frame);
             // Same relay set send() uses: the peer's advertised relays (#17) + our shared discovered
             // relays (§3.1), alongside the implicit primary.
-            let mut targets = self
-                .chats
-                .get(contact_id)
-                .map(|c| c.contact.peer_relays.clone())
-                .unwrap_or_default();
-            for r in &self.discovered_relays {
-                if !targets.contains(r) {
-                    targets.push(r.clone());
-                }
-            }
+            let targets = relay_targets(
+                self.chats
+                    .get(contact_id)
+                    .map_or(&[][..], |c| &c.contact.peer_relays),
+                &self.discovered_relays,
+            );
             let queued = queue_on_relays(
                 self.transport.as_ref(),
                 &self.relay,
@@ -1420,11 +1523,12 @@ impl Node {
                 self.pending_control.push(PendingControl {
                     recipient_ik: contact_id.to_string(),
                     peer_address: addr,
-                    relays: self
-                        .chats
-                        .get(contact_id)
-                        .map(|c| c.contact.peer_relays.clone())
-                        .unwrap_or_default(),
+                    relays: relay_targets(
+                        self.chats
+                            .get(contact_id)
+                            .map_or(&[][..], |c| &c.contact.peer_relays),
+                        &self.discovered_relays,
+                    ),
                     bytes: wire::encode(&frame),
                 });
             }
@@ -1640,24 +1744,31 @@ impl Node {
         let _ = self.deliver(peer_address, contact, &frame);
     }
 
-    /// Mint (and store in arti's keystore) this device's client access key for a **private** relay's
-    /// onion (restricted discovery, §3.2), returning the public `descriptor:x25519:…` string to give
-    /// the relay operator. arti stores the private half keyed by the relay's onion and presents it
-    /// automatically on future connects, so once the operator authorizes the returned key this
-    /// device can reach the restricted relay. `None` on transports without restricted discovery
-    /// (tests, LAN); `Some(Err)` if the onion won't parse / key generation fails.
-    pub(crate) fn relay_access_key(&self, relay_onion: &str) -> Option<Result<String>> {
-        // The relay's key is not persisted: unlike a peer, a relay is reached fresh each run and
-        // re-minting costs nothing, so only the public half matters here.
-        self.transport
-            .make_client_key(relay_onion)
-            .map(|r| r.map(|(public, _secret)| public))
+    /// This device's client access key for a **private** relay's onion (restricted discovery, §3.2),
+    /// as the public `descriptor:x25519:…` string to give the relay operator. Minted on the first
+    /// request and inserted into arti's keystore, which presents it on every connect to that onion;
+    /// a repeat request returns the **same** key, since the operator authorized that one and a new
+    /// one would lock this device out. Kept in the sealed store and re-inserted at startup.
+    /// `None` on transports without restricted discovery (tests, LAN); `Some(Err)` if the onion
+    /// won't parse or key generation fails.
+    pub(crate) fn relay_access_key(&mut self, relay_onion: &str) -> Option<Result<String>> {
+        if let Some((_, public, _)) = self.relay_keys.iter().find(|(r, _, _)| r == relay_onion) {
+            return Some(Ok(public.clone()));
+        }
+        Some(
+            self.transport
+                .make_client_key(relay_onion)?
+                .map(|(public, secret)| {
+                    self.relay_keys
+                        .push((relay_onion.to_string(), public.clone(), secret));
+                    self.dirty = true;
+                    public
+                }),
+        )
     }
 
     /// Attach the primary relay for offline store-and-forward (§6). Without one (and no
     /// advertised extras), sending to an offline peer errors instead of being queued.
-    // Wired into NightdropCore/the app in step 8 (opt-in 24h server storage); used in tests now.
-    #[allow(dead_code)]
     pub fn set_relay(&mut self, relay: RelayClient) {
         self.relay = Some(relay);
     }
@@ -1669,7 +1780,7 @@ impl Node {
         self.transport.abort_handle()
     }
 
-    /// Tear down the network side: swap the live transport for an inert [`ClosedTransport`] and
+    /// Tear down the network side: swap the live transport for an inert [`ClosedTransport`](crate::transport::ClosedTransport) and
     /// drop the primary relay, so everything they hold is released. Identity and chats survive,
     /// but the node can no longer send or receive.
     ///
@@ -1708,7 +1819,7 @@ impl Node {
     }
 
     /// Reachability of each of **our** advertised extra relays (#17), as observed on the last
-    /// [`poll_relay`](Self::poll_relay): `(address, reachable)`. A relay not yet probed reports
+    /// relay drain ([`apply_relay_harvest`](Self::apply_relay_harvest)): `(address, reachable)`. A relay not yet probed reports
     /// `true` (optimistic — don't cry wolf before the first poll). Lets the UI warn "your relay is
     /// offline — add a backup" for a self-hosted relay that stops answering.
     pub fn relay_health(&self) -> Vec<(String, bool)> {
@@ -1756,8 +1867,8 @@ impl Node {
             .values()
             .filter(|c| c.authorized)
             .map(|c| {
-                // `remote_storage_healthy` and `last_seen_secs` are live per-chat state, not part
-                // of the stored contact — filled in here so the UI sees one flat object.
+                // These are live or derived per-chat state, not part of the stored contact —
+                // filled in here so the UI sees one flat object.
                 let mut dto = c.contact.clone();
                 dto.remote_storage_healthy = c.remote_storage_healthy;
                 dto.last_seen_secs = c.last_seen.unwrap_or(0);
@@ -1786,16 +1897,20 @@ fn put_field(out: &mut Vec<u8>, bytes: &[u8]) {
 }
 
 fn take_field(buf: &[u8], p: &mut usize) -> Result<Vec<u8>> {
-    if *p + 4 > buf.len() {
-        anyhow::bail!("corrupt media envelope");
-    }
-    let n = u32::from_be_bytes(buf[*p..*p + 4].try_into().unwrap()) as usize;
-    *p += 4;
-    if *p + n > buf.len() {
-        anyhow::bail!("corrupt media envelope");
-    }
-    let v = buf[*p..*p + n].to_vec();
-    *p += n;
+    // Checked arithmetic: on a 32-bit target (armeabi-v7a) a length near 4 GiB would wrap a plain
+    // `*p + n` past the bounds check and panic on the slice instead of failing cleanly.
+    let corrupt = || anyhow::anyhow!("corrupt media envelope");
+    let len_end = p
+        .checked_add(4)
+        .filter(|&e| e <= buf.len())
+        .ok_or_else(corrupt)?;
+    let n = u32::from_be_bytes(buf[*p..len_end].try_into().unwrap()) as usize;
+    let end = len_end
+        .checked_add(n)
+        .filter(|&e| e <= buf.len())
+        .ok_or_else(corrupt)?;
+    let v = buf[len_end..end].to_vec();
+    *p = end;
     Ok(v)
 }
 
@@ -2006,7 +2121,7 @@ fn unpack_media_incoming(buf: &[u8]) -> Result<(String, String, String, u64, Vec
     Ok((transfer_id, kind, mime, size, buf[p..].to_vec()))
 }
 
-// -------- Interactive SPAKE2 short-code pairing (§5b, `TODO.md` #3) --------
+// -------- Interactive SPAKE2 short-code pairing (§5b) --------
 
 /// The two rendezvous legs for one slot: the joiner posts its SPAKE2 opener under the
 /// joiner leg; the inviter posts its answer under the inviter leg. Distinct handles keep the
@@ -2203,8 +2318,6 @@ pub fn run_join_handshake(
     }
 }
 
-/// The relay handle a server backup is stored under. Derived from the password with a
-/// fixed salt, so the user needs only their recovery password to both locate and decrypt.
 /// Six characters derived from an identity key, so two contacts who never named themselves are
 /// still distinguishable (`docs/design/contact-naming.md` §3).
 ///
@@ -2223,6 +2336,8 @@ pub(crate) fn identity_tag(identity_key: &str) -> String {
         .collect()
 }
 
+/// The relay handle a server backup is stored under. Derived from the password with a
+/// fixed salt, so the user needs only their recovery password to both locate and decrypt.
 fn backup_handle(password: &str) -> Result<String> {
     let key = crate::storage::derive_key(password, b"nightdrop-backup-handle")?;
     Ok(format!("bkp:{}", base64_handle(&key[..16])))

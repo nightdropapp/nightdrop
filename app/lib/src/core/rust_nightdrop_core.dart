@@ -95,7 +95,8 @@ class RustNightdropCore extends NightdropCore {
   // Unlocked at-rest key, held only in memory. Non-null means "this session has unlocked the
   // store"; it is also the *only* copy when a lock is set, because enabling a lock deletes the
   // keystore entry. Dart can't zeroize a String, so dropping the reference is as far as this
-  // goes — the Rust side never keeps the key beyond the call.
+  // goes. The Rust core holds its own copy for as long as it runs (it re-seals the state file on
+  // every change) and zeroizes it when the core is dropped.
   String? _unlockedKey;
 
   /// Set when launch stopped because the store is locked. Cached because `build` can't await
@@ -218,8 +219,6 @@ class RustNightdropCore extends NightdropCore {
     );
   }
 
-  /// Whether a wipe code is armed. Needs the unlocked store key; without one (locked, or no lock
-  /// at all) the answer is a plain no.
   @override
   Future<String> readBridges() async =>
       rust.readBridges(dir: (await _torStateDir())!);
@@ -284,6 +283,8 @@ class RustNightdropCore extends NightdropCore {
     await _refresh();
   }
 
+  /// Whether a wipe code is armed. Needs the unlocked store key; without one (locked, or no lock
+  /// at all) the answer is a plain no.
   @override
   Future<bool> isDuressArmed() async {
     final key = _unlockedKey ?? await _readStoreKey();
@@ -303,8 +304,11 @@ class RustNightdropCore extends NightdropCore {
   ///  * The **lock file goes first**, before anything that can throw or stall. If the wipe is
   ///    interrupted after this point the app comes up as a fresh install rather than showing a
   ///    lock screen for a store that no longer exists.
-  ///  * The peer notice runs on a **hard time bound**, and the wipe proceeds whatever it returns.
-  ///    A wipe that can be prevented by taking the phone off the network is not a wipe.
+  ///  * A peer notice is possible only when a core is already running behind the lock screen
+  ///    (background delivery on); usually there is none, because the store was never opened
+  ///    (`duress-wipe.md` §5). When there is, it runs on a **hard time bound** and the wipe
+  ///    proceeds whatever it returns. A wipe that can be prevented by taking the phone off the
+  ///    network is not a wipe.
   ///  * The notice is the ordinary "chat deleted" — nothing says *duress*. See
   ///    `docs/design/duress-wipe.md` §5.
   Future<void> _duressWipe() async {
@@ -323,11 +327,6 @@ class RustNightdropCore extends NightdropCore {
     await logout(duress: true);
   }
 
-  /// Forget the unlocked key, if we are allowed to.
-  ///
-  /// With background delivery **on** the key has to stay resident or the foreground service
-  /// couldn't decrypt anything it receives while locked — the same trade Signal makes. With it
-  /// off, nothing needs the store until the next unlock, so the key goes.
   @override
   Future<void> exitApp() async {
     // In this order. The service first, forced past any download hold: the user asked for
@@ -339,6 +338,11 @@ class RustNightdropCore extends NightdropCore {
     await AppProcess.exit();
   }
 
+  /// Forget the unlocked key, if we are allowed to.
+  ///
+  /// With background delivery **on** the key has to stay resident or the foreground service
+  /// couldn't decrypt anything it receives while locked — the same trade Signal makes. With it
+  /// off, nothing needs the store until the next unlock, so the key goes.
   @override
   Future<void> lockStore() async {
     if (!await isStoreLocked()) return;
@@ -349,9 +353,9 @@ class RustNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
-  /// Tor's state base dir (also where the persisted state file lives). We pin it to the app
-  /// support dir on every platform — mobile needs an explicit writable dir, and on desktop a
-  /// known location lets a backup fold in the onion keystore so restore keeps the same `.onion`.
+  /// Tor's state base dir (also where the persisted state file and the sealed onion identity
+  /// live). We pin it to the app support dir on every platform — mobile needs an explicit writable
+  /// dir, and one known location on desktop too keeps every platform's layout the same.
   Future<String?> _torStateDir() async =>
       (await getApplicationSupportDirectory()).path;
 
@@ -472,7 +476,7 @@ class RustNightdropCore extends NightdropCore {
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
-    unawaited(_scheduleUpdateChecks()); // the old core's loop ended with it
+    _configureNewCore();
     notifyListeners();
   }
 
@@ -714,6 +718,22 @@ class RustNightdropCore extends NightdropCore {
     await setCaptureReporting(await ScreenshotDetector.canDetect());
   }
 
+  /// Everything a freshly built core needs told before it is used, on **every** path that builds
+  /// one: launch, a new identity, a restore, a Tor reset. The core holds these only for its own
+  /// lifetime, so a rebuild that skipped them ran without its version, without the screenshot
+  /// capability — leaving a contact paired that run reading our silence as "they'd be told" — and
+  /// with the user's burn-receipt choice quietly off. All unawaited: a core must never wait on the
+  /// network to come up, and the version and capture announces put a frame on the wire per contact.
+  void _configureNewCore() {
+    unawaited(_announceAppVersion());
+    unawaited(_announceCaptureReporting());
+    unawaited(_restoreCoverTraffic());
+    unawaited(_restoreBurnReceipts());
+    // Self-limiting (update_schedule.dart), so running it for every new core is free when nothing
+    // is due; the previous core's loop ended with it.
+    unawaited(_scheduleUpdateChecks());
+  }
+
   Future<String?>? _downloadInFlight;
 
   @override
@@ -918,8 +938,9 @@ class RustNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
-  // If the onion hasn't published within this long, the entry-guard set is almost certainly wedged
-  // (a healthy publish finishes well under it) — the app then resets guards and rebuilds itself.
+  // How long after launch the guard heal starts looking. Before then a cold Tor start has had no
+  // fair chance to reach anyone, so "nothing has succeeded" is not yet evidence of anything; the
+  // trigger itself is `directPathWedged` (see [_scheduleGuardHeal]), not the onion's publish state.
   static const _guardHealTimeout = Duration(seconds: 150);
   // How often the health signals are re-read after that first check. Two cheap FFI reads, so the
   // cost is nil; the point is that a session which wedges an hour in is still noticed.
@@ -1039,32 +1060,10 @@ class RustNightdropCore extends NightdropCore {
     } finally {
       _booting = false;
       notifyListeners();
-      // Tell restored contacts whether this device can report screenshots (#1). Unawaited for the
-      // same reason as the update check: it puts a frame on the wire per contact.
-      unawaited(_announceAppVersion());
-      unawaited(_announceCaptureReporting());
-      unawaited(_restoreCoverTraffic());
-      unawaited(_restoreBurnReceipts());
-      // Fire and forget, deliberately unawaited: a launch must never wait on the network, and
-      // this one dials Tor. It self-limits (update_schedule.dart), so running it on every start
-      // and every hour after is free when nothing is due.
-      unawaited(_scheduleUpdateChecks());
+      _configureNewCore();
     }
   }
 
-  /// Copy an unreadable state file aside before anything can overwrite it, so a transient failure
-  /// (or a bug fixed in a later build) doesn't cost the user their data. Best-effort.
-  /// Move any persisted state out of the way before a **new** identity is created.
-  ///
-  /// The core restores from `persistPath` whenever that file exists — it has no other way to tell
-  /// "create" from "restore". So an unreadable state file, which is the exact reason the load-error
-  /// screen is on screen, made "set up a new identity" fail with "wrong key or corrupt store": the
-  /// recovery path blocked by the thing it exists to recover from. Found on a device, 2026-08-02,
-  /// straight after the same shape of bug in the sealed onion key.
-  ///
-  /// **Renamed, never deleted.** These bytes may be the user's only copy of an identity they are
-  /// abandoning under duress of a failed launch, possibly recoverable later with the right key.
-  /// The wipe removes the sidecars, so they never outlive a deliberate destruction.
   /// Whether a state file is positively known to be on disk.
   ///
   /// Only a confirmed sighting counts. If the path cannot even be resolved we say `false` and let
@@ -1078,6 +1077,17 @@ class RustNightdropCore extends NightdropCore {
     }
   }
 
+  /// Move any persisted state out of the way before a **new** identity is created.
+  ///
+  /// The core restores from `persistPath` whenever that file exists — it has no other way to tell
+  /// "create" from "restore". So an unreadable state file, which is the exact reason the load-error
+  /// screen is on screen, made "set up a new identity" fail with "wrong key or corrupt store": the
+  /// recovery path blocked by the thing it exists to recover from. Found on a device, 2026-08-02,
+  /// straight after the same shape of bug in the sealed onion key.
+  ///
+  /// **Renamed, never deleted.** These bytes may be the user's only copy of an identity they are
+  /// abandoning under duress of a failed launch, possibly recoverable later with the right key.
+  /// The wipe removes the sidecars, so they never outlive a deliberate destruction.
   Future<void> _setAsideOldState() async {
     // One stamp for both files, so it is obvious which key belongs to which state file.
     final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -1088,7 +1098,7 @@ class RustNightdropCore extends NightdropCore {
       }
       // The sealed onion identity has to travel with the state file. The .onion is not derivable
       // from the identity, and every chat holds the PEER's address with nothing refreshing it
-      // after pairing (ARCHITECTURE.md §11) — so a state file recovered without its key comes
+      // after pairing (ARCHITECTURE.md §1a) — so a state file recovered without its key comes
       // back on a NEW address, with every stored peer address stale. Setting the state aside and
       // overwriting the key made the "abandoned is not the same as destroyed" promise only half
       // true: the identity survived, the address it answers on did not.
@@ -1104,6 +1114,8 @@ class RustNightdropCore extends NightdropCore {
     }
   }
 
+  /// Copy an unreadable state file aside before anything can overwrite it, so a transient failure
+  /// (or a bug fixed in a later build) doesn't cost the user their data. Best-effort.
   Future<void> _preserveUnreadableState(String path) async {
     try {
       final file = File(path);
@@ -1115,17 +1127,17 @@ class RustNightdropCore extends NightdropCore {
     }
   }
 
-  @override
-  Future<void> createIdentity() async {
-    // Reachable from the load-error screen ("set up new identity"), where a failed start may
-    // have left a core holding the Tor state lock.
-    await _closeCore();
-    _guardHealDone = false;
-    // Refuse to displace a state file nobody agreed to abandon. Onboarding is only ever correct
-    // on a genuinely fresh install, or after the recovery screen said the state is unreadable and
-    // the user chose to move on (dismissLoadError). Reaching it any other way means a failed or
-    // raced launch mislabelled this device as new, and setting the identity aside there is how a
-    // working install silently loses its identity.
+  /// Clear the way for an identity that is about to be written over this device's state files —
+  /// a new one, or one restored from a backup. Both write the state file and the sealed onion
+  /// identity, so both need this; the restores used to skip it and write straight over them.
+  ///
+  /// Refuses to displace a state file nobody agreed to abandon. Onboarding is only ever correct
+  /// on a genuinely fresh install, or after the recovery screen said the state is unreadable and
+  /// the user chose to move on (dismissLoadError). Reaching it any other way means a failed or
+  /// raced launch mislabelled this device as new, and replacing the identity there is how a
+  /// working install silently loses it. When it is allowed, the old files are renamed aside,
+  /// never deleted ([_setAsideOldState]).
+  Future<void> _makeRoomForNewIdentity() async {
     if (!_abandonExistingStateApproved && await _savedStateExists()) {
       throw StateError(
         'There is already a saved identity on this device. Restart Night Drop and try again; '
@@ -1134,6 +1146,15 @@ class RustNightdropCore extends NightdropCore {
     }
     await _setAsideOldState();
     _abandonExistingStateApproved = false;
+  }
+
+  @override
+  Future<void> createIdentity() async {
+    // Reachable from the load-error screen ("set up new identity"), where a failed start may
+    // have left a core holding the Tor state lock.
+    await _closeCore();
+    _guardHealDone = false;
+    await _makeRoomForNewIdentity();
     final listen = _listenAddr;
     final relay = _relayAddr;
     if (_torEnabled) {
@@ -1162,12 +1183,7 @@ class RustNightdropCore extends NightdropCore {
     _identity = Identity(id: id.id);
     // Settle the screenshot capability before anyone pairs, so the first contact is announced to
     // on pairing rather than left reading our silence as "they'd be told" (#1).
-    unawaited(_announceAppVersion());
-    unawaited(_announceCaptureReporting());
-    unawaited(_restoreCoverTraffic());
-    // A first install has no core at launch, so the launch-time loop ended at once; this core
-    // gets its own (it waits for Tor first).
-    unawaited(_scheduleUpdateChecks());
+    _configureNewCore();
     notifyListeners();
   }
 
@@ -1304,6 +1320,7 @@ class RustNightdropCore extends NightdropCore {
     // has to go first — otherwise arti can't launch the restored identity's onion service.
     await _closeCore();
     if (_torEnabled) {
+      await _makeRoomForNewIdentity();
       // Restore the backup onto Tor and persist it (so it survives future restarts too).
       final key = await _ensureStoreKey();
       _core = await rust.NightdropCore.restoreBackupTor(
@@ -1331,7 +1348,7 @@ class RustNightdropCore extends NightdropCore {
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
-    unawaited(_scheduleUpdateChecks()); // a new core: the previous one's loop ended with it
+    _configureNewCore();
   }
 
   @override
@@ -1345,6 +1362,7 @@ class RustNightdropCore extends NightdropCore {
     }
     // As in `importBackup`: release the Tor state lock before the restored core takes it.
     await _closeCore();
+    await _makeRoomForNewIdentity();
     final key = await _ensureStoreKey();
     _core = await rust.NightdropCore.restoreServerBackupTor(
       password: password,
@@ -1358,7 +1376,7 @@ class RustNightdropCore extends NightdropCore {
     final id = await _core!.identity();
     _identity = Identity(id: id.id);
     await _refresh();
-    unawaited(_scheduleUpdateChecks()); // a new core: the previous one's loop ended with it
+    _configureNewCore();
   }
 
   @override
@@ -1550,7 +1568,14 @@ class RustNightdropCore extends NightdropCore {
           if (f.path.split('/').last.startsWith(_kOnionKeyFile)) rm(f);
         }
       });
+      // The app-lock file. The duress wipe removes it first; an ordinary logout used to leave it,
+      // so the next start showed a lock screen for a store that no longer existed, and a new
+      // identity created in the same session was sealed under the old key — behind the old PIN,
+      // with the old wipe code still armed, none of which the user chose for it.
+      await step('app lock', () => rust.destroyStoreLock(dir: dir));
     }
+    _unlockedKey = null;
+    _lockedOut = false;
     if (failed.isNotEmpty && _diagEnabled) {
       // ignore: avoid_print — the wipe's outcome belongs on the record; names only, no paths.
       print('[nd-diag] wipe: could not remove ${failed.join(', ')}');

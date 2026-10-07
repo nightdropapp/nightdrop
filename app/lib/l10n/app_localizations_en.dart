@@ -505,6 +505,11 @@ class AppLocalizationsEn extends AppLocalizations {
   }
 
   @override
+  String aboutVersion(String version) {
+    return 'Version $version';
+  }
+
+  @override
   String get updateChecking => 'Checking for updates…';
 
   @override

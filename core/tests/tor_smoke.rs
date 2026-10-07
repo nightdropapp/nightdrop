@@ -275,7 +275,7 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
 
 /// Is a relay actually reachable from a client, over Tor, right now?
 ///
-/// Debug aid for the "could not reach any relay to start pairing" failure (`TODO.md` #6/#7),
+/// Debug aid for the "could not reach any relay to start pairing" failure,
 /// where the joiner can't post its opener. That error can't tell you *why*: the relay could be
 /// down, its descriptor unpublished, or the address stale. This bootstraps a real client exactly
 /// as the app does and does one `peek` round-trip against the relay, which separates "the relay
@@ -574,4 +574,70 @@ fn the_update_check_reaches_our_onion_site_over_tor() {
         expect.as_str() > "0.1.17",
         "update_available disagreed with the versions it was given"
     );
+}
+
+/// A file-backup restore keeps the device's onion address — on the restore itself **and on the
+/// start after it**. The restore writes the backup's keystore to disk and arti reads the identity
+/// from there; unless that identity is sealed at once, the next start finds no sealed key and the
+/// address depends on the on-disk migration path instead. Three onion bootstraps; keep `#[ignore]`d.
+#[test]
+#[ignore = "needs network; three onion bootstraps (slow)"]
+fn a_file_backup_restore_keeps_the_onion_across_the_next_restart() {
+    use base64::Engine as _;
+    use nightdrop::api::NightdropCore;
+    let key = base64::engine::general_purpose::STANDARD.encode([7u8; 32]);
+    let (a, b) = (scratch("restore-a"), scratch("restore-b"));
+
+    let original = NightdropCore::new_tor(
+        Some(a.clone()),
+        None,
+        Some(format!("{a}/state.bin")),
+        Some(key.clone()),
+    )
+    .expect("first start");
+    let onion = original.address();
+    let password = original.create_backup(false).expect("create backup");
+    let backup = format!("{a}/backup.ndb");
+    original.save_backup(backup.clone()).expect("save backup");
+    original.shutdown();
+    drop(original);
+
+    let restored = NightdropCore::restore_backup_tor(
+        backup,
+        password,
+        Some(b.clone()),
+        None,
+        format!("{b}/state.bin"),
+        key.clone(),
+    )
+    .expect("restore");
+    assert_eq!(
+        restored.address(),
+        onion,
+        "the restore must come back on the same onion"
+    );
+    assert!(
+        std::path::Path::new(&format!("{b}/onion-key.sealed")).exists(),
+        "the restored identity is sealed immediately"
+    );
+    restored.shutdown();
+    drop(restored);
+
+    let again = NightdropCore::new_tor(
+        Some(b.clone()),
+        None,
+        Some(format!("{b}/state.bin")),
+        Some(key),
+    )
+    .expect("start after restore");
+    assert_eq!(
+        again.address(),
+        onion,
+        "and the start after it keeps it too"
+    );
+    assert!(
+        !std::path::Path::new(&format!("{b}/arti-state/keystore")).exists(),
+        "with a sealed key, the on-disk keystore (and its contact list) is gone"
+    );
+    again.shutdown();
 }

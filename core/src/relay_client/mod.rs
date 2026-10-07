@@ -36,8 +36,8 @@ const REAP_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Minimum wall-clock time between disk flushes of the queue. A write that lands at least this long
 /// after the previous flush persists **immediately** (durability for normal traffic — a post is on
-/// disk before it's acked); writes bursting inside the window are **coalesced** into a single flush
-/// by the background flusher. Without this, a flood of posts to a large store forces one full
+/// disk before it's acked, unless a write is already running); writes bursting inside the window are
+/// **coalesced** into a single flush by the background flusher. Without this, a flood of posts to a large store forces one full
 /// rewrite per post — O(store) disk I/O per request (a DoS amplifier). Half a second keeps the
 /// crash-loss window tiny while capping flush frequency regardless of request rate.
 const FLUSH_MIN_INTERVAL: Duration = Duration::from_millis(500);
@@ -58,7 +58,7 @@ fn now_unix() -> u64 {
         .unwrap_or(0)
 }
 
-/// Resource limits protecting the (in-memory) relay from floods (`TODO.md` #1). All are
+/// Resource limits protecting the (in-memory) relay from floods. All are
 /// **reject-new**: a full mailbox refuses further posts rather than evicting queued
 /// blobs — otherwise a flooder could silently destroy a victim's undelivered mail.
 /// Rejections return an error to the poster (whose direct P2P path still works) and are
@@ -104,7 +104,6 @@ impl Default for RelayLimits {
 /// incompatible change to [`Request`] / [`Response`] so a mismatched client and relay reject
 /// each other with a clear error instead of misparsing. Independent of the peer-to-peer
 /// [`wire::WIRE_VERSION`](crate::wire::WIRE_VERSION); the two protocols version separately.
-/// See `TODO.md` #2.
 pub const RELAY_VERSION: u8 = 1;
 
 /// The virtual port a relay's onion service is dialed on. It lives here, with the protocol,
@@ -352,7 +351,6 @@ struct PersistedStore {
     mailboxes: HashMap<String, Vec<PersistedBlob>>,
 }
 
-/// Serialize the live store and write it atomically (`tmp` + rename) to `path`.
 /// Serialize the live store to JSON bytes. The caller holds the lock, so keep this cheap and free
 /// of I/O — the disk write happens off the lock (see [`do_flush`]).
 fn serialize_store(inner: &StoreInner) -> Option<Vec<u8>> {
@@ -440,7 +438,13 @@ fn load_store(path: &Path) -> StoreInner {
 /// path), skip the inline write when the last flush was too recent — coalescing a burst into one
 /// write per [`FLUSH_MIN_INTERVAL`], which the background flusher then writes. The flusher calls
 /// with `respect_interval = false` so a deferred write always lands within one interval.
-fn do_flush(store: &Store, path: &Path, respect_interval: bool) {
+fn do_flush(store: &Store, writer: &Mutex<()>, path: &Path, respect_interval: bool) {
+    // One writer at a time. Without this the flusher and a request could both be mid-write on the
+    // same `tmp` file — a long store written over by a shorter one leaves invalid JSON, which loads
+    // as an empty store — and an older snapshot could land after a newer one with `dirty` already
+    // cleared. Taken before the store lock, so snapshots reach disk in the order they were taken.
+    // Waiting here holds up only this request's reply, never the store.
+    let _writing = writer.lock().unwrap_or_else(|e| e.into_inner());
     let json = {
         let mut inner = lock(store);
         if !inner.dirty {
@@ -469,10 +473,10 @@ fn do_flush(store: &Store, path: &Path, respect_interval: bool) {
 
 /// Background flusher: every [`FLUSH_MIN_INTERVAL`], write out any changes the per-request rate
 /// limiter deferred, so a coalesced burst is never unpersisted for longer than one interval.
-fn spawn_flusher(store: Store, path: PathBuf) {
+fn spawn_flusher(store: Store, writer: Arc<Mutex<()>>, path: PathBuf) {
     std::thread::spawn(move || loop {
         std::thread::sleep(FLUSH_MIN_INTERVAL);
-        do_flush(&store, &path, false);
+        do_flush(&store, &writer, &path, false);
     });
 }
 
@@ -497,6 +501,8 @@ pub struct RelayCore {
     directory: Option<String>,
     /// Where to durably store the mailbox, if persistence was requested.
     persist_path: Option<PathBuf>,
+    /// Serializes writes of `persist_path` between request threads and the flusher ([`do_flush`]).
+    writer: Arc<Mutex<()>>,
 }
 
 impl RelayCore {
@@ -516,6 +522,7 @@ impl RelayCore {
             limits,
             directory: None,
             persist_path: None,
+            writer: Arc::default(),
         }
     }
 
@@ -538,13 +545,19 @@ impl RelayCore {
     ) -> Self {
         let store: Store = Arc::new(Mutex::new(load_store(&persist_path)));
         spawn_reaper(Arc::clone(&store), logger.clone());
-        spawn_flusher(Arc::clone(&store), persist_path.clone());
+        let writer: Arc<Mutex<()>> = Arc::default();
+        spawn_flusher(
+            Arc::clone(&store),
+            Arc::clone(&writer),
+            persist_path.clone(),
+        );
         Self {
             store,
             logger,
             limits,
             directory: None,
             persist_path: Some(persist_path),
+            writer,
         }
     }
 
@@ -563,7 +576,7 @@ impl RelayCore {
                     logger(event);
                 }
                 if let Some(path) = &self.persist_path {
-                    do_flush(&self.store, path, true);
+                    do_flush(&self.store, &self.writer, path, true);
                 }
                 response
             }
@@ -1496,6 +1509,75 @@ mod tests {
         let response: ResponseLine = serde_json::from_str(&recovered.handle_line(&peek)).unwrap();
         assert_eq!(response.resp.count, 1, "mail survives immediate restart");
 
+        let _ = std::fs::remove_file(&path);
+        let _ = std::fs::remove_file(path.with_extension("tmp"));
+    }
+
+    #[test]
+    fn concurrent_flushes_never_leave_a_torn_queue_file() {
+        // The flusher and a request thread both write the queue. Run two writers flat out while
+        // the store swings between large and small; every file left on disk must parse, and the
+        // last one must hold the final state.
+        let path = std::env::temp_dir().join(format!(
+            "nd-relay-torn-{}-{}.json",
+            std::process::id(),
+            now_unix()
+        ));
+        let store: Store = Arc::new(Mutex::new(StoreInner::default()));
+        let writer: Arc<Mutex<()>> = Arc::default();
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let flushers: Vec<_> = (0..2)
+            .map(|_| {
+                let (store, writer, path, stop) = (
+                    Arc::clone(&store),
+                    Arc::clone(&writer),
+                    path.clone(),
+                    Arc::clone(&stop),
+                );
+                std::thread::spawn(move || {
+                    while !stop.load(std::sync::atomic::Ordering::Relaxed) {
+                        do_flush(&store, &writer, &path, false);
+                    }
+                })
+            })
+            .collect();
+        let mut torn = 0;
+        for round in 0..300 {
+            {
+                let mut inner = lock(&store);
+                let size = if round % 2 == 0 { 512 * 1024 } else { 16 };
+                inner.map.clear();
+                inner.total_bytes = size;
+                inner.map.insert(
+                    "mbx:t".into(),
+                    vec![Stored {
+                        msg_id: format!("{round}"),
+                        delete_token: String::new(),
+                        posted: Instant::now(),
+                        expiry: Instant::now() + Duration::from_secs(60),
+                        expiry_unix: now_unix() + 60,
+                        bytes: vec![b'x'; size],
+                    }],
+                );
+                inner.dirty = true;
+            }
+            for _ in 0..4 {
+                if let Ok(data) = std::fs::read(&path) {
+                    torn += usize::from(serde_json::from_slice::<PersistedStore>(&data).is_err());
+                }
+            }
+        }
+        stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        for f in flushers {
+            f.join().unwrap();
+        }
+        do_flush(&store, &writer, &path, false);
+        assert_eq!(torn, 0, "a queue file on disk failed to parse");
+        let last = load_store(&path);
+        assert_eq!(
+            last.map["mbx:t"][0].msg_id, "299",
+            "the newest snapshot is on disk"
+        );
         let _ = std::fs::remove_file(&path);
         let _ = std::fs::remove_file(path.with_extension("tmp"));
     }

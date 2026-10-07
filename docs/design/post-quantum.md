@@ -1,7 +1,7 @@
 # Design/research — Post-quantum key agreement (PQXDH)
 
 **Status:** **Option D implemented** (hybrid-encapsulated pairing payload, §4 below / `core/src/pqkem.rs`);
-Options A/B still tracked. Relates to the anonymity/injection review (TODO #23) and `ARCHITECTURE.md` §3
+Options A/B still tracked. Relates to the anonymity/injection review (#23) and `ARCHITECTURE.md` §3
 (crypto). The point of this doc is to (a) state the exposure honestly, (b) show what is *already* safe,
 and (c) give a phased plan that keeps the "prefer audited crates" invariant instead of hand-rolling PQ
 crypto.
@@ -55,7 +55,7 @@ by bolting a static-key outer layer (that would lack forward secrecy).
 libsignal (PQXDH/PQ3). Large migration, and MLS is group-oriented — our documented door for groups,
 not for 1:1 v1. Out of scope now; revisit if/when groups (MSC-style MLS) are on the table anyway.
 
-**D. Smaller self-contained win now: PQ-protect the *pairing payload*.** ✅ **Implemented** (§4.1).
+**D. Smaller self-contained win now: PQ-protect the *pairing payload*.** ✅ **Implemented**.
 Independently of the ratchet, the **short-code rendezvous** payload (prekeys, onion address) — the part
 that actually crosses the untrusted relay — is now sealed under a **hybrid** key. The joiner ships a
 one-time **ML-KEM-768** public key in its SPAKE2 opener; the inviter encapsulates; the seal key is

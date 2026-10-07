@@ -10,7 +10,7 @@
 //! protection). Binary fields inside the JSON are URL-safe base64.
 //!
 //! The envelope version lets two installed builds detect an incompatible protocol change and fail
-//! **loudly** (a clear error) instead of silently misparsing a frame — see `TODO.md` #2. Bump
+//! **loudly** (a clear error) instead of silently misparsing a frame. Bump
 //! [`WIRE_VERSION`] on any change to `Frame`, the envelope, or the framing that older builds can't
 //! read; the sealed relay blob carries the versioned frame inside it, so store-and-forward is
 //! covered too.
@@ -221,7 +221,7 @@ pub enum Frame {
     /// The sender changed their advertised **extra relay set** (#17). The new comma-joined list
     /// of relay addresses is **E2E-encrypted** on the session; the receiver stores it as the
     /// contact's `peer_relays` and fans out future offline mail to those relays too. See
-    /// `node::announce_relays_if_changed`.
+    /// `node::announce_relays`.
     Relays { from: String, message: WireOlm },
     /// "This is the Night Drop version I run" (from 0.1.27): the sender's app version, E2E-encrypted
     /// on the session, as a standing property of the chat - no history entry. Lets a later build
@@ -310,7 +310,7 @@ impl Frame {
 
 /// The wire protocol version, stamped into every [`Envelope`]. Bump this on any
 /// incompatible change to [`Frame`] or the envelope shape so peers on an older build reject
-/// the frame with a clear error instead of misparsing it. See `TODO.md` #2.
+/// the frame with a clear error instead of misparsing it.
 ///
 /// v2 added **length-prefixed, zero-padded framing** (see [`encode`]) and moved the
 /// control frames (`Closed`/`Ack`/`BackedUp`/`Verified`) behind the ratchet.
@@ -322,6 +322,23 @@ pub const WIRE_VERSION: u8 = 2;
 /// the top bucket round up to [`PAD_BLOCK`], bounding overhead for media to one block.
 const PAD_BUCKETS: [usize; 3] = [1024, 4096, 16384];
 const PAD_BLOCK: usize = 16 * 1024;
+
+/// The largest frame a peer may send: a [`MAX_MEDIA_BYTES`](crate::node::MAX_MEDIA_BYTES)
+/// attachment is one frame, its Olm ciphertext base64-encoded (×4/3), plus a little envelope and
+/// padding — 1 MiB of headroom covers both. Every transport refuses a length prefix above this
+/// *before* reading the body, so a peer cannot make the app allocate up to 4 GiB with four bytes.
+pub(crate) const MAX_FRAME_BYTES: usize =
+    (crate::node::MAX_MEDIA_BYTES as usize).div_ceil(3) * 4 + 1024 * 1024;
+
+/// Check a frame's announced length against [`MAX_FRAME_BYTES`].
+pub(crate) fn frame_len(prefix: [u8; 4]) -> anyhow::Result<usize> {
+    let len = u32::from_be_bytes(prefix) as usize;
+    anyhow::ensure!(
+        len <= MAX_FRAME_BYTES,
+        "peer announced a {len}-byte frame, over the {MAX_FRAME_BYTES}-byte limit"
+    );
+    Ok(len)
+}
 
 /// The padded on-wire length for a payload of `raw` bytes (which already includes the 4-byte
 /// length prefix): the smallest bucket that fits, else the next [`PAD_BLOCK`] multiple.
@@ -411,6 +428,17 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn the_largest_attachment_frame_fits_under_the_frame_limit() {
+        // A MAX_MEDIA_BYTES attachment plus a generous 4 KiB of packing and Olm overhead,
+        // base64-encoded, plus 4 KiB of JSON envelope and the length prefix, padded.
+        let payload = crate::node::MAX_MEDIA_BYTES as usize + 4096;
+        let b64 = payload.div_ceil(3) * 4;
+        assert!(padded_len(4 + b64 + 4096) <= MAX_FRAME_BYTES);
+        assert!(frame_len((MAX_FRAME_BYTES as u32).to_be_bytes()).is_ok());
+        assert!(frame_len((MAX_FRAME_BYTES as u32 + 1).to_be_bytes()).is_err());
+    }
     use crate::crypto;
     use crate::identity::LocalIdentity;
 

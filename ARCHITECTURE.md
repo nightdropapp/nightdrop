@@ -53,11 +53,12 @@ These define the product. Do not violate them, and flag any change that would:
   persisted, and zeroized when its window closes. The server-stored backup (opt-in, default 24h /
   max 36h) holds an opaque encrypted blob only and never receives the password; losing it means
   losing the backup, by design (§7).
-- **Backups bundle the Tor onion keystore**, not just identity and sessions. The `.onion` is not
-  derivable from the identity, and each chat stores the *peer's* address with nothing refreshing it
-  after pairing — a restore without the key yields a new onion, stale peer addresses everywhere, and
-  **both sides restored = permanently "peer offline"**. A stable onion is not a privacy leak: v3
-  descriptors are published under blinded keys, so only someone already given it can reach you.
+- **Backups bundle the onion identity** (the key that *is* the `.onion`), not just identity and
+  sessions. The `.onion` is not derivable from the identity, and each chat stores the *peer's*
+  address with nothing refreshing it after pairing — a restore without the key yields a new onion,
+  stale peer addresses everywhere, and **both sides restored = permanently "peer offline"**. A
+  stable onion is not a privacy leak: v3 descriptors are published under blinded keys, so only
+  someone already given it can reach you.
 - **Prefer audited crates** (`vodozemac`, `arti`, a vetted PAKE) over hand-rolled crypto; any new
   cryptographic primitive needs explicit justification.
 - **v1 is 1:1 only.** No group-chat assumptions (MLS later; `docs/design/group-chat.md`).
@@ -174,7 +175,13 @@ Because SPAKE2 is a PAKE, the secret words are never sent and **no offline dicti
 attack** is possible: an observer of the rendezvous traffic cannot test a candidate code
 without a fresh online handshake, and the sealed payload is readable only by a party who
 completes SPAKE2 with the right words. The rendezvous is therefore **never trusted** — a
-guessed or random slot yields only un-attackable protocol messages. (The earlier scheme
+guessed or random slot yields only un-attackable protocol messages. **Online** guessing is what
+remains: each opener the inviter answers lets its sender test one guess, and the relay operator
+sees the slot's mailbox. The secret is four words from sixteen (~15 bits), so an inviter that
+answered every opener could be brute-forced within the code's 10-minute life. An invite therefore
+answers at most **three distinct openers** (`MAX_OPENERS_PER_INVITE`; a joiner's re-posts of the
+same opener don't count) and is then retired — three guesses in ~43,680. The price is that junk
+openers can burn a code, which the joiner sees as a timeout and fixes with a fresh code. (The earlier scheme
 sealed the payload under an Argon2 key from the words with a fixed salt, which *was*
 offline-attackable for low-entropy codes; SPAKE2 replaced it.) The tradeoff is that
 pairing is now **interactive**: the inviter must be reachable to answer, which the poller
@@ -289,7 +296,10 @@ on a re-pair (new session) exactly like `verified`.
   transport) it **defers the opaque-byte delivery** to the background poller instead of dialing
   inline. Composing a message returns instantly with the message stored "queued"; the poller
   attempts direct-peer delivery (relay fallback) on its next tick and flips the status. Only the
-  transport delivery moves off the hot path — the crypto boundary is unchanged.
+  transport delivery moves off the hot path — the crypto boundary is unchanged. Attachments take
+  the same path from 0.1.29 (the video pre-signal first, then the payload, matched back to the
+  message by its `transfer_id`); before that a media send uploaded inline, holding the core lock
+  for the whole Tor transfer.
 - **Network dials are time-bounded so the UI never hangs on them.** `send` runs while the core
   lock is held, so an unbounded dial to an offline peer would freeze every other FFI call and the
   poller for as long as arti retries (minutes, at a high `HS_CONNECT_ATTEMPTS`). Direct peer dials
@@ -458,9 +468,14 @@ on a re-pair (new session) exactly like `verified`.
   Two consequences worth keeping: `shutdown` **tries** for the lock with a bound and proceeds
   without it rather than waiting (an unbounded acquire made "bounded shutdown" a lie), and the
   transport is held as an `Arc` so a send can carry a handle across the unlocked window.
-  `service_pending_invites` and `flush_pending_control` still do their I/O under the lock — the
-  same treatment is owed to them. (The relay-directory fetch got it in 0.1.28:
-  `begin_directory_fetch` → `fetch_directory` → `finish_directory_fetch`.)
+  Still doing their I/O under the lock, and owed the same treatment: `service_pending_invites`,
+  `flush_pending_control`, and every control frame sent through `Node::deliver` — the once-per-run
+  announcements (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`)
+  and `announce_relays`, which `set_my_relays` runs on a background thread that still takes the
+  lock — and the relay recall + re-post when a still-queued message is edited or unsent. Each is a
+  direct dial bounded by `PEER_DIAL_TIMEOUT`, then a relay post. (The
+  relay-directory fetch got the treatment in 0.1.28: `begin_directory_fetch` → `fetch_directory`
+  → `finish_directory_fetch`; the server-backup post in 0.1.29.)
 - **Offline / space-saving path:** a **minimal relay** stores **E2E-encrypted blobs
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.
@@ -484,7 +499,7 @@ on a re-pair (new session) exactly like `verified`.
   **relay-agnostic** (the same handle works on every relay) and every queued blob is already
   sealed under a recipient-derived key, a sender simply seals **once** and posts the identical
   blob to the primary **plus** the recipient's set (`queue_on_relays`); the recipient drains all
-  of them and **de-duplicates by content hash** (`seen_relay_blobs`), and an edit/unsend recalls
+  of them and **de-duplicates by content hash** (`seen_frames`), and an edit/unsend recalls
   **every** copy. This buys **availability + censorship-resistance** if a relay is down or
   blocked — it is explicitly **not** an anonymity layer and relays never gossip (anonymity stays
   with Tor). No new trust, keys, or metadata surface. Full rationale:
@@ -523,9 +538,10 @@ on a re-pair (new session) exactly like `verified`.
     unauthorized client cannot even fetch its descriptor, let alone post. This preserves the
     identity-blind invariant — the relay authenticates at the **Tor layer** with x25519 client keys,
     never learning chat identities. Flow: each device runs `create_relay_access_key(relay_onion)`
-    (`NightdropCore` FFI → arti `generate_service_discovery_key`, private half stored in the local
-    keystore and presented automatically on later dials) and shows the operator the public
-    `descriptor:x25519:…`; the operator runs `nightdrop-relay authorize-client <name> <key>`
+    (`NightdropCore` FFI → `Node::relay_access_key`: minted once, kept in the sealed store
+    (`relay_keys`), re-inserted into arti's in-memory keystore at startup, and presented
+    automatically on later dials) and shows the operator the public `descriptor:x25519:…` — **no
+    app screen does this yet** (`RELAYS.md`); the operator runs `nightdrop-relay authorize-client <name> <key>`
     (revoke/list mirror it). An empty authorized set = a normal **PUBLIC** relay (today's default) —
     we never restrict with zero clients (that would lock everyone out). Authorizing/revoking after
     launch is picked up live (the directory is watched); the first authorization / last revocation
@@ -609,8 +625,11 @@ three transfer mechanisms, each covering a different scenario.
 
 > **Build plan:** **Lite (default)** vs **Full** backup modes, single-chat scoped backups,
 > the per-chat backed-up flag, the peer "backed up this chat" signal, and Closed-on-logout
-> for un-backed chats are specced in **§11**. A backup also folds in the **onion keystore** so
-> restore reproduces the same `.onion` (already implemented; see §11.5 / git history).
+> for un-backed chats are specced in **§11**. A backup also carries the **onion identity**
+> (`PersistedState::onion_identity`), so a file restore comes back on the same `.onion` and seals
+> it; a backup from 0.1.15 or earlier carries arti's keystore files instead. From 0.1.16 to 0.1.28
+> backups carried neither (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`).
+> Every start also re-announces our address to each contact once, which repairs a stale one.
 
 ### 7a. Encrypted file export — user-held password
 - The app produces an **encrypted backup file**. The encryption password is
@@ -621,7 +640,10 @@ three transfer mechanisms, each covering a different scenario.
   **zeroized the moment that window closes**.
 - Import on any install requires the user to re-enter the recorded password.
 
-### 7b. Device-to-device transfer — no human-handled password
+### 7b. Device-to-device transfer — no human-handled password _(planned)_
+
+Not built yet: today a device moves by file backup (7a) or server backup (7c).
+
 - Old device → new device over an **authenticated channel** (QR + PAKE). The backup
   key is handed directly between devices; nothing is transcribed by the user.
 - **Requires the old device to still be working and present.** If the old device is
@@ -1092,7 +1114,9 @@ re-sealed resend — different bytes, same id — is caught by id at the point o
 receipted without being shown. Frame-hash dedup applies only to user-content frames: several control
 frames carry no per-instance ciphertext, so a legitimate repeat is byte-identical (`Approved` on a
 re-pair is the one that bites). And a frame that will not process never aborts a relay drain — those
-blobs are already destructively taken, so failing the batch loses the rest for good.
+blobs are already destructively taken, so failing the batch loses the rest for good. The same holds
+for the direct path: until 0.1.29 one bad direct frame aborted the poll tick before it applied the
+relay harvest it was holding, which lost that harvest.
 - **24h passes, never collected:** badge `queued → expired` ("not delivered").
 - **Sender recall:** `recall()` while unfetched → blob gone, receiver never notified; badge
   `queued → recalled` ("unsent"); the "stored on relay" indicator disappears on the sender.
@@ -1106,7 +1130,7 @@ blobs are already destructively taken, so failing the batch loses the rest for g
 - Honest limits to document in UI: cannot force-delete the **peer's** device copy, and a hostile
   relay could retain a blob — but it is undecryptable ciphertext, and once the **honest** network
   expires it, an honest fetch can't recover it.
-- **User-set disappearing timer** (shipped, TODO #10): an independent per-chat timer
+- **User-set disappearing timer** (shipped, #10): an independent per-chat timer
   (`disappearing_secs`, 0 = off) that does **not** require server storage. It is a **shared**
   setting — changing it sends an E2E `Disappearing` frame so both devices mirror the value and a
   notice records the change — and `sweep_time` deletes messages older than the **shorter** of this
@@ -1115,7 +1139,8 @@ blobs are already destructively taken, so failing the batch loses the rest for g
 ### 11.5 Backup content matrix
 | Item | Lite (default) | Full | Single-chat (Lite/Full) |
 |---|---|---|---|
-| Identity key + onion keystore | ✓ | ✓ | ✓ |
+| Identity key | ✓ | ✓ | ✓ |
+| Onion identity (the `.onion`) | ✓ | ✓ | ✗ (a merge keeps the live address) |
 | Contacts (`.onion` + names) | all | all | the one chat |
 | Session pickles | ✓ | ✓ | ✓ (that chat) |
 | Message history | ✗ | ✓ | per mode |
@@ -1123,7 +1148,7 @@ blobs are already destructively taken, so failing the batch loses the rest for g
 
 **Lite/Full — implemented** (#7): `Node::backup_with_mode(password, full)` filters what
 `export()` includes — Full bundles media; Lite clears each chat's `history` and skips media
-(both keep the onion keystore). Exposed via the `full` flag on `create_backup` /
+(both carry the onion identity). Exposed via the `full` flag on `create_backup` /
 `create_server_backup`, offered as a Lite/Full choice in the backup menu.
 
 **Single-chat scoped backup — implemented** (#8): `Node::backup_chat(contact_id, password,
@@ -1131,7 +1156,10 @@ full)` seals a blob carrying **only** that conversation (its `collect_media_for`
 when Full); `Node::merge_from_backup(blob, password)` folds it into the **live** identity —
 inserting a chat we lack, or, for one we already have, appending only history messages we're
 missing (deduped by `msg_id`; the live session is never rewound) and sealing any carried media
-into the store. Exposed as `create_chat_backup` / `merge_backup`; UI in the chat overflow and
+into the store. A merge refuses a blob from a different identity (its sessions belong to that
+account, and the contact never paired with ours), and a new chat counts against the contact cap
+(§8) like a pairing does; an inserted chat's client key goes straight into the in-memory keystore.
+Exposed as `create_chat_backup` / `merge_backup`; UI in the chat overflow and
 the home backup menu. The per-chat backed-up flag + logout/transparency signals (§11.6) are the
 rest of #7.
 

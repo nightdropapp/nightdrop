@@ -934,6 +934,12 @@ abstract class AppLocalizations {
   /// **'Version {version} is available. This build is out of date.'**
   String updateAvailableBody(String version);
 
+  /// The app's own version in the About dialog. {version} is e.g. 0.1.29.
+  ///
+  /// In en, this message translates to:
+  /// **'Version {version}'**
+  String aboutVersion(String version);
+
   /// Shown while the on-demand update check runs.
   ///
   /// In en, this message translates to:

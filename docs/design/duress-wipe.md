@@ -262,7 +262,7 @@ it costs a fresh consensus fetch on the next launch.
 * ✅ **The wipe.** `_duressWipe` in `rust_nightdrop_core.dart`: destroys the lock file **first** (so
   an interrupted wipe comes up as a fresh install, not a lock screen over a dead store), then runs
   the ordinary teardown with `duress: true` — which routes to onboarding before any await, tells
-  *every* live chat via `Node::duress_logout`, and is capped at 5 s so the wipe cannot be stalled or
+  *every* live chat via `Node::duress_logout` when a core is running at all (§5), and is capped at 5 s so the wipe cannot be stalled or
   prevented by a peer that won't answer.
 * ✅ **Settings UI.** Its **own** home-menu row ("Wipe code"), stateless in the label; inside, the
   armed state and the matching actions — *replace* and *remove* when armed, *set* when not, so

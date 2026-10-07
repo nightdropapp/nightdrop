@@ -315,7 +315,7 @@ After editing a script, at minimum run `bash -n <script>`; use shellcheck if ava
 - **Multi-relay fan-out (#17) seals once, posts many, dedups by hash.** `queue_on_relays`
   computes the sealed blob **once** and posts the *identical* bytes to the primary + each of
   the recipient's `peer_relays`; the receiver drains all and de-dups by SHA-256 of the blob
-  (`seen_relay_blobs`). Two gotchas to preserve: (1) an edit/unsend must recall **every** stored
+  (`seen_frames`). Two gotchas to preserve: (1) an edit/unsend must recall **every** stored
   copy — iterate, do **not** `.any()` (it short-circuits after the first success and strands
   siblings); (2) `fetch`/`take` on the relay **drain**; use `peek` (count only) for
   non-destructive checks. A relay being unreachable must never abort the drain/fan-out from the

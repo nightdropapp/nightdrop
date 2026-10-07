@@ -1,4 +1,4 @@
-//! Opt-in operational diagnostics for field debugging (`TODO.md` #6/#7).
+//! Opt-in operational diagnostics for field debugging.
 //!
 //! **How this differs from `devlog!`** (`node.rs`), and why both exist: `devlog!` prints
 //! identity keys, invite codes, and decrypted display names, so it is compiled out of release

@@ -248,7 +248,7 @@ abstract class NightdropCore extends ChangeNotifier {
   Future<void> importServerBackup(String password);
 
   /// Delete a chat and tell the peer (who then sees a "chat deleted" notice). A new chat
-  /// must be created to keep talking (TODO #1).
+  /// must be created to keep talking.
   Future<void> deleteChat(String contactId);
 
   /// Close the app cleanly **without** touching the identity (issue #15): stop background

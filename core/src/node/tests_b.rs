@@ -515,6 +515,53 @@ fn announcing_a_new_address_updates_the_contact() {
 }
 
 #[test]
+fn the_per_run_address_announcement_repairs_a_stale_contact_and_is_silent_otherwise() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let mut carol = Node::new(Box::new(net.endpoint("carol")));
+    let bundle = alice.publish_bundle();
+    let at_bob = bob.connect_with_bundle("alice", &bundle).unwrap();
+    let bundle = alice.publish_bundle();
+    let at_carol = carol.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+
+    // Bob holds a stale address for Alice — what a 0.1.16–0.1.28 restore left behind, with
+    // `announce_address_if_changed` seeing no change. Carol's is right.
+    bob.chats.get_mut(&at_bob).unwrap().peer_address = "stale.onion".to_string();
+    assert!(!alice.announce_address_if_changed());
+
+    alice.reannounce_address();
+    bob.pump().unwrap();
+    carol.pump().unwrap();
+    assert_eq!(
+        bob.chats.get(&at_bob).unwrap().peer_address,
+        alice.address()
+    );
+    let notices = |n: &Node, c: &str| {
+        n.messages(c)
+            .iter()
+            .filter(|m| m.system && m.text.contains("address changed"))
+            .count()
+    };
+    assert_eq!(notices(&bob, &at_bob), 1, "the stale contact is told once");
+    assert_eq!(
+        notices(&carol, &at_carol),
+        0,
+        "a contact with the right address sees nothing"
+    );
+
+    // Once per run: a second call this run sends nothing more.
+    bob.chats.get_mut(&at_bob).unwrap().peer_address = "stale-again.onion".to_string();
+    alice.reannounce_address();
+    bob.pump().unwrap();
+    assert_eq!(
+        bob.chats.get(&at_bob).unwrap().peer_address,
+        "stale-again.onion"
+    );
+}
+
+#[test]
 fn address_is_only_announced_when_it_changes() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
@@ -532,7 +579,7 @@ fn address_is_only_announced_when_it_changes() {
 
 #[test]
 fn interactive_spake2_seals_the_invite_only_to_the_right_code() {
-    // The crypto core of TODO #3, exercised without the relay: the inviter's response
+    // The crypto core of interactive SPAKE2 pairing, exercised without the relay: the inviter's response
     // opens iff the joiner used the same short code. A wrong code yields a different
     // SPAKE2 key, so the AEAD tag (our key-confirmation) rejects it — and nothing the
     // relay could offline-attack is ever produced. The seal key is the §4.1 HYBRID of the
@@ -758,6 +805,47 @@ fn pairing_exchanges_onion_client_keys_and_delete_revokes_them() {
 }
 
 #[test]
+fn declining_a_request_revokes_the_strangers_client_key() {
+    use crate::transport::client_auth;
+
+    let base = std::env::temp_dir().join(format!("nightdrop-declineauth-{}", std::process::id()));
+    let alice_auth = base.join("alice");
+    let _ = std::fs::remove_dir_all(&base);
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(AuthTransport {
+        inner: net.endpoint("alice"),
+        auth_dir: alice_auth.clone(),
+    }));
+    alice.set_require_authorization(true);
+    let mut stranger = Node::new(Box::new(AuthTransport {
+        inner: net.endpoint("stranger"),
+        auth_dir: base.join("stranger"),
+    }));
+    let stranger_ik = stranger.identity_key();
+
+    let bundle = alice.publish_bundle();
+    stranger.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.pending_count(),
+        1,
+        "the stranger's request awaits approval"
+    );
+    assert!(
+        client_auth::is_authorized(&alice_auth, &stranger_ik),
+        "a pending request's client key is already authorized"
+    );
+
+    alice.authorize(&stranger_ik, false).unwrap();
+    assert_eq!(alice.pending_count(), 0);
+    assert!(
+        !client_auth::is_authorized(&alice_auth, &stranger_ik),
+        "declining revokes it"
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
 fn media_to_file_writes_owner_only_plaintext_into_the_app_private_scratch() {
     // §1.4: decrypted attachments must land in an app-private, owner-only sibling of the sealed
     // store — never the world-readable system temp under a predictable name.
@@ -912,7 +1000,7 @@ fn close_transport_drops_the_live_transport_so_its_resources_are_released() {
 /// The inviter's read of the joiner leg is **destructive**, so an opener can be consumed without
 /// an answer ever being posted back — the answer's post fails, or the inviter is backgrounded or
 /// killed mid-handshake. The joiner must not sit out its whole timeout waiting for a reply that
-/// can never arrive (TODO #7: "issues using the secret"); it re-posts, so an inviter that comes
+/// can never arrive ("issues using the secret"); it re-posts, so an inviter that comes
 /// back still finds an opener and pairing completes.
 #[test]
 fn a_consumed_opener_does_not_strand_the_joiner() {
@@ -1965,5 +2053,138 @@ fn the_peer_version_survives_a_restart() {
     assert_eq!(
         bob2.contacts()[0].peer_app_version.as_deref(),
         Some("0.1.27")
+    );
+}
+
+/// Each distinct opener is one online guess at the code, so an invite answers at most
+/// `MAX_OPENERS_PER_INVITE` of them and is then retired. Without the cap a relay operator — who
+/// sees the slot's mailbox — could post guesses until one opened the payload, and the code's
+/// secret is only about 15 bits. Re-posts of the *same* opener are not new guesses and are
+/// answered again, which is what keeps a real joiner's retries working.
+#[test]
+fn an_invite_answers_only_a_few_distinct_openers_then_retires() {
+    let live = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();
+    let net = MemoryNetwork::new();
+    let slot = "57";
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_relay(RelayClient::new(live.clone()));
+    alice
+        .stage_short_code_invite(slot, "cedar-lantern-river-ember", Duration::from_secs(60))
+        .unwrap();
+
+    let attacker = RelayClient::new(live.clone());
+    let joiner_leg = rendezvous_handle(slot, RDV_JOINER);
+    let inviter_leg = rendezvous_handle(slot, RDV_INVITER);
+    let opener_for = |guess: &str| {
+        let (_, msg) = crate::pake::start(guess.as_bytes());
+        let mut opener = Vec::new();
+        put_field(&mut opener, &msg);
+        put_field(&mut opener, &crate::pqkem::generate().public);
+        opener
+    };
+    let answers = |alice: &mut Node| {
+        alice.service_pending_invites();
+        attacker.take(&inviter_leg).unwrap().len()
+    };
+
+    // A repeated opener is one guess, answered every time it comes back.
+    let first = opener_for("57-wrong-words-one-a");
+    for _ in 0..2 {
+        attacker
+            .post(&joiner_leg, &first, Duration::from_secs(60))
+            .unwrap();
+        assert_eq!(answers(&mut alice), 1);
+    }
+    // Two more distinct guesses are still answered: three in all.
+    for guess in ["57-wrong-words-two-b", "57-wrong-words-three-c"] {
+        attacker
+            .post(&joiner_leg, &opener_for(guess), Duration::from_secs(60))
+            .unwrap();
+        assert_eq!(answers(&mut alice), 1);
+    }
+    assert!(alice.has_pending_invites());
+
+    // A fourth distinct guess gets no answer, and the code is retired.
+    attacker
+        .post(
+            &joiner_leg,
+            &opener_for("57-wrong-words-four-d"),
+            Duration::from_secs(60),
+        )
+        .unwrap();
+    assert_eq!(answers(&mut alice), 0);
+    assert!(!alice.has_pending_invites(), "the code is retired");
+}
+
+/// One frame that will not process must cost that frame only. `pump` used to return the error,
+/// which aborted the poll tick calling it before the tick applied the relay harvest it held —
+/// blobs already taken off the relay, so a single bad direct frame lost a whole relay round.
+#[test]
+fn an_unprocessable_direct_frame_is_skipped_and_the_rest_still_arrive() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let mallory = net.endpoint("mallory");
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    // Decodes as a frame from Alice, but its ciphertext opens on no session.
+    let forged = crate::wire::encode(&Frame::Message {
+        from: alice_contact.clone(),
+        id: "forged".to_string(),
+        message: WireOlm {
+            message_type: 1,
+            body: "bm90IGFuIG9sbSBtZXNzYWdl".to_string(),
+        },
+    });
+    mallory.send("bob", &forged).unwrap();
+    alice.send(&bob_contact, "the real one").unwrap();
+
+    let received = bob.pump().expect("one bad frame does not fail the pump");
+    assert!(
+        received.iter().any(|(_, text)| text == "the real one"),
+        "{received:?}"
+    );
+}
+
+/// A contact paired *after* we set extra relays must still learn them. `announce_relays` only runs
+/// on an edit, so pairing has to say it, from both sides: the joiner at once, the inviter when it
+/// approves the request.
+#[test]
+fn a_contact_paired_after_the_relays_were_set_learns_them_from_both_sides() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_require_authorization(true);
+    alice.set_my_relays(vec!["alice-extra.onion".into()]);
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    bob.set_my_relays(vec!["bob-extra.onion".into()]);
+
+    let alice_contact = bob
+        .connect_with_bundle("alice", &alice.publish_bundle())
+        .unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.pending_authorizations()[0].id.clone();
+    // Alice holds Bob as a request: his relay set is not recorded for a stranger.
+    assert!(alice.contacts().is_empty());
+
+    alice.authorize(&bob_contact, true).unwrap();
+    bob.pump().unwrap();
+    alice.pump().unwrap();
+    assert_eq!(
+        alice.contacts()[0].peer_relays,
+        vec!["bob-extra.onion".to_string()],
+        "the joiner's relays reach the inviter"
+    );
+    let alice_seen_by_bob = bob
+        .contacts()
+        .into_iter()
+        .find(|c| c.id == alice_contact)
+        .unwrap();
+    assert_eq!(
+        alice_seen_by_bob.peer_relays,
+        vec!["alice-extra.onion".to_string()],
+        "the inviter's relays reach the joiner on approval"
     );
 }

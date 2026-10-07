@@ -662,6 +662,16 @@
       }
     }
   },
+  "aboutVersion": "Version {version}",
+  "@aboutVersion": {
+    "description": "The app's own version in the About dialog. {version} is e.g. 0.1.29.",
+    "placeholders": {
+      "version": {
+        "type": "String",
+        "example": "0.1.29"
+      }
+    }
+  },
   "updateChecking": "Checking for updates…",
   "@updateChecking": {
     "description": "Shown while the on-demand update check runs."

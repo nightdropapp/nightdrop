@@ -1,12 +1,15 @@
 # Design draft — Keeping the onion identity off disk
 
-**Status:** 🟡 partly done. The **cleanup half is implemented** (2026-08-02): deleted chats and
-logout now drop the peer client keys, and logout clears the Tor state on every platform. The
-**ephemeral-keystore half is still design** — see §3.
+**Status:** ✅ implemented. The **cleanup half** landed 2026-08-02 (0.1.15): deleted chats and
+logout drop the peer client keys, and logout clears the Tor state on every platform. The
+**ephemeral-keystore half** shipped in 0.1.16 (`apply_keystore_kind`, `seal_onion_identity`,
+`drop_superseded_keystore`). Sections 1–3 are kept as the design record; §1 describes 0.1.15 and
+earlier. Backups did not carry the identity from 0.1.16 to 0.1.28 — see
+`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`.
 **Relates to:** `docs/design/app-lock.md` §8 (which lists arti's state as out of scope — this
 revisits that), `docs/multiple-identities.md` §1, and `ARCHITECTURE.md` §4.
 
-## 1. What a cloned phone gets today
+## 1. What a cloned phone got (0.1.15 and earlier)
 
 The app lock seals the message store. **arti's keystore is not sealed**, and it sits in the same
 app-private directory:

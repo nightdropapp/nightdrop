@@ -39,7 +39,7 @@ flutter_rust_bridge = "=2.12.0" # Dart <-> Rust bridge (must match the codegen v
 # provider installed at process start (done in transport::tor) — we use ring.
 arti-client = { version = "0.47", default-features = false, features = [
     "tokio", "rustls", "onion-service-client", "onion-service-service",
-    # Onion-service client authorization (restricted discovery, TODO #22). These pull arti's
+    # Onion-service client authorization (restricted discovery, #22). These pull arti's
     # EXPERIMENTAL, semver-unstable API surface (`__is_experimental`) — pinned arti required.
     "restricted-discovery", "experimental-api", "keymgr",
     # In-memory keystore (onion-key-at-rest.md): keeps the onion identity and every contact's
@@ -59,7 +59,7 @@ tor-rtcompat = { version = "0.47", features = ["tokio", "rustls"], optional = tr
 rustls = { version = "0.23", default-features = false, features = ["ring"], optional = true }
 tor-hsservice = { version = "0.47", optional = true }
 tor-cell = { version = "0.47", optional = true }
-# Onion-service client authorization (restricted discovery, TODO #22): the config builders come
+# Onion-service client authorization (restricted discovery, #22): the config builders come
 # from tor-hsservice; these add the types arti-client doesn't re-export — HsId (parse a peer onion),
 # KeystoreSelector (client-key generation), and CfgPath (the authorized-keys directory path).
 tor-hscrypto = { version = "0.47", optional = true }

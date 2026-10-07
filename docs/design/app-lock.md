@@ -4,8 +4,8 @@
 decision of 2026-07-29; device round trip 2026-08-01). See §7 for what was exercised, §8 for what
 is still open.
 **Relates to:** `ARCHITECTURE.md` §7 (backups, which already use Argon2id), the invariant
-"security-critical code lives in the Rust core," and the planned **duress wipe** (`#3`), whose
-design is constrained by the choice made here (§4).
+"security-critical code lives in the Rust core," and the **duress wipe** (`#3`,
+`docs/design/duress-wipe.md`), whose design is constrained by the choice made here (§4).
 
 ## 1. Problem
 
@@ -46,7 +46,8 @@ of yielding a plausible wrong key. Nothing about the sealed-state format changes
 sidecar file `store-key.lock` next to the state blob, holding `{v, salt, m_cost_kib, t_cost,
 p_cost, wrapped}` — no secret, and useless without the secret.
 
-* **Cost: 64 MiB / t=3 / p=1**, ~25× the memory of `Argon2::default()` (which `SECURITY.md`
+* **Cost: 64 MiB / t=3 / p=1** — ~3.4× the memory and ~5× the work of `Argon2::default()`
+  (argon2 0.5: 19 MiB, t=2; which `SECURITY.md`
   restricts to *random* backup passwords). Persisted per lock so it can be raised later without
   stranding existing locks. This buys real time against a passphrase attacker; it is close to
   irrelevant against a PIN, per §2 — offered anyway because it costs one unlock's latency.
@@ -84,6 +85,11 @@ Follows the **existing** background-delivery toggle — no new setting:
 
 `BackgroundDelivery.isEnabled()` (`app/lib/src/core/background_delivery.dart`) is the source of
 truth. The tension is inherent: you cannot both receive messages while locked and hold no key.
+
+**Logout removes the lock.** The lock belongs to the identity it protects: logging out deletes
+`store-key.lock` with the rest (0.1.29; it used to survive, so the next start asked for the PIN of a
+store that no longer existed, and an identity created right after was sealed under the old key with
+the old wipe code still armed).
 
 ## 6. Remaining work
 
@@ -138,12 +144,14 @@ verified by reading `rust_nightdrop_core.dart` — `_secure.delete(key: _kStoreK
 
 * **Wrong-secret behaviour was not exercised on device** — only in `cargo test`. The growing
   0.5→5s failure delay and the generic failure text are untested against a real keyboard.
-* **The duress slot** (§4) — `#3`, not started.
+* **The duress slot** (§4) — implemented since; see `docs/design/duress-wipe.md`.
 
 ## 9. Deliberately not doing
 
 * **Hardware-throttled Keystore unlock** — kills #3 (§4). Revisit only if duress is dropped.
 * **Locking the Tor state dir** or arti's own on-disk state: out of scope, and arti needs it
-  while the foreground service runs.
+  while the foreground service runs. The keys in it were the part that mattered, and they have
+  since left it: the onion identity and contact keys live in the sealed store, with arti's
+  keystore in memory (0.1.16, `docs/design/onion-key-at-rest.md`). What remains is caches.
 * **Migration** from an existing unlocked install: the install base is empty, so the dangerous
   re-key path is simply absent. If that changes, this needs designing before shipping.

@@ -260,7 +260,7 @@ Concrete, so a future reader is not re-litigating taste:
 
 Recorded because the transport implementation is the visible part and not the expensive one:
 
-* **`diag.rs` redacts only `.onion`.** `redact_onion` scans for that literal suffix, so a
+* **`diag.rs` redacts only `.onion`.** `redact_onions` scans for that literal suffix, so a
   `.b32.i2p` destination would pass straight through into diagnostic output. Any second address
   format needs the redactor extended **first**, with tests — this is a leak, not a cosmetic gap.
 * **Backups must bundle the I2P destination keys**, exactly as they must already bundle the Tor

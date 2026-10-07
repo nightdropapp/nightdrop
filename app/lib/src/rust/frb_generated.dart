@@ -3906,10 +3906,6 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
         that: this,
       );
 
-  /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
-  /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
-  /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
-  /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   /// Ask our onion site whether a newer release exists (`crate::update`).
   ///
   /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
@@ -3962,9 +3958,9 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
 
   /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
   /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
-  /// `nightdrop-relay authorize-client <name> <key>`. arti stores the private half and presents it
-  /// automatically whenever this device dials that relay, so after authorization the private relay
-  /// becomes reachable. Only meaningful on the Tor transport; errors otherwise. Generating a key
+  /// `nightdrop-relay authorize-client <name> <key>`. arti presents the private half whenever this
+  /// device dials that relay, so after authorization the private relay becomes reachable. Asking
+  /// again returns the same key; it is kept in the sealed store across restarts. Only meaningful on the Tor transport; errors otherwise. Generating a key
   /// for a public relay is harmless but unnecessary.
   Future<String> createRelayAccessKey({required String relayOnion}) =>
       RustLib.instance.api.crateApiNightdropCoreCreateRelayAccessKey(
@@ -3989,7 +3985,7 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
         that: this,
       );
 
-  /// Delete a chat (TODO #1): signal the peer (who then sees a "chat deleted" notice) and
+  /// Delete a chat: signal the peer (who then sees a "chat deleted" notice) and
   /// remove it locally. Creating a new chat is required to talk again.
   Future<void> deleteChat({required String contactId}) => RustLib.instance.api
       .crateApiNightdropCoreDeleteChat(that: this, contactId: contactId);
@@ -4023,6 +4019,11 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   ///
   /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
   /// take minutes on a poor circuit.
+  ///
+  /// Single-flight: a second call while one runs is refused. Both would stream into the same
+  /// hash-keyed scratch file, and the loser would keep writing into the build after the winner
+  /// verified and published it (`update::part_path`). The Dart side joins a running download
+  /// instead of calling twice; this makes the property hold whoever the caller is.
   Future<BigInt> downloadUpdate({required String destPath}) =>
       RustLib.instance.api
           .crateApiNightdropCoreDownloadUpdate(that: this, destPath: destPath);
@@ -4136,6 +4137,10 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   Future<Contact> openChat({String? code}) => RustLib.instance.api
       .crateApiNightdropCoreOpenChat(that: this, code: code);
 
+  /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
+  /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
+  /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
+  /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   Future<List<RelayHealth>> relayHealth() =>
       RustLib.instance.api.crateApiNightdropCoreRelayHealth(
         that: this,
@@ -4164,7 +4169,7 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       .crateApiNightdropCoreSafetyQr(that: this, contactId: contactId);
 
   /// Write the backup prepared by [`create_backup`](Self::create_backup) to `path` (the
-  /// location chosen by the user after acknowledging the password, §7 / TODO #4).
+  /// location chosen by the user after acknowledging the password, §7).
   Future<void> saveBackup({required String path}) => RustLib.instance.api
       .crateApiNightdropCoreSaveBackup(that: this, path: path);
 
@@ -4303,8 +4308,7 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
           that: this, contactId: contactId, verified: verified);
 
   /// Stop the background poller and tear down the network side (see
-  /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
-  /// the core stays readable afterwards but can no longer send or receive.
+  /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock.
   ///
   /// Call this before building a second core over the same `state_dir` — restoring a backup and
   /// the guard heal both do exactly that, and arti refuses to launch a second onion service while

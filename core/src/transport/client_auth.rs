@@ -1,5 +1,5 @@
 //! Authorized-client key directory for Tor onion-service **client authorization** (restricted
-//! discovery, `docs/design/onion-client-auth.md`, TODO #22). This is the pure-Rust, arti-free half
+//! discovery, `docs/design/onion-client-auth.md`, #22). This is the pure-Rust, arti-free half
 //! of the feature: it manages the directory of authorized-client key files that arti's
 //! `DirectoryKeyProvider` reads to decide **who may fetch our onion descriptor at all** — so only
 //! paired contacts can even open a connection to us.
@@ -12,16 +12,14 @@
 //! stays in the default build and is covered by the normal test suite).
 //!
 //! ## Why the key is opaque to us
-//! Each contact generates the keypair on their side (arti `TorClient::generate_service_discovery_key`
-//! for our onion) and sends us only the **public** string during pairing; we write it verbatim. We
-//! never mint or hold their secret. Revoking a contact = deleting their file (arti, watching the
-//! directory, stops encrypting the descriptor to them).
+//! Each contact mints the keypair on their side (`TorTransport::make_service_discovery_key` for our
+//! onion — minted by us rather than by arti, so they can keep the secret in their sealed store) and
+//! sends us only the **public** string during pairing; we write it verbatim. We never see or hold
+//! their secret. Revoking a contact = deleting their file (arti, watching the directory, stops
+//! encrypting the descriptor to them).
 //!
-//! ## Status
-//! The directory management here is complete and tested. Pointing arti's watched `DirectoryKeyProvider`
-//! at this directory, and the client-side `generate_service_discovery_key` exchange, live behind an
-//! **experimental** arti-client API and need two live Tor devices to validate — deferred, see the
-//! design doc. This module is the seam both sides build on.
+//! The arti side — the watched `DirectoryKeyProvider` and the client keys — lives in
+//! `transport::tor` (`onion_service_config`, `insert_client_key`).
 
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};

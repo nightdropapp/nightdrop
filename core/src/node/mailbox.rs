@@ -504,31 +504,30 @@ impl Node {
 
     /// A [`Frame::MailboxKey`] from `from`. Stores their contribution, checks their confirmation,
     /// and replies with ours when the agreement still needs it. Silent: no history entry.
-    pub(super) fn on_mailbox_key(&mut self, from: &str, message: &WireOlm) -> Result<()> {
+    pub(super) fn on_mailbox_key(&mut self, from: &str, message: &WireOlm) {
         #[cfg(test)]
         if self.legacy_v1_only {
-            return Ok(());
+            return;
         }
         let me = self.identity_key();
         let reply = {
             let Some(chat) = self.chats.get_mut(from) else {
-                return Ok(());
+                return;
             };
             if !chat.authorized {
-                return Ok(());
+                return;
             }
-            // Undecryptable = ignored, never an error: an error here aborts the whole pump, and the
-            // frames queued behind this one would never be processed. It happens legitimately — a
-            // reply sealed on a session the peer has just replaced (a re-pair) — and a lost key frame
-            // costs nothing, because the next run's announce resends it.
+            // Undecryptable = ignored, never an error. It happens legitimately — a reply sealed on a
+            // session the peer has just replaced (a re-pair) — and a lost key frame costs nothing,
+            // because the next run's announce resends it.
             let Ok(olm) = message.to_olm() else {
-                return Ok(());
+                return;
             };
             let Ok(pt) = crypto::decrypt(&mut chat.session, &olm) else {
-                return Ok(());
+                return;
             };
             let Some((theirs, their_confirm)) = decode_payload(&pt) else {
-                return Ok(());
+                return;
             };
             chat.last_seen = Some(crate::api::now_secs());
             let pair = chat.mailbox.get_or_insert_with(MailboxPair::fresh);
@@ -565,7 +564,6 @@ impl Node {
         if reply {
             self.send_mailbox_key(from);
         }
-        Ok(())
     }
 }
 

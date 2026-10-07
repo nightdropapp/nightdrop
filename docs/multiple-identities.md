@@ -17,11 +17,14 @@ would protect its data with our own app lock — Argon2 over a secret you chose 
 `docs/design/app-lock.md` §2 says plainly, cannot save a short PIN from an offline attack. Knox's
 hardware-throttled unlock can.
 
-**We could not have hidden it anyway.** arti writes the onion service secret key as a plaintext file
-(`arti-state/keystore/hss/<svc>/ks_hs_id.ed25519_expanded_private`), outside anything we encrypt. A
-second in-app identity would need a second onion, hence a second plaintext key, visible to anyone
-who images the phone. So an in-app version could not have offered deniability against a cloned
-device — the property that would have justified the complexity.
+**We could not have hidden it anyway.** When this was decided, arti wrote the onion service secret
+key as a plaintext file (`arti-state/keystore/hss/<svc>/ks_hs_id.ed25519_expanded_private`), outside
+anything we encrypt. A second in-app identity would need a second onion, hence a second plaintext
+key, visible to anyone who images the phone. So an in-app version could not have offered
+deniability against a cloned device — the property that would have justified the complexity. Since
+0.1.16 the key is sealed in our store instead (`docs/design/onion-key-at-rest.md`), but a second
+identity would still mean a second sealed store and a second hidden service's state on disk, so
+its existence would remain visible; the conclusion stands.
 
 **Bonus, verified:** `adb` cannot reach the Secure Folder profile at all. `pm list packages
 --user 150` and `pm install --user 150` both fail with `SecurityException: Shell does not have

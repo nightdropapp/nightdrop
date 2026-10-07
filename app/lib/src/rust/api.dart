@@ -6,7 +6,7 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `flush_pending`, `lock`, `maybe_flush`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `shutdown_core`, `spawn_poller`, `system_tagged`, `system`, `text`, `try_close_transport`
+// These functions are ignored because they are not marked as `pub`: `apply_tick`, `check_bridge_line`, `decode_onion_identity`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `flush_pending`, `lock`, `maybe_flush`, `media_store_dir`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `shutdown_core`, `spawn_poller`, `start`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
 // These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
@@ -64,7 +64,7 @@ Future<void> diagNote({required String line}) =>
 /// force rotation. arti already recovers from a single unreachable guard on its own — measured
 /// 2026-08-03: it added a fresh guard to the sample 0.7 s after the failure and had it usable 79 s
 /// later, without discarding the persisted set. Only reach for this when the client is stuck in a
-/// way that persists (see [`NightdropCore::tor_client_wedged`]).
+/// way that persists (see [`NightdropCore::direct_path_wedged`]).
 Future<void> resetTorGuards({required String stateDir}) =>
     RustLib.instance.api.crateApiResetTorGuards(stateDir: stateDir);
 
@@ -220,10 +220,6 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Whether burn-view receipts are on.
   Future<bool> burnReceiptsEnabled();
 
-  /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
-  /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
-  /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
-  /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   /// Ask our onion site whether a newer release exists (`crate::update`).
   ///
   /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
@@ -263,9 +259,9 @@ abstract class NightdropCore implements RustOpaqueInterface {
 
   /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
   /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
-  /// `nightdrop-relay authorize-client <name> <key>`. arti stores the private half and presents it
-  /// automatically whenever this device dials that relay, so after authorization the private relay
-  /// becomes reachable. Only meaningful on the Tor transport; errors otherwise. Generating a key
+  /// `nightdrop-relay authorize-client <name> <key>`. arti presents the private half whenever this
+  /// device dials that relay, so after authorization the private relay becomes reachable. Asking
+  /// again returns the same key; it is kept in the sealed store across restarts. Only meaningful on the Tor transport; errors otherwise. Generating a key
   /// for a public relay is harmless but unnecessary.
   Future<String> createRelayAccessKey({required String relayOnion});
 
@@ -286,7 +282,7 @@ abstract class NightdropCore implements RustOpaqueInterface {
   static Future<NightdropCore> default_() =>
       RustLib.instance.api.crateApiNightdropCoreDefault();
 
-  /// Delete a chat (TODO #1): signal the peer (who then sees a "chat deleted" notice) and
+  /// Delete a chat: signal the peer (who then sees a "chat deleted" notice) and
   /// remove it locally. Creating a new chat is required to talk again.
   Future<void> deleteChat({required String contactId});
 
@@ -316,6 +312,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   ///
   /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
   /// take minutes on a poor circuit.
+  ///
+  /// Single-flight: a second call while one runs is refused. Both would stream into the same
+  /// hash-keyed scratch file, and the loser would keep writing into the build after the winner
+  /// verified and published it (`update::part_path`). The Dart side joins a running download
+  /// instead of calling twice; this makes the property hold whoever the caller is.
   Future<BigInt> downloadUpdate({required String destPath});
 
   /// [`logout`](Self::logout) for the **duress wipe** (#3): same teardown, but *every* live chat
@@ -386,7 +387,8 @@ abstract class NightdropCore implements RustOpaqueInterface {
   // HINT: Make it `#[frb(sync)]` to let it become the default constructor of Dart class.
   /// Demo core: a fresh identity on an in-memory network with auto-replying peers and
   /// **no** background poller (so messaging is synchronous and flutter_rust_bridge
-  /// stream tests don't see continuous events). This is what the app uses today.
+  /// stream tests don't see continuous events). Used for UI work (a bare `flutter run`) and
+  /// tests; every real build runs [`new_tor`](Self::new_tor) instead.
   static Future<NightdropCore> newInstance() =>
       RustLib.instance.api.crateApiNightdropCoreNew();
 
@@ -418,8 +420,8 @@ abstract class NightdropCore implements RustOpaqueInterface {
 
   /// Real networked core over plain TCP (for the desktop two-client demo / LAN). Binds a
   /// listener at `listen_addr` (e.g. `127.0.0.1:7001`) and uses the relay at `relay_addr`
-  /// for rendezvous + offline delivery. Runs the background poll loop. (Production would
-  /// use a Tor variant of this constructor.)
+  /// for rendezvous + offline delivery. Runs the background poll loop. Development only;
+  /// production uses [`new_tor`](Self::new_tor).
   static Future<NightdropCore> newNetworked(
           {required String listenAddr, required String relayAddr}) =>
       RustLib.instance.api.crateApiNightdropCoreNewNetworked(
@@ -460,6 +462,10 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// core, which has no demo harness — real chats are opened by pairing (QR / short code).
   Future<Contact> openChat({String? code});
 
+  /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
+  /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
+  /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
+  /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   Future<List<RelayHealth>> relayHealth();
 
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
@@ -472,8 +478,8 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// not imply otherwise.
   Future<void> reportScreenshot({required String contactId});
 
-  /// Restore a core from a password-encrypted backup file (§7, TODO #5). `listen_addr` +
-  /// `relay_addr` select the real networked transport (as in [`new_networked`]); omit
+  /// Restore a core from a password-encrypted backup file (§7). `listen_addr` +
+  /// `relay_addr` select the real networked transport (as in [`new_networked`](Self::new_networked)); omit
   /// both for the in-process demo. Runs the background poll loop.
   static Future<NightdropCore> restoreBackup(
           {required String path,
@@ -508,7 +514,7 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Recover from an opt-in **server backup** on a fresh device (§7c / #9): bootstrap Tor,
   /// fetch the opaque blob from the relay by its password-derived handle, decrypt it with the
   /// user's recovery `password`, and rebuild identity + chats — persisted under `persist_key`
-  /// so it survives future restarts. The relay counterpart of [`restore_backup_tor`].
+  /// so it survives future restarts. The relay counterpart of [`restore_backup_tor`](Self::restore_backup_tor).
   ///
   /// The backup blob does not carry into a *pre-bootstrap* onion keystore here (the relay is
   /// only reachable once Tor is up), so this device comes back on a **new** `.onion`; the
@@ -536,7 +542,7 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<String> safetyQr({required String contactId});
 
   /// Write the backup prepared by [`create_backup`](Self::create_backup) to `path` (the
-  /// location chosen by the user after acknowledging the password, §7 / TODO #4).
+  /// location chosen by the user after acknowledging the password, §7).
   Future<void> saveBackup({required String path});
 
   /// Send an attachment as a **burn message** (see [`send_burn_message`](Self::send_burn_message)).
@@ -637,8 +643,7 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<void> setVerified({required String contactId, required bool verified});
 
   /// Stop the background poller and tear down the network side (see
-  /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
-  /// the core stays readable afterwards but can no longer send or receive.
+  /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock.
   ///
   /// Call this before building a second core over the same `state_dir` — restoring a backup and
   /// the guard heal both do exactly that, and arti refuses to launch a second onion service while
@@ -681,7 +686,8 @@ abstract class NightdropCore implements RustOpaqueInterface {
 
 /// A push event from the core to the UI (flutter_rust_bridge stream). The real transport
 /// uses this to surface unsolicited messages and incoming requests; the UI reacts by
-/// re-reading state. `kind` is one of "request", "message", "contacts".
+/// re-reading state. `kind` is one of "request", "message", "contacts" (all three: re-read
+/// state), or "update_progress" (a download's progress, which must not trigger a re-read).
 ///
 /// `contacts` names the chats whose **message history** actually changed, so the UI can re-pull
 /// only those instead of every conversation (§1.5.5). Empty means "unknown / refresh broadly" —
@@ -950,10 +956,6 @@ class Contact {
   /// implying a server copy exists. Always `true` when server storage is off. Ephemeral.
   final bool remoteStorageHealthy;
 
-  /// Unix seconds of the last **authenticated** contact from this peer — a message we decrypted
-  /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
-  /// says their device drained our mailbox. `0` when we have no reading yet.
-  ///
   /// A nickname **you** gave this contact, or empty. Local only: it is never sent, never
   /// announced, and never leaves the device — only you know that this key is the person you met,
   /// and the peer cannot supply that knowledge. Takes precedence over `their_name` in the UI.
@@ -965,6 +967,10 @@ class Contact {
   /// Derived rather than random so it *changes* when the identity does.
   final String identityTag;
 
+  /// Unix seconds of the last **authenticated** contact from this peer — a message we decrypted
+  /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
+  /// says their device drained our mailbox. `0` when we have no reading yet.
+  ///
   /// Drives the "no sign of them" notice. It reports **silence, not a cause**: a wiped identity,
   /// a seized phone, a lost phone and a flat battery all look the same from here, and the UI must
   /// not imply otherwise. That ambiguity is deliberate — see `docs/design/silence-detection.md`.

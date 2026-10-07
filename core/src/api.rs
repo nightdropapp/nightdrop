@@ -32,7 +32,8 @@ use crate::Result;
 
 /// A push event from the core to the UI (flutter_rust_bridge stream). The real transport
 /// uses this to surface unsolicited messages and incoming requests; the UI reacts by
-/// re-reading state. `kind` is one of "request", "message", "contacts".
+/// re-reading state. `kind` is one of "request", "message", "contacts" (all three: re-read
+/// state), or "update_progress" (a download's progress, which must not trigger a re-read).
 ///
 /// `contacts` names the chats whose **message history** actually changed, so the UI can re-pull
 /// only those instead of every conversation (§1.5.5). Empty means "unknown / refresh broadly" —
@@ -208,7 +209,7 @@ pub fn diag_note(line: String) {
 /// force rotation. arti already recovers from a single unreachable guard on its own — measured
 /// 2026-08-03: it added a fresh guard to the sample 0.7 s after the failure and had it usable 79 s
 /// later, without discarding the persisted set. Only reach for this when the client is stuck in a
-/// way that persists (see [`NightdropCore::tor_client_wedged`]).
+/// way that persists (see [`NightdropCore::direct_path_wedged`]).
 pub fn reset_tor_guards(state_dir: String) {
     let dir = std::path::Path::new(&state_dir)
         .join("arti-state")
@@ -324,10 +325,6 @@ pub struct Contact {
     /// directly). Lets the UI downgrade the storage banner to "not currently stored" instead of
     /// implying a server copy exists. Always `true` when server storage is off. Ephemeral.
     pub remote_storage_healthy: bool,
-    /// Unix seconds of the last **authenticated** contact from this peer — a message we decrypted
-    /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
-    /// says their device drained our mailbox. `0` when we have no reading yet.
-    ///
     /// A nickname **you** gave this contact, or empty. Local only: it is never sent, never
     /// announced, and never leaves the device — only you know that this key is the person you met,
     /// and the peer cannot supply that knowledge. Takes precedence over `their_name` in the UI.
@@ -337,6 +334,10 @@ pub struct Contact {
     /// matching tag proves nothing and the UI must never let it look like the safety number does.
     /// Derived rather than random so it *changes* when the identity does.
     pub identity_tag: String,
+    /// Unix seconds of the last **authenticated** contact from this peer — a message we decrypted
+    /// or a control frame that verified on their ratchet, including the silent delivery `Ack` that
+    /// says their device drained our mailbox. `0` when we have no reading yet.
+    ///
     /// Drives the "no sign of them" notice. It reports **silence, not a cause**: a wiped identity,
     /// a seized phone, a lost phone and a flat battery all look the same from here, and the UI must
     /// not imply otherwise. That ambiguity is deliberate — see `docs/design/silence-detection.md`.
@@ -550,7 +551,7 @@ struct Inner {
 /// the poller flushes once the window elapses. New *messages* and roster changes bypass the debounce.
 struct Persist {
     path: String,
-    /// The at-rest key (from the OS keystore). Held for the process lifetime so the state file can
+    /// The at-rest key (from the OS keystore, or unwrapped by the app lock). Held for the core's lifetime so the state file can
     /// be re-sealed on every change; [zeroized on drop](Persist::drop) so it doesn't linger in freed
     /// memory after logout/shutdown. (Transient by-value copies of this `Copy` array — e.g. the one
     /// [`save`](Inner::save) hands to `save_to_file` — are short-lived stack values we can't all
@@ -567,7 +568,11 @@ impl Persist {
         Self {
             path,
             key,
-            last_write: std::time::Instant::now() - PERSIST_DEBOUNCE,
+            // As if the last write was a full window ago, so the first save is not delayed.
+            // `checked_sub`: `Instant` counts from boot, and subtracting past it panics.
+            last_write: std::time::Instant::now()
+                .checked_sub(PERSIST_DEBOUNCE)
+                .unwrap_or_else(std::time::Instant::now),
             pending: false,
         }
     }
@@ -718,6 +723,8 @@ impl Inner {
             self.me.announce_burns();
             // Our app version (`Frame::Version`), same cadence and the same once-per-run guard.
             self.me.announce_version();
+            // And our address, once per run: repairs a contact holding a stale one.
+            self.me.reannounce_address();
             // v2 mailbox handles (`mailbox-handles.md`): offer our contribution to every chat not
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
@@ -814,7 +821,8 @@ impl Drop for NightdropCore {
 impl NightdropCore {
     /// Demo core: a fresh identity on an in-memory network with auto-replying peers and
     /// **no** background poller (so messaging is synchronous and flutter_rust_bridge
-    /// stream tests don't see continuous events). This is what the app uses today.
+    /// stream tests don't see continuous events). Used for UI work (a bare `flutter run`) and
+    /// tests; every real build runs [`new_tor`](Self::new_tor) instead.
     pub fn new() -> Self {
         let (demo, transport) = Demo::new();
         let mut me = Node::new(transport);
@@ -868,8 +876,33 @@ impl NightdropCore {
         Self { inner, poller }
     }
 
-    /// Restore a core from a password-encrypted backup file (§7, TODO #5). `listen_addr` +
-    /// `relay_addr` select the real networked transport (as in [`new_networked`]); omit
+    /// Wrap a ready node into a running core: save it (which creates the state file on a first
+    /// run, and re-seals it under the device key after a restore), start the background poller,
+    /// and — for a Tor core — register it so the next launch in this process can retire it first.
+    fn start(me: Node, persist: Option<Persist>, tor: bool) -> Self {
+        let inner = Arc::new(Mutex::new(Inner {
+            me,
+            demo: None,
+            pending_backup: None,
+            persist,
+        }));
+        inner.lock().unwrap_or_else(|e| e.into_inner()).save();
+        let poller = StopSignal::new();
+        spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
+        #[cfg(any(feature = "tor", test))]
+        if tor {
+            register_tor_core(&inner, &poller);
+        }
+        #[cfg(not(any(feature = "tor", test)))]
+        let _ = tor;
+        Self {
+            inner,
+            poller: Some(poller),
+        }
+    }
+
+    /// Restore a core from a password-encrypted backup file (§7). `listen_addr` +
+    /// `relay_addr` select the real networked transport (as in [`new_networked`](Self::new_networked)); omit
     /// both for the in-process demo. Runs the background poll loop.
     pub fn restore_backup(
         path: String,
@@ -891,24 +924,13 @@ impl NightdropCore {
         if let Some(relay) = relay {
             me.set_relay(relay);
         }
-        let inner = Arc::new(Mutex::new(Inner {
-            me,
-            demo: None,
-            pending_backup: None,
-            persist: None,
-        }));
-        let poller = StopSignal::new();
-        spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
-        Ok(Self {
-            inner,
-            poller: Some(poller),
-        })
+        Ok(Self::start(me, None, false))
     }
 
     /// Real networked core over plain TCP (for the desktop two-client demo / LAN). Binds a
     /// listener at `listen_addr` (e.g. `127.0.0.1:7001`) and uses the relay at `relay_addr`
-    /// for rendezvous + offline delivery. Runs the background poll loop. (Production would
-    /// use a Tor variant of this constructor.)
+    /// for rendezvous + offline delivery. Runs the background poll loop. Development only;
+    /// production uses [`new_tor`](Self::new_tor).
     pub fn new_networked(listen_addr: String, relay_addr: String) -> Result<NightdropCore> {
         let transport = crate::transport::tcp::TcpTransport::bind(&listen_addr)?;
         let relay = RelayClient::new(relay_addr);
@@ -962,27 +984,15 @@ impl NightdropCore {
             me.set_relay(relay);
         }
         if let Some((path, key)) = &persist {
-            let dir = std::path::Path::new(path)
-                .parent()
-                .map(|p| p.join("nightdrop-media"))
-                .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
-            me.set_media_store(dir.to_string_lossy().into_owned(), *key);
+            me.set_media_store(media_store_dir(path), *key);
         }
         me.announce_address_if_changed();
 
-        let inner = Arc::new(Mutex::new(Inner {
+        Ok(Self::start(
             me,
-            demo: None,
-            pending_backup: None,
-            persist: persist.map(|(p, k)| Persist::new(p, k)),
-        }));
-        inner.lock().unwrap().save();
-        let poller = StopSignal::new();
-        spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
-        Ok(Self {
-            inner,
-            poller: Some(poller),
-        })
+            persist.map(|(p, k)| Persist::new(p, k)),
+            false,
+        ))
     }
 
     /// Real core over the **embedded Tor transport** (the production WAN path, §6): this
@@ -1051,10 +1061,7 @@ impl NightdropCore {
             // this the in-memory keystore forgets it and the next start is a different address.
             if saved_onion_key.is_none() {
                 if let (Some(dir), Some((_, key))) = (state_dir.as_deref(), persist.as_ref()) {
-                    let material = transport.onion_key_material().ok_or_else(|| {
-                        anyhow::anyhow!("onion service started without an identity key")
-                    })?;
-                    write_onion_key(dir, key, &material)?;
+                    seal_onion_identity(&transport, dir, key)?;
                 }
             }
             // Reach the relay over Tor: build a dialer from the transport's arti client before it
@@ -1082,11 +1089,7 @@ impl NightdropCore {
             }
             // Store attachments as sealed files in a sibling dir of the state file.
             if let Some((path, key)) = &persist {
-                let dir = std::path::Path::new(path)
-                    .parent()
-                    .map(|p| p.join("nightdrop-media"))
-                    .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
-                me.set_media_store(dir.to_string_lossy().into_owned(), *key);
+                me.set_media_store(media_store_dir(path), *key);
             }
             // If our onion changed since last run (rebuilt keystore), tell contacts the new
             // address in-band so they can still reach us (#11). No-op on first run / no change.
@@ -1095,20 +1098,11 @@ impl NightdropCore {
             // before any connection is attempted (`onion-key-at-rest.md`).
             me.restore_client_keys();
 
-            let inner = Arc::new(Mutex::new(Inner {
+            Ok(Self::start(
                 me,
-                demo: None,
-                pending_backup: None,
-                persist: persist.map(|(p, k)| Persist::new(p, k)),
-            }));
-            inner.lock().unwrap().save(); // create the file on first run
-            let poller = StopSignal::new();
-            spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
-            register_tor_core(&inner, &poller);
-            Ok(Self {
-                inner,
-                poller: Some(poller),
-            })
+                persist.map(|(p, k)| Persist::new(p, k)),
+                true,
+            ))
         }
         #[cfg(not(feature = "tor"))]
         {
@@ -1139,8 +1133,19 @@ impl NightdropCore {
             // onion keystore onto disk *before* Tor bootstraps, so the device comes back up on
             // the SAME `.onion` — otherwise the peer's stored address is stale and unreachable.
             let (state, bkey) = Node::open_backup(&blob, &password)?;
-            if let Some(sd) = &state_dir {
-                Node::write_onion_keys(&state.onion_keys, sd)?;
+            // The identity the backup carries (0.1.29 on) goes straight to arti. A backup from
+            // 0.1.15 or earlier carries arti's keystore files instead, which are written to disk
+            // for arti to read once. One from 0.1.16–0.1.28 carries neither, so arti mints a new
+            // address and the startup announcement tells contacts (`docs/advisories/…-backups-lost-the-onion-address.md`).
+            let identity = state
+                .onion_identity
+                .as_deref()
+                .map(decode_onion_identity)
+                .transpose()?;
+            if identity.is_none() {
+                if let Some(sd) = &state_dir {
+                    Node::write_onion_keys(&state.onion_keys, sd)?;
+                }
             }
             let transport = crate::transport::tor::TorTransport::bootstrap(
                 "nightdrop",
@@ -1151,10 +1156,12 @@ impl NightdropCore {
                     .as_deref()
                     .map(|s| format!("{s}/client-auth"))
                     .as_deref(),
-                // Restore paths write the backup's keystore files to disk just above, so the
-                // identity is read from there for this run and sealed afterwards.
-                None,
+                identity,
             )?;
+            let key = decode_store_key(&persist_key)?;
+            if let Some(dir) = state_dir.as_deref() {
+                seal_onion_identity(&transport, dir, &key)?;
+            }
             // Build the relay dialer over Tor before the transport is moved into the node.
             let relay = relay_addr.map(|onion| {
                 RelayClient::with_dialer_for(onion.clone(), transport.make_relay_dialer(onion))
@@ -1168,29 +1175,17 @@ impl NightdropCore {
             if let Some(relay) = relay {
                 me.set_relay(relay);
             }
-            let key = decode_store_key(&persist_key)?;
             // Sealed-file media store beside the state file.
-            let dir = std::path::Path::new(&persist_path)
-                .parent()
-                .map(|p| p.join("nightdrop-media"))
-                .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
-            me.set_media_store(dir.to_string_lossy().into_owned(), key);
-            let inner = Arc::new(Mutex::new(Inner {
-                me,
-                demo: None,
-                pending_backup: None,
-                persist: Some(Persist::new(persist_path, key)),
-            }));
-            // Re-export under the store key: the at-rest file now uses the device key (not the
-            // backup password), so the restored identity survives future restarts.
-            inner.lock().unwrap().save();
-            let poller = StopSignal::new();
-            spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
-            register_tor_core(&inner, &poller);
-            Ok(Self {
-                inner,
-                poller: Some(poller),
-            })
+            me.set_media_store(media_store_dir(&persist_path), key);
+            // A backup without an identity comes back on a new address; say so now, because the
+            // save in `start` records the new one as ours and no later start would see a change.
+            me.announce_address_if_changed();
+            // With the identity handed to arti the keystore is in memory, so the per-peer client
+            // keys have to be put back before any connection is attempted.
+            me.restore_client_keys();
+            // `start` re-exports under the store key: the at-rest file now uses the device key
+            // (not the backup password), so the restored identity survives future restarts.
+            Ok(Self::start(me, Some(Persist::new(persist_path, key)), true))
         }
         #[cfg(not(feature = "tor"))]
         {
@@ -1211,7 +1206,7 @@ impl NightdropCore {
     /// Recover from an opt-in **server backup** on a fresh device (§7c / #9): bootstrap Tor,
     /// fetch the opaque blob from the relay by its password-derived handle, decrypt it with the
     /// user's recovery `password`, and rebuild identity + chats — persisted under `persist_key`
-    /// so it survives future restarts. The relay counterpart of [`restore_backup_tor`].
+    /// so it survives future restarts. The relay counterpart of [`restore_backup_tor`](Self::restore_backup_tor).
     ///
     /// The backup blob does not carry into a *pre-bootstrap* onion keystore here (the relay is
     /// only reachable once Tor is up), so this device comes back on a **new** `.onion`; the
@@ -1228,6 +1223,7 @@ impl NightdropCore {
         #[cfg(feature = "tor")]
         {
             retire_previous_tor_core();
+            let key = decode_store_key(&persist_key)?;
             let transport = crate::transport::tor::TorTransport::bootstrap(
                 "nightdrop",
                 state_dir.as_deref(),
@@ -1237,10 +1233,14 @@ impl NightdropCore {
                     .as_deref()
                     .map(|s| format!("{s}/client-auth"))
                     .as_deref(),
-                // Restore paths write the backup's keystore files to disk just above, so the
-                // identity is read from there for this run and sealed afterwards.
+                // No identity to hand over: the backup can only be fetched once Tor is up, so
+                // arti mints a new one here (the device comes back on a new address, above).
                 None,
             )?;
+            // Seal it now, or the next start finds no sealed key and mints yet another address.
+            if let Some(dir) = state_dir.as_deref() {
+                seal_onion_identity(&transport, dir, &key)?;
+            }
             // Build the relay dialer before the transport is moved into the node; it both
             // fetches the backup and stays attached for store-and-forward afterwards.
             let relay = RelayClient::with_dialer_for(
@@ -1253,32 +1253,14 @@ impl NightdropCore {
                 me.set_tor_state_dir(sd.clone());
             }
             me.set_relay(relay);
-            let key = decode_store_key(&persist_key)?;
-            let dir = std::path::Path::new(&persist_path)
-                .parent()
-                .map(|p| p.join("nightdrop-media"))
-                .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"));
-            me.set_media_store(dir.to_string_lossy().into_owned(), key);
+            me.set_media_store(media_store_dir(&persist_path), key);
             // We came up on a new onion (see above) — announce it so contacts can still reach us.
             me.announce_address_if_changed();
             // The keystore is in memory now, so the per-peer client keys have to be put back
             // before any connection is attempted (`onion-key-at-rest.md`).
             me.restore_client_keys();
-            let inner = Arc::new(Mutex::new(Inner {
-                me,
-                demo: None,
-                pending_backup: None,
-                persist: Some(Persist::new(persist_path, key)),
-            }));
-            // Re-encrypt at rest under the device key so the restored identity persists.
-            inner.lock().unwrap().save();
-            let poller = StopSignal::new();
-            spawn_poller(Arc::clone(&inner), Arc::clone(&poller));
-            register_tor_core(&inner, &poller);
-            Ok(Self {
-                inner,
-                poller: Some(poller),
-            })
+            // `start` re-encrypts at rest under the device key so the restored identity persists.
+            Ok(Self::start(me, Some(Persist::new(persist_path, key)), true))
         }
         #[cfg(not(feature = "tor"))]
         {
@@ -1290,8 +1272,7 @@ impl NightdropCore {
     }
 
     /// Stop the background poller and tear down the network side (see
-    /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock. Idempotent;
-    /// the core stays readable afterwards but can no longer send or receive.
+    /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock.
     ///
     /// Call this before building a second core over the same `state_dir` — restoring a backup and
     /// the guard heal both do exactly that, and arti refuses to launch a second onion service while
@@ -1447,23 +1428,21 @@ impl NightdropCore {
 
     /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
     /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
-    /// `nightdrop-relay authorize-client <name> <key>`. arti stores the private half and presents it
-    /// automatically whenever this device dials that relay, so after authorization the private relay
-    /// becomes reachable. Only meaningful on the Tor transport; errors otherwise. Generating a key
+    /// `nightdrop-relay authorize-client <name> <key>`. arti presents the private half whenever this
+    /// device dials that relay, so after authorization the private relay becomes reachable. Asking
+    /// again returns the same key; it is kept in the sealed store across restarts. Only meaningful on the Tor transport; errors otherwise. Generating a key
     /// for a public relay is harmless but unnecessary.
     pub fn create_relay_access_key(&self, relay_onion: String) -> Result<String> {
         let onion = relay_onion.trim();
-        let g = self.lock();
-        match g.me.relay_access_key(onion) {
-            Some(result) => result,
+        let mut g = self.lock();
+        let key = match g.me.relay_access_key(onion) {
+            Some(result) => result?,
             None => anyhow::bail!("relay access keys require the Tor transport"),
-        }
+        };
+        g.save();
+        Ok(key)
     }
 
-    /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
-    /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
-    /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
-    /// backup relay. A not-yet-polled relay reports `true` (optimistic).
     /// Ask our onion site whether a newer release exists (`crate::update`).
     ///
     /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
@@ -1508,7 +1487,23 @@ impl NightdropCore {
     ///
     /// Slow by nature — tens of megabytes over Tor — so call it off the UI path and expect it to
     /// take minutes on a poor circuit.
+    ///
+    /// Single-flight: a second call while one runs is refused. Both would stream into the same
+    /// hash-keyed scratch file, and the loser would keep writing into the build after the winner
+    /// verified and published it (`update::part_path`). The Dart side joins a running download
+    /// instead of calling twice; this makes the property hold whoever the caller is.
     pub fn download_update(&self, dest_path: String) -> Result<u64> {
+        static RUNNING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+        struct Running;
+        impl Drop for Running {
+            fn drop(&mut self) {
+                RUNNING.store(false, std::sync::atomic::Ordering::Release);
+            }
+        }
+        if RUNNING.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            anyhow::bail!("an update download is already running");
+        }
+        let _running = Running;
         // Same rule as check_for_update, and it matters far more here: this can run for minutes.
         // Holding the core lock across it would freeze the entire app for the whole download.
         let transport = self.lock().me.transport_handle();
@@ -1529,6 +1524,10 @@ impl NightdropCore {
         )
     }
 
+    /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
+    /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
+    /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
+    /// backup relay. A not-yet-polled relay reports `true` (optimistic).
     pub fn relay_health(&self) -> Vec<RelayHealth> {
         self.lock()
             .me
@@ -1814,14 +1813,17 @@ impl NightdropCore {
     }
 
     /// Write the backup prepared by [`create_backup`](Self::create_backup) to `path` (the
-    /// location chosen by the user after acknowledging the password, §7 / TODO #4).
+    /// location chosen by the user after acknowledging the password, §7).
     pub fn save_backup(&self, path: String) -> Result<()> {
         let mut g = self.lock();
         let blob = g
             .pending_backup
-            .take()
+            .as_ref()
             .ok_or_else(|| anyhow::anyhow!("no backup prepared; create one first"))?;
-        std::fs::write(&path, &blob)?;
+        // Cleared only once written: the password was shown once already, so a failed write (a
+        // full disk, a revoked folder) must leave the prepared backup there to retry, not lose it.
+        std::fs::write(&path, blob)?;
+        g.pending_backup = None;
         Ok(())
     }
 
@@ -1906,15 +1908,21 @@ impl NightdropCore {
     /// persisted — the relay never sees it. The returned exact expiry drives the acknowledgment
     /// screen the invariant requires. Losing the password loses the backup, by design.
     pub fn create_server_backup(&self, ttl_hours: u64, full: bool) -> Result<ServerBackupInfo> {
-        let mut g = self.lock();
-        let relay =
-            g.me.relay_client()
-                .ok_or_else(|| anyhow::anyhow!("server backup needs a relay (Tor mode)"))?;
         let hours = ttl_hours.clamp(1, 36);
-        let ttl = Duration::from_secs(hours * 3600);
         let password = crate::storage::random_password();
-        g.me.server_backup(&relay, &password, Some(ttl), full)?;
+        // Build under the lock, post without it: the post is a Tor round trip (§6).
+        let (relay, (handle, blob, ttl)) = {
+            let g = self.lock();
+            let relay =
+                g.me.relay_client()
+                    .ok_or_else(|| anyhow::anyhow!("server backup needs a relay (Tor mode)"))?;
+            let parts =
+                g.me.server_backup_parts(&password, Some(Duration::from_secs(hours * 3600)), full)?;
+            (relay, parts)
+        };
+        relay.post(&handle, &blob, ttl)?;
         // The blob is posted, so mark the chats backed up (#7) + notify peers of a Full backup.
+        let mut g = self.lock();
         let ids: Vec<String> = g.me.contacts().into_iter().map(|c| c.id).collect();
         g.me.mark_backed_up(&ids, full);
         g.save();
@@ -1952,7 +1960,7 @@ impl NightdropCore {
         failed as u32
     }
 
-    /// Delete a chat (TODO #1): signal the peer (who then sees a "chat deleted" notice) and
+    /// Delete a chat: signal the peer (who then sees a "chat deleted" notice) and
     /// remove it locally. Creating a new chat is required to talk again.
     pub fn delete_chat(&self, contact_id: &str) -> Result<()> {
         let mut g = self.lock();
@@ -2318,7 +2326,6 @@ pub fn clear_store_passphrase(dir: String, passphrase: String) -> Result<String>
     Ok(encoded)
 }
 
-/// Decode a base64 32-byte at-rest key.
 /// Where the onion identity lives now: sealed under the store key, beside the state file, instead
 /// of unencrypted in arti's keystore (`docs/design/onion-key-at-rest.md`).
 // Not gated on the `tor` feature, unlike its caller: sealing is plain `storage` work with no arti
@@ -2366,14 +2373,12 @@ fn onion_key_for_start(
     read_onion_key(dir, key)
 }
 
-/// Seal the onion identity beside the state file. Called once, after a first-run bootstrap.
-#[cfg_attr(not(feature = "tor"), allow(dead_code))]
 /// Remove arti's **on-disk** keystore unless it is still the rightful source of our identity.
 ///
 /// It may speak for us in exactly one case: we are restoring an identity and have no sealed key of
-/// our own yet — the migration run for an install from before `onion-key-at-rest.md`, and the run
-/// after a backup restore (which writes the backup's keystore to disk on purpose). Then arti reads
-/// the identity from there and the caller seals it immediately afterwards.
+/// our own yet — the migration run for an install from before `onion-key-at-rest.md`. Then arti
+/// reads the identity from there and the caller seals it immediately afterwards. (A restore of a
+/// backup from 0.1.15 or earlier also writes keystore files to disk; it seals before any start.)
 ///
 /// Every other case it is leftovers, and leaving it is not merely untidy:
 ///
@@ -2389,6 +2394,7 @@ fn onion_key_for_start(
 ///   product; one that silently inherits its predecessor's address is not one.
 ///
 /// Best-effort: the keys are superseded either way, so a failure to remove is logged, not fatal.
+#[cfg_attr(not(feature = "tor"), allow(dead_code))]
 fn drop_superseded_keystore(state_dir: &str, have_sealed_key: bool, restoring: bool) {
     if restoring && !have_sealed_key {
         return; // the migration / post-restore run: arti must read the identity from disk
@@ -2412,6 +2418,9 @@ fn drop_superseded_keystore(state_dir: &str, have_sealed_key: bool, restoring: b
     }
 }
 
+/// Seal the onion identity beside the state file, after any bootstrap that did not start from a
+/// sealed key (a first run, a migration run, or a restore).
+///
 /// Only the Tor path seals an onion identity (and the tests that pin its rules). Gated so the
 /// default `cargo build`/`make clippy` — which is how the repo's own gate runs — doesn't carry a
 /// standing dead-code warning, under which a *new* warning goes unnoticed.
@@ -2420,12 +2429,49 @@ fn write_onion_key(dir: &str, key: &crate::storage::StoreKey, bytes: &[u8; 64]) 
     let sealed = crate::storage::seal(key, bytes)?;
     std::fs::create_dir_all(dir).ok();
     let path = format!("{dir}/{ONION_KEY_FILE}");
-    let tmp = format!("{path}.tmp");
-    std::fs::write(&tmp, &sealed)?;
-    std::fs::rename(&tmp, &path)?; // atomic: a torn write here would lose the identity
-    Ok(())
+    // Atomic and durable: a torn or empty file here would lose the identity, and with it the address.
+    crate::storage::write_atomic(std::path::Path::new(&path), &sealed)
 }
 
+/// Decode the base64 onion identity a backup carries. Malformed means a damaged backup: fail
+/// rather than start on a fresh address as if none had been there.
+#[cfg_attr(not(feature = "tor"), allow(dead_code))]
+fn decode_onion_identity(b64: &str) -> Result<[u8; 64]> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .ok()
+        .and_then(|v| <[u8; 64]>::try_from(v.as_slice()).ok())
+        .ok_or_else(|| anyhow::anyhow!("the backup's onion identity is damaged"))
+}
+
+/// Where attachments live: a `nightdrop-media` directory beside the state file.
+fn media_store_dir(state_path: &str) -> String {
+    std::path::Path::new(state_path)
+        .parent()
+        .map(|p| p.join("nightdrop-media"))
+        .unwrap_or_else(|| std::path::PathBuf::from("nightdrop-media"))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Read the running service's onion identity back out of arti and seal it beside the state file,
+/// so the next start launches on the same address (`docs/design/onion-key-at-rest.md`). Called
+/// after every bootstrap that did not start from a sealed key; a service without an identity key
+/// is a failure, never something to carry on from.
+#[cfg(feature = "tor")]
+fn seal_onion_identity(
+    transport: &crate::transport::tor::TorTransport,
+    dir: &str,
+    key: &crate::storage::StoreKey,
+) -> Result<()> {
+    let material = transport
+        .onion_key_material()
+        .ok_or_else(|| anyhow::anyhow!("onion service started without an identity key"))?;
+    write_onion_key(dir, key, &material)
+}
+
+/// Decode a base64 32-byte at-rest key.
 fn decode_store_key(b64: &str) -> Result<crate::storage::StoreKey> {
     use base64::Engine as _;
     use zeroize::Zeroize as _;
@@ -2780,7 +2826,11 @@ const WORDS: &[&str] = &[
     "meadow", "cinder", "aurora", "marble", "nimbus", "raven", "saffron",
 ];
 
-/// Generate a `slot-secret-words` short code for display in the QR/Invite tab (§5b).
+/// A placeholder `slot-words` code returned with a QR invite (§5a). Nothing is staged for it, so
+/// it is not a working short code: only the in-process demo shows it. Real builds call
+/// [`create_short_code_invite`](NightdropCore::create_short_code_invite) right after, whose staged
+/// code is the one displayed and the one an approval echoes back (it replaces this one as
+/// `last_invite_code`).
 fn random_short_code() -> String {
     let mut rng = rand::thread_rng();
     let slot = rng.gen_range(1..=99);
@@ -2797,10 +2847,10 @@ fn random_slot() -> String {
         .collect()
 }
 
-/// The shared secret words for a short code. NOTE: this is a moderate-entropy secret used
-/// to password-encrypt the rendezvous blob (Argon2). For low-entropy secrets, production
-/// should add the interactive SPAKE2 bouncer (the `pake` module) to defeat offline
-/// dictionary attacks by the relay — see `ARCHITECTURE.md` §5b.
+/// The shared secret words for a short code: four distinct words from [`WORDS`] (~15 bits). They
+/// feed SPAKE2 and never leave the device; SPAKE2 rules out offline guessing, and the inviter's
+/// cap on distinct openers (`node::MAX_OPENERS_PER_INVITE`) bounds online guessing
+/// (`ARCHITECTURE.md` §5b).
 fn random_secret_words() -> String {
     let mut rng = rand::thread_rng();
     let words: Vec<&str> = WORDS.choose_multiple(&mut rng, 4).cloned().collect();

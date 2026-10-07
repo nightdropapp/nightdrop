@@ -103,7 +103,7 @@ write_android_index() {
     local apksigner aapt
     apksigner=$(find_apksigner 2>/dev/null || true)
     aapt=${apksigner%/apksigner}/aapt2
-    local rows="" apk name label ver size hash
+    local rows="" apk label ver size hash
     # Deliberate order: the safe choice first, then smaller/narrower ones.
     for apk in NightDrop.apk NightDrop-arm64-v8a.apk NightDrop-armeabi-v7a.apk NightDrop-x86_64.apk; do
         [ -f "android/$apk" ] || continue

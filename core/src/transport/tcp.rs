@@ -72,16 +72,41 @@ fn write_frame(w: &mut impl Write, frame: &[u8]) -> Result<()> {
 }
 
 fn read_frame(r: &mut impl Read) -> Result<Vec<u8>> {
-    let mut len = [0u8; 4];
-    r.read_exact(&mut len)?;
-    let mut buf = vec![0u8; u32::from_be_bytes(len) as usize];
-    r.read_exact(&mut buf)?;
+    let mut prefix = [0u8; 4];
+    r.read_exact(&mut prefix)?;
+    let len = crate::wire::frame_len(prefix)?;
+    // Grow as bytes arrive rather than allocating the announced length up front.
+    let mut buf = Vec::new();
+    r.take(len as u64).read_to_end(&mut buf)?;
+    anyhow::ensure!(buf.len() == len, "connection closed mid-frame");
     Ok(buf)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_oversized_frame_is_refused_before_its_body_is_read() {
+        // Four bytes announcing ~4 GiB, and no body: refused on the prefix alone.
+        let mut r = std::io::Cursor::new(vec![0xFF, 0xFF, 0xFF, 0xFF]);
+        let err = read_frame(&mut r).unwrap_err().to_string();
+        assert!(err.contains("over the"), "{err}");
+    }
+
+    #[test]
+    fn a_frame_cut_short_is_an_error_and_a_whole_one_reads_back() {
+        let mut short = 10u32.to_be_bytes().to_vec();
+        short.extend_from_slice(b"abc");
+        assert!(read_frame(&mut std::io::Cursor::new(short)).is_err());
+
+        let mut whole = Vec::new();
+        write_frame(&mut whole, b"hello").unwrap();
+        assert_eq!(
+            read_frame(&mut std::io::Cursor::new(whole)).unwrap(),
+            b"hello"
+        );
+    }
 
     #[test]
     fn tcp_endpoints_exchange_a_frame() {

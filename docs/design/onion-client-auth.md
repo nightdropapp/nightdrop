@@ -10,9 +10,11 @@ revoke-on-delete) all landed. Covered offline by
 Tor** by the `#[ignore]`d `tor_smoke::restricted_onion_admits_authorized_client_and_refuses_unauthorized`
 (2026-07-09, ~20 min): an authorized client is admitted to a restricted onion and delivers a frame; an
 unauthorized one is refused — exercising the **experimental** client-side `generate_service_discovery_key`
-path (§3) for real. See §9 for exactly what shipped. Grounded in the **arti 0.43** API present in the
-tree (`tor-hsservice` / `arti-client` / `tor-hsclient` 0.43.0). Relates to `ARCHITECTURE.md` §5–§6 and
-the anonymity/injection review (TODO #22).
+path (§3) for real. See §9 for exactly what shipped. Since 0.1.16 we mint the client key ourselves and
+hand it to arti with `insert_service_discovery_key`, so the secret can be kept in the sealed store with
+arti's keystore in memory (`onion-key-at-rest.md`). Written against the **arti 0.43** API
+(`tor-hsservice` / `arti-client` / `tor-hsclient` 0.43.0); the tree has since moved to 0.47. Relates to `ARCHITECTURE.md` §5–§6 and
+the anonymity/injection review (#22).
 
 ## 1. Goal
 
@@ -22,7 +24,7 @@ inbound frame). Client authorization means only holders of an authorized key can
 onion descriptor and reach us at all — defense-in-depth against:
 
 - **Control-frame / junk injection** at the transport (complements the now-authenticated control
-  plane, TODO #20, and the E2E ratchet — this stops the *connection*, not just the payload).
+  plane, #20, and the E2E ratchet — this stops the *connection*, not just the payload).
 - **Onion-address scanning / enumeration** and unsolicited-connection DoS.
 - **Presence probing** by a party who scraped your address from a leaked backup or a contact.
 
@@ -172,4 +174,4 @@ just one machine.
 
 This authorizes *reachability*. It does **not** replace: the E2E ratchet (content secrecy),
 authorization-before-first-message (§5, who becomes a contact), the authenticated control plane
-(TODO #20), or safety-number verification (#18, MITM detection at pairing). It sits alongside them.
+(#20), or safety-number verification (#18, MITM detection at pairing). It sits alongside them.

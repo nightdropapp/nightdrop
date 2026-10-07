@@ -124,6 +124,13 @@ One thing came out stronger than designed: §2 called for the sender to be *warn
 cannot burn. The core **refuses** instead, which is the same information delivered at the same
 moment with no way to ignore it.
 
+**Fixed 2026-10-07: an unconfirmed burn is never re-sent.** A message the peer's onion accepted but
+never receipted gets a relay copy after `RECEIPT_TIMEOUT` (30 s). That copy was an ordinary
+`Frame::Message` for burns too, and the recipient's burn tombstone clears the id that would have
+marked it a duplicate — so a burn revealed and deleted while its receipt was slow (a phone in Doze
+has taken ~45 s) came back as a **permanent** message. `sweep_unconfirmed` now skips burns: a lost
+burn stays lost, which is the direction this feature must fail in.
+
 **Not built:**
 
 *(Media landed the same day — see below.)*

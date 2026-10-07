@@ -1,9 +1,12 @@
-//! Signed relay directory (§3.1 / TODO #17 tail): rotate the relay set **without an app update**.
+//! Signed relay directory (§3.1 / #17): rotate the relay set **without an app update**.
 //!
 //! The operator holds an Ed25519 signing key; its public key is baked into the app
-//! ([`DIRECTORY_PUBKEY`]). A signed relay list is served by relays ([`Request::GetDirectory`]);
-//! the app fetches it on each relay poll, verifies the signature against the baked-in key, and
-//! merges the relays into the set it drains and pairs over. Because verification is against a key
+//! ([`DIRECTORY_PUBKEY`]). The signed relay list is published on our onion site
+//! (`website/relays.json`, [`SITE_PATH`]) and also served by relays
+//! ([`Request::GetDirectory`](crate::relay_client::Request::GetDirectory)). From 0.1.28 the app
+//! fetches it daily from the site, asking a relay only when the site cannot be reached; it
+//! verifies the signature against the baked-in key and merges the relays into the set it drains
+//! and pairs over. Because verification is against a key
 //! **only the operator holds**, a malicious relay cannot inject relays — and losing any single
 //! relay's onion key no longer strands users: publish a new signed list (with the new onion) from
 //! any live relay and every app picks it up.

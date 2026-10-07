@@ -1,6 +1,6 @@
 # Design draft — Safety numbers & key-change verification
 
-**Status:** ✅ **implemented** (TODO #18; see `ARCHITECTURE.md` §5b′). Kept here as the design
+**Status:** ✅ **implemented** (#18; see `ARCHITECTURE.md` §5b′). Kept here as the design
 record. Core: `Node::safety_number` / `safety_qr` / `verify_safety_qr` / `set_verified` +
 `Contact.verified`. UI: `app/lib/src/features/chat/verify_screen.dart`. Phase 3 (QR
 scan-to-verify) shipped in the first pass.
@@ -68,8 +68,8 @@ Per contact: `verified: bool` (default `false`), persisted.
   string* and a bool cross the FFI.
 
 ### 4.2 App (Dart)
-- Extend the existing chat app-bar **"Their identity"** action (`chat_screen.dart`,
-  `_showIdentity`) into a **Verify screen**: shows the safety number, a "Scan to verify" button
+- Extend the existing chat app-bar **"Their identity"** action (`chat_screen.dart`, then
+  `_showIdentity`; built as `features/chat/verify_screen.dart`) into a **Verify screen**: shows the safety number, a "Scan to verify" button
   (reuses the `flutter_zxing` scanner), a "Show my QR" (`qr_flutter`), and a **Mark verified**
   toggle.
 - **Badges:** a small ✓ on verified contacts (home list + chat title); an unobtrusive

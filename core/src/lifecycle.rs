@@ -90,8 +90,8 @@ impl StopSignal {
         true
     }
 
-    /// Whether the thread has exited. Test/diagnostic use.
-    #[cfg_attr(not(test), allow(dead_code))]
+    /// Whether the thread has exited.
+    #[cfg(test)]
     pub(crate) fn exited(&self) -> bool {
         self.lock().exited
     }

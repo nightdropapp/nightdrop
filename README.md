@@ -56,8 +56,9 @@ clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
 - **Authorization** (§5): a stranger can't message you until you approve the request.
 - **Persistence** (`core/storage`): encrypted-at-rest store; identity/sessions/history
   survive a restart.
-- **Backup** (§7): password-encrypted export/import (Argon2), device-to-device, and opt-in
-  server backup (24h default / 36h max) with **restore over Tor** (`restore_server_backup_tor`).
+- **Backup** (§7): password-encrypted export/import (Argon2) and opt-in server backup (24h
+  default / 36h max) with **restore over Tor** (`restore_server_backup_tor`). Direct
+  device-to-device transfer (§7b) is planned, not built.
   **Lite/Full** content modes, **single-chat scoped backup + merge-restore**, a per-chat
   **backed-up flag** driving a peer **transparency warning** and an un-backed **logout
   Closed-signal** (§11.6).

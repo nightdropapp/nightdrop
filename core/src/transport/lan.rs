@@ -127,10 +127,13 @@ fn write_frame(w: &mut impl Write, frame: &[u8]) -> Result<()> {
 }
 
 fn read_frame(r: &mut impl Read) -> Result<Vec<u8>> {
-    let mut len = [0u8; 4];
-    r.read_exact(&mut len)?;
-    let mut buf = vec![0u8; u32::from_be_bytes(len) as usize];
-    r.read_exact(&mut buf)?;
+    let mut prefix = [0u8; 4];
+    r.read_exact(&mut prefix)?;
+    let len = crate::wire::frame_len(prefix)?;
+    // Grow as bytes arrive rather than allocating the announced length up front.
+    let mut buf = Vec::new();
+    r.take(len as u64).read_to_end(&mut buf)?;
+    anyhow::ensure!(buf.len() == len, "connection closed mid-frame");
     Ok(buf)
 }
 

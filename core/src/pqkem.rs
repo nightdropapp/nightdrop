@@ -1,5 +1,5 @@
 //! Hybrid post-quantum key encapsulation for the short-code pairing handshake (`ARCHITECTURE.md`
-//! §5b, IMPROVEMENT_PLAN §4.1). The short-code rendezvous payload — the inviter's pre-keys and
+//! §5b). The short-code rendezvous payload — the inviter's pre-keys and
 //! onion address — travels through the **untrusted relay**, sealed under the SPAKE2 shared secret.
 //! SPAKE2 is classical, so a *harvest-now-decrypt-later* adversary who records the rendezvous today
 //! could recover that payload once a quantum computer breaks the classical handshake.
@@ -76,12 +76,12 @@ impl KemKeypair {
 }
 
 /// Combine the classical PAKE secret with the ML-KEM shared secret into the 32-byte payload-seal
-/// key (§4.1). HKDF-SHA256 over both inputs, domain-separated — the output is secure unless **both**
-/// the PAKE and ML-KEM are broken (hybrid).
+/// key (`docs/design/post-quantum.md` §4, option D). HKDF-SHA256 over both inputs,
+/// domain-separated — the output is secure unless **both** the PAKE and ML-KEM are broken (hybrid).
 pub fn hybrid_seal_key(pake_secret: &[u8], kem_secret: &[u8; 32]) -> [u8; 32] {
     use hkdf::Hkdf;
     use sha2::Sha256;
-    let mut ikm = Vec::with_capacity(pake_secret.len() + kem_secret.len());
+    let mut ikm = zeroize::Zeroizing::new(Vec::with_capacity(pake_secret.len() + kem_secret.len()));
     ikm.extend_from_slice(pake_secret);
     ikm.extend_from_slice(kem_secret);
     let hk = Hkdf::<Sha256>::new(Some(b"nightdrop/rendezvous/hybrid/v1"), &ikm);

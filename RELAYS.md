@@ -135,8 +135,13 @@ nightdrop-relay revoke-client alice-phone       # remove access later
 - The **first** authorization flips the relay PUBLIC→PRIVATE; restart it once to apply.
 - Later authorizations/revocations are picked up **live** (the directory is watched).
 - Revoking the **last** client returns it to PUBLIC (restart to apply).
-- arti stores each device's private key locally and presents it automatically on future dials, so
-  once authorized, the device just works. The key travels in the device's encrypted backup.
+- The device keeps its private key in its sealed store and presents it automatically on future
+  dials, so once authorized, the device just works; asking for the key again returns the same one.
+  The key travels in the device's encrypted backup. (From 0.1.16 to 0.1.28 the key was not kept
+  across a restart, so a device lost access on every launch; fixed in 0.1.29.)
+- **The app has no screen for this yet.** The key comes from `createRelayAccessKey` on the core's
+  FFI surface, which nothing in the UI calls — so today a private relay is usable only from a build
+  that wires it up.
 
 **How keys get to the operator (v1):** manually — the contact reads their `descriptor:x25519:…`
 string to you (in-chat, out-of-band, however), and you authorize it. This mirrors how self-hosted

@@ -12,6 +12,10 @@
 //!   it keeps the `.onion` **stable** across restarts.
 //! - `NIGHTDROP_RELAY_DEV` — enable the **dev flow-log** (§11.9): one metadata-only line per
 //!   operation to stdout + `relay.log` (never blob bytes). Leave unset in production.
+//! - `NIGHTDROP_RELAY_TUI` — the same events on a live terminal dashboard (`tui.rs`) instead of
+//!   stdout. Dev only, like the flow-log.
+//! - `NIGHTDROP_RELAY_EPHEMERAL` — keep the queue in RAM only; by default it persists to
+//!   `<state>/queue.json` so a restart does not drop queued mail.
 //!
 //! Operator subcommands (no Tor bootstrap):
 //! - `gen-directory-key` / `sign-directory` — the signed relay directory (§3.1).
@@ -93,16 +97,16 @@ fn main() -> anyhow::Result<()> {
     } else {
         (None, None)
     };
-    // Persist the store-and-forward queue to <state>/queue.json by default, so a relay
-    // restart or crash doesn't drop queued mail (only opaque, already-encrypted, time-boxed
-    // blobs under unlinkable handles are written; anything past its TTL is dropped on load).
-    // Set NIGHTDROP_RELAY_EPHEMERAL=1 for strict RAM-only (nothing but the onion key on disk).
     // Serve the operator-signed relay directory if one is present (§3.1). Drop the output of
     // `nightdrop-relay sign-directory` as <state>/relay-list.json; clients fetch + verify it.
     let directory = std::fs::read_to_string(format!("{state_dir}/relay-list.json"))
         .ok()
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
+    // Persist the store-and-forward queue to <state>/queue.json by default, so a relay
+    // restart or crash doesn't drop queued mail (only opaque, already-encrypted, time-boxed
+    // blobs under unlinkable handles are written; anything past its TTL is dropped on load).
+    // Set NIGHTDROP_RELAY_EPHEMERAL=1 for strict RAM-only (nothing but the onion key on disk).
     let base = if std::env::var("NIGHTDROP_RELAY_EPHEMERAL").is_ok() {
         RelayCore::new(logger)
     } else {
@@ -695,11 +699,6 @@ fn auth_dir() -> String {
     format!("{}/authorized-clients", state_dir())
 }
 
-/// Build the relay's onion-service config, enabling **restricted discovery** (private relay, §3.2)
-/// when the authorized-clients dir holds ≥1 key. An empty/absent dir yields a normal PUBLIC onion —
-/// we never restrict with an empty set (that would make the relay unreachable by everyone). The
-/// directory is watched, so authorizing/revoking after launch takes effect without a relaunch.
-/// Mirrors `nightdrop::transport::tor::onion_service_config` (kept in sync by construction).
 /// Introduction points for the relay's onion. arti defaults to 3; the relay is always-on
 /// infrastructure whose reachability everyone depends on, so it runs more — losing a couple of
 /// intro points (relay churn, transient failures) then still leaves the service reachable instead
@@ -769,6 +768,11 @@ fn reset_tor_guards(state_dir: &str) {
     );
 }
 
+/// Build the relay's onion-service config, enabling **restricted discovery** (private relay, §3.2)
+/// when the authorized-clients dir holds ≥1 key. An empty/absent dir yields a normal PUBLIC onion —
+/// we never restrict with an empty set (that would make the relay unreachable by everyone). The
+/// directory is watched, so authorizing/revoking after launch takes effect without a relaunch.
+/// Mirrors `nightdrop::transport::tor::onion_service_config` (kept in sync by construction).
 fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<OnionServiceConfig> {
     let mut builder = OnionServiceConfigBuilder::default();
     builder.nickname(nickname);
@@ -791,8 +795,9 @@ fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<On
 }
 
 /// `authorize-client <name> <descriptor:x25519:…>`: authorize one client to reach this (private)
-/// relay. `<name>` is any memorable label (revoke with the same one); `<key>` is the value the
-/// client's app shows under "relay access key". Restart the relay if this is the first client
+/// relay. `<name>` is any memorable label (revoke with the same one); `<key>` is the device's
+/// `descriptor:x25519:…` access key (`createRelayAccessKey` in the app's core — no screen shows it
+/// yet, see RELAYS.md). Restart the relay if this is the first client
 /// (that flips the onion from PUBLIC to PRIVATE); later authorizations are picked up live.
 fn authorize_client(args: &[String]) -> anyhow::Result<()> {
     if args.len() < 2 {

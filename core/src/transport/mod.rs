@@ -139,7 +139,7 @@ pub trait Transport: Send + Sync {
 
     /// Build a relay round-trip dialer for an **arbitrary** relay address, if this transport can
     /// reach relays by address over its anonymized path (Tor does). Returns `None` for transports
-    /// that don't (tests/TCP), so the node falls back to a direct [`RelayClient::new`]. This is
+    /// that don't (tests/TCP), so the node falls back to a direct [`RelayClient::new`](crate::relay_client::RelayClient::new). This is
     /// what lets a sender post to a *recipient-chosen* relay set (multi-relay mailboxes, #17).
     fn relay_dialer(&self, _addr: &str) -> Option<crate::relay_client::RelayDialer> {
         None
@@ -203,14 +203,12 @@ pub trait Transport: Send + Sync {
         None
     }
 
-    /// Onion client authorization (#22, Tor only). Generate (and store in arti's keymgr) *our*
-    /// client descriptor-encryption keypair for connecting to `peer_onion`'s (possibly restricted)
-    /// onion, returning the **public** key string (`descriptor:x25519:…`) to hand the peer so they
-    /// can authorize us. arti then uses the stored keypair automatically on future connects to that
-    /// onion. `None` for transports without restricted discovery (everything but Tor), so the node
-    /// simply skips the client-key exchange.
-    /// Mint our client descriptor-encryption key for `peer_onion`'s restricted service (#22),
-    /// returning the **public** half to hand the peer and the **secret** for us to keep.
+    /// Onion client authorization (#22, Tor only): mint our client descriptor-encryption key for
+    /// `peer_onion`'s (possibly restricted) service, returning the **public** half
+    /// (`descriptor:x25519:…`) to hand the peer so they can authorize us, and the **secret** for us
+    /// to keep. arti uses the key automatically on later connects to that onion. `None` for
+    /// transports without restricted discovery (everything but Tor), so the node simply skips the
+    /// client-key exchange.
     ///
     /// The secret comes back because we persist it ourselves now, sealed in the store, instead of
     /// leaving it in arti's on-disk keystore — where it sat unencrypted in a directory named after
@@ -243,14 +241,22 @@ pub trait Transport: Send + Sync {
     /// *other* direction from [`revoke_client`](Self::revoke_client), which only drops their
     /// permission to reach us.
     ///
-    /// This matters beyond tidiness: arti stores that key in a directory **named after the peer's
-    /// onion address**, so leaving it behind means a deleted chat's address stays on disk, and a
-    /// wiped identity leaves a recoverable contact list. The key is re-derivable by re-pairing, so
-    /// there is nothing to preserve and nothing to back up.
+    /// This mattered beyond tidiness while arti kept its keystore on disk (through 0.1.15): the key
+    /// sat in a directory **named after the peer's onion address**, so a deleted chat's address
+    /// stayed on disk and a wiped identity left a recoverable contact list. With the keystore in
+    /// memory it still drops the key for the rest of the run. The key is re-derivable by
+    /// re-pairing, so there is nothing to preserve.
     ///
     /// No-op where client auth isn't configured.
     fn forget_peer_key(&self, _peer_onion: &str) -> Result<()> {
         Ok(())
+    }
+
+    /// The secret that **is** this device's address — the 64-byte expanded onion identity — so a
+    /// backup can carry it and a restore come back on the same `.onion` (ARCHITECTURE.md §1a).
+    /// `None` for transports whose address is not a key (memory, TCP, LAN).
+    fn onion_identity(&self) -> Option<[u8; 64]> {
+        None
     }
 }
 
@@ -450,7 +456,8 @@ mod tests {
     /// `published()` answers a UI question and nothing else.
     ///
     /// It used to double as the guard-heal trigger, which cost a healthy guard set on every launch
-    /// (TODO.txt item 00): arti's aggregate onion-service state is bootstrap *progress*, so it read
+    /// (CLAUDE.md, "never trust a component's own opinion of its health"): arti's aggregate
+    /// onion-service state is bootstrap *progress*, so it read
     /// false on a service sitting on 8/8 HSDirs. The trigger that replaced it — asking arti whether
     /// its client was stuck — was then removed too, once a router-level block of every confirmed
     /// guard showed arti cold-bootstrapping back to `Running` in ~80 s on its own. Nothing in the

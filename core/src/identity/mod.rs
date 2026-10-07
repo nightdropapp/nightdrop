@@ -39,8 +39,9 @@ impl LocalIdentity {
         Self { account }
     }
 
-    /// Stable public identifier derived from the Ed25519 identity key — not a username.
-    /// Short and URL-safe so it can live in a `nightdrop://` link.
+    /// Stable public identifier derived from the Ed25519 identity key — not a username. A short
+    /// display handle ([`api::NightdropCore::identity`](crate::api::NightdropCore::identity)); pair
+    /// links carry the full Curve25519 key instead.
     pub fn id(&self) -> String {
         let ed = self.account.ed25519_key().as_bytes().to_vec();
         // First 8 bytes are plenty to disambiguate locally; full key is exchanged in

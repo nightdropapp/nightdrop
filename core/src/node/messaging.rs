@@ -1,5 +1,5 @@
 //! [`Node`] messaging: send/edit/unsend, media, the transport/relay pump, and the
-//! per-chat setters + time sweep. Split out of `node.rs` (IMPROVEMENT_PLAN.md §2.1).
+//! per-chat setters + time sweep. Split out of `node.rs`.
 use super::*;
 
 /// How long a directly-sent message may sit unconfirmed before [`Node::sweep_unconfirmed`] stops
@@ -24,6 +24,18 @@ pub(crate) const DIRECT_WEDGED_THRESHOLD: u32 = 3;
 /// UI to show a "wait for them to accept" toast rather than a generic failure.
 pub(crate) const AWAITING_APPROVAL: &str =
     "waiting for the other person to accept the chat before messages can be sent";
+
+/// Our own message that a deferred send's outcome refers to: a text message by its `msg_id`, an
+/// attachment (which has none) by its `transfer_id`. Never matches on an empty id, which every
+/// attachment and system notice carries.
+fn sent_message_mut<'a>(history: &'a mut [ChatMessage], id: &str) -> Option<&'a mut ChatMessage> {
+    if id.is_empty() {
+        return None;
+    }
+    history.iter_mut().find(|m| {
+        m.from_me && !m.system && (m.msg_id == id || (m.msg_id.is_empty() && m.transfer_id == id))
+    })
+}
 
 /// True from the moment a short-code join completes until the invitee approves (or their first
 /// message arrives). Sending in that window would queue a message the peer's core will drop as
@@ -149,12 +161,7 @@ impl Node {
         // opt-in server storage is enabled (§6). Fans out to the recipient's whole relay set (#17).
         let mut needs_relay_retry = false;
         if !delivered || chat.contact.remote_storage {
-            let mut targets = chat.contact.peer_relays.clone();
-            for r in &self.discovered_relays {
-                if !targets.contains(r) {
-                    targets.push(r.clone());
-                }
-            }
+            let targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
             match queue_on_relays(
                 self.transport.as_ref(),
                 &self.relay,
@@ -253,10 +260,19 @@ impl Node {
             }
             // Still unconfirmed *and* still present: an edit, an unsend or a receipt that landed
             // between the sweep and now all mean there is nothing to re-queue.
+            //
+            // Never a burn message. The copy below is an ordinary `Frame::Message`, and the
+            // recipient's burn tombstone clears the id that would mark it a duplicate — so a burn
+            // that was revealed and deleted while its receipt was slow (Doze has taken ~45 s,
+            // longer than RECEIPT_TIMEOUT) would come back as a permanent message. Re-sending it
+            // as a burn would resurrect it instead. A lost burn stays lost: that is the direction
+            // this feature has to fail in (`docs/design/burn-messages.md`).
             let Some(text) = chat
                 .history
                 .iter()
-                .find(|m| m.from_me && m.msg_id == a.msg_id && m.delivery == "sent")
+                .find(|m| {
+                    m.from_me && m.msg_id == a.msg_id && m.delivery == "sent" && m.burn_secs == 0
+                })
                 .map(|m| m.text.clone())
             else {
                 continue;
@@ -273,12 +289,7 @@ impl Node {
                 message: WireOlm::from_olm(&message),
             };
             let bytes = wire::encode(&frame);
-            let mut targets = chat.contact.peer_relays.clone();
-            for r in &self.discovered_relays {
-                if !targets.contains(r) {
-                    targets.push(r.clone());
-                }
-            }
+            let targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
             match queue_on_relays(
                 self.transport.as_ref(),
                 &self.relay,
@@ -393,12 +404,7 @@ impl Node {
             let Some(chat) = self.chats.get(&p.contact_id) else {
                 continue;
             };
-            let mut relay_targets = chat.contact.peer_relays.clone();
-            for r in &self.discovered_relays {
-                if !relay_targets.contains(r) {
-                    relay_targets.push(r.clone());
-                }
-            }
+            let relay_targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
             items.push(PlannedSend {
                 handle: self.post_handle(&p.contact_id),
                 contact_id: p.contact_id,
@@ -446,11 +452,7 @@ impl Node {
                     // rather than implying a copy exists.
                     chat.remote_storage_healthy = false;
                 }
-                if let Some(m) = chat
-                    .history
-                    .iter_mut()
-                    .find(|m| m.from_me && m.msg_id == o.msg_id)
-                {
+                if let Some(m) = sent_message_mut(&mut chat.history, &o.msg_id) {
                     m.delivery = if o.delivered { "sent" } else { "queued" }.to_string();
                 }
             }
@@ -487,7 +489,7 @@ impl Node {
         let mut affected = Vec::new();
         for p in std::mem::take(&mut self.pending_relay) {
             // Drop the retry if the chat was deleted/closed in the meantime.
-            let Some(mut peer_relays) = self
+            let Some(peer_relays) = self
                 .chats
                 .get(&p.contact_id)
                 .filter(|c| !c.closed)
@@ -495,11 +497,7 @@ impl Node {
             else {
                 continue;
             };
-            for r in &self.discovered_relays {
-                if !peer_relays.contains(r) {
-                    peer_relays.push(r.clone());
-                }
-            }
+            let peer_relays = relay_targets(&peer_relays, &self.discovered_relays);
             match queue_on_relays(
                 self.transport.as_ref(),
                 &self.relay,
@@ -712,7 +710,7 @@ impl Node {
     }
 
     /// Joiner side of short-code pairing: show a notice that nothing will be delivered until the
-    /// other person accepts the chat. Cleared by [`clear_system_notices`] on approval, or when the
+    /// other person accepts the chat. Cleared by [`clear_system_notices`](Self::clear_system_notices) on approval, or when the
     /// first message arrives (see the `Approved`/`Message` handlers).
     pub(crate) fn note_awaiting_approval(&mut self, contact_id: &str) {
         if let Some(chat) = self.chats.get_mut(contact_id) {
@@ -934,6 +932,26 @@ impl Node {
         }
         let from = self.identity_key();
         let transfer_id = crate::storage::random_password();
+        // The same gates as a text send, for every attachment (they used to apply to videos only).
+        {
+            let chat = self
+                .chats
+                .get(contact_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
+            if !chat.authorized {
+                anyhow::bail!("authorize this contact before messaging");
+            }
+            if awaiting_approval(chat) {
+                anyhow::bail!(AWAITING_APPROVAL);
+            }
+            if chat.closed {
+                anyhow::bail!("this chat was deleted; create a new one to keep talking");
+            }
+        }
+        // Off the lock on a real network, as `send` does: an attachment is tens of megabytes over
+        // Tor, and sending it inline held the core lock — every other call and the poller — for
+        // the whole upload. The poller sends these in order, the pre-signal first.
+        let deferred = !self.transport.is_synchronous();
 
         // 1) Fire the small "incoming" pre-signal FIRST (videos), before the heavy work on
         // the payload (sealing/encrypting 10s of MB) — so the receiver sees it right away.
@@ -943,15 +961,6 @@ impl Node {
                     .chats
                     .get_mut(contact_id)
                     .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
-                if !chat.authorized {
-                    anyhow::bail!("authorize this contact before messaging");
-                }
-                if awaiting_approval(chat) {
-                    anyhow::bail!(AWAITING_APPROVAL);
-                }
-                if chat.closed {
-                    anyhow::bail!("this chat was deleted; create a new one to keep talking");
-                }
                 let env = pack_media_incoming(&transfer_id, kind, mime, data.len() as u64, thumb);
                 let m = crypto::encrypt(&mut chat.session, &env)?;
                 let bytes = wire::encode(&Frame::MediaIncoming {
@@ -960,7 +969,14 @@ impl Node {
                 });
                 (chat.peer_address.clone(), bytes)
             };
-            if self.transport.send(&peer_address, &incoming).is_err() {
+            if deferred {
+                // An id no message carries, so its outcome updates nothing in history.
+                self.pending_sends.push(PendingRelaySend {
+                    contact_id: contact_id.to_string(),
+                    msg_id: format!("t:{transfer_id}:incoming"),
+                    bytes: incoming,
+                });
+            } else if self.transport.send(&peer_address, &incoming).is_err() {
                 let handle = self.post_handle(contact_id);
                 if let Some(relay) = &self.relay {
                     if let Ok(sealed) = relay_wrap(contact_id, &incoming) {
@@ -1007,6 +1023,29 @@ impl Node {
             )
         };
 
+        if deferred {
+            if let Some(chat) = self.chats.get_mut(contact_id) {
+                let mut msg = ChatMessage::media(
+                    true,
+                    kind.to_string(),
+                    mime.to_string(),
+                    media_id,
+                    data.len() as u64,
+                    transfer_id.clone(),
+                    thumb_id,
+                );
+                msg.delivery = "queued".to_string();
+                msg.burn_secs = burn_secs;
+                chat.history.push(msg);
+            }
+            // Media has no `msg_id`; its outcome is matched by `transfer_id` (`sent_message_mut`).
+            self.pending_sends.push(PendingRelaySend {
+                contact_id: contact_id.to_string(),
+                msg_id: transfer_id,
+                bytes: media_bytes,
+            });
+            return Ok(());
+        }
         let delivered = self.transport.send(&peer_address, &media_bytes).is_ok();
         self.note_direct_result(delivered);
         devlog!(
@@ -1143,8 +1182,17 @@ impl Node {
             if self.is_duplicate_user_frame(&frame, &bytes) {
                 continue;
             }
-            if let Some(msg) = self.process_frame(Some(from_address), frame)? {
-                received.push(msg);
+            // Skip a frame that will not process (a ratchet that cannot open it, a malformed
+            // envelope), as the relay drain does. Returning the error aborted the poll tick that
+            // called this — *before* it applied the relay harvest it was holding, whose blobs had
+            // already been taken off the relay destructively, so one bad direct frame lost every
+            // relay message in that round.
+            match self.process_frame(Some(from_address), frame) {
+                Ok(Some(msg)) => received.push(msg),
+                Ok(None) => {}
+                Err(_) => crate::diag!(
+                    "pump: a frame from a peer could not be processed — skipped, the rest go on"
+                ),
             }
         }
         // Per-message delivery receipts for anything that arrived over the DIRECT path. Without
@@ -1169,7 +1217,7 @@ impl Node {
     /// I/O. The background poller instead runs the drain **off** the lock (§1.5.2); see
     /// [`relay_drain_plan`](Self::relay_drain_plan) / [`drain_relay_mailboxes`] /
     /// [`apply_relay_harvest`](Self::apply_relay_harvest).
-    #[allow(dead_code)] // used by the node tests; the app path goes through the split phases
+    #[cfg(test)]
     pub fn poll_relay(&mut self) -> Result<Vec<(String, String)>> {
         let Some(plan) = self.relay_drain_plan() else {
             return Ok(Vec::new());
@@ -1246,8 +1294,8 @@ impl Node {
     }
 
     /// Apply blobs drained lock-free by [`drain_relay_mailboxes`]: record relay reachability,
-    /// de-duplicate fan-out copies by content hash (both within this cycle and across cycles via
-    /// `seen_relay_blobs`), unseal + process each frame, and send silent delivery acks. Same
+    /// de-duplicate fan-out copies by content hash (within this cycle and across cycles, and
+    /// against copies that arrived directly, via `seen_frames`), unseal + process each frame, and send silent delivery acks. Same
     /// effects as the combined path — only the network **reads** were hoisted off the lock (§1.5.2).
     pub(crate) fn apply_relay_harvest(
         &mut self,
@@ -1410,8 +1458,6 @@ impl Node {
         std::mem::take(&mut self.receipt_sends)
     }
 
-    /// Set our per-chat display name (§4). Blank falls back to [`DEFAULT_NAME`]; on a live
-    /// chat the new name is also sent E2E-encrypted so the peer relabels our messages.
     /// Give this contact a nickname of your own. **Never sent** — unlike `set_my_name`, nothing
     /// goes on the wire: only you know that this identity key is the person you met, and the peer
     /// cannot supply that knowledge. Empty clears it, falling back to their chosen name plus their
@@ -1426,6 +1472,8 @@ impl Node {
         Ok(())
     }
 
+    /// Set our per-chat display name (§4). Blank falls back to [`DEFAULT_NAME`]; on a live
+    /// chat the new name is also sent E2E-encrypted so the peer relabels our messages.
     pub fn set_my_name(&mut self, contact_id: &str, name: &str) -> Result<()> {
         let from = self.identity_key();
         let resolved = if name.trim().is_empty() {
@@ -1494,42 +1542,71 @@ impl Node {
     /// E2E `Address` frame (best-effort, relay fallback), so a rebuilt Tor keystore — which
     /// gives us a new onion — doesn't orphan our contacts. Records the announced address so we
     /// don't re-announce the same one. Returns how many contacts we notified.
-    #[allow(dead_code)] // driven by the Tor-backed api path (`new_tor`) + tests
     pub fn announce_address(&mut self) -> usize {
-        let from = self.identity_key();
         let address = self.address();
-        // Gather targets first (borrow ends), then send — deliver needs &self and encrypt &mut.
-        let targets: Vec<String> = self
-            .chats
-            .iter()
-            .filter(|(_, c)| c.authorized && !c.closed)
-            .map(|(id, _)| id.clone())
-            .collect();
         let mut sent = 0;
-        for contact_id in &targets {
-            let Some(chat) = self.chats.get_mut(contact_id) else {
-                continue;
-            };
-            let Ok(message) = crypto::encrypt(&mut chat.session, address.as_bytes()) else {
-                continue; // unusable session: nothing can be sent on it
-            };
-            let frame = Frame::Address {
-                from: from.clone(),
-                message: WireOlm::from_olm(&message),
-            };
-            let peer_address = chat.peer_address.clone();
-            let _ = self.deliver(&peer_address, contact_id, &frame);
-            sent += 1;
+        for contact_id in self.address_targets() {
+            if self.send_address_to(&contact_id).is_some() {
+                sent += 1;
+            }
         }
         self.restored_address = address;
         sent
+    }
+
+    /// Tell every established contact our address once per run, whether or not it changed.
+    ///
+    /// [`announce_address_if_changed`](Self::announce_address_if_changed) can only see a change
+    /// against the address it last persisted, so a change it missed is never repaired by it: a
+    /// file-backup restore from 0.1.16–0.1.28 came back on a new onion without announcing it,
+    /// and the save that followed made the new address the baseline
+    /// (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`). Receivers ignore an
+    /// address they already hold, silently. Per run and success-gated, like
+    /// [`announce_version`](Self::announce_version): one small frame per contact per launch.
+    pub fn reannounce_address(&mut self) {
+        if !self.announce_ready() {
+            return;
+        }
+        let pending: Vec<String> = self
+            .address_targets()
+            .into_iter()
+            .filter(|id| !self.address_announced.contains(id))
+            .collect();
+        for contact_id in pending {
+            if self.send_address_to(&contact_id) == Some(true) {
+                self.address_announced.insert(contact_id);
+            }
+        }
+    }
+
+    /// Chats an `Address` frame goes to: authorized and open.
+    fn address_targets(&self) -> Vec<String> {
+        self.chats
+            .iter()
+            .filter(|(_, c)| c.authorized && !c.closed)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
+    /// Encrypt our current address for one chat and send it (relay fallback in `deliver`).
+    /// `None` if the session cannot encrypt; otherwise whether delivery succeeded.
+    fn send_address_to(&mut self, contact_id: &str) -> Option<bool> {
+        let from = self.identity_key();
+        let address = self.address();
+        let chat = self.chats.get_mut(contact_id)?;
+        let message = crypto::encrypt(&mut chat.session, address.as_bytes()).ok()?;
+        let frame = Frame::Address {
+            from,
+            message: WireOlm::from_olm(&message),
+        };
+        let peer_address = chat.peer_address.clone();
+        Some(self.deliver(&peer_address, contact_id, &frame).is_ok())
     }
 
     /// If the live transport address differs from the one we last persisted (a changed onion,
     /// e.g. after a lost/rebuilt keystore), announce the new address to contacts (#11). A
     /// brand-new node (no prior address) or an unchanged address does nothing. Returns whether
     /// an announcement was sent.
-    #[allow(dead_code)] // driven by the Tor-backed api path (`new_tor`) + tests
     pub fn announce_address_if_changed(&mut self) -> bool {
         let current = self.address();
         if current.is_empty()
@@ -1562,6 +1639,10 @@ impl Node {
             .iter()
             .map(|(id, c)| (id.clone(), c.client_key, c.peer_address.clone()))
             .collect();
+        // Our PRIVATE-relay access keys (§3.2): without these the relay refuses us after a restart.
+        for (relay, _, secret) in &self.relay_keys {
+            let _ = self.transport.insert_client_key(relay, secret);
+        }
         let mut reannounced = 0usize;
         for (id, key, addr) in saved {
             if addr.is_empty() {
@@ -1590,30 +1671,44 @@ impl Node {
 
     /// Tell every established contact our current advertised extra relay set (#17), so their
     /// offline mail to us fans out to those relays too. E2E `Relays` frame, best-effort (relay
-    /// fallback). Called after the user edits their relays.
+    /// fallback). Called after the user edits their relays; a contact paired later is told at
+    /// pairing ([`announce_relays_to`](Self::announce_relays_to)).
     pub fn announce_relays(&mut self) {
+        let targets: Vec<String> = self.chats.keys().cloned().collect();
+        for contact_id in &targets {
+            self.send_relays_to(contact_id);
+        }
+    }
+
+    /// Tell one newly established contact our extra relay set. The broadcast above only runs on an
+    /// edit, so without this a contact paired after the user added a relay never learned it, and
+    /// their mail to us never reached it. Nothing to say while we advertise no extras: an empty
+    /// set is what the peer already assumes.
+    pub(crate) fn announce_relays_to(&mut self, contact_id: &str) {
+        if !self.my_relays.is_empty() {
+            self.send_relays_to(contact_id);
+        }
+    }
+
+    /// One `Relays` frame to an approved, open chat (the peer drops it from anyone else).
+    fn send_relays_to(&mut self, contact_id: &str) {
         let from = self.identity_key();
         let list = self.my_relays.join(",");
-        let targets: Vec<String> = self
-            .chats
-            .iter()
-            .filter(|(_, c)| c.authorized && !c.closed)
-            .map(|(id, _)| id.clone())
-            .collect();
-        for contact_id in &targets {
-            let Some(chat) = self.chats.get_mut(contact_id) else {
-                continue;
-            };
-            let Ok(message) = crypto::encrypt(&mut chat.session, list.as_bytes()) else {
-                continue; // unusable session: nothing can be sent on it
-            };
-            let frame = Frame::Relays {
-                from: from.clone(),
-                message: WireOlm::from_olm(&message),
-            };
-            let peer_address = chat.peer_address.clone();
-            let _ = self.deliver(&peer_address, contact_id, &frame);
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return;
+        };
+        if !chat.authorized || chat.closed {
+            return;
         }
+        let Ok(message) = crypto::encrypt(&mut chat.session, list.as_bytes()) else {
+            return; // unusable session: nothing can be sent on it
+        };
+        let frame = Frame::Relays {
+            from,
+            message: WireOlm::from_olm(&message),
+        };
+        let peer_address = chat.peer_address.clone();
+        let _ = self.deliver(&peer_address, contact_id, &frame);
     }
 
     /// Set this chat's disappearing-messages timer (`secs`, 0 = off). Messages older than the
@@ -1758,10 +1853,10 @@ impl Node {
     /// * **viewed** — `viewed_at + burn_secs`, the countdown the recipient watched;
     /// * **unviewed** — `at + RELAY_TTL` (24h), so a message nobody opened does not sit for ever.
     ///
-    /// The **sender's own copy** burns on the 24h horizon only. It cannot burn on view, because
-    /// there is deliberately no read receipt (`burn-messages.md` §3) — so the sender's copy has a
-    /// fixed maximum life rather than a mirrored countdown. Users are told this rather than left
-    /// to infer that their copy vanished when the other person looked.
+    /// The **sender's own copy** burns on the 24h horizon, unless the recipient has opted in to
+    /// burn-view receipts (`burn-messages.md` §8): then their `Frame::Viewed` removes it when they
+    /// open it (the `Viewed` handler, not this sweep). Without that opt-in there is no read
+    /// receipt, so the sender's copy has a fixed maximum life rather than a mirrored countdown.
     pub fn sweep_burns(&mut self) -> bool {
         let now = crate::api::now_secs();
         let unviewed_horizon = RELAY_TTL.as_secs();

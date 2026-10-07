@@ -526,6 +526,48 @@ fn scoped_chat_backup_merges_into_a_lite_restore() {
 }
 
 #[test]
+fn a_chat_backup_merges_only_into_its_own_identity_and_within_the_contact_cap() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let alice_contact = bob
+        .connect_with_bundle("alice", &alice.publish_bundle())
+        .unwrap();
+    alice.pump().unwrap();
+    let pw = crate::storage::random_password();
+    let scoped = bob.backup_chat(&alice_contact, &pw, true).unwrap();
+
+    // Someone else's chat would go out under a key its contact never paired with.
+    let mut stranger = Node::new(Box::new(net.endpoint("stranger")));
+    let err = stranger
+        .merge_from_backup(&scoped, &pw)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("different identity"), "{err}");
+    assert!(stranger.contacts().is_empty());
+
+    // The same identity, already at the cap, cannot grow past it by merging.
+    let lite_pw = crate::storage::random_password();
+    let lite = bob.backup_with_mode(&lite_pw, false).unwrap();
+    let mut bob2 =
+        Node::restore_from_backup(&lite, &lite_pw, Box::new(net.endpoint("bob2"))).unwrap();
+    bob2.delete_chat(&alice_contact).unwrap();
+    let mut peers = Vec::new();
+    for i in 0..super::mailbox::MAX_CONTACTS {
+        let mut peer = Node::new(Box::new(net.endpoint(&format!("p{i}"))));
+        bob2.connect_with_bundle(&format!("p{i}"), &peer.publish_bundle())
+            .unwrap();
+        peers.push(peer);
+    }
+    let err = bob2
+        .merge_from_backup(&scoped, &pw)
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("50 contacts"), "{err}");
+    assert!(bob2.messages(&alice_contact).is_empty());
+}
+
+#[test]
 fn full_backup_signals_the_peer_and_logout_respects_the_flag() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
@@ -1012,6 +1054,122 @@ fn approving_twice_does_not_resend_approval() {
         .filter(|m| m.system && m.text.contains("approved"))
         .count();
     assert_eq!(approvals, 1, "second approval must not resend");
+}
+
+/// A memory transport that reports itself asynchronous, as Tor does, so sends take the deferred,
+/// off-lock path.
+struct AsyncMem(crate::transport::MemoryTransport);
+
+impl crate::transport::Transport for AsyncMem {
+    fn address(&self) -> String {
+        self.0.address()
+    }
+    fn is_synchronous(&self) -> bool {
+        false
+    }
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        self.0.send(peer, frame)
+    }
+    fn try_recv(&self) -> Option<(String, Vec<u8>)> {
+        self.0.try_recv()
+    }
+}
+
+/// An attachment over a real network goes through the poller's off-lock send path, as text does:
+/// sent inline it held the core lock — every other call and the poller — for a whole Tor upload.
+#[test]
+fn media_on_a_real_network_is_deferred_off_the_lock_and_delivered_in_order() {
+    let key: StoreKey = [5u8; 32];
+    let dir = std::env::temp_dir().join(format!("nightdrop-media-defer-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(AsyncMem(net.endpoint("alice"))));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}-a", dir.display()), key);
+    bob.set_media_store(format!("{}-b", dir.display()), key);
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    alice
+        .send_media(
+            &bob_contact,
+            b"a small video",
+            "video/mp4",
+            "video",
+            b"thumb",
+        )
+        .unwrap();
+    let mine = |n: &Node| {
+        n.messages(&bob_contact)
+            .into_iter()
+            .rfind(|m| m.from_me && !m.system)
+            .unwrap()
+    };
+    assert_eq!(
+        mine(&alice).delivery,
+        "queued",
+        "stored at once, not sent inline"
+    );
+    assert_eq!(
+        alice.pending_sends.len(),
+        2,
+        "the pre-signal and the payload, in that order"
+    );
+    let early = bob.pump().unwrap();
+    let early_msgs: Vec<(bool, String, String)> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .map(|m| (m.system, m.kind, m.text))
+        .collect();
+    assert!(
+        early_msgs
+            .iter()
+            .all(|(system, kind, _)| *system || kind != "video"),
+        "nothing went out inline: {early:?} {early_msgs:?}"
+    );
+
+    let plan = alice.plan_pending_sends().unwrap();
+    let outcomes = crate::node::execute_sends(&plan);
+    alice.apply_send_outcomes(outcomes);
+    assert_eq!(
+        mine(&alice).delivery,
+        "sent",
+        "the outcome found the attachment by its transfer id"
+    );
+
+    bob.pump().unwrap();
+    let got = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .find(|m| !m.from_me && m.kind == "video" && !m.media_id.is_empty())
+        .expect("the attachment arrived");
+    assert_eq!(bob.media_bytes(&got.media_id).unwrap(), b"a small video");
+    let _ = std::fs::remove_dir_all(format!("{}-a", dir.display()));
+    let _ = std::fs::remove_dir_all(format!("{}-b", dir.display()));
+}
+
+/// The text-send gates apply to every attachment — they used to apply to videos only.
+#[test]
+fn an_image_cannot_be_sent_into_a_deleted_chat() {
+    let key: StoreKey = [6u8; 32];
+    let dir = std::env::temp_dir().join(format!("nightdrop-media-gate-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(dir.display().to_string(), key);
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+    alice.chats.get_mut(&bob_contact).unwrap().closed = true;
+
+    let err = alice
+        .send_media(&bob_contact, b"img", "image/png", "image", b"")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("deleted"), "{err}");
+    let _ = std::fs::remove_dir_all(&dir);
 }
 
 #[test]
@@ -1822,11 +1980,11 @@ fn a_direct_message_is_only_delivered_once_the_peer_receipts_it() {
 
 /// Taking a blob off the relay is not the same as accepting it, and the delivery ack must say so.
 ///
-/// `Ack` means "I drained your mailbox" and `flip_queued_delivered` promotes every queued message
-/// on it, so acking a frame we then DROPPED reports "Delivered" for a message the peer will never
-/// see. The sender's own diagnostics call this out — "DROPPED (the sender believes it was
-/// delivered)" — and it is the exact lie `Frame::Delivered` was added to end, arriving by the back
-/// door. The ack is now sent only for frames that actually produced a message.
+/// `Ack` means only "I drained your mailbox". It used to promote every queued message, so acking a
+/// frame we then DROPPED reported "Delivered" for a message the peer would never see — the exact
+/// lie `Frame::Delivered` was added to end, arriving by the back door. Now `Ack` promotes nothing
+/// (ARCHITECTURE.md §11.3) and a receipt is sent only for a frame that produced a message; this
+/// pins both from the sender's side.
 #[test]
 fn a_dropped_relay_message_is_not_acked_as_delivered() {
     let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
@@ -1884,11 +2042,7 @@ fn a_dropped_relay_message_is_not_acked_as_delivered() {
     assert_eq!(after.delivery, "queued", "it is still sitting on the relay");
 
     // Control: once Bob is approved, a message that really lands still flips to delivered, so the
-    // assertion above is about the drop and not about acks being broken outright.
-    //
-    // NOTE: this also promotes the dropped message above, because `Ack` carries no message id and
-    // `flip_queued_delivered` promotes the lot. That residual is inherent to the coarse ack and is
-    // why `Frame::Delivered` exists; see TODO.txt.
+    // assertion above is about the drop and not about receipts being broken outright.
     alice.authorize(&bob_contact, true).unwrap();
     bob.pump().unwrap();
     bob.send(&alice_contact, "second try").unwrap();
@@ -1976,6 +2130,42 @@ fn nothing_but_a_receipt_marks_a_message_delivered() {
 ///
 /// Also covers the other half — the peer eventually getting *both* copies must not show the message
 /// twice, and must still receipt the duplicate, or the sender would retry a message it already has.
+#[test]
+fn an_unacknowledged_burn_message_is_never_re_queued_as_a_permanent_one() {
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+    alice
+        .chats
+        .get_mut(&bob_contact)
+        .unwrap()
+        .contact
+        .peer_supports_burn = Some(true);
+
+    // Handed over, never receipted — as when the receipt is slower than RECEIPT_TIMEOUT.
+    alice.send_burn(&bob_contact, "gone in ten", 10).unwrap();
+    alice.backdate_unconfirmed(crate::node::messaging::RECEIPT_TIMEOUT.as_secs() + 1);
+    assert!(
+        alice.sweep_unconfirmed().is_empty(),
+        "a burn is never re-queued"
+    );
+    bob.poll_relay().unwrap();
+    assert!(
+        bob.messages(&alice_contact)
+            .iter()
+            .all(|m| m.system || m.text != "gone in ten"),
+        "no plain copy reached the relay"
+    );
+}
+
 #[test]
 fn an_unacknowledged_message_is_re_queued_on_the_relay_and_deduped_on_arrival() {
     let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
@@ -2131,5 +2321,53 @@ fn the_direct_path_is_wedged_only_when_nothing_ever_gets_through() {
     assert!(
         !alice.direct_path_wedged(),
         "one delivered message proves the path; an offline contact must not trigger a teardown"
+    );
+}
+
+#[test]
+fn a_private_relay_access_key_is_stable_and_survives_a_restart() {
+    use crate::storage;
+    // The operator authorizes one public key. With arti's keystore in memory, a key that was not
+    // kept would be gone after a restart, and the next request would mint a different one the
+    // relay refuses — locking this device out of its private relay on every launch.
+    let key: storage::StoreKey = [22u8; 32];
+    let net = MemoryNetwork::new();
+    let minted = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut alice = Node::new(Box::new(KeyRestoreSpy {
+        inner: net.endpoint("alice"),
+        inserted: std::sync::Arc::default(),
+        minted: std::sync::Arc::clone(&minted),
+    }));
+    let first = alice.relay_access_key("relay.onion").unwrap().unwrap();
+    let again = alice.relay_access_key("relay.onion").unwrap().unwrap();
+    assert_eq!(first, again, "a repeat request returns the authorized key");
+    assert_eq!(minted.lock().unwrap().len(), 1, "and does not mint another");
+
+    let state = alice.export(&key);
+    let inserted2: InsertLog = std::sync::Arc::default();
+    let minted2 = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let mut alice2 = Node::restore(
+        &state,
+        Box::new(KeyRestoreSpy {
+            inner: net.endpoint("alice2"),
+            inserted: std::sync::Arc::clone(&inserted2),
+            minted: std::sync::Arc::clone(&minted2),
+        }),
+        &key,
+    )
+    .unwrap();
+    alice2.restore_client_keys();
+    assert_eq!(
+        inserted2.lock().unwrap().as_slice(),
+        &[("relay.onion".to_string(), [1u8; 32])],
+        "the saved secret goes back into the keystore at startup"
+    );
+    assert_eq!(
+        alice2.relay_access_key("relay.onion").unwrap().unwrap(),
+        first
+    );
+    assert!(
+        minted2.lock().unwrap().is_empty(),
+        "nothing re-minted after the restart"
     );
 }

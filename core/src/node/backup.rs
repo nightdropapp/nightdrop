@@ -14,90 +14,97 @@ fn now_unix() -> u64 {
 impl Node {
     /// Capture the full device state for at-rest persistence (`storage::`). Identity and
     /// sessions are vodozemac-encrypted under `key`; the rest is sealed by the caller.
-    // App-level save/load is wired once the real transport replaces the demo peer; the
-    // mechanism is exercised by tests now.
-    #[allow(dead_code)]
     pub fn export(&self, key: &StoreKey) -> PersistedState {
         let account_pickle = self.identity.account().pickle().encrypt(key);
         let chats = self
             .chats
             .values()
-            .map(|chat| PersistedChat {
-                contact_id: chat.contact.id.clone(),
-                peer_address: chat.peer_address.clone(),
-                their_name: chat.contact.their_name.clone(),
-                my_name: chat.contact.my_name.clone(),
-                remote_storage: chat.contact.remote_storage,
-                disappearing_secs: chat.contact.disappearing_secs,
-                session_pickle: chat.session.pickle().encrypt(key),
-                history: chat
-                    .history
-                    .iter()
-                    .map(|m| PersistedMessage {
-                        from_me: m.from_me,
-                        text: m.text.clone(),
-                        system: m.system,
-                        msg_id: m.msg_id.clone(),
-                        edited: m.edited,
-                        at: m.at,
-                        delivery: m.delivery.clone(),
-                        kind: m.kind.clone(),
-                        mime: m.mime.clone(),
-                        media_id: m.media_id.clone(),
-                        media_size: m.media_size,
-                        transfer_id: m.transfer_id.clone(),
-                        thumb_id: m.thumb_id.clone(),
-                        burn_secs: m.burn_secs,
-                        viewed_at: m.viewed_at,
-                    })
-                    .collect(),
-                closed: chat.closed,
-                backed_up: chat.contact.backed_up,
-                peer_backed_up: chat.contact.peer_backed_up,
-                verified: chat.contact.verified,
-                peer_verified: chat.contact.peer_verified,
-                peer_captures_silent: chat.contact.peer_captures_silent,
-                peer_relays: chat.contact.peer_relays.clone(),
-                peer_supports_burn: chat.contact.peer_supports_burn,
-                peer_app_version: chat.contact.peer_app_version.clone(),
-                mailbox_own: super::mailbox::to_persisted(&chat.mailbox).0,
-                mailbox_peer: super::mailbox::to_persisted(&chat.mailbox).1,
-                mailbox_peer_confirmed: super::mailbox::to_persisted(&chat.mailbox).2,
-                mailbox_confirm_sent: super::mailbox::to_persisted(&chat.mailbox).3,
-                mailbox_announced_at: super::mailbox::to_persisted(&chat.mailbox).4,
-                // Persist recall receipts for still-queued messages so an edit/unsend can pull an
-                // undelivered blob off the relay even after a restart (§1.1). Flatten the
-                // by-msg_id map into a list carrying its target.
-                queued_receipts: chat
-                    .relay_receipts
-                    .iter()
-                    .flat_map(|(target, receipts)| {
-                        receipts
-                            .iter()
-                            .map(move |r| crate::storage::PersistedReceipt {
-                                target_msg_id: target.clone(),
-                                relay_addr: r.relay_addr.clone(),
-                                handle: r.handle.clone(),
-                                msg_id: r.msg_id.clone(),
-                                delete_token: r.delete_token.clone(),
-                            })
-                    })
-                    .collect(),
-                last_seen_unix: chat.last_seen,
-                client_key: chat.client_key.map(|k| {
-                    use base64::Engine as _;
-                    base64::engine::general_purpose::STANDARD.encode(k)
-                }),
-                local_name: chat.local_name.clone(),
-                authorized: chat.authorized,
+            .map(|chat| {
+                let (
+                    mailbox_own,
+                    mailbox_peer,
+                    mailbox_peer_confirmed,
+                    mailbox_confirm_sent,
+                    mailbox_announced_at,
+                ) = super::mailbox::to_persisted(&chat.mailbox);
+                PersistedChat {
+                    contact_id: chat.contact.id.clone(),
+                    peer_address: chat.peer_address.clone(),
+                    their_name: chat.contact.their_name.clone(),
+                    my_name: chat.contact.my_name.clone(),
+                    remote_storage: chat.contact.remote_storage,
+                    disappearing_secs: chat.contact.disappearing_secs,
+                    session_pickle: chat.session.pickle().encrypt(key),
+                    history: chat
+                        .history
+                        .iter()
+                        .map(|m| PersistedMessage {
+                            from_me: m.from_me,
+                            text: m.text.clone(),
+                            system: m.system,
+                            msg_id: m.msg_id.clone(),
+                            edited: m.edited,
+                            at: m.at,
+                            delivery: m.delivery.clone(),
+                            kind: m.kind.clone(),
+                            mime: m.mime.clone(),
+                            media_id: m.media_id.clone(),
+                            media_size: m.media_size,
+                            transfer_id: m.transfer_id.clone(),
+                            thumb_id: m.thumb_id.clone(),
+                            burn_secs: m.burn_secs,
+                            viewed_at: m.viewed_at,
+                        })
+                        .collect(),
+                    closed: chat.closed,
+                    backed_up: chat.contact.backed_up,
+                    peer_backed_up: chat.contact.peer_backed_up,
+                    verified: chat.contact.verified,
+                    peer_verified: chat.contact.peer_verified,
+                    peer_captures_silent: chat.contact.peer_captures_silent,
+                    peer_relays: chat.contact.peer_relays.clone(),
+                    peer_supports_burn: chat.contact.peer_supports_burn,
+                    peer_app_version: chat.contact.peer_app_version.clone(),
+                    mailbox_own,
+                    mailbox_peer,
+                    mailbox_peer_confirmed,
+                    mailbox_confirm_sent,
+                    mailbox_announced_at,
+                    // Persist recall receipts for still-queued messages so an edit/unsend can pull an
+                    // undelivered blob off the relay even after a restart (§1.1). Flatten the
+                    // by-msg_id map into a list carrying its target.
+                    queued_receipts: chat
+                        .relay_receipts
+                        .iter()
+                        .flat_map(|(target, receipts)| {
+                            receipts
+                                .iter()
+                                .map(move |r| crate::storage::PersistedReceipt {
+                                    target_msg_id: target.clone(),
+                                    relay_addr: r.relay_addr.clone(),
+                                    handle: r.handle.clone(),
+                                    msg_id: r.msg_id.clone(),
+                                    delete_token: r.delete_token.clone(),
+                                })
+                        })
+                        .collect(),
+                    last_seen_unix: chat.last_seen,
+                    client_key: chat.client_key.map(|k| {
+                        use base64::Engine as _;
+                        base64::engine::general_purpose::STANDARD.encode(k)
+                    }),
+                    local_name: chat.local_name.clone(),
+                    authorized: chat.authorized,
+                }
             })
             .collect();
         PersistedState {
             account_pickle,
             address: self.address(),
             chats,
-            media: Vec::new(),      // populated only for backups (see `backup`)
-            onion_keys: Vec::new(), // populated only for backups (see `backup`)
+            media: Vec::new(), // populated only for backups (see `backup_with_mode`)
+            onion_keys: Vec::new(), // populated only for backups (see `backup_with_mode`)
+            onion_identity: None, // likewise
             my_relays: self.my_relays.clone(),
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
@@ -105,6 +112,20 @@ impl Node {
             pending_control: self.export_pending_control(),
             pending_invites: self.export_pending_invites(),
             poll_seed: Some(base64_handle(&self.poll_seed)),
+            relay_keys: self
+                .relay_keys
+                .iter()
+                .map(
+                    |(relay, public, secret)| crate::storage::PersistedRelayKey {
+                        relay: relay.clone(),
+                        public: public.clone(),
+                        secret: {
+                            use base64::Engine as _;
+                            base64::engine::general_purpose::STANDARD.encode(secret)
+                        },
+                    },
+                )
+                .collect(),
         }
     }
 
@@ -126,6 +147,7 @@ impl Node {
                     payload: p.payload.clone(),
                     ttl_secs: p.ttl.as_secs(),
                     expires_unix: now_unix().saturating_add(remaining.as_secs()),
+                    openers: p.openers.iter().map(hex_32).collect(),
                 })
             })
             .collect()
@@ -150,6 +172,7 @@ impl Node {
                     payload: p.payload.clone(),
                     ttl: Duration::from_secs(p.ttl_secs),
                     expiry: Instant::now() + Duration::from_secs(remaining),
+                    openers: p.openers.iter().filter_map(|h| unhex_32(h)).collect(),
                 })
             })
             .collect()
@@ -192,7 +215,7 @@ impl Node {
             .collect()
     }
 
-    /// Read arti's onion keystore (`<state_dir>/arti-state/keystore`) into base64 [`PersistedFile`]s
+    /// Read arti's onion keystore (`<state_dir>/arti-state/keystore`) into base64 [`PersistedFile`](crate::storage::PersistedFile)s
     /// so a backup reproduces the same `.onion`. Empty if Tor state isn't known or absent.
     fn collect_onion_keys(&self) -> Vec<crate::storage::PersistedFile> {
         use base64::Engine as _;
@@ -228,7 +251,7 @@ impl Node {
     /// Write the onion keystore from a restored backup into `<state_dir>/arti-state/keystore`
     /// (key files mode 0600) so the next Tor bootstrap publishes the same `.onion`. Must run
     /// *before* the Tor transport bootstraps.
-    #[allow(dead_code)] // used by the Tor-backed api path (`--features tor`)
+    #[cfg_attr(not(feature = "tor"), allow(dead_code))]
     pub fn write_onion_keys(
         files: &[crate::storage::PersistedFile],
         state_dir: &str,
@@ -285,7 +308,6 @@ impl Node {
 
     /// Rebuild a node from persisted state onto a (fresh) transport, restoring the
     /// identity, every session, and history so the app resumes after a restart.
-    #[allow(dead_code)]
     pub fn restore(
         state: &PersistedState,
         transport: Box<dyn Transport>,
@@ -304,6 +326,19 @@ impl Node {
         node.discovered_relays = state.discovered_relays.clone();
         node.directory_version = state.directory_version;
         node.directory_next_check = state.directory_next_check;
+        node.relay_keys = state
+            .relay_keys
+            .iter()
+            .filter_map(|k| {
+                use base64::Engine as _;
+                let secret = base64::engine::general_purpose::STANDARD
+                    .decode(&k.secret)
+                    .ok()?
+                    .try_into()
+                    .ok()?;
+                Some((k.relay.clone(), k.public.clone(), secret))
+            })
+            .collect();
         // Keep the polling partition fixed across the restart (`mailbox.rs`). An older state file
         // has none: the fresh random seed from `Node::new` stands, and is saved on the next write.
         if let Some(seed) = state.poll_seed.as_deref().and_then(|b| {
@@ -338,70 +373,7 @@ impl Node {
             }
             node.chats.insert(
                 chat.contact_id.clone(),
-                Chat {
-                    contact: Contact {
-                        id: chat.contact_id.clone(),
-                        their_name: chat.their_name.clone(),
-                        my_name: chat.my_name.clone(),
-                        remote_storage: chat.remote_storage,
-                        disappearing_secs: chat.disappearing_secs,
-                        backed_up: chat.backed_up,
-                        peer_backed_up: chat.peer_backed_up,
-                        verified: chat.verified,
-                        peer_verified: chat.peer_verified,
-                        peer_captures_silent: chat.peer_captures_silent,
-                        peer_relays: chat.peer_relays.clone(),
-                        peer_supports_burn: chat.peer_supports_burn,
-                        peer_app_version: chat.peer_app_version.clone(),
-                        remote_storage_healthy: true,
-                        last_seen_secs: 0, // these three are filled in `contacts()` from the chat
-                        local_name: String::new(),
-                        identity_tag: String::new(),
-                        peer_on_old_version: false,
-                    },
-                    peer_address: chat.peer_address.clone(),
-                    session,
-                    history: chat
-                        .history
-                        .iter()
-                        .map(|m| ChatMessage {
-                            from_me: m.from_me,
-                            text: m.text.clone(),
-                            system: m.system,
-                            kind: m.kind.clone(),
-                            mime: m.mime.clone(),
-                            media_id: m.media_id.clone(),
-                            media_size: m.media_size,
-                            transfer_id: m.transfer_id.clone(),
-                            thumb_id: m.thumb_id.clone(),
-                            delivery: m.delivery.clone(),
-                            msg_id: m.msg_id.clone(),
-                            edited: m.edited,
-                            at: m.at,
-                            burn_secs: m.burn_secs,
-                            viewed_at: m.viewed_at,
-                        })
-                        .collect(),
-                    last_seen: chat.last_seen_unix,
-                    local_name: chat.local_name.clone(),
-                    client_key: chat.client_key.as_ref().and_then(|b| {
-                        use base64::Engine as _;
-                        base64::engine::general_purpose::STANDARD
-                            .decode(b)
-                            .ok()
-                            .and_then(|v| v.try_into().ok())
-                    }),
-                    // NOT hardcoded true any more: a pending inbound request is persisted like any
-                    // other chat, so assuming approval here promoted strangers to contacts on the
-                    // next restart. Old files (field absent) still read as approved — see the
-                    // field's note.
-                    authorized: chat.authorized,
-                    code: None,
-                    closed: chat.closed,
-                    relay_receipts,
-                    remote_storage_healthy: true,
-                    mailbox: super::mailbox::from_persisted(chat),
-                },
+                chat_from_persisted(chat, session, relay_receipts),
             );
         }
         Ok(node)
@@ -415,63 +387,44 @@ impl Node {
     /// the blob are sealed into the media store.
     pub fn merge_from_backup(&mut self, blob: &[u8], password: &str) -> Result<usize> {
         let (state, mut key) = Self::open_backup(blob, password)?;
+        // Sessions belong to the account that made them: another identity's chats would go out
+        // under a key the contact never paired with. A different identity is a full restore.
+        let same_identity = AccountPickle::from_encrypted(&state.account_pickle, &key)
+            .map(|p| Account::from_pickle(p).curve25519_key().to_base64() == self.identity_key())
+            .unwrap_or(false);
+        if !same_identity {
+            key.zeroize();
+            anyhow::bail!(
+                "this backup belongs to a different identity; restore it instead of merging"
+            );
+        }
         let mut added = 0usize;
         for pchat in &state.chats {
             match self.chats.get_mut(&pchat.contact_id) {
                 None => {
-                    // New chat: rebuild its session and insert it wholesale.
+                    // New chat: rebuild its session and insert it wholesale — within the contact
+                    // cap, which pairing enforces too (`mailbox.rs`, §8).
+                    if pchat.authorized
+                        && !pchat.closed
+                        && self.open_contacts() >= super::mailbox::MAX_CONTACTS
+                    {
+                        key.zeroize();
+                        anyhow::bail!(super::mailbox::AT_CONTACT_CAP);
+                    }
                     let session = match SessionPickle::from_encrypted(&pchat.session_pickle, &key) {
                         Ok(p) => Session::from_pickle(p),
                         Err(_) => continue, // wrong key / corrupt — skip this chat
                     };
-                    let history: Vec<ChatMessage> =
-                        pchat.history.iter().map(persisted_to_message).collect();
-                    added += history.len();
-                    self.chats.insert(
-                        pchat.contact_id.clone(),
-                        Chat {
-                            contact: Contact {
-                                id: pchat.contact_id.clone(),
-                                their_name: pchat.their_name.clone(),
-                                my_name: pchat.my_name.clone(),
-                                remote_storage: pchat.remote_storage,
-                                disappearing_secs: pchat.disappearing_secs,
-                                backed_up: pchat.backed_up,
-                                peer_backed_up: pchat.peer_backed_up,
-                                verified: pchat.verified,
-                                peer_verified: pchat.peer_verified,
-                                peer_captures_silent: pchat.peer_captures_silent,
-                                peer_relays: pchat.peer_relays.clone(),
-                                peer_supports_burn: pchat.peer_supports_burn,
-                                peer_app_version: pchat.peer_app_version.clone(),
-                                remote_storage_healthy: true,
-                                last_seen_secs: 0, // these three are filled in `contacts()` from the chat
-                                local_name: String::new(),
-                                identity_tag: String::new(),
-                                peer_on_old_version: false,
-                            },
-                            peer_address: pchat.peer_address.clone(),
-                            session,
-                            history,
-                            // Same reasoning as the restore path above: a merged chat that was
-                            // still a pending request must not arrive approved.
-                            authorized: pchat.authorized,
-                            code: None,
-                            closed: pchat.closed,
-                            relay_receipts: HashMap::new(),
-                            last_seen: pchat.last_seen_unix,
-                            local_name: pchat.local_name.clone(),
-                            client_key: pchat.client_key.as_ref().and_then(|b| {
-                                use base64::Engine as _;
-                                base64::engine::general_purpose::STANDARD
-                                    .decode(b)
-                                    .ok()
-                                    .and_then(|v| v.try_into().ok())
-                            }),
-                            remote_storage_healthy: true,
-                            mailbox: super::mailbox::from_persisted(pchat),
-                        },
-                    );
+                    let chat = chat_from_persisted(pchat, session, HashMap::new());
+                    added += chat.history.len();
+                    // The keystore is in memory, so the chat's client key for the peer's restricted
+                    // onion goes in now; startup's `restore_client_keys` only covers chats it saw.
+                    if let Some(secret) = &chat.client_key {
+                        if !chat.peer_address.is_empty() {
+                            let _ = self.transport.insert_client_key(&chat.peer_address, secret);
+                        }
+                    }
+                    self.chats.insert(pchat.contact_id.clone(), chat);
                 }
                 Some(chat) => {
                     // Existing chat: keep the live session; fold in only messages we're missing.
@@ -515,18 +468,17 @@ impl Node {
 
     /// Produce a **portable, password-encrypted backup** (§7a). The key is derived from
     /// `password` with Argon2 (random salt prepended); identity, sessions, and history are
-    /// inside. The same bytes work for **device-to-device** transfer if `password` is a
-    /// PAKE-derived transfer secret instead of a user password (§7b).
-    #[allow(dead_code)]
+    /// inside. Tests only: the app calls [`backup_with_mode`](Self::backup_with_mode).
+    #[cfg(test)]
     pub fn backup(&self, password: &str) -> Result<Vec<u8>> {
         self.backup_with_mode(password, true)
     }
 
-    /// As [`backup`](Self::backup), choosing the **content matrix** (§11.5, #7):
+    /// A password-encrypted backup (§7a), choosing the **content matrix** (§11.5, #7):
     ///
-    /// * **Full** (`full = true`): identity + onion keystore + contacts + session pickles **plus
+    /// * **Full** (`full = true`): identity + onion identity + contacts + session pickles **plus
     ///   message history and media** — a complete clone of the device.
-    /// * **Lite** (`full = false`): identity + onion keystore + contacts + session pickles only —
+    /// * **Lite** (`full = false`): identity + onion identity + contacts + session pickles only —
     ///   enough to *keep chatting* (the ratchet survives) and reappear on the same `.onion`, but
     ///   **no message history and no attachments** leave the device. The privacy-preferring
     ///   default the UI offers.
@@ -547,15 +499,26 @@ impl Node {
             }
         }
         state.onion_keys = self.collect_onion_keys();
-        let sealed = crate::storage::seal(&key, &serde_json::to_vec(&state)?)?;
+        state.onion_identity = self.transport.onion_identity().map(|mut secret| {
+            use base64::Engine as _;
+            let b64 = base64::engine::general_purpose::STANDARD.encode(secret);
+            secret.zeroize();
+            b64
+        });
+        let mut json = serde_json::to_vec(&state)?;
+        if let Some(id) = state.onion_identity.as_mut() {
+            id.zeroize();
+        }
+        let sealed = crate::storage::seal(&key, &json);
+        json.zeroize();
         key.zeroize();
         let mut out = salt.to_vec();
-        out.extend_from_slice(&sealed);
+        out.extend_from_slice(&sealed?);
         Ok(out)
     }
 
     /// A **single-chat scoped backup** (§11.7 phase 4, #8): the same encrypted blob as
-    /// [`backup_with_mode`] but carrying **only** the one chat (its contact + session pickle,
+    /// [`backup_with_mode`](Self::backup_with_mode) but carrying **only** the one chat (its contact + session pickle,
     /// plus history + media when `full`). Meant to be **merged** into an existing identity via
     /// [`merge_from_backup`](Self::merge_from_backup) — e.g. to bring one conversation's history
     /// onto a device restored from a Lite backup. Errors if the contact is unknown.
@@ -608,7 +571,7 @@ impl Node {
     }
 
     /// Decrypt a password-encrypted backup into its [`PersistedState`] + the derived key, without
-    /// binding it to a transport — so the caller can restore the onion keystore (and thus the
+    /// binding it to a transport — so the caller can restore the onion identity (and thus the
     /// `.onion`) *before* bootstrapping Tor, then call [`restore`](Self::restore) with the key.
     pub fn open_backup(blob: &[u8], password: &str) -> Result<(PersistedState, StoreKey)> {
         if blob.len() < BACKUP_SALT_LEN {
@@ -622,7 +585,6 @@ impl Node {
     }
 
     /// Restore a node from a password-encrypted backup onto a fresh transport (§7).
-    #[allow(dead_code)]
     pub fn restore_from_backup(
         blob: &[u8],
         password: &str,
@@ -637,7 +599,7 @@ impl Node {
     /// Upload an encrypted backup to the relay for fresh-device recovery (§7c). Retention
     /// defaults to 24h and is capped at 36h. The relay only ever holds the opaque blob;
     /// the password (and thus the contents) never reach it.
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub fn server_backup(
         &self,
         relay: &RelayClient,
@@ -645,19 +607,30 @@ impl Node {
         ttl: Option<Duration>,
         full: bool,
     ) -> Result<()> {
+        let (handle, blob, ttl) = self.server_backup_parts(password, ttl, full)?;
+        relay.post(&handle, &blob, ttl).map(|_| ())
+    }
+
+    /// Everything a server backup posts — the password-derived handle, the
+    /// encrypted blob, and the clamped TTL — without posting it, so a caller holding the core lock
+    /// can release it before the Tor round trip.
+    pub fn server_backup_parts(
+        &self,
+        password: &str,
+        ttl: Option<Duration>,
+        full: bool,
+    ) -> Result<(String, Vec<u8>, Duration)> {
         let ttl = ttl
             .unwrap_or(SERVER_BACKUP_DEFAULT_TTL)
             .min(SERVER_BACKUP_MAX_TTL);
         let blob = self.backup_with_mode(password, full)?;
-        relay
-            .post(&backup_handle(password)?, &blob, ttl)
-            .map(|_| ())
+        Ok((backup_handle(password)?, blob, ttl))
     }
 }
 
 impl Node {
     /// Recover from a server backup on a fresh device using the recovery password (§7c).
-    #[allow(dead_code)]
+    #[cfg_attr(not(feature = "tor"), allow(dead_code))]
     pub fn restore_from_server(
         relay: &RelayClient,
         password: &str,
@@ -672,4 +645,73 @@ impl Node {
             })?;
         Self::restore_from_backup(&blob, password, transport)
     }
+}
+
+/// A chat rebuilt from its persisted form (restore and scoped-backup merge). `relay_receipts` is
+/// passed in because only a restore has queued copies to recall.
+fn chat_from_persisted(
+    chat: &crate::storage::PersistedChat,
+    session: Session,
+    relay_receipts: HashMap<String, Vec<QueuedReceipt>>,
+) -> Chat {
+    Chat {
+        contact: Contact {
+            id: chat.contact_id.clone(),
+            their_name: chat.their_name.clone(),
+            my_name: chat.my_name.clone(),
+            remote_storage: chat.remote_storage,
+            disappearing_secs: chat.disappearing_secs,
+            backed_up: chat.backed_up,
+            peer_backed_up: chat.peer_backed_up,
+            verified: chat.verified,
+            peer_verified: chat.peer_verified,
+            peer_captures_silent: chat.peer_captures_silent,
+            peer_relays: chat.peer_relays.clone(),
+            peer_supports_burn: chat.peer_supports_burn,
+            peer_app_version: chat.peer_app_version.clone(),
+            remote_storage_healthy: true,
+            last_seen_secs: 0, // these four are filled in `contacts()` from the chat
+            local_name: String::new(),
+            identity_tag: String::new(),
+            peer_on_old_version: false,
+        },
+        peer_address: chat.peer_address.clone(),
+        session,
+        history: chat.history.iter().map(persisted_to_message).collect(),
+        last_seen: chat.last_seen_unix,
+        local_name: chat.local_name.clone(),
+        client_key: chat.client_key.as_ref().and_then(|b| {
+            use base64::Engine as _;
+            base64::engine::general_purpose::STANDARD
+                .decode(b)
+                .ok()
+                .and_then(|v| v.try_into().ok())
+        }),
+        // Persisted, not assumed: a pending inbound request is stored like any other chat, and
+        // assuming approval here once promoted strangers to contacts on the next restart. Old
+        // files (field absent) still read as approved — see the field's note.
+        authorized: chat.authorized,
+        code: None,
+        closed: chat.closed,
+        relay_receipts,
+        remote_storage_healthy: true,
+        mailbox: super::mailbox::from_persisted(chat),
+    }
+}
+
+/// Lowercase hex of a 32-byte hash, for the persisted invite's opener list.
+fn hex_32(bytes: &[u8; 32]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// The inverse of [`hex_32`]; `None` on anything malformed (that entry is simply forgotten).
+fn unhex_32(s: &str) -> Option<[u8; 32]> {
+    if s.len() != 64 {
+        return None;
+    }
+    let mut out = [0u8; 32];
+    for (i, byte) in out.iter_mut().enumerate() {
+        *byte = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
+    }
+    Some(out)
 }

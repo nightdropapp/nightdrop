@@ -32,15 +32,6 @@ class Identity {
   final String id;
 }
 
-/// How a pairing was initiated.
-enum PairingMethod {
-  /// QR code: pre-authorized, embeds the onion address, skips the rendezvous (§5a).
-  qr,
-
-  /// Short code `slot-secret-words`: rendezvous lookup + PAKE bouncer (§5b).
-  shortCode,
-}
-
 /// An invite the inviter shows to the other person.
 class PairingInvite {
   const PairingInvite({required this.shortCode, required this.qrPayload});
@@ -336,10 +327,6 @@ class Message {
   /// A burn message that expired before it was opened (24h). The core keeps this marker in its
   /// place instead of deleting it without a trace (`burn-messages.md` §6); it carries no content.
   bool get isBurnExpired => kind == 'burn_expired';
-
-  /// Whether we can unsend this message — identical eligibility to [canEdit] (our own
-  /// recent/queued text). Kept separate so the bubble menu can label the action distinctly.
-  bool get canUnsend => canEdit;
 
   /// A received video whose payload hasn't arrived yet (only the incoming placeholder).
   bool get receiving => isVideo && mediaId.isEmpty && !sending;

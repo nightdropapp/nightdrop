@@ -3,7 +3,8 @@
 //! serialized and sealed under a 32-byte key.
 //!
 //! The key in production comes from the **OS keystore** (Keychain / Keystore / DPAPI /
-//! libsecret); here it is injected as bytes so the logic is testable. Identity and session
+//! libsecret), or, with the app lock on, is unwrapped with a passphrase- or PIN-derived key
+//! ([`lock`], `docs/design/app-lock.md`); here it is injected as bytes so the logic is testable. Identity and session
 //! key material additionally use vodozemac's own encrypted pickling under the same key;
 //! the outer AEAD then also covers the message plaintext.
 
@@ -13,9 +14,9 @@ use serde::{Deserialize, Serialize};
 
 use crate::Result;
 
-/// 32-byte symmetric key, sourced from the OS keystore in production.
 pub mod lock;
 
+/// 32-byte symmetric key: from the OS keystore, or derived from the app-lock secret ([`lock`]).
 pub type StoreKey = [u8; 32];
 
 const NONCE_LEN: usize = 12;
@@ -211,8 +212,8 @@ pub struct PersistedMedia {
     pub data: String,
 }
 
-/// A file carried inside a backup, by path relative to a base dir (used for the Tor onion
-/// keystore so a restored device reproduces the *same* `.onion` address and stays reachable).
+/// A file carried inside a backup, by path relative to a base dir: arti's on-disk onion keystore,
+/// how backups up to 0.1.15 carried the identity (see [`PersistedState::onion_keys`]).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedFile {
     pub path: String,
@@ -220,9 +221,9 @@ pub struct PersistedFile {
     pub data: String,
 }
 
-/// A chat-delete `Closed` signal (§11.6) that hasn't reached a relay yet, persisted so a delete
-/// survives an app restart before the poller's retry lands (otherwise a delete during a relay/arti
-/// outage, followed by a restart, would silently never notify the peer).
+/// A control frame — a chat-delete `Closed` (§11.6) or a screenshot notice — that hasn't reached a
+/// relay yet, persisted so it survives an app restart before the poller's retry lands (otherwise
+/// one sent during a relay/arti outage, followed by a restart, would silently never reach the peer).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PersistedPendingControl {
     pub recipient_ik: String,
@@ -257,6 +258,10 @@ pub struct PersistedInvite {
     /// Wall-clock expiry. Stored as unix seconds because the in-memory form is an `Instant`,
     /// which is monotonic and meaningless across a process restart.
     pub expires_unix: u64,
+    /// Hex SHA-256 of each distinct opener answered so far, so a restart does not reset the
+    /// guess count (`node::MAX_OPENERS_PER_INVITE`).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub openers: Vec<String>,
 }
 
 /// The full device state written to disk.
@@ -270,9 +275,16 @@ pub struct PersistedState {
     /// skip-empty keeps older blobs loadable and the state file small.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub media: Vec<PersistedMedia>,
-    /// The Tor onion keystore, bundled into a backup so restore reproduces the same `.onion`
-    /// address (otherwise the peer's stored address goes stale and can't be reached). Empty in
-    /// the at-rest state file — there the keystore lives in arti's own dir.
+    /// The onion identity (base64 of the 64-byte expanded ed25519 secret), bundled into a backup
+    /// so a restore comes back on the same `.onion` — otherwise every contact's stored address
+    /// for us goes stale. `None` in the at-rest state file, where the identity is sealed beside it
+    /// (`onion-key.sealed`). Added in 0.1.29: from 0.1.16 (the in-memory keystore) to 0.1.28,
+    /// backups carried no identity at all (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub onion_identity: Option<String>,
+    /// arti's on-disk keystore files, which is how backups carried the identity up to 0.1.15,
+    /// while arti kept it on disk. Still read from old backups; still written if an install has
+    /// not migrated off the on-disk keystore yet. Empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub onion_keys: Vec<PersistedFile>,
     /// Our advertised **extra** relay addresses (#17). `#[serde(default)]` for forward-compat.
@@ -288,8 +300,8 @@ pub struct PersistedState {
     /// up; older state files have none.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub directory_next_check: u64,
-    /// Undelivered chat-delete `Closed` signals (§11.6), persisted so a delete isn't lost across a
-    /// restart before the retry lands. `#[serde(default)]` for forward-compat.
+    /// Undelivered control frames (chat-delete `Closed` signals, §11.6, and screenshot notices),
+    /// persisted so one isn't lost across a restart before the retry lands. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_control: Vec<PersistedPendingControl>,
     /// Short-code invites still being hosted (§5b), persisted so a core rebuild mid-pairing does
@@ -300,6 +312,23 @@ pub struct PersistedState {
     /// partition stays fixed for its epoch across restarts. `#[serde(default)]` for older files.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub poll_seed: Option<String>,
+    /// Our access keys for PRIVATE relays (§3.2), so an authorization survives a restart: the
+    /// operator authorized one specific public key, and with arti's keystore in memory a re-minted
+    /// key would be a different one. `#[serde(default)]` for older files.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relay_keys: Vec<PersistedRelayKey>,
+}
+
+/// One PRIVATE relay access key (see [`PersistedState::relay_keys`]). Sealed with everything else,
+/// like a chat's `client_key`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedRelayKey {
+    /// The relay's `.onion`.
+    pub relay: String,
+    /// The `descriptor:x25519:…` string the operator authorized, handed back on a repeat request.
+    pub public: String,
+    /// Base64 of the 32-byte secret.
+    pub secret: String,
 }
 
 fn is_zero_u64(n: &u64) -> bool {
@@ -345,17 +374,27 @@ pub fn open(key: &StoreKey, blob: &[u8]) -> Result<Vec<u8>> {
 /// disk (`fsync`), then `rename` it over the target — a POSIX-atomic swap, so a crash can only
 /// ever leave the *previous* intact state or the *new* intact state, never a truncated one.
 pub fn save_to_file(path: &str, key: &StoreKey, state: &PersistedState) -> Result<()> {
-    use std::io::Write as _;
     let json = serde_json::to_vec(state)?;
-    let sealed = seal(key, &json)?;
+    write_atomic(std::path::Path::new(path), &seal(key, &json)?)
+}
+
+/// Replace `path` with `bytes` so a crash leaves either the old file or the new one, never a torn
+/// one: write a sibling temp file, `fsync` it, then `rename` it over the target. The `fsync` is
+/// what makes the rename safe — without it the rename can reach the disk before the data, and a
+/// power cut in between leaves an empty file under the real name. Used for every file whose loss
+/// strands the user: the state file, the app-lock file and the sealed onion identity.
+pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
     // Sibling temp in the same directory, so the rename stays within one filesystem (a
     // cross-device rename is not atomic and would fall back to copy). `create` truncates any
     // stale temp left by a previously-crashed write.
-    let tmp = format!("{path}.tmp");
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = std::path::PathBuf::from(tmp);
     {
         let mut f = std::fs::File::create(&tmp)?;
-        f.write_all(&sealed)?;
-        f.sync_all()?; // fsync: the bytes are durably on disk before we swap the file in
+        f.write_all(bytes)?;
+        f.sync_all()?;
     }
     if let Err(e) = std::fs::rename(&tmp, path) {
         let _ = std::fs::remove_file(&tmp); // don't leave the temp behind if the swap failed
@@ -380,7 +419,7 @@ pub fn derive_key(password: &str, salt: &[u8]) -> Result<StoreKey> {
 }
 
 /// Generate a random recovery password to show the user **once** (§7a). Grouped,
-/// ambiguity-free characters; ~95 bits of entropy. Never persisted by the app.
+/// ambiguity-free characters; 100 bits of entropy (20 from 32). Never persisted by the app.
 pub fn random_password() -> String {
     use rand::Rng;
     const CHARS: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no 0/O/1/I
@@ -428,6 +467,7 @@ mod tests {
             chats: Vec::new(),
             media: Vec::new(),
             onion_keys: Vec::new(),
+            onion_identity: None,
             my_relays: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
@@ -435,6 +475,7 @@ mod tests {
             pending_control: Vec::new(),
             pending_invites: Vec::new(),
             poll_seed: None,
+            relay_keys: Vec::new(),
         };
 
         // A stale temp from a previously-crashed write must not break the next save.

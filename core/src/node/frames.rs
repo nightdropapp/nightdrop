@@ -92,46 +92,17 @@ impl Node {
                             "AUTO-APPROVED (require_authorization is off)"
                         }
                     );
+                    // Inbound request: needs approval unless we auto-authorize. The most recent
+                    // invite code goes with it so approval can echo it.
                     self.chats.insert(
                         contact_id.clone(),
-                        Chat {
-                            contact: Contact {
-                                id: contact_id.clone(),
-                                their_name: DEFAULT_NAME.to_string(),
-                                my_name: DEFAULT_NAME.to_string(),
-                                remote_storage: false,
-                                disappearing_secs: 0,
-                                backed_up: false,
-                                peer_backed_up: false,
-                                verified: false,
-                                peer_verified: false,
-                                peer_captures_silent: None,
-                                peer_relays: Vec::new(),
-                                peer_supports_burn: None,
-                                peer_app_version: None,
-                                remote_storage_healthy: true,
-                                last_seen_secs: 0, // these three are filled in `contacts()` from the chat
-                                local_name: String::new(),
-                                identity_tag: String::new(),
-                                peer_on_old_version: false,
-                            },
-                            peer_address: peer_address.clone(),
-                            session: accepted.session,
-                            history: Vec::new(),
-                            // Inbound request: needs approval unless we auto-authorize.
-                            authorized: !self.require_authorization,
-                            // Associate the most recent invite code so approval can echo it.
-                            code: self.last_invite_code.clone(),
-                            closed: false,
-                            relay_receipts: HashMap::new(),
-                            // Pairing is itself contact: start the clock rather than
-                            // reporting a brand-new chat as silent.
-                            last_seen: Some(crate::api::now_secs()),
-                            client_key: None, // minted and announced immediately after pairing
-                            local_name: String::new(),
-                            remote_storage_healthy: true,
-                            mailbox: None,
-                        },
+                        Chat::new_paired(
+                            &contact_id,
+                            &peer_address,
+                            accepted.session,
+                            !self.require_authorization,
+                            self.last_invite_code.clone(),
+                        ),
                     );
                 }
                 // Re-pair warning (§1.2): a known contact just re-established the chat with a new
@@ -161,6 +132,9 @@ impl Node {
                     self.announce_captures_to(&contact_id);
                     self.announce_burns_to(&contact_id);
                     self.announce_version_to(&contact_id);
+                    // Our extra relays: only once approved (an auto-approved chat now, a request
+                    // when the user approves it — see `authorize`).
+                    self.announce_relays_to(&contact_id);
                     // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
                     // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
                     self.send_mailbox_key(&contact_id);
@@ -277,7 +251,7 @@ impl Node {
             Frame::MailboxKey { from, message } => {
                 // v2 mailbox agreement (`mailbox.rs`). Silent: a standing property of the pair, and
                 // a line in every chat on rollout would be noise.
-                self.on_mailbox_key(&from, &message)?;
+                self.on_mailbox_key(&from, &message);
                 Ok(None)
             }
             Frame::Burns { from, message } => {
@@ -449,6 +423,10 @@ impl Node {
                             "approved",
                         ));
                     }
+                    // What we told them at pairing landed on a request, which drops it; now they
+                    // will take it. (`Approved` is unauthenticated, but this only re-sends our own
+                    // relay list on our session with them, which a forger cannot read.)
+                    self.announce_relays_to(&from);
                     return Ok(Some((from, String::new())));
                 }
                 Ok(None)
