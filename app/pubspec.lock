@@ -180,10 +180,9 @@ packages:
   fc_native_video_thumbnail:
     dependency: "direct main"
     description:
-      name: fc_native_video_thumbnail
-      sha256: f726fdeb48aaaf008be89e379346f15656b92e1d2c02b9bdc043b1a467e71fb1
-      url: "https://pub.dev"
-    source: hosted
+      path: "../third_party/fc_native_video_thumbnail"
+      relative: true
+    source: path
     version: "3.0.1"
   ffi:
     dependency: transitive

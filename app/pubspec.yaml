@@ -23,8 +23,11 @@ dependencies:
   open_filex: ^4.5.0 # open a received video/file in the system player (cross-platform)
   image: ^4.10.1 # downscale/recompress images before sending (big speed win over Tor)
   # Preview frame for sent videos (Android/iOS/macOS/Windows; no Linux). Replaced the
-  # unmaintained `video_thumbnail`, whose 2023-era Gradle config breaks under AGP 9.
-  fc_native_video_thumbnail: ^3.0.1
+  # unmaintained `video_thumbnail`, whose 2023-era Gradle config breaks under AGP 9. Vendored
+  # (3.0.1) with its Linux half removed: it linked the system FFmpeg, and an AppImage built
+  # against one distro's FFmpeg will not start on another (third_party/.../NIGHTDROP-PATCH.md).
+  fc_native_video_thumbnail:
+    path: ../third_party/fc_native_video_thumbnail
   flutter_local_notifications: ^22.3.1 # local notifications for new messages/requests
   flutter_rust_bridge: 2.12.0 # Dart <-> Rust FFI bridge (matches the codegen version)
   # cargokit plugin that builds core/ and bundles libnightdrop into each platform target.

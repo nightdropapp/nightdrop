@@ -1,0 +1,14 @@
+# Build environment for the Linux desktop app (the AppImage): Ubuntu 22.04, so every native piece —
+# the Rust core, the C/C++ Flutter plugins, the runner — is compiled against glibc 2.35 and runs on
+# anything from Ubuntu 22.04 / Debian 12 / Fedora 36 up. Built on the dev box's own distro, the same
+# code required glibc 2.39, and the AppImage catalog's 22.04 test refused it (MAINTENANCE.md §11.7).
+#
+# The Flutter SDK, the Rust toolchain and the pub cache are NOT in the image: build-appimage.sh
+# mounts the host's, so the pinned versions (app/.fvmrc, rust-toolchain.toml) stay the only source.
+FROM docker.io/library/ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        build-essential clang cmake ninja-build pkg-config git curl unzip xz-utils file ca-certificates \
+        libgtk-3-dev liblzma-dev libstdc++-12-dev libsecret-1-dev \
+        openjdk-17-jdk-headless \
+    && rm -rf /var/lib/apt/lists/*

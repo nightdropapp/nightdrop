@@ -1,0 +1,9 @@
+# A plain Ubuntu 22.04 desktop's runtime, for launching an AppImage the way the AppImage catalog's
+# test does (MAINTENANCE.md §11.7): GTK3, libsecret and Mesa from the system, Xvfb for a display,
+# and nothing to build with — no compilers, no FFmpeg, no dev packages.
+FROM docker.io/library/ubuntu:22.04
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        libgtk-3-0 libsecret-1-0 libegl1 libgles2 libegl-mesa0 libgl1-mesa-dri libepoxy0 libfontconfig1 \
+        xvfb x11-utils x11-apps ca-certificates \
+    && rm -rf /var/lib/apt/lists/*

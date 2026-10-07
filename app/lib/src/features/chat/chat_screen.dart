@@ -399,9 +399,10 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     }
   }
 
-  /// Extract a small preview frame from a video (all desktop + mobile platforms; on
-  /// Linux this uses ffmpeg via the plugin). Any failure just means no thumbnail —
-  /// the receiver sees the generic video tile instead.
+  /// Extract a small preview frame from a video (Android, iOS/macOS, Windows). Linux has none:
+  /// the plugin's Linux half linked the system FFmpeg and is removed
+  /// (`third_party/fc_native_video_thumbnail/NIGHTDROP-PATCH.md`), so the call fails there.
+  /// Any failure just means no thumbnail — the receiver sees the generic video tile instead.
   Future<List<int>> _videoThumbnail(String path) async {
     try {
       final data = await FcNativeVideoThumbnail().saveThumbnailToBytes(
