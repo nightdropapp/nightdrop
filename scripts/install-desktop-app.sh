@@ -25,7 +25,8 @@ set -euo pipefail
 
 # This script lives in scripts/; the repo root is its parent.
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
+# shellcheck source=lib/flutter-sdk.sh
+source "$(dirname "$0")/lib/flutter-sdk.sh"
 APP_DIR="$PROJECT_ROOT/app"
 APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"       # Wayland app_id / .desktop basename / icon name
 APP_NAME="${NIGHTDROP_APP_NAME:-Night Drop}"      # launcher display name
@@ -82,7 +83,8 @@ uninstall() {
 #    relay-state/onion) enables rendezvous short codes + offline store-and-forward. Both are
 #    baked in as compile-time --dart-define values, so the bundle needs no runtime env.
 if [ "$DO_BUILD" -eq 1 ]; then
-  [ -x "$FLUTTER_HOME/bin/flutter" ] || { err "Flutter not found at $FLUTTER_HOME/bin/flutter (set FLUTTER_HOME)"; exit 1; }
+  # The pinned SDK (app/.fvmrc), found or refused by lib/flutter-sdk.sh.
+  resolve_flutter_home "$PROJECT_ROOT"
   DART_DEFINES=(--dart-define=NIGHTDROP_TOR=1)
   if [ "$DIAG" = 1 ]; then
     DART_DEFINES+=(--dart-define=NIGHTDROP_DIAG=1)

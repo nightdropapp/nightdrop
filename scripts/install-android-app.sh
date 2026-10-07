@@ -13,7 +13,9 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 # Configuration (customizable via environment variables)
-FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
+# FLUTTER_HOME: the pinned SDK (app/.fvmrc), found or refused by lib/flutter-sdk.sh in check_flutter.
+# shellcheck source=lib/flutter-sdk.sh
+source "$(dirname "$0")/lib/flutter-sdk.sh"
 # This script lives in scripts/; the repo root is its parent.
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ADB="${ADB:-}"
@@ -121,6 +123,7 @@ setup_adb() {
 check_flutter() {
     print_header "Checking Flutter"
 
+    resolve_flutter_home "$PROJECT_ROOT"
     if [ ! -d "$FLUTTER_HOME" ]; then
         log_error "Flutter not found at: $FLUTTER_HOME"
         echo ""
@@ -530,7 +533,8 @@ OPTIONS
   --help              Show this help message
 
 ENVIRONMENT VARIABLES
-  FLUTTER_HOME        Flutter SDK path (default: ~/flutter)
+  FLUTTER_HOME        Flutter SDK path (default: the version app/.fvmrc pins, found in
+                      ~/flutter-<version>, ~/fvm/versions/<version> or ~/flutter)
   PROJECT_ROOT        Night Drop root (default: this script's directory)
   ADB                 adb command path (auto-detected if not set)
   ANDROID_SERIAL      Device serial to install to (same as --device; standard adb env var)

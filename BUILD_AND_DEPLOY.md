@@ -81,8 +81,10 @@ automatically: `MAINTENANCE.md` §3.
 
 ## Troubleshooting
 
-- **`flutter: command not found` / the wrong Flutter.** The scripts use `FLUTTER_HOME` (default
-  `~/flutter`), not `PATH`; point it at the SDK matching `app/.fvmrc`.
+- **`flutter: command not found` / the wrong Flutter.** The scripts look for the SDK `app/.fvmrc`
+  pins (`FLUTTER_HOME`, else `~/flutter-<version>`, `~/fvm/versions/<version>`, `~/flutter`) and
+  refuse any other version; install it in one of those places or set `FLUTTER_HOME`
+  (`MAINTENANCE.md` §8).
 - **`libnightdrop.so` not found** on a bare `flutter run`: `make core-build` first.
 - **CMake "Permission denied" on `/usr/local`**, or Android "No Android SDK found":
   `MAINTENANCE.md` §9.

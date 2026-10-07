@@ -14,7 +14,7 @@
 # Ubuntu 22.04 (MAINTENANCE.md §11.7). A portability check runs before packaging either way.
 #
 # Requirements:
-#   * Flutter SDK at the version app/.fvmrc pins (FLUTTER_HOME, default ~/flutter) and the Rust
+#   * Flutter SDK at the version app/.fvmrc pins (found by scripts/lib/flutter-sdk.sh) and the Rust
 #     toolchain; both are mounted into the container, never baked into the image.
 #   * podman (the container build; skip with --host).
 #   * appimagetool on PATH (or ~/.local/bin). Get it once:
@@ -35,7 +35,8 @@
 set -euo pipefail
 
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
-FLUTTER_HOME="${FLUTTER_HOME:-$HOME/flutter}"
+# shellcheck source=lib/flutter-sdk.sh
+source "$(dirname "$0")/lib/flutter-sdk.sh"
 APP_DIR="$PROJECT_ROOT/app"
 APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"
 BUNDLE_SRC="$APP_DIR/build/linux/x64/release/bundle"
@@ -71,12 +72,9 @@ command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1 
   || AITOOL_RUN=("$AITOOL" --appimage-extract-and-run)
 
 if [ "$DO_BUILD" = 1 ]; then
-  [ -x "$FLUTTER_HOME/bin/flutter" ] || { err "Flutter not found at $FLUTTER_HOME/bin/flutter (set FLUTTER_HOME)"; exit 1; }
-  # The pinned SDK, not whatever FLUTTER_HOME happens to be: a 3.44.6 build once shipped instead of
-  # 3.47.6 because the default pointed at the old SDK (MAINTENANCE.md §8).
-  WANT="$(grep -o '"flutter": *"[^"]*"' "$APP_DIR/.fvmrc" | grep -o '[0-9][0-9.]*')"
-  HAVE="$(grep -o '"frameworkVersion": *"[^"]*"' "$FLUTTER_HOME/bin/cache/flutter.version.json" 2>/dev/null | grep -o '[0-9][0-9.]*' || true)"
-  [ "$WANT" = "$HAVE" ] || { err "Flutter at $FLUTTER_HOME is ${HAVE:-unknown}, app/.fvmrc pins $WANT — set FLUTTER_HOME"; exit 1; }
+  # The pinned SDK (app/.fvmrc), found or refused by lib/flutter-sdk.sh.
+  resolve_flutter_home "$PROJECT_ROOT"
+  ok "Flutter $(flutter_sdk_version "$FLUTTER_HOME") at $FLUTTER_HOME"
   # Same production wiring as the desktop installer: embedded Tor, and the baked-in relay onion so
   # store-and-forward works out of the box.
   DEFINES=(--dart-define=NIGHTDROP_TOR=1)

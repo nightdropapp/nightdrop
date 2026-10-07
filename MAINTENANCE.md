@@ -39,7 +39,7 @@ Anything here that cost a session to learn says so. Those notes are the point of
 | What | Why | Notes |
 |---|---|---|
 | Rust (rustup) | builds `core/` and `relay/` | pinned **exactly** in `rust-toolchain.toml` |
-| Flutter SDK | builds `app/` | pinned **exactly** in `app/.fvmrc` (the F-Droid recipe reads it). The scripts use `FLUTTER_HOME` (default `~/flutter`), **not `PATH`** — see §8 |
+| Flutter SDK | builds `app/` | pinned **exactly** in `app/.fvmrc` (the F-Droid recipe reads it). The scripts find that SDK themselves (`scripts/lib/flutter-sdk.sh`), **not via `PATH`** — see §8 |
 | `clang cmake ninja pkg-config libgtk-3-dev libsecret-1-dev libavformat-dev libavcodec-dev libavutil-dev libswscale-dev` | Linux desktop build | `libsecret-1-dev` is required by flutter_secure_storage's Linux backend; the ffmpeg `-dev` set by fc_native_video_thumbnail's — CMake configure fails without them |
 | Real JDK (with `javac`) + Android SDK 36 + NDK | Android build | a headless JRE is **not** enough for Gradle. `app/android/local.properties` must point `sdk.dir` at the SDK. Builds need `ANDROID_HOME` **and** `JAVA_HOME` set |
 | `xvfb` | headless integration tests on Linux | |
@@ -239,10 +239,15 @@ where they bite:
   from `fdroid/app.nightdrop.yml` instead and are immune. Copy **only** `relay-state/onion` (the
   public address — never the keys beside it) into the worktree first. On 2026-10-06 the 0.1.28
   universal APK and AppImage were built this way and caught before publishing.
-- **`FLUTTER_HOME`, not `PATH`.** It defaults to `~/flutter`, so a side-by-side SDK on `PATH` is
-  ignored: the 0.1.28 universal APK first came out on Flutter 3.44.6 (without the libpng fix 3.47.6
-  was adopted for) while the shell's `PATH` said 3.47.6. Set `FLUTTER_HOME` to the SDK matching
-  `app/.fvmrc`, and check the result rather than the command (§11.6).
+- **The pinned Flutter, never whatever is lying around.** `build-appimage.sh`,
+  `install-android-app.sh` and `install-desktop-app.sh` all source `scripts/lib/flutter-sdk.sh`,
+  which reads the version from `app/.fvmrc` and uses `FLUTTER_HOME` if it is that version (and
+  stops if it is not), else the first of `~/flutter-<version>`, `~/fvm/versions/<version>`,
+  `~/flutter` that is. `PATH` plays no part. Before this the scripts defaulted to `~/flutter`, and
+  the 0.1.28 universal APK first came out on Flutter 3.44.6 (without the libpng fix 3.47.6 was
+  adopted for) while the shell's `PATH` said 3.47.6. Commands that just run `flutter` — `make
+  app-test`, a hand-typed `flutter analyze` — still use `PATH`, and an older SDK there rewrites
+  `app/pubspec.lock` to its own pins; check the result rather than the command (§11.6).
 - **WebTunnel is on in every app build.** The patched cargokit (`builder.dart`) adds
   `--features webtunnel` unless `NIGHTDROP_WEBTUNNEL=0`; a bare `cargo build` leaves it off.
 
