@@ -931,7 +931,7 @@ impl Node {
                 Ok(Some((from, String::new())))
             }
             // Short-code SPAKE2 runs over the rendezvous mailbox before any transport session
-            // exists (see `run_join_handshake`/`service_pending_invites`), so a `Pake` frame on
+            // exists (see `run_join_handshake`/`service_invites`), so a `Pake` frame on
             // the peer transport is unexpected — reserved for a future in-band re-key.
             Frame::Pake { .. } => Ok(None),
         }

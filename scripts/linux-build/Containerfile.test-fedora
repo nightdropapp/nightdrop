@@ -1,0 +1,8 @@
+# Fedora's equivalent of Containerfile.test: a bare desktop runtime (GTK3, libsecret, Mesa, Xvfb)
+# with nothing to build with, for test-appimage.sh --distro fedora:44.
+ARG BASE=registry.fedoraproject.org/fedora:44
+FROM ${BASE}
+RUN dnf install -y --setopt=install_weak_deps=False \
+        gtk3 libsecret mesa-libEGL mesa-libGLES mesa-dri-drivers libepoxy fontconfig \
+        xorg-x11-server-Xvfb xwininfo xwd ca-certificates findutils \
+    && dnf clean all

@@ -4,17 +4,26 @@
 # test the AppImage catalog runs (MAINTENANCE.md §11.7). Run it on every release AppImage before
 # publishing. Uses a throwaway HOME inside the container: no identity is created or touched.
 #
-# Usage: scripts/linux-build/test-appimage.sh path/to/Night_Drop-x86_64.AppImage [screenshot.xwd]
+# Usage: scripts/linux-build/test-appimage.sh [--distro D] path/to/Night_Drop-x86_64.AppImage [shot.xwd]
+#   D: ubuntu:22.04 (default — the catalog's), ubuntu:24.04, debian:13 or fedora:44.
 #   Exit 0 = alive after 25 s with a "Night Drop" window and no unhandled Dart exception.
-#   The optional second argument saves a screenshot (convert with `magick shot.xwd shot.png`).
+#   The optional last argument saves a screenshot (convert with `magick shot.xwd shot.png`).
 
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
-APPIMAGE="$(realpath "${1:?usage: $0 AppImage [screenshot.xwd]}")"
+DISTRO=ubuntu:22.04
+[ "${1:-}" = --distro ] && { DISTRO="${2:?--distro needs a name}"; shift 2; }
+APPIMAGE="$(realpath "${1:?usage: $0 [--distro D] AppImage [screenshot.xwd]}")"
 SHOT="${2:-}"
-IMAGE=nightdrop-appimage-test:22.04
+case "$DISTRO" in
+  ubuntu:*|debian:*) FILE=Containerfile.test; BASE="docker.io/library/$DISTRO" ;;
+  fedora:*) FILE=Containerfile.test-fedora; BASE="registry.fedoraproject.org/$DISTRO" ;;
+  *) echo "unsupported distro: $DISTRO" >&2; exit 2 ;;
+esac
+IMAGE="nightdrop-appimage-test:${DISTRO/:/-}"
 
-podman image exists "$IMAGE" || podman build -t "$IMAGE" -f "$HERE/Containerfile.test" "$HERE"
+podman image exists "$IMAGE" ||
+  podman build -q -t "$IMAGE" --build-arg "BASE=$BASE" -f "$HERE/$FILE" "$HERE" >/dev/null
 
 OUT="$(mktemp -d)"; trap 'rm -rf "$OUT"' EXIT
 # Labelling off so the container can read the AppImage wherever it lives in the home directory.
@@ -33,7 +42,7 @@ podman run --rm --security-opt label=disable \
 status="$(cat "$OUT/status")"
 window="$(grep -c '"Night Drop"' "$OUT/windows" || true)"
 unhandled="$(grep -c 'Unhandled Exception' "$OUT/app.log" || true)"
-echo "process: $status | Night Drop windows: $window | unhandled Dart exceptions: $unhandled"
+echo "[$DISTRO] process: $status | Night Drop windows: $window | unhandled Dart exceptions: $unhandled"
 if [ "$status" = alive ] && [ "$window" -ge 1 ] && [ "$unhandled" = 0 ]; then
   echo "PASS"
 else

@@ -157,7 +157,7 @@ structured like Magic Wormhole's — a non-secret slot plus secret words:
 ```
 
 Flow (**interactive SPAKE2**, `core/src/pake` + `node::run_join_handshake` /
-`node::service_pending_invites`):
+`node::service_invites`):
 1. **Inviter** picks a **slot** + secret words, reads out the full `slot-secret-words`
    code out-of-band, and *stages* the invite locally (their onion address + a fresh
    pre-key bundle). Nothing decryptable-by-the-code is posted; the background poller
@@ -468,14 +468,17 @@ on a re-pair (new session) exactly like `verified`.
   Two consequences worth keeping: `shutdown` **tries** for the lock with a bound and proceeds
   without it rather than waiting (an unbounded acquire made "bounded shutdown" a lie), and the
   transport is held as an `Arc` so a send can carry a handle across the unlocked window.
-  Still doing their I/O under the lock, and owed the same treatment: `service_pending_invites`,
-  `flush_pending_control`, and every control frame sent through `Node::deliver` — the once-per-run
+  Still doing their I/O under the lock, and owed the same treatment: `flush_pending_control`, and every control frame sent through `Node::deliver` — the once-per-run
   announcements (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`)
   and `announce_relays`, which `set_my_relays` runs on a background thread that still takes the
   lock — and the relay recall + re-post when a still-queued message is edited or unsent. Each is a
   direct dial bounded by `PEER_DIAL_TIMEOUT`, then a relay post. (The
   relay-directory fetch got the treatment in 0.1.28: `begin_directory_fetch` → `fetch_directory`
-  → `finish_directory_fetch`; the server-backup post in 0.1.29.)
+  → `finish_directory_fetch`; the server-backup post in 0.1.29; and in 0.1.29 the inviter side of
+  short-code pairing, which now runs as its own job on the 2 s pairing cadence —
+  `invite_service_plan` → `service_invites` → `apply_invite_service`. It used to run only after a
+  whole mailbox drain round, and once v2 polling fragments made a round take over a minute on a
+  phone, an Android inviter answered after the joiner's 120 s wait had run out.)
 - **Offline / space-saving path:** a **minimal relay** stores **E2E-encrypted blobs
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.

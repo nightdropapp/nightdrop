@@ -2061,6 +2061,48 @@ fn the_peer_version_survives_a_restart() {
 /// sees the slot's mailbox — could post guesses until one opened the payload, and the code's
 /// secret is only about 15 bits. Re-posts of the *same* opener are not new guesses and are
 /// answered again, which is what keeps a real joiner's retries working.
+/// A joiner re-posts its opener while it waits, so an inviter that looks late finds many copies of
+/// one opener. They are one guess and get one answer: a phone answered twelve copies one relay round
+/// trip at a time, and the joiner gave up before the last (S25, 2026-10-07).
+#[test]
+fn re_posted_copies_of_one_opener_get_one_answer() {
+    let live = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();
+    let net = MemoryNetwork::new();
+    let slot = "58";
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_relay(RelayClient::new(live.clone()));
+    alice
+        .stage_short_code_invite(slot, "cedar-lantern-river-ember", Duration::from_secs(60))
+        .unwrap();
+    let joiner = RelayClient::new(live);
+    let (_, msg) = crate::pake::start(b"58-cedar-lantern-river-ember");
+    let mut opener = Vec::new();
+    put_field(&mut opener, &msg);
+    put_field(&mut opener, &crate::pqkem::generate().public);
+    for _ in 0..12 {
+        joiner
+            .post(
+                &rendezvous_handle(slot, RDV_JOINER),
+                &opener,
+                Duration::from_secs(60),
+            )
+            .unwrap();
+    }
+
+    alice.service_pending_invites();
+
+    let answers = joiner.take(&rendezvous_handle(slot, RDV_INVITER)).unwrap();
+    assert_eq!(
+        answers.len(),
+        1,
+        "one answer for twelve copies of one opener"
+    );
+    assert!(
+        alice.has_pending_invites(),
+        "copies are not distinct guesses"
+    );
+}
+
 #[test]
 fn an_invite_answers_only_a_few_distinct_openers_then_retires() {
     let live = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();

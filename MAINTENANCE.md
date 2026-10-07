@@ -480,7 +480,8 @@ the Rust core and two C++ plugins needed glibc 2.38–2.39, which 22.04 (2.35) d
 - `scripts/linux-build/test-appimage.sh <AppImage>` launches it the way the catalog does — a bare
   `ubuntu:22.04` with GTK3, libsecret, Mesa and Xvfb, `--appimage-extract-and-run` — and passes on
   a "Night Drop" window after 25 s with no unhandled Dart exception. It fails the 0.1.28 AppImage
-  with the catalog's own error. Run it on every release AppImage; after a release that fixes a
+  with the catalog's own error. `--distro ubuntu:24.04|debian:13|fedora:44` runs the same check on
+  another bare desktop runtime (all four passed on 2026-10-07, build from 7306cee). Run it on every release AppImage; after a release that fixes a
   catalog failure, comment `/retest` on the catalog PR.
 
 ---

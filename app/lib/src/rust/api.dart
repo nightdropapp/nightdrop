@@ -276,7 +276,7 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Create a short-code invite via the rendezvous mailbox (§5b/§5c). Returns the full
   /// `slot-secret-words` code to read out; the secret never reaches the relay. Returns
   /// immediately — the background poller completes the interactive SPAKE2 handshake with a
-  /// joiner (`Node::service_pending_invites`), so this device must stay reachable meanwhile.
+  /// joiner (`node::service_invites`), so this device must stay reachable meanwhile.
   Future<String> createShortCodeInvite();
 
   static Future<NightdropCore> default_() =>

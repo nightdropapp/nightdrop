@@ -660,6 +660,13 @@ impl Inner {
             .me
             .plan_pending_sends()
             .map(|plan| crate::node::execute_sends(&plan));
+        // Answer short-code openers too: the poller does this on its own job (§5b).
+        if poll_relay {
+            if let Some(plan) = self.me.invite_service_plan() {
+                let outcome = crate::node::service_invites(&plan);
+                self.me.apply_invite_service(outcome);
+            }
+        }
         let result = self.apply_tick(poll_relay, harvest, sent);
         // Receipts for what that tick received. The poller sends these after releasing the lock;
         // a synchronous caller already holds it, so they go now — after the tick has emitted.
@@ -672,7 +679,8 @@ impl Inner {
     /// The state-mutating half of a poll cycle: pump the transport, apply any relay blobs already
     /// drained (off-lock) by the poller, let demo peers echo, and emit/persist on change. Runs
     /// under the core lock; the blocking relay **reads** happened before this (§1.5.2). When
-    /// `relay_due` is set, also service short-code pairing and the time-sweep.
+    /// `relay_due` is set, also run the relay-cadence chores and the time-sweep. (Short-code
+    /// pairing is not one of them: the poller answers openers on its own job, `drive` inline.)
     fn apply_tick(
         &mut self,
         relay_due: bool,
@@ -729,8 +737,8 @@ impl Inner {
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
             self.me.announce_mailbox();
-            // Inviter side of short-code pairing: answer any joiner's SPAKE2 opener (§5b).
-            self.me.service_pending_invites();
+            // (The inviter side of short-code pairing runs on its own job in the poller loop, on
+            // the pairing cadence — not here, where it waited for whole drain rounds.)
             // Retry messages that couldn't reach the peer or any relay when first sent (arti was
             // cold): now that Tor has had time to warm, re-queue them so they finally deliver.
             for id in self.me.flush_pending_relay() {
@@ -1592,7 +1600,7 @@ impl NightdropCore {
     /// Create a short-code invite via the rendezvous mailbox (§5b/§5c). Returns the full
     /// `slot-secret-words` code to read out; the secret never reaches the relay. Returns
     /// immediately — the background poller completes the interactive SPAKE2 handshake with a
-    /// joiner (`Node::service_pending_invites`), so this device must stay reachable meanwhile.
+    /// joiner (`node::service_invites`), so this device must stay reachable meanwhile.
     pub fn create_short_code_invite(&self) -> Result<String> {
         let slot = random_slot();
         let secret = random_secret_words();
@@ -2630,6 +2638,11 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
         // run inline, every message composed meanwhile sat "held" until it finished (2026-09-27).
         // Off this thread, sends keep going every tick while it runs.
         let mut drain_job: Option<thread::JoinHandle<RelayHarvest>> = None;
+        // Answering a joiner's short-code opener (§5b): its own job on the pairing cadence, off the
+        // lock, independent of the drain — a drain round of isolated fragment circuits can outlast
+        // a joiner's whole wait (`Node::invite_service_plan`).
+        let mut invite_job: Option<thread::JoinHandle<crate::node::InviteServiceOutcome>> = None;
+        let mut last_invite_service: Option<std::time::Instant> = None;
         // The relay list fetched from our onion site (`directory::SITE_PATH`, §3.1 — relay
         // rotation without an app update): daily, and on its own thread for the same reason as the
         // drain — an onion fetch can take minutes and must not hold the core lock.
@@ -2686,6 +2699,25 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
                         drain_job = Some(thread::spawn(move || drain_relay_mailboxes(&plan)));
                     }
                     None => relay_applied = true, // no relay: still run the chores on cadence
+                }
+            }
+            if invite_job.as_ref().is_some_and(|j| j.is_finished()) {
+                if let Some(outcome) = invite_job.take().and_then(|j| j.join().ok()) {
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    g.me.apply_invite_service(outcome);
+                }
+            }
+            if pairing
+                && invite_job.is_none()
+                && last_invite_service.is_none_or(|t| t.elapsed() >= RELAY_POLL_PAIRING)
+            {
+                last_invite_service = Some(std::time::Instant::now());
+                let plan = {
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    g.me.invite_service_plan()
+                };
+                if let Some(plan) = plan {
+                    invite_job = Some(thread::spawn(move || crate::node::service_invites(&plan)));
                 }
             }
             if directory_job.as_ref().is_some_and(|j| j.is_finished()) {

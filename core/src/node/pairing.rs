@@ -170,7 +170,7 @@ impl Node {
     // reproduces. The AEAD tag on that seal doubles as key confirmation — a wrong code makes
     // `open` fail, so an imposter is turned away and a MITM (who lacks the code) cannot forge a
     // response either. The tradeoff is that pairing is now interactive: the inviter must be
-    // reachable to answer, which the background poller handles via [`service_pending_invites`].
+    // reachable to answer, which the background poller handles via [`service_invites`].
 
     /// Inviter side: stage a short-code invite (§5b). Remembers the SPAKE2 secret and the
     /// pre-key/onion payload so the poller can answer a joiner's opener. Returns immediately —
@@ -210,19 +210,26 @@ impl Node {
         !self.pending_invites.is_empty()
     }
 
-    /// Inviter side, run each poll tick: answer any joiner's SPAKE2 opener sitting in the
-    /// rendezvous, and drop expired invites. Best-effort — a transient relay error is swallowed
-    /// so it never aborts the wider poll cycle. Cheap when no invite is outstanding.
-    ///
-    /// Broadcasts across the whole rendezvous set ([`rendezvous_relays`](Self::rendezvous_relays)): we
-    /// look for a joiner's opener on **every** relay and post our answer to **all** of them, so a
-    /// joiner reaches us over any relay they share with us — losing the single primary no longer
-    /// stops pairing, as long as both sides share one live relay.
+    /// Inviter side of short-code pairing, in one call: [`invite_service_plan`](Self::invite_service_plan),
+    /// [`service_invites`] and [`apply_invite_service`](Self::apply_invite_service). The poller runs
+    /// the middle step without the core lock; this composition is for tests and simple callers.
+    #[cfg(test)]
     pub fn service_pending_invites(&mut self) {
-        let relays = self.rendezvous_relays();
-        if relays.is_empty() {
-            return;
+        if let Some(plan) = self.invite_service_plan() {
+            let outcome = service_invites(&plan);
+            self.apply_invite_service(outcome);
         }
+    }
+
+    /// What servicing the hosted short-code invites needs, snapshotted under the lock — or `None`
+    /// when there is nothing to do (no invite, or no relay). Drops expired invites on the way.
+    ///
+    /// The relay round trips then run in [`service_invites`] **without** the core lock, on their
+    /// own cadence: the poller runs this every [`RELAY_POLL_PAIRING`](crate::api) while an invite
+    /// is open. It used to run only after a whole mailbox drain round had finished, and with v2
+    /// polling fragments a round on a phone took over a minute — longer than a joiner waits — so
+    /// an Android inviter answered openers after the joiner had given up (S25, 2026-10-07).
+    pub(crate) fn invite_service_plan(&mut self) -> Option<InviteServicePlan> {
         let now = Instant::now();
         let before = self.pending_invites.len();
         self.pending_invites.retain(|p| p.expiry > now);
@@ -233,78 +240,33 @@ impl Node {
                 before - self.pending_invites.len()
             );
         }
-        // A snapshot, so `self` is not borrowed across the relay round-trips.
-        let invites = self.pending_invites.clone();
-        let mut retired: Vec<String> = Vec::new();
-        for PendingInvite {
-            slot,
-            secret,
-            payload,
-            ttl,
-            openers: mut seen,
-            ..
-        } in invites
-        {
-            // Both handles depend only on the slot, so compute them once per invite rather than
-            // rebuilding them for every relay and every opener inside the loops below.
-            let joiner_handle = rendezvous_handle(&slot, RDV_JOINER);
-            let inviter_handle = rendezvous_handle(&slot, RDV_INVITER);
-            for relay in &relays {
-                let Ok(openers) = relay.take(&joiner_handle) else {
-                    continue;
-                };
-                if openers.is_empty() {
-                    continue; // nobody is trying this code right now — the common case
-                }
-                crate::diag!("invite: took {} opener(s) from a relay", openers.len());
-                for opener in openers {
-                    // Each *distinct* opener is one guess at the code (MAX_OPENERS_PER_INVITE).
-                    let digest: [u8; 32] = sha2::Sha256::digest(&opener).into();
-                    if !seen.contains(&digest) {
-                        if seen.len() >= super::MAX_OPENERS_PER_INVITE {
-                            crate::diag!(
-                                "invite: more than {} different openers for one code — retiring \
-                                 it; the joiner needs a fresh code",
-                                super::MAX_OPENERS_PER_INVITE
-                            );
-                            retired.push(slot.clone());
-                            break;
-                        }
-                        seen.push(digest);
-                    }
-                    match build_invite_response(&secret, &payload, &opener) {
-                        Ok(response) => {
-                            // Post the answer to every relay so the joiner finds it wherever they poll.
-                            let mut posted = 0usize;
-                            for out in &relays {
-                                if out.post(&inviter_handle, &response, ttl).is_ok() {
-                                    posted += 1;
-                                }
-                            }
-                            crate::diag!(
-                                "invite: answered an opener, posted to {posted}/{} relays{}",
-                                relays.len(),
-                                if posted == 0 {
-                                    " — ANSWER LOST, the opener is already consumed"
-                                } else {
-                                    ""
-                                }
-                            );
-                        }
-                        // A malformed opener, or one for a different code (an attacker probing the
-                        // slot). Either way this one is now consumed.
-                        Err(_) => crate::diag!("invite: could not build a response for an opener"),
-                    }
-                }
-                if retired.contains(&slot) {
-                    break;
-                }
-            }
+        if self.pending_invites.is_empty() {
+            return None;
+        }
+        let relays = self.rendezvous_relays();
+        if relays.is_empty() {
+            return None;
+        }
+        Some(InviteServicePlan {
+            relays,
+            invites: self.pending_invites.clone(),
+        })
+    }
+
+    /// Fold the result of [`service_invites`] back in: each invite's distinct openers so far (the
+    /// guess count, `MAX_OPENERS_PER_INVITE`), and the invites retired for exceeding it. An invite
+    /// that vanished meanwhile (expired, or replaced) is left alone.
+    pub(crate) fn apply_invite_service(&mut self, outcome: InviteServiceOutcome) {
+        for (slot, seen) in outcome.openers {
             if let Some(p) = self.pending_invites.iter_mut().find(|p| p.slot == slot) {
                 p.openers = seen;
             }
         }
-        self.pending_invites.retain(|p| !retired.contains(&p.slot));
+        if !outcome.retired.is_empty() {
+            self.pending_invites
+                .retain(|p| !outcome.retired.contains(&p.slot));
+        }
+        self.dirty = true;
     }
 
     /// The relays used for short-code pairing rendezvous (§3.1): the primary shared default plus
@@ -337,4 +299,113 @@ impl Node {
             .find(|c| c.id == contact_id)
             .ok_or_else(|| anyhow::anyhow!("chat not created"))
     }
+}
+
+/// Snapshot for [`service_invites`] (see [`Node::invite_service_plan`]).
+pub(crate) struct InviteServicePlan {
+    relays: Vec<RelayClient>,
+    invites: Vec<PendingInvite>,
+}
+
+/// What [`service_invites`] found, for [`Node::apply_invite_service`].
+pub(crate) struct InviteServiceOutcome {
+    /// Per invite slot: the distinct openers seen so far.
+    openers: Vec<(String, Vec<[u8; 32]>)>,
+    /// Slots retired for exceeding `MAX_OPENERS_PER_INVITE`.
+    retired: Vec<String>,
+}
+
+/// Inviter side of short-code pairing, **without the core lock**: answer any joiner's SPAKE2
+/// opener sitting in the rendezvous. Best-effort — a transient relay error is swallowed so it never
+/// aborts the poller.
+///
+/// Broadcasts across the whole rendezvous set ([`Node::rendezvous_relays`]): we look for a joiner's
+/// opener on **every** relay and post our answer to **all** of them, so a joiner reaches us over
+/// any relay they share with us — losing the single primary no longer stops pairing, as long as
+/// both sides share one live relay.
+///
+/// A joiner re-posts the same opener while it waits, to every relay, so one take can hold many
+/// copies of it (twelve, on a phone that had not looked for a minute). Each distinct opener is
+/// answered **once per call**: the answer waits on the relay for the joiner, and answering every
+/// copy only spent a relay round trip apiece — 24 s of them in that case — before the next one.
+pub(crate) fn service_invites(plan: &InviteServicePlan) -> InviteServiceOutcome {
+    let mut outcome = InviteServiceOutcome {
+        openers: Vec::new(),
+        retired: Vec::new(),
+    };
+    let relays = &plan.relays;
+    for PendingInvite {
+        slot,
+        secret,
+        payload,
+        ttl,
+        openers: seen,
+        ..
+    } in &plan.invites
+    {
+        let mut seen = seen.clone();
+        let mut answered: Vec<[u8; 32]> = Vec::new();
+        // Both handles depend only on the slot, so compute them once per invite rather than
+        // rebuilding them for every relay and every opener inside the loops below.
+        let joiner_handle = rendezvous_handle(slot, RDV_JOINER);
+        let inviter_handle = rendezvous_handle(slot, RDV_INVITER);
+        let mut retire = false;
+        'relays: for relay in relays {
+            let Ok(openers) = relay.take(&joiner_handle) else {
+                continue;
+            };
+            if openers.is_empty() {
+                continue; // nobody is trying this code right now — the common case
+            }
+            crate::diag!("invite: took {} opener(s) from a relay", openers.len());
+            for opener in openers {
+                let digest: [u8; 32] = sha2::Sha256::digest(&opener).into();
+                if answered.contains(&digest) {
+                    continue; // a re-posted copy of one already answered in this call
+                }
+                // Each *distinct* opener is one guess at the code (MAX_OPENERS_PER_INVITE).
+                if !seen.contains(&digest) {
+                    if seen.len() >= super::MAX_OPENERS_PER_INVITE {
+                        crate::diag!(
+                            "invite: more than {} different openers for one code — retiring \
+                             it; the joiner needs a fresh code",
+                            super::MAX_OPENERS_PER_INVITE
+                        );
+                        retire = true;
+                        break 'relays;
+                    }
+                    seen.push(digest);
+                }
+                answered.push(digest);
+                match build_invite_response(secret, payload, &opener) {
+                    Ok(response) => {
+                        // Post the answer to every relay so the joiner finds it wherever they poll.
+                        let mut posted = 0usize;
+                        for out in relays {
+                            if out.post(&inviter_handle, &response, *ttl).is_ok() {
+                                posted += 1;
+                            }
+                        }
+                        crate::diag!(
+                            "invite: answered an opener, posted to {posted}/{} relays{}",
+                            relays.len(),
+                            if posted == 0 {
+                                " — ANSWER LOST, the joiner's next re-post gets another"
+                            } else {
+                                ""
+                            }
+                        );
+                    }
+                    // A malformed opener, or one for a different code (an attacker probing the
+                    // slot). Either way this one is now consumed.
+                    Err(_) => crate::diag!("invite: could not build a response for an opener"),
+                }
+            }
+        }
+        if retire {
+            outcome.retired.push(slot.clone());
+        }
+        outcome.openers.push((slot.clone(), seen));
+    }
+    outcome
 }

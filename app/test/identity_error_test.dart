@@ -22,6 +22,24 @@ void main() {
       expect(msg, contains('bootstrap Tor: no network'));
     });
 
+    test('a locked Linux keyring says what to unlock, not the platform error', () {
+      // Exactly what flutter_secure_storage_linux surfaced on a Fedora 44 desktop session whose
+      // keyring was never unlocked (2026-10-07).
+      final msg = identitySetupError('PlatformException(KeyringLocked, KeyringLocked, null, null)');
+      expect(msg, contains('keyring is locked'));
+      expect(msg, contains('Unlock'));
+      expect(msg, isNot(contains('PlatformException')));
+    });
+
+    test('no keyring service at all is named as such', () {
+      // The plugin's other code; the message is libsecret's own.
+      final msg = identitySetupError(
+          'PlatformException(Libsecret error, The name org.freedesktop.secrets was not provided '
+          'by any .service files, null, null)');
+      expect(msg, contains('none is running'));
+      expect(msg, isNot(contains('PlatformException')));
+    });
+
     test('matches the context case-insensitively', () {
       final msg = identitySetupError('AnyhowException(Launch Onion Service: fs lock held)');
       expect(msg, contains('already be running'));

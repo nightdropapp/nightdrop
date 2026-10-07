@@ -691,7 +691,7 @@ pub struct Node {
     dirty: bool,
     /// Outstanding short-code invites this device is hosting (§5b). Each holds the SPAKE2
     /// secret words and the pre-key/onion payload to hand out; the background poller answers a
-    /// joiner's SPAKE2 opener from these (see [`service_pending_invites`](Self::service_pending_invites)).
+    /// joiner's SPAKE2 opener from these (see [`service_invites`](crate::node::service_invites)).
     /// **Persisted** (`export_pending_invites`), so a code survives a core rebuild or restart within
     /// its TTL — a rebuild mid-pairing used to leave the joiner waiting on an inviter that had
     /// forgotten the code (`ARCHITECTURE.md` §5b).
@@ -1026,6 +1026,7 @@ mod pairing;
 /// same window the node actually uses rather than a number that can drift away from it.
 #[cfg(test)]
 pub(crate) use messaging::RECEIPT_TIMEOUT;
+pub(crate) use pairing::{service_invites, InviteServiceOutcome};
 
 impl Node {
     pub fn new(transport: Box<dyn Transport>) -> Self {

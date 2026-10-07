@@ -21,17 +21,29 @@ String identitySetupError(Object error) {
     return 'Night Drop may already be running, or another copy is using its data. '
         'Close the other window, then try again.';
   }
+  // Linux keeps the store key in the desktop keyring (Secret Service). A locked keyring — common
+  // after an automatic login — or no keyring service at all (a bare window manager) fails here
+  // with a raw platform error that names neither the problem nor the fix.
+  final lower = msg.toLowerCase();
+  if (lower.contains('keyringlocked') || lower.contains('keyring is locked')) {
+    return 'Your system keyring is locked, so Night Drop has nowhere safe to keep its key. '
+        'Unlock the keyring (your login password unlocks it on most desktops), then try again.';
+  }
+  if (lower.contains('org.freedesktop.secrets') || lower.contains('libsecret')) {
+    return 'Night Drop needs a system keyring to keep its key, and none is running. Install or '
+        'start one (GNOME Keyring or KWallet), then try again.';
+  }
   return 'Could not set up your identity: $msg';
 }
 
 /// The UI's single seam to the security core.
 ///
-/// Today this is backed by [MockNightdropCore] (in-memory, no crypto) so the app runs and
-/// the flows are clickable. Later, a `RustNightdropCore` will back it with the real
-/// `flutter_rust_bridge` calls into `core/` — without the UI changing.
+/// The app runs on `RustNightdropCore`, which calls the Rust core in `core/` through
+/// `flutter_rust_bridge`; `MockNightdropCore` (in memory, no crypto) backs widget tests and
+/// screenshots. Widgets see only this interface.
 ///
-/// It extends [ChangeNotifier] so widgets can simply `ListenableBuilder` on it; the
-/// real implementation will notify on bridge events (incoming messages, etc.).
+/// It extends [ChangeNotifier] so widgets can simply `ListenableBuilder` on it; the Rust-backed
+/// implementation notifies on bridge events (incoming messages, etc.).
 abstract class NightdropCore extends ChangeNotifier {
   /// The current identity, or null before onboarding.
   Identity? get identity;

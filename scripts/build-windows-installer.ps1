@@ -26,7 +26,14 @@ if (-not $iscc) { throw 'Inno Setup 6 not found (winget install JRSoftware.InnoS
 $env:Path += ';C:\Program Files\NASM'
 if (-not $env:LIBCLANG_PATH) { $env:LIBCLANG_PATH = 'C:\Program Files\LLVM\bin' }
 
-Write-Host "==> Night Drop $Version, relay $Relay"
+# The pinned Flutter (app/.fvmrc), not whatever `flutter` PATH finds first: the build VM's default
+# is an older SDK, and a release built on it would ship without that SDK's fixes (MAINTENANCE.md §8).
+$want = ((Get-Content -Raw (Join-Path $App '.fvmrc')) | ConvertFrom-Json).flutter
+$sdk = Split-Path -Parent (Split-Path -Parent (Get-Command flutter).Source)
+$have = ((Get-Content -Raw (Join-Path $sdk 'bin\cache\flutter.version.json')) | ConvertFrom-Json).frameworkVersion
+if ($have -ne $want) { throw "flutter on PATH ($sdk) is $have, app/.fvmrc pins $want - put that SDK's bin first on PATH" }
+
+Write-Host "==> Night Drop $Version, relay $Relay, Flutter $have"
 Push-Location $App
 try {
     & flutter build windows --release --dart-define=NIGHTDROP_TOR=1 "--dart-define=NIGHTDROP_RELAY=$Relay"
