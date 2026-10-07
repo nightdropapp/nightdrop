@@ -1,0 +1,5 @@
+Backups keep your address again. Since 0.1.16 they lost it, so contacts could not reach a restored device directly: make a new backup after updating. The app now reminds contacts of your address at each start, repairing earlier restores.
+
+Short codes shown on a phone work reliably. Code guessing is limited, declining a request revokes access, and burn messages never return as normal ones. Linux: runs on older systems.
+
+Night Drop 0.2 won't be able to message 0.1 apps: update when it arrives.
