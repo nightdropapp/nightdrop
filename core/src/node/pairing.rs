@@ -274,11 +274,26 @@ impl Node {
     /// survives loss of any single relay both sides don't uniquely depend on. Clients are cheap
     /// clones; built once per call for driving the joiner handshake outside the lock.
     pub fn rendezvous_relays(&self) -> Vec<RelayClient> {
-        let mut relays = Vec::new();
-        if let Some(primary) = &self.relay {
-            relays.push(primary.clone());
-        }
+        self.relay_set()
+    }
+
+    /// The primary, our own extra relays and the directory's, **once each**. The signed directory
+    /// lists the primary too, under the same address: without the check every rendezvous post and
+    /// take went to the same relay twice — a joiner's opener "posted to 2/2 relays" was two copies
+    /// on one relay (2026-10-07), the same doubling the drain plan already guards against.
+    pub(crate) fn relay_set(&self) -> Vec<RelayClient> {
+        let mut relays: Vec<RelayClient> = self.relay.iter().cloned().collect();
+        let mut seen: Vec<&str> = self
+            .relay
+            .as_ref()
+            .and_then(|p| p.addr())
+            .into_iter()
+            .collect();
         for addr in self.my_relays.iter().chain(self.discovered_relays.iter()) {
+            if seen.contains(&addr.as_str()) {
+                continue;
+            }
+            seen.push(addr);
             relays.push(build_relay(self.transport.as_ref(), addr));
         }
         relays

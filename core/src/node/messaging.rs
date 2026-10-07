@@ -604,11 +604,7 @@ impl Node {
     /// The relays to ask for the list when our onion site cannot be reached: the primary, our own
     /// and the discovered ones. Snapshotted under the lock; asked off it (`fetch_directory`).
     pub(crate) fn directory_relays(&self) -> Vec<RelayClient> {
-        let mut clients: Vec<RelayClient> = self.relay.iter().cloned().collect();
-        for addr in self.my_relays.iter().chain(self.discovered_relays.iter()) {
-            clients.push(build_relay(self.transport.as_ref(), addr));
-        }
-        clients
+        self.relay_set()
     }
 
     /// Adopt a signed relay list if it verifies against `pubkey` and is newer than ours.

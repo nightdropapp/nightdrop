@@ -285,3 +285,27 @@ fn the_relays_are_not_asked_when_the_site_answers() {
     drop(listener);
     let _ = asked.join();
 }
+
+/// The signed list names the primary too. Counted twice, every rendezvous post and take went to
+/// the same relay twice (a joiner's opener "posted to 2/2 relays", 2026-10-07).
+#[test]
+fn the_primary_listed_again_by_the_directory_is_one_relay() {
+    let mut n = node();
+    n.set_relay(RelayClient::new("primary.onion"));
+    n.set_my_relays(vec!["mine.onion".into(), "primary.onion".into()]);
+    assert_eq!(
+        n.adopt_directory(
+            &list(1, &["primary.onion", "other.onion", "mine.onion"]),
+            &pubkey()
+        ),
+        DirectoryOutcome::Applied { changed: true }
+    );
+    let mut addrs: Vec<String> = n
+        .rendezvous_relays()
+        .iter()
+        .map(|r| r.addr().unwrap().to_string())
+        .collect();
+    addrs.sort();
+    assert_eq!(addrs, ["mine.onion", "other.onion", "primary.onion"]);
+    assert_eq!(n.directory_relays().len(), 3);
+}
