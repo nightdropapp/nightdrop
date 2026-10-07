@@ -494,13 +494,25 @@ impl TorTransport {
             };
             runtime.block_on(async {
                 let exchange = async {
-                    let mut stream = tokio::time::timeout(
-                        RELAY_DIAL_TIMEOUT,
-                        client.connect_with_prefs((relay_onion.as_str(), RELAY_PORT), &prefs),
-                    )
-                    .await
-                    .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
-                    .with_context(|| format!("relay connect {relay_onion}"))?;
+                    // One retry, only for a circuit that died under the stream being opened
+                    // (`circuit_closed_under_stream`): nothing has been sent yet, and arti builds
+                    // or picks another circuit for the second attempt. Both share the one timeout.
+                    let connect = async {
+                        let target = (relay_onion.as_str(), RELAY_PORT);
+                        match client.connect_with_prefs(target, &prefs).await {
+                            Err(e) if circuit_closed_under_stream(&e) => {
+                                crate::diag!(
+                                    "relay: circuit closed while opening a stream — retrying once"
+                                );
+                                client.connect_with_prefs(target, &prefs).await
+                            }
+                            other => other,
+                        }
+                    };
+                    let mut stream = tokio::time::timeout(RELAY_DIAL_TIMEOUT, connect)
+                        .await
+                        .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
+                        .with_context(|| format!("relay connect {relay_onion}"))?;
                     write_all_stalling(&mut stream, req.as_bytes(), RELAY_STALL_TIMEOUT).await?;
                     read_line_stalling(&mut stream, RELAY_STALL_TIMEOUT).await
                 };
@@ -518,6 +530,29 @@ impl TorTransport {
             })
         })
     }
+}
+
+/// Whether `e` is a circuit torn down underneath a stream that was still opening.
+///
+/// arti reports that as `Stream not connected` with kind `BadApiUsage` ("bad API usage (bug)"),
+/// but it is the network: a guard dropping its connection, or a hop or the rendezvous point
+/// tearing the circuit down, before CONNECTED arrived (`docs/arti-stream-not-connected.md`). It
+/// is matched on both the kind and the message, so a genuine API misuse — the other things arti
+/// files under `BadApiUsage` — still fails at once instead of being retried.
+fn circuit_closed_under_stream(e: &arti_client::Error) -> bool {
+    use arti_client::HasKind;
+    let mut report = e.to_string();
+    let mut source = std::error::Error::source(e);
+    while let Some(s) = source {
+        report.push_str(": ");
+        report.push_str(&s.to_string());
+        source = s.source();
+    }
+    is_circuit_closed_under_stream(e.kind(), &report)
+}
+
+fn is_circuit_closed_under_stream(kind: arti_client::ErrorKind, report: &str) -> bool {
+    kind == arti_client::ErrorKind::BadApiUsage && report.contains("Stream not connected")
 }
 
 /// Completes once the transport that owns `closing` has been dropped. Polled rather than awaited
@@ -1581,6 +1616,36 @@ mod bridge_tests {
         assert_eq!(apply_transports(&mut b2, empty.to_str().unwrap()), 0);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod circuit_closed_tests {
+    use super::*;
+    use arti_client::ErrorKind;
+
+    /// The chain clients logged (2026-10-05/06), minus our own context.
+    const SEEN: &str = "Protocol error while launching a data stream: Protocol error while \
+                        launching a data stream: Problem building circuit 4.172, while begin \
+                        stream: Stream not connected";
+
+    #[test]
+    fn a_circuit_closed_under_a_new_stream_is_retried() {
+        assert!(is_circuit_closed_under_stream(ErrorKind::BadApiUsage, SEEN));
+    }
+
+    #[test]
+    fn other_api_misuse_and_other_failures_are_not() {
+        // A genuine misuse arti files under the same kind fails at once.
+        assert!(!is_circuit_closed_under_stream(
+            ErrorKind::BadApiUsage,
+            "Invalid stream target address"
+        ));
+        // The same words under any other kind are not this case.
+        assert!(!is_circuit_closed_under_stream(
+            ErrorKind::TorNetworkTimeout,
+            SEEN
+        ));
     }
 }
 
