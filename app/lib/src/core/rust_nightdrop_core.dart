@@ -15,6 +15,7 @@ import 'models.dart';
 import 'notifications.dart';
 import 'install_source.dart';
 import 'public_downloads.dart';
+import '../desktop/desktop_shell.dart';
 import 'screenshot_detector.dart';
 import 'update_schedule.dart';
 
@@ -347,6 +348,8 @@ class RustNightdropCore extends NightdropCore {
   Future<void> lockStore() async {
     if (!await isStoreLocked()) return;
     if (await BackgroundDelivery.isEnabled()) return;
+    // Desktop's equivalent: the window is in the tray and the app is still meant to receive.
+    if (DesktopShell.keepsRunning) return;
     _unlockedKey = null;
     _lockedOut = true;
     await _closeCore();
@@ -958,6 +961,13 @@ class RustNightdropCore extends NightdropCore {
   @override
   Future<void> start() => _startInFlight ??=
       _start().whenComplete(() => _startInFlight = null);
+
+  /// The first [start] of this process, for [startOnce]. A later explicit [start] or [retryStart]
+  /// (after a failure) still runs; only the launch path coalesces onto this one.
+  Future<void>? _firstStart;
+
+  @override
+  Future<void> startOnce() => _firstStart ??= start();
 
   Future<void> _start() async {
     // Auto-restore a persisted identity on launch (Tor mode only). If a secure-store key and

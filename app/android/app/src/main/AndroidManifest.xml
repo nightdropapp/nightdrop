@@ -14,6 +14,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Opt-in background delivery foreground service (flutter_foreground_task, §11.8 / #13):
          keeps the process alive so the Tor peek keeps running while backgrounded. -->
+    <!-- Background delivery after a reboot or an app update (BootReceiver, §11.8). It acts only
+         while the user has background delivery on. -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
@@ -30,13 +33,11 @@
          manifest. Verified against app/lib usage:
            - RECORD_AUDIO          (camera_android_camerax): camera is QR-scan only, no mic/voice.
            - WRITE_EXTERNAL_STORAGE (camera_android_camerax): file saving uses file_picker+SAF.
-           - RECEIVE_BOOT_COMPLETED (flutter_foreground_task): we set autoRunOnBoot: false.
            - READ_EXTERNAL_STORAGE / READ_MEDIA_{IMAGES,VIDEO,AUDIO} (open_filex): attaching uses
              file_picker (SAF), opening hands the file to another app via intent — neither needs
              this app to hold media-read perms. Confirmed by device test of attach/open flows. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" tools:node="remove" />
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove" />
-    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" tools:node="remove" />
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" tools:node="remove" />
@@ -93,6 +94,22 @@
              stops the service itself on a swipe and never calls onTaskRemoved, so the plugin's own
              stopWithTask option cannot override it. MainActivity keeps the engine alive for the
              same reason, and Exit in the menu is how the user stops everything (issue #15). -->
+        <!-- Restarts the engine (and with it the Tor core and the foreground service) after a reboot
+             or an update, when background delivery is on. See BootReceiver.kt. -->
+        <receiver
+            android:name=".BootReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <!-- The plugin's own boot receiver restarts only the service, never the engine that runs
+             the core (BootReceiver.kt says why that is wrong); it is inert with autoRunOnBoot off,
+             and removed so the app has one boot path. -->
+        <receiver
+            android:name="com.pravera.flutter_foreground_task.service.RebootReceiver"
+            tools:node="remove" />
         <service
             android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
             android:foregroundServiceType="specialUse"

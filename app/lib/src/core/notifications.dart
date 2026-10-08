@@ -2,6 +2,8 @@ import 'dart:io' show File, Platform;
 
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
+import '../desktop/desktop_shell.dart';
+
 /// Thin wrapper over flutter_local_notifications for new-message/request alerts. All content
 /// is generic ("New message") — no message text leaves the secure surfaces.
 class NotificationService {
@@ -22,13 +24,25 @@ class NotificationService {
       const android = AndroidInitializationSettings('@mipmap/ic_launcher');
       const linux = LinuxInitializationSettings(defaultActionName: 'Open');
       const darwin = DarwinInitializationSettings();
+      // Windows had no settings until desktop close-to-tray, so it posted nothing; a window
+      // hidden in the tray needs these to say anything arrived. The GUID only routes a toast's
+      // click back to this app; keep it stable, or clicks on toasts already shown go nowhere.
+      const windows = WindowsInitializationSettings(
+        appName: 'Night Drop',
+        appUserModelId: 'NightDrop.NightDrop',
+        guid: '0596e0e2-23fc-43e8-82cd-d06be25731d7',
+      );
       await _plugin.initialize(
         settings: const InitializationSettings(
           android: android,
           linux: linux,
           iOS: darwin,
           macOS: darwin,
+          windows: windows,
         ),
+        // Desktop: a click opens the window, from the tray if that is where it is. (Android opens
+        // the app by itself.)
+        onDidReceiveNotificationResponse: (_) => DesktopShell.show(),
       );
       await _plugin
           .resolvePlatformSpecificImplementation<
@@ -66,6 +80,7 @@ class NotificationService {
           priority: Priority.high,
         ),
         linux: LinuxNotificationDetails(),
+        windows: WindowsNotificationDetails(),
         iOS: DarwinNotificationDetails(),
         macOS: DarwinNotificationDetails(),
       );

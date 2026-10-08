@@ -2014,6 +2014,66 @@ abstract class AppLocalizations {
   /// **'Reconnect'**
   String get bridgesRestartNow;
 
+  /// Desktop home-menu item: close-to-tray and start-at-login settings.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep running when closed…'**
+  String get desktopRunMenu;
+
+  /// No description provided for @desktopRunTitle.
+  ///
+  /// In en, this message translates to:
+  /// **'Keep running when closed'**
+  String get desktopRunTitle;
+
+  /// No description provided for @desktopRunBody.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop can only receive messages while it is running. Closing the window normally ends it, and messages wait (on the relay, for up to 24 hours) until you open it again.'**
+  String get desktopRunBody;
+
+  /// No description provided for @desktopCloseToTray.
+  ///
+  /// In en, this message translates to:
+  /// **'Close to the tray'**
+  String get desktopCloseToTray;
+
+  /// No description provided for @desktopCloseToTrayHint.
+  ///
+  /// In en, this message translates to:
+  /// **'Closing the window leaves Night Drop running in the system tray, so messages keep arriving and you are notified. Click the tray icon to open it; quit with Exit in the menu. If you set an app lock, your key stays in memory while Night Drop runs in the tray, so it can decrypt what arrives.'**
+  String get desktopCloseToTrayHint;
+
+  /// No description provided for @desktopNoTray.
+  ///
+  /// In en, this message translates to:
+  /// **'Your desktop does not show tray icons, so a closed window would have no way back. On GNOME, the AppIndicator extension adds them.'**
+  String get desktopNoTray;
+
+  /// No description provided for @desktopStartAtLogin.
+  ///
+  /// In en, this message translates to:
+  /// **'Start when you log in'**
+  String get desktopStartAtLogin;
+
+  /// No description provided for @desktopStartAtLoginHint.
+  ///
+  /// In en, this message translates to:
+  /// **'With close to the tray on, it starts in the tray without opening a window.'**
+  String get desktopStartAtLoginHint;
+
+  /// No description provided for @desktopRunSaved.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved.'**
+  String get desktopRunSaved;
+
+  /// No description provided for @desktopRunFailed.
+  ///
+  /// In en, this message translates to:
+  /// **'Could not save: {error}'**
+  String desktopRunFailed(String error);
+
   /// No description provided for @coverTrafficMenu.
   ///
   /// In en, this message translates to:

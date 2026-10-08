@@ -1177,6 +1177,42 @@ class AppLocalizationsEn extends AppLocalizations {
   String get bridgesRestartNow => 'Reconnect';
 
   @override
+  String get desktopRunMenu => 'Keep running when closed…';
+
+  @override
+  String get desktopRunTitle => 'Keep running when closed';
+
+  @override
+  String get desktopRunBody =>
+      'Night Drop can only receive messages while it is running. Closing the window normally ends it, and messages wait (on the relay, for up to 24 hours) until you open it again.';
+
+  @override
+  String get desktopCloseToTray => 'Close to the tray';
+
+  @override
+  String get desktopCloseToTrayHint =>
+      'Closing the window leaves Night Drop running in the system tray, so messages keep arriving and you are notified. Click the tray icon to open it; quit with Exit in the menu. If you set an app lock, your key stays in memory while Night Drop runs in the tray, so it can decrypt what arrives.';
+
+  @override
+  String get desktopNoTray =>
+      'Your desktop does not show tray icons, so a closed window would have no way back. On GNOME, the AppIndicator extension adds them.';
+
+  @override
+  String get desktopStartAtLogin => 'Start when you log in';
+
+  @override
+  String get desktopStartAtLoginHint =>
+      'With close to the tray on, it starts in the tray without opening a window.';
+
+  @override
+  String get desktopRunSaved => 'Saved.';
+
+  @override
+  String desktopRunFailed(String error) {
+    return 'Could not save: $error';
+  }
+
+  @override
   String get coverTrafficMenu => 'Cover traffic';
 
   @override

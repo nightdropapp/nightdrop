@@ -106,7 +106,9 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
     // has no await before its finally-notify), and notifying mid-build throws
     // "setState() or markNeedsBuild() called during build".
     final core = NightdropScope.of(context);
-    WidgetsBinding.instance.addPostFrameCallback((_) => core.start());
+    // `startOnce`, not `start`: after a reboot the core may already be running, started headless
+    // by `BootDelivery` before this screen existed.
+    WidgetsBinding.instance.addPostFrameCallback((_) => core.startOnce());
   }
 
   @override

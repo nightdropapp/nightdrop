@@ -2,7 +2,10 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
+#include <shellapi.h>
 
 #include <memory>
 
@@ -12,8 +15,13 @@
 class FlutterWindow : public Win32Window {
  public:
   // Creates a new FlutterWindow hosting a Flutter view running |project|.
-  explicit FlutterWindow(const flutter::DartProject& project);
+  // |start_hidden|: launched at login into the tray (`--hidden`), so the window is not shown
+  // when Flutter draws its first frame.
+  FlutterWindow(const flutter::DartProject& project, bool start_hidden);
   virtual ~FlutterWindow();
+
+  // Posted by a second launch (see main.cpp) to bring this one forward, from the tray if need be.
+  static UINT ShowMessage();
 
  protected:
   // Win32Window:
@@ -28,6 +36,21 @@ class FlutterWindow : public Win32Window {
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+
+  // `app.nightdrop/window`: close-to-tray on/off, show, hide and quit, driven from Dart
+  // (lib/src/desktop/desktop_window.dart).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
+
+  void ShowFromTray();
+  void AddTrayIcon();
+  void RemoveTrayIcon();
+  void ShowTrayMenu();
+
+  bool start_hidden_;
+  // While set, closing the window hides it to the tray instead of ending the app.
+  bool close_to_tray_ = false;
+  bool tray_added_ = false;
+  NOTIFYICONDATAW tray_{};
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

@@ -1,12 +1,18 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import 'src/app.dart';
 import 'src/core/app_config.dart';
 import 'src/core/background_delivery.dart';
+import 'src/core/boot_delivery.dart';
 import 'src/core/rust_nightdrop_core.dart';
+import 'src/desktop/desktop_shell.dart';
 import 'src/rust/frb_generated.dart';
 
-Future<void> main() async {
+/// `args` carries [BootDelivery.arg] when Android started the app after a reboot or an update,
+/// with no screen (`BootReceiver.kt`).
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   // Configure the opt-in Android background-delivery foreground service (§11.8, #13). No-op off
   // Android; harmless if the user never enables it.
@@ -17,5 +23,9 @@ Future<void> main() async {
   // Load the Rust security core (flutter_rust_bridge). The native lib is built and
   // bundled by the platform build (see README "Wiring the Rust core").
   await RustLib.init();
-  runApp(NightdropApp(core: RustNightdropCore()));
+  final core = RustNightdropCore();
+  runApp(NightdropApp(core: core));
+  // Desktop: close-to-tray and start-at-login, from the saved settings (no-op elsewhere).
+  unawaited(DesktopShell.init(args));
+  if (args.contains(BootDelivery.arg)) unawaited(BootDelivery.run(core));
 }

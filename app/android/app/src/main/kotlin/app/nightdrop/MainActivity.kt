@@ -88,12 +88,17 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        // An engine BootReceiver started had no screen, so its Dart `setKeepAlive` reached no
+        // channel; without this the engine would be destroyed with the first screen that closes.
+        keepEngine = keepEngine || BootReceiver.isEnabled(applicationContext)
         process = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, PROCESS_CHANNEL).apply {
             setMethodCallHandler { call, result ->
                 when (call.method) {
                     // True while background delivery is on: the engine then outlives the screen.
                     "setKeepAlive" -> {
                         keepEngine = call.arguments as? Boolean ?: false
+                        // Remembered for BootReceiver, which decides before any Dart runs.
+                        BootReceiver.setEnabled(applicationContext, keepEngine)
                         result.success(null)
                     }
                     // Issue #15. Dart has already stopped the service and shut the core down (Tor
@@ -225,7 +230,7 @@ class MainActivity : FlutterActivity() {
     companion object {
         const val CHANNEL = "app.nightdrop/screenshots"
         const val PROCESS_CHANNEL = "app.nightdrop/process"
-        private const val ENGINE_ID = "main"
+        const val ENGINE_ID = "main"
 
         /** Set from Dart via `setKeepAlive`; process-wide, since the engine outlives any screen. */
         @Volatile

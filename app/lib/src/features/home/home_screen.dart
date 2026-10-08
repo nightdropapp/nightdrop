@@ -7,6 +7,7 @@ import '../../app.dart';
 import '../../core/app_config.dart';
 import '../../core/app_version.dart';
 import '../../core/background_delivery.dart';
+import '../../desktop/desktop_shell.dart';
 import '../../core/nightdrop_core.dart';
 import '../../core/models.dart';
 import '../backup/backup_actions.dart';
@@ -55,6 +56,7 @@ class HomeScreen extends StatelessWidget {
             onSelected: (value) {
               if (value == 'identity') _showMyIdentity(context, core);
               if (value == 'background') _backgroundDeliverySettings(context);
+              if (value == 'desktop') _desktopRunSettings(context);
               if (value == 'applock') showAppLockSettings(context, core);
               if (value == 'duress') showDuressSettings(context, core);
               if (value == 'bridges') {
@@ -75,6 +77,8 @@ class HomeScreen extends StatelessWidget {
               if (BackgroundDelivery.supported)
                 PopupMenuItem(
                     value: 'background', child: Text(l10n.backgroundDeliveryMenu)),
+              if (DesktopShell.supported)
+                PopupMenuItem(value: 'desktop', child: Text(l10n.desktopRunMenu)),
               PopupMenuItem(value: 'applock', child: Text(l10n.appLockMenu)),
               // Its own row, and deliberately stateless in the label: "Wipe code" reads the same
               // whether or not one is armed, so a glance at an unlocked phone gives nothing away.
@@ -211,6 +215,98 @@ Future<void> _confirmResetTor(BuildContext context, NightdropCore core) async {
   ScaffoldMessenger.of(context)
       .showSnackBar(SnackBar(content: Text(l10n.resetTorRunning)));
   await core.resetTorConnection();
+}
+
+/// Desktop: keep running with the window closed, and start at login (`DesktopShell`). The tray
+/// switch is offered only where the desktop shows tray icons; elsewhere it says why not, rather
+/// than hide a window with no way back.
+Future<void> _desktopRunSettings(BuildContext context) async {
+  final l10n = AppLocalizations.of(context)!;
+  final current = await DesktopShell.load();
+  final trayAvailable = await DesktopShell.trayAvailable();
+  if (!context.mounted) return;
+  final chosen = await showDialog<DesktopSettings>(
+    context: context,
+    builder: (context) => _DesktopRunDialog(
+      initial: current,
+      trayAvailable: trayAvailable,
+    ),
+  );
+  if (chosen == null || !context.mounted) return;
+  final messenger = ScaffoldMessenger.of(context);
+  try {
+    await DesktopShell.update(chosen);
+    messenger.showSnackBar(SnackBar(content: Text(l10n.desktopRunSaved)));
+  } catch (e) {
+    messenger.showSnackBar(SnackBar(content: Text(l10n.desktopRunFailed(e.toString()))));
+  }
+}
+
+class _DesktopRunDialog extends StatefulWidget {
+  const _DesktopRunDialog({required this.initial, required this.trayAvailable});
+
+  final DesktopSettings initial;
+  final bool trayAvailable;
+
+  @override
+  State<_DesktopRunDialog> createState() => _DesktopRunDialogState();
+}
+
+class _DesktopRunDialogState extends State<_DesktopRunDialog> {
+  late DesktopSettings _settings = widget.initial;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final theme = Theme.of(context);
+    final muted = theme.textTheme.bodySmall
+        ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
+    return AlertDialog(
+      title: Text(l10n.desktopRunTitle),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(l10n.desktopRunBody),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              key: const Key('desktop-tray'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(l10n.desktopCloseToTray),
+              value: widget.trayAvailable && _settings.closeToTray,
+              onChanged: widget.trayAvailable
+                  ? (v) => setState(() => _settings = _settings.copyWith(closeToTray: v))
+                  : null,
+            ),
+            Text(
+              widget.trayAvailable ? l10n.desktopCloseToTrayHint : l10n.desktopNoTray,
+              style: muted,
+            ),
+            SwitchListTile(
+              key: const Key('desktop-login'),
+              contentPadding: EdgeInsets.zero,
+              title: Text(l10n.desktopStartAtLogin),
+              value: _settings.startAtLogin,
+              onChanged: (v) => setState(() => _settings = _settings.copyWith(startAtLogin: v)),
+            ),
+            Text(l10n.desktopStartAtLoginHint, style: muted),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          key: const Key('desktop-save'),
+          onPressed: () => Navigator.of(context).pop(_settings),
+          child: Text(l10n.save),
+        ),
+      ],
+    );
+  }
 }
 
 /// Cover traffic (#4). Opt-in, and the dialog carries the limit as prominently as the benefit:

@@ -57,6 +57,14 @@ abstract class NightdropCore extends ChangeNotifier {
   /// so the user isn't asked to create an identity every launch. No-op if nothing is saved.
   Future<void> start();
 
+  /// [start], unless it has already run in this process — the launch path the UI uses.
+  ///
+  /// On Android the engine can be started before any screen exists: after a reboot,
+  /// [BootDelivery] starts the core with no UI, and when the user later opens the app the screen
+  /// attaches to that same engine. Calling [start] again then would close and rebuild a core that
+  /// is already running, and restarting the onion service rotates its introduction points.
+  Future<void> startOnce() => start();
+
   /// True when a saved state file exists but could not be opened at launch (corrupt, wrong key,
   /// or a transient I/O error). The app must NOT silently drop to onboarding in this case — a
   /// fresh identity would overwrite the still-on-disk data. Defaults false (e.g. the mock).

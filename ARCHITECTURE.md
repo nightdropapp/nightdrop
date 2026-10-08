@@ -1271,12 +1271,40 @@ service; it then stops itself (`TaskStarter.system`) instead of showing "Watchin
 over nothing. Verified on an S25 (2026-09-26): task removed, service and process alive a minute
 later, a message sent from the desktop notified.
 
-**Not covered: a reboot or an app update.** Both end the process, and nothing brings delivery back
-until the user opens the app once. `autoRunOnBoot`/`autoRunOnMyPackageReplaced` stay off on purpose:
-they restart only the service, not the engine that runs the core, which is the "watching over
-nothing" case the service now refuses. Covering it means running the core in the service's own
-background engine instead of the UI's — a larger change, not yet made. Seen on the S25 when a
-reinstall at 14:41 left nothing running until the app was opened at 15:10.
+**After a reboot or an app update, delivery comes back by itself** (0.2), as it does in SimpleX;
+Signal, Molly and Session also restart on boot, through their push or polling services. Both end the
+process. `autoRunOnBoot`/`autoRunOnMyPackageReplaced` stay off, because they restart only the
+service, not the engine that runs the core, which is the "watching over nothing" case the service
+refuses; the plugin's boot receiver is removed from the manifest. Instead `BootReceiver.kt` answers
+`BOOT_COMPLETED` and `MY_PACKAGE_REPLACED`, only while background delivery is on (read from a copy of
+the setting `MainActivity` writes on every `setKeepAlive`, since no Dart runs before it decides).
+It creates the same cached engine `MainActivity` attaches to and runs `main` with `--boot`.
+`BootDelivery` then starts the foreground service first, while Android still allows a
+background start after boot, and then the core. When the user later opens the app, the screen
+attaches to that engine, and `startOnce` keeps the UI from starting a core that is already running.
+With an app lock set, the key is not in memory after a restart, so the core cannot open. Like
+Briar, whose database needs a password, it then posts a reminder notification ("Night Drop is
+locked") and ends the process instead of running a service that can receive nothing. The first
+update *to* this version is the one gap: the copy of the setting is written only once a build that
+has it has run.
+
+**Desktop: close to the tray** (0.2, Linux and Windows). Closing the window used to end the process.
+"Keep running when closed…" in the menu (`desktop/desktop_shell.dart`) hides the window in the tray
+instead, and "Start when you log in" adds an XDG autostart entry (Linux, pointing at the AppImage
+file itself) or a per-user `Run` key (Windows), starting into the tray with `--hidden`. Each runner
+owns its window and takes `app.nightdrop/window` calls (close-to-tray, show, hide, quit). On Windows
+the tray icon is `Shell_NotifyIcon` with an Open/Quit menu, and the runner quits for real on
+`WM_ENDSESSION`, so an installer's Restart Manager can close it. On Linux it is a
+StatusNotifierItem spoken over D-Bus from Dart (`linux_tray.dart`), with the icon sent as pixels.
+Tray plugins link `libayatana-appindicator3`, which many systems lack, and a missing library would
+stop the AppImage from starting at all (§11.7 of MAINTENANCE.md). Close-to-tray is offered only
+where a tray exists: Windows, and Linux sessions with a StatusNotifierItem host. Stock GNOME has
+none, and a hidden window with no icon would look like the app had vanished. Launching the app
+again also brings the window back: Linux was already single-instance, and Windows now is too,
+through a named mutex, so a second launch hands over to the first instead of starting a second
+core on the same Tor state. Windows notifications (toasts) were never initialised before this;
+now they are, and a click on one opens the window. While the app runs in the tray, the app lock
+leaves the key in memory, as with Android background delivery.
 
 **What background delivery costs** (measured on a Galaxy S25 overnight on mobile data; method and
 every run in `docs/background-traffic.md`). With 0.1.28: **~30 mAh/h** for Night Drop, of which
