@@ -109,11 +109,15 @@ if [ "$DO_BUILD" = 1 ]; then
     RUSTUP="${RUSTUP_HOME:-$HOME/.rustup}"; CARGO="${CARGO_HOME:-$HOME/.cargo}"; PUB="${PUB_CACHE:-$HOME/.pub-cache}"
     c "Building Linux release bundle in $BUILD_IMAGE (glibc ≤ $MAX_GLIBC)…"
     # Same paths inside as outside (package_config.json and CMake caches hold absolute paths), the
-    # host's uid (keep-id), and no SELinux relabelling of the host's toolchain dirs.
+    # host's uid (keep-id), and no SELinux relabelling of the host's toolchain dirs. The app id goes
+    # in too: CMake compiles it into the binary (`APPLICATION_ID`), and without it a test-id
+    # AppImage carried the test id's packaging around a binary that claimed `app.nightdrop`, so it
+    # handed itself off to the real install's running instance.
     podman run --rm --userns=keep-id --security-opt label=disable \
       -v "$PROJECT_ROOT:$PROJECT_ROOT" -v "$FLUTTER_HOME:$FLUTTER_HOME" \
       -v "$CARGO:$CARGO" -v "$RUSTUP:$RUSTUP" -v "$PUB:$PUB" \
       -e HOME=/tmp/home -e PUB_CACHE="$PUB" -e CARGO_HOME="$CARGO" -e RUSTUP_HOME="$RUSTUP" \
+      -e NIGHTDROP_APP_ID="$APP_ID" \
       -e PATH="$FLUTTER_HOME/bin:$CARGO/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       -w "$APP_DIR" "$BUILD_IMAGE" \
       bash -c 'mkdir -p "$HOME" && flutter config --no-analytics >/dev/null 2>&1; flutter build linux --release "$@"' \
