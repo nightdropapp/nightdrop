@@ -16,5 +16,10 @@ directory deleted, so Flutter neither builds nor links it. On Linux the Dart cal
 thumbnail" — the receiver sees the generic video tile. The `example/` app is dropped too. Android,
 iOS/macOS and Windows code is byte-for-byte upstream.
 
+**`pubspec.lock` is ours too.** F-Droid's source scanner refuses a `pubspec.yaml` without a lockfile
+beside it ("Found dependency file without lock", which failed the first 0.1.29 build). It is not
+used by the app build — `app/pubspec.lock` decides every version — so regenerate it with the pinned
+Flutter (`flutter pub get` here, then revert the `analysis_options.yaml` that pub rewrites).
+
 **Updating:** copy the new release over this directory, delete `linux/` and `example/` and the
-`linux:` platform entry again, and keep this file.
+`linux:` platform entry again, regenerate `pubspec.lock`, and keep this file.
