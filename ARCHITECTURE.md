@@ -1246,6 +1246,31 @@ nothing" case the service now refuses. Covering it means running the core in the
 background engine instead of the UI's — a larger change, not yet made. Seen on the S25 when a
 reinstall at 14:41 left nothing running until the app was opened at 15:10.
 
+**What background delivery costs** (measured on a Galaxy S25 overnight on mobile data; method and
+every run in `docs/background-traffic.md`). With 0.1.28: **~30 mAh/h** for Night Drop, of which
+~17 is the wake lock and ~12.5 the mobile radio, and ~0.8 MB/h up, ~1.0 MB/h down. Three findings
+set that figure:
+
+- **arti's onion-service publisher reuploaded more the longer it ran.** `tor-hsservice` kept its
+  reupload timers in a `BinaryHeap` and never dropped an earlier timer for the same time period, so
+  every extra upload round (an intro-point change, a network change, a failed round) became a
+  repeating one: 1-4 timer firings an hour after a start, 30+ after a day, and 200-270 HSDir
+  uploads an hour. We ship a patched crate (`third_party/tor-hsservice/NIGHTDROP-PATCH.md`, one
+  timer per period) since 0.1.27; it cut timer firings to 0.3/h, upload traffic by 72% and Night
+  Drop's battery use by 41%. Reported upstream (anonymous ticket, 2026-10-03). Until a fixed arti
+  ships, every arti upgrade must carry the patch forward.
+- **The wake lock stays** (decided 2026-10-03). Without it Night Drop drew ~20 mAh/h instead of
+  ~34, but background mailbox checks slowed from every 5 minutes to every 14-26, because the timer
+  only ran in Android's maintenance windows. 3-5x slower offline mail is not worth ~18 mAh/h.
+- **The 2 s circuit-build floor** (0.1.25, `core/src/transport/tor.rs`) abandons ~7% of circuits on
+  mobile data at night, some of which would have completed. Failed rounds no longer multiply, but
+  they still cost circuits, and 84% of HSDir upload attempts fail. Revisiting the floor is open.
+
+Not separable from one night each: Run 6's gain over the fix alone (13% less battery, half the
+upload) came with arti 0.43 → 0.47 and the daily relay-list fetch together. Whole-phone drain is not
+a measure of Night Drop: other apps' background radio use and the number of network changes swing
+it more than Night Drop does.
+
 **Exit** (home menu, issue #15) is the deliberate way to stop: it stops the service, shuts the core
 down (Tor closed, pending saves written — `shutdown` now flushes the save debounce), then ends the
 process. The identity is untouched. Its dialog states the cost: mail sent meanwhile waits on the

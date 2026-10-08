@@ -2,7 +2,7 @@
 
 Status: **explained** (2026-10-07). It is the Tor network closing circuits, which arti misreports
 as an API bug. The client now retries the stream open once (`circuit_closed_under_stream` in
-`core/src/transport/tor.rs`); an upstream report is drafted below.
+`core/src/transport/tor.rs`); upstream it is arti#2439 (see the end).
 
 ## What clients see
 
@@ -76,24 +76,13 @@ mailbox handles, on the relay — so that target stays off.
   `relay: circuit closed while opening a stream — retrying once` when it fires.
 - **Relay:** the temporary tracing was removed on 2026-10-07 (one restart).
 
-## Draft upstream report (arti, gitlab.torproject.org/tpo/core/arti)
+## Upstream
 
-> **Title:** A circuit closed under a pending BEGIN is reported as `ErrorKind::BadApiUsage`
->
-> When a circuit is torn down (DESTROY from the guard, or the guard's channel dropping without TLS
-> close_notify) while a data stream on it is waiting for CONNECTED, `connect()` fails with
-> `Protocol error while launching a data stream … while begin stream: Stream not connected`, and
-> `HasKind::kind()` is `BadApiUsage`, rendered as "bad API usage (bug)".
->
-> The cause is `tor_proto::Error::NotConnected` (raised in `stream/raw.rs` when the stream's
-> receiver ends without an END cell), which `util/err.rs` maps to `EK::BadApiUsage`. On this path
-> it is not caller misuse but a network failure, and callers that branch on the kind — retry
-> transient failures, surface bugs — get it backwards.
->
-> Observed with arti 0.43 and 0.47, from both sides of an onion service: over 24 h, 162 of 172
-> occurrences on the service side followed a received DESTROY within 0.3 s, and one occurrence on a
-> client co-located with the service followed its guard channel closing ("peer closed connection
-> without sending TLS close_notify") by 120 ms.
->
-> Suggested: report a stream whose circuit closed before CONNECTED as `ErrorKind::CircuitCollapse`,
-> keeping `NotConnected` → `BadApiUsage` only for a caller using an already-closed stream.
+Already reported upstream as **arti#2439**, "tor-proto: `NotConnected` error shouldn't be
+`BadApiUsage`" (opened 2026-03-30, from a merge-request review; open, unassigned as of 2026-10-08).
+It names the misclassification but has no field data and no proposed kind. So instead of a new
+issue, a note with the measurements above goes on #2439. The suggestion: report a stream whose
+circuit closed before CONNECTED as `ErrorKind::CircuitCollapse` (what `E::CircuitClosed` maps to).
+Today the receiver can't tell that apart from a locally terminated entry (see the comment at the
+`Poll::Ready(None)` arm in `stream/raw.rs`, unchanged on `main` at 3adfc4b0), so the reactor would
+need to record the cause. Our retry stays until a fix ships in an arti release we use.
