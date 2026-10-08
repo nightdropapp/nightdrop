@@ -232,6 +232,10 @@ pub struct PersistedPendingControl {
     pub relays: Vec<String>,
     /// base64-encoded sealed control-frame bytes (the whole [`PersistedState`] is sealed around it).
     pub bytes: String,
+    /// The mailbox handle to post under: the chat's v2 handle when it had one. Empty in states
+    /// written before 0.2, which retried under the recipient's v1 handle.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub handle: String,
 }
 
 /// A short-code invite this device is hosting, persisted so it survives a **core rebuild**.

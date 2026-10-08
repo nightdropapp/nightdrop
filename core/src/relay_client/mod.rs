@@ -85,7 +85,7 @@ pub struct RelayLimits {
 
 impl Default for RelayLimits {
     fn default() -> Self {
-        let max_blob_bytes = 150 * 1024 * 1024;
+        let max_blob_bytes = MAX_BLOB_BYTES;
         Self {
             max_blob_bytes,
             max_mailbox_blobs: 256,
@@ -142,6 +142,51 @@ struct ResponseLine {
 /// Most handles one [`Request::TakeMany`] may name. A fragment holds ~8 (`node::mailbox`); the bound
 /// only stops a request from asking a relay for unbounded work.
 pub const MAX_TAKE_MANY: usize = 64;
+
+/// Largest blob a relay stores by default ([`RelayLimits::max_blob_bytes`]): the app's 100 MB media
+/// cap after E2E encryption and envelope sealing (~1.4x).
+pub const MAX_BLOB_BYTES: usize = 150 * 1024 * 1024;
+
+/// Raw blob bytes one draining response (`Take`, `TakeMany`, `Fetch`) carries, at most. The rest
+/// stays queued for the next take. A response always carries at least one blob, so the bound on
+/// the reply is this plus one [`MAX_BLOB_BYTES`] blob — which is what lets a client cap the line it
+/// reads ([`MAX_RESPONSE_LINE_BYTES`]). Without it a reply's size was bounded only by the relay's
+/// whole store, and a client had to read whatever arrived: a hostile relay could stream until the
+/// phone ran out of memory.
+pub const TAKE_BUDGET_BYTES: usize = 32 * 1024 * 1024;
+
+/// Longest response line a client reads from a relay: a full [`TAKE_BUDGET_BYTES`] plus one
+/// maximum blob, base64-encoded, plus generous JSON overhead (ids, quotes, commas per item).
+/// Anything longer is refused, and the connection dropped, before it is buffered.
+pub const MAX_RESPONSE_LINE_BYTES: usize =
+    (TAKE_BUDGET_BYTES + MAX_BLOB_BYTES) / 3 * 4 + 8 * 1024 * 1024;
+
+/// What is left of one draining response's [`TAKE_BUDGET_BYTES`].
+struct TakeBudget {
+    room: usize,
+    first: bool,
+}
+
+impl Default for TakeBudget {
+    fn default() -> Self {
+        Self {
+            room: TAKE_BUDGET_BYTES,
+            first: true,
+        }
+    }
+}
+
+impl TakeBudget {
+    /// Whether a blob of `len` bytes goes in this response; counts it if so. The first always does.
+    fn admit(&mut self, len: usize) -> bool {
+        if !self.first && len > self.room {
+            return false;
+        }
+        self.first = false;
+        self.room = self.room.saturating_sub(len);
+        true
+    }
+}
 
 /// A request to the relay (one JSON line per request).
 #[derive(Debug, Serialize, Deserialize)]
@@ -321,11 +366,40 @@ struct StoreInner {
 }
 
 impl StoreInner {
-    /// Remove a whole mailbox, keeping the byte total in sync.
-    fn drain_handle(&mut self, handle: &str) -> Vec<Stored> {
-        let entries = self.map.remove(handle).unwrap_or_default();
-        self.total_bytes -= entries.iter().map(|s| s.bytes.len()).sum::<usize>();
-        entries
+    /// Remove and return the oldest live blobs under `handle` that fit in what is left of one
+    /// response's [`TakeBudget`], keeping the byte total in sync. What does not fit stays queued
+    /// for the next take; expired blobs met on the way are dropped.
+    fn drain_handle_bounded(
+        &mut self,
+        handle: &str,
+        budget: &mut TakeBudget,
+        now: Instant,
+    ) -> Vec<Stored> {
+        let Some(queue) = self.map.get_mut(handle) else {
+            return Vec::new();
+        };
+        let mut taken = Vec::new();
+        let mut freed = 0;
+        while let Some(first) = queue.first() {
+            if first.expiry <= now {
+                freed += queue.remove(0).bytes.len();
+                continue;
+            }
+            if !budget.admit(first.bytes.len()) {
+                break;
+            }
+            let s = queue.remove(0);
+            freed += s.bytes.len();
+            taken.push(s);
+        }
+        if queue.is_empty() {
+            self.map.remove(handle);
+        }
+        self.total_bytes -= freed;
+        if freed > 0 {
+            self.dirty = true;
+        }
+        taken
     }
 }
 
@@ -806,11 +880,10 @@ fn process(
             )
         }
         Request::Fetch { handle } => {
-            let entries = inner.drain_handle(&handle);
-            inner.dirty |= !entries.is_empty();
-            let items: Vec<(String, String)> = entries
+            let mut budget = TakeBudget::default();
+            let items: Vec<(String, String)> = inner
+                .drain_handle_bounded(&handle, &mut budget, now)
                 .into_iter()
-                .filter(|s| s.expiry > now)
                 .map(|s| (s.msg_id, B64.encode(s.bytes)))
                 .collect();
             let ev = simple_ev("FETCH", &handle, 0, format!("{} items", items.len()));
@@ -832,13 +905,12 @@ fn process(
                 );
             }
             let mut blobs: Vec<String> = Vec::new();
+            let mut budget = TakeBudget::default();
             for handle in &handles {
-                let entries = inner.drain_handle(handle);
-                inner.dirty |= !entries.is_empty();
                 blobs.extend(
-                    entries
+                    inner
+                        .drain_handle_bounded(handle, &mut budget, now)
                         .into_iter()
-                        .filter(|s| s.expiry > now)
                         .map(|s| B64.encode(s.bytes)),
                 );
             }
@@ -858,11 +930,10 @@ fn process(
             )
         }
         Request::Take { handle } => {
-            let entries = inner.drain_handle(&handle);
-            inner.dirty |= !entries.is_empty();
-            let blobs: Vec<String> = entries
+            let mut budget = TakeBudget::default();
+            let blobs: Vec<String> = inner
+                .drain_handle_bounded(&handle, &mut budget, now)
                 .into_iter()
-                .filter(|s| s.expiry > now)
                 .map(|s| B64.encode(s.bytes))
                 .collect();
             let ev = simple_ev("TAKE", &handle, 0, format!("{} blobs", blobs.len()));
@@ -1290,9 +1361,10 @@ fn tcp_round_trip(addr: &str, line: &str) -> Result<String> {
     let mut writer = stream.try_clone()?;
     writer.write_all(line.as_bytes())?;
     let mut reader = BufReader::new(stream);
-    let mut response_line = String::new();
-    reader.read_line(&mut response_line)?;
-    Ok(response_line)
+    // Capped: a relay's reply is bounded by `MAX_RESPONSE_LINE_BYTES`, and one that is not
+    // honest must not be able to grow this buffer until the app runs out of memory.
+    read_line_capped(&mut reader, MAX_RESPONSE_LINE_BYTES)?
+        .ok_or_else(|| anyhow::anyhow!("relay closed the connection without answering"))
 }
 
 #[cfg(test)]
@@ -1353,6 +1425,45 @@ mod tests {
             vec![b"one".to_vec(), b"two".to_vec()],
             "one take per handle instead"
         );
+    }
+
+    /// A draining reply carries at most `TAKE_BUDGET_BYTES` (plus its first blob); the rest waits
+    /// for the next take, in order, and nothing is lost.
+    #[test]
+    fn a_take_leaves_what_does_not_fit_its_budget_for_the_next_one() {
+        let (core, relay) = in_process(false);
+        let big = vec![7u8; TAKE_BUDGET_BYTES / 2 + 1];
+        for _ in 0..3 {
+            relay
+                .post("mbx:big", &big, Duration::from_secs(60))
+                .unwrap();
+        }
+        let first = relay.take_many(&["mbx:big".into()]).unwrap();
+        assert_eq!(first.len(), 1, "two of these would pass the budget");
+        let second = relay.take_many(&["mbx:big".into()]).unwrap();
+        assert_eq!(second.len(), 1);
+        let third = relay.take_many(&["mbx:big".into()]).unwrap();
+        assert_eq!(third.len(), 1, "the last one, on the third take");
+        assert!(relay.take_many(&["mbx:big".into()]).unwrap().is_empty());
+        assert_eq!(
+            core.store.lock().unwrap().total_bytes,
+            0,
+            "byte count back to zero"
+        );
+    }
+
+    #[test]
+    fn a_blob_larger_than_the_budget_still_goes_out_alone() {
+        let (_core, relay) = in_process(false);
+        relay
+            .post("mbx:a", &[1u8; 10], Duration::from_secs(60))
+            .unwrap();
+        let huge = vec![9u8; TAKE_BUDGET_BYTES + 1];
+        relay.post("mbx:b", &huge, Duration::from_secs(60)).unwrap();
+        let got = relay.take_many(&["mbx:b".into(), "mbx:a".into()]).unwrap();
+        assert_eq!(got.len(), 1, "the oversized blob, first and alone");
+        assert_eq!(got[0].len(), huge.len());
+        assert_eq!(relay.take_many(&["mbx:a".into()]).unwrap().len(), 1);
     }
 
     #[test]

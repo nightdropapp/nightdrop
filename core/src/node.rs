@@ -487,7 +487,7 @@ pub(crate) enum DirectoryOutcome {
 /// is `None` for the primary relay, or an advertised extra relay's address (#17). See
 /// [`Chat::relay_receipts`] and [`recall_receipts`].
 #[derive(Clone)]
-struct QueuedReceipt {
+pub(crate) struct QueuedReceipt {
     /// `None` = the primary (baked-in) relay; `Some(addr)` = an advertised extra relay.
     relay_addr: Option<String>,
     /// The mailbox handle the copy was posted under (v1 or a v2 day handle), so a recall targets
@@ -745,6 +745,11 @@ pub struct Node {
     /// Frames sealed by a UI call and waiting to be sent **off** the lock by that call's caller
     /// (see [`DetachedSend`]). Drained by [`Node::take_detached_sends`]; in memory only.
     detached_sends: Vec<DetachedSend>,
+    /// Control frames and relay retries sealed under the lock and waiting to be delivered without
+    /// it ([`Outbound`]). Filled only on asynchronous transports; drained by the poller
+    /// ([`take_outbox`](Node::take_outbox)) or by the API call waiting on its own entries. In
+    /// memory: whatever must survive a restart is also held in `pending_control`.
+    outbox: Vec<Outbound>,
     /// Delivery receipts and relay acks for messages this tick received, sealed under the lock and
     /// waiting for the poller to send them **after** it has surfaced those messages and released
     /// the lock. Sent inline instead, they held back the "message" event — and so the notification
@@ -916,31 +921,186 @@ pub(crate) struct DetachedSend {
 impl DetachedSend {
     /// Deliver it: the peer's onion first, the relay mailbox if that fails. True if either took it.
     pub(crate) fn execute(&self) -> bool {
-        let direct = if self.fresh {
-            self.transport.send_fresh(&self.peer_address, &self.bytes)
-        } else {
-            self.transport.send(&self.peer_address, &self.bytes)
+        !matches!(self.run(Route::DirectThenRelay), Delivery::Failed)
+    }
+
+    /// Deliver it by `route`, reporting which path took it (and the relay receipts, so an edit or
+    /// unsend can recall the copy later).
+    pub(crate) fn run(&self, route: Route) -> Delivery {
+        let direct = || {
+            if self.peer_address.is_empty() {
+                return false; // relay-only by construction (cover traffic)
+            }
+            if self.fresh {
+                self.transport.send_fresh(&self.peer_address, &self.bytes)
+            } else {
+                self.transport.send(&self.peer_address, &self.bytes)
+            }
+            .is_ok()
         };
-        if direct.is_ok() {
-            return true;
+        let relay = || {
+            queue_on_relays(
+                self.transport.as_ref(),
+                &self.primary,
+                &self.peer_relays,
+                &self.recipient_ik,
+                &self.handle,
+                &self.bytes,
+            )
+            .ok()
+        };
+        match route {
+            Route::DirectThenRelay => {
+                if direct() {
+                    return Delivery::Direct;
+                }
+                crate::diag!("detached send: direct dial failed — falling back to the relay");
+                match relay() {
+                    Some(copies) => {
+                        crate::diag!("detached send: queued on the relay for the peer to drain");
+                        Delivery::Relay(copies)
+                    }
+                    None => {
+                        crate::diag!("detached send: relay fallback also failed this attempt");
+                        Delivery::Failed
+                    }
+                }
+            }
+            Route::RelayThenDirect => match relay() {
+                Some(copies) => Delivery::Relay(copies),
+                None if direct() => Delivery::Direct,
+                None => Delivery::Failed,
+            },
+            Route::RelayOnly => relay().map_or(Delivery::Failed, Delivery::Relay),
         }
-        crate::diag!("detached send: direct dial failed — falling back to the relay");
-        let queued = queue_on_relays(
+    }
+}
+
+/// The relay copies an edit or unsend must recall before it knows which path it takes
+/// ([`Node::begin_edit`]); run without the lock.
+pub(crate) struct RecallPlan {
+    transport: Arc<dyn Transport>,
+    primary: Option<RelayClient>,
+    contact_id: String,
+    copies: Vec<QueuedReceipt>,
+}
+
+impl RecallPlan {
+    /// Recall every copy. True only when all of them were (see [`recall_receipts`]).
+    pub(crate) fn run(&self) -> bool {
+        recall_receipts(
             self.transport.as_ref(),
             &self.primary,
-            &self.peer_relays,
-            &self.recipient_ik,
-            &self.handle,
-            &self.bytes,
+            &self.contact_id,
+            &self.copies,
         )
-        .is_ok();
-        if queued {
-            crate::diag!("detached send: queued on the relay for the peer to drain");
-        } else {
-            crate::diag!("detached send: relay fallback also failed — not retried");
-        }
-        queued
     }
+}
+
+/// Which path an [`Outbound`] tries, in order.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Route {
+    /// The peer's onion, then their relay set: most control frames.
+    DirectThenRelay,
+    /// The relay set, then the onion: a chat-delete `Closed`, whose peer is usually reachable only
+    /// through the relay (§11.6), and the `pending_control` retries.
+    RelayThenDirect,
+    /// Only the relay set: retries of messages that already failed direct, and cover traffic.
+    RelayOnly,
+}
+
+/// What took an [`Outbound`].
+pub(crate) enum Delivery {
+    Direct,
+    Relay(Vec<QueuedReceipt>),
+    Failed,
+}
+
+/// Which once-per-run announcement an [`OutboundDone::Announced`] stands for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Announce {
+    Burns,
+    Version,
+    Mailbox,
+    Address,
+}
+
+/// What a finished [`Outbound`] changes in the core, applied under the lock by
+/// [`Node::apply_outbound`].
+pub(crate) enum OutboundDone {
+    /// Best-effort: nothing to record.
+    Nothing,
+    /// The API call that queued it is waiting on the result (approve, QR `Hello`, edit, unsend).
+    /// With a `(contact, msg_id)`, the relay receipts are also recorded against that message: an
+    /// edit's replacement copy, which a later edit or unsend must be able to recall.
+    Caller(Option<(String, String)>),
+    /// A once-per-run announcement. Its flag is set when queued, so the next tick does not queue a
+    /// second copy while this one is in flight, and cleared again if it fails, so the tick after
+    /// retries.
+    Announced(Announce, String),
+    /// A `pending_control` entry, identified by its sealed bytes (unique: each is a fresh ratchet
+    /// message). Dropped on success; otherwise left for the next poll.
+    PendingControl(Vec<u8>),
+    /// A [`PendingRelaySend`] retry: its receipts recorded on success, put back otherwise.
+    PendingRelay(PendingRelaySend),
+    /// A relay copy behind an unreceipted message ([`Node::sweep_unconfirmed`]).
+    Unconfirmed(AwaitingReceipt),
+    /// Cover traffic: logged either way, never retried.
+    Cover,
+}
+
+/// A frame sealed under the lock and delivered without it.
+///
+/// Every control frame and relay retry the core raises goes through here
+/// ([`Node::send_or_queue`]). On a synchronous transport it runs at once, as before; on Tor it
+/// waits in [`Node::outbox`] for the poller, which runs it on its own job after releasing the lock
+/// and re-takes the lock only to [apply](Node::apply_outbound) what happened. An API call that
+/// reports the result to its caller takes its own entries instead ([`Node::take_caller_outbox`]).
+pub(crate) struct Outbound {
+    pub(crate) send: DetachedSend,
+    pub(crate) route: Route,
+    pub(crate) done: OutboundDone,
+}
+
+/// An [`Outbound`] after its network round, ready for [`Node::apply_outbound`].
+pub(crate) struct Finished {
+    pub(crate) done: OutboundDone,
+    pub(crate) delivery: Delivery,
+}
+
+impl Outbound {
+    pub(crate) fn run(self) -> Finished {
+        let delivery = self.send.run(self.route);
+        Finished {
+            done: self.done,
+            delivery,
+        }
+    }
+
+    /// Never sent (the core is shutting down): applied as a failure, so anything that retries is
+    /// put back to be persisted.
+    pub(crate) fn abandon(self) -> Finished {
+        Finished {
+            done: self.done,
+            delivery: Delivery::Failed,
+        }
+    }
+
+    pub(crate) fn is_caller(&self) -> bool {
+        matches!(self.done, OutboundDone::Caller(_))
+    }
+}
+
+impl Finished {
+    /// A caller's entry that reached neither the peer nor any relay.
+    pub(crate) fn caller_failed(&self) -> bool {
+        matches!(self.done, OutboundDone::Caller(_)) && matches!(self.delivery, Delivery::Failed)
+    }
+}
+
+/// Run queued [`Outbound`]s, in order, with no core lock held.
+pub(crate) fn run_outbox(sends: Vec<Outbound>) -> Vec<Finished> {
+    sends.into_iter().map(Outbound::run).collect()
 }
 
 /// A message handed to the peer's onion but not yet confirmed by a [`Frame::Delivered`] naming it
@@ -951,7 +1111,7 @@ impl DetachedSend {
 /// vanished with the sender's side showing it as sent. Once this has gone unconfirmed for
 /// [`RECEIPT_TIMEOUT`](crate::node::messaging::RECEIPT_TIMEOUT), the poller re-queues the message on
 /// the relay so it survives the peer being offline, restarted or rebuilt.
-struct AwaitingReceipt {
+pub(crate) struct AwaitingReceipt {
     contact_id: String,
     msg_id: String,
     /// When the direct send succeeded (unix seconds).
@@ -959,7 +1119,7 @@ struct AwaitingReceipt {
 }
 
 /// A sent message awaiting a relay to accept its store-and-forward copy (see [`Node::pending_relay`]).
-struct PendingRelaySend {
+pub(crate) struct PendingRelaySend {
     contact_id: String,
     msg_id: String,
     /// The already-sealed `Frame::Message` bytes — re-posted verbatim so the ratchet is not
@@ -970,7 +1130,7 @@ struct PendingRelaySend {
 /// An authenticated control signal awaiting delivery: a chat-delete `Closed` (its chat already
 /// removed) or a screenshot notice (see [`Node::pending_control`]). Carries its own routing so it
 /// survives the chat.
-struct PendingControl {
+pub(crate) struct PendingControl {
     /// The peer's identity key — seals + addresses the relay copy (its mailbox handle).
     recipient_ik: String,
     /// The peer's onion/address, for the direct-send fallback.
@@ -980,6 +1140,13 @@ struct PendingControl {
     relays: Vec<String>,
     /// The already-sealed control frame bytes — re-posted verbatim (ratchet not re-advanced).
     bytes: Vec<u8>,
+    /// The mailbox handle the relay copy goes under, chosen while the chat still existed
+    /// ([`Node::post_handle`]): the pair's v2 handle once agreed, which is what the peer polls.
+    handle: String,
+    /// Queued in [`Node::outbox`] right now, so the next poll does not send a second copy. Not
+    /// persisted: after a restart nothing is in flight. The entry itself stays in
+    /// `pending_control` (and so in the saved state) until a copy lands.
+    in_flight: bool,
 }
 
 /// One in-flight short-code invite awaiting a joiner (§5b). The `secret` never
@@ -1073,6 +1240,7 @@ impl Node {
             pending_sends: Vec::new(),
             pending_control: Vec::new(),
             detached_sends: Vec::new(),
+            outbox: Vec::new(),
             receipt_sends: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
@@ -1227,7 +1395,14 @@ impl Node {
         let from = self.identity_key();
         let code = code.unwrap_or_default();
         devlog!("[nightdrop] authorize: approved {contact_id}; sending approval (code='{code}')");
-        self.deliver(&peer_address, contact_id, &Frame::Approved { from, code })?;
+        // The caller (`Core::authorize`) sends this itself, off the lock, and reports a failure.
+        self.deliver_with(
+            &peer_address,
+            contact_id,
+            &Frame::Approved { from, code },
+            false,
+            OutboundDone::Caller(None),
+        )?;
         // A request could not be told our extra relays while it was one.
         self.announce_relays_to(contact_id);
         Ok(())
@@ -1261,28 +1436,21 @@ impl Node {
                     .map_or(&[][..], |c| &c.contact.peer_relays),
                 &self.discovered_relays,
             );
-            let queued = queue_on_relays(
-                self.transport.as_ref(),
-                &self.relay,
-                &targets,
-                contact_id,
-                &self.post_handle(contact_id),
-                &bytes,
-            )
-            .is_ok();
-            // Direct send only if no relay accepted (relay-less onion mode).
-            let direct = !queued && self.transport.send(&addr, &bytes).is_ok();
-            // Reached neither the peer nor any relay (arti cold / relay briefly down): retry from the
-            // poller so the "chat deleted" notice isn't silently dropped. The chat is about to be
-            // removed, so this retry is chat-independent (carries its own recipient + sealed bytes).
-            if !queued && !direct {
-                self.pending_control.push(PendingControl {
+            // Held in `pending_control` from the start, not only after a failed first attempt: the
+            // send now happens off the lock, after this call returns, and the chat is gone by then.
+            // A copy landing removes it; until then it is saved with the state and retried.
+            let handle = self.post_handle(contact_id);
+            self.queue_pending_control(
+                PendingControl {
                     recipient_ik: contact_id.to_string(),
                     peer_address: addr,
                     relays: targets,
                     bytes,
-                });
-            }
+                    handle,
+                    in_flight: false,
+                },
+                Route::RelayThenDirect,
+            );
         }
         // Read the address out before the chat goes: forgetting our client key needs it, and it is
         // the only place we hold it.
@@ -1404,10 +1572,10 @@ impl Node {
         // `deliver`, not a bare `transport.send`: it falls back to the relay mailbox when the peer
         // is offline. A dropped announce is not cosmetic — an unannounced peer reads as "cannot
         // burn", so losing this frame silently disables the feature for that chat until a restart.
-        // Recorded as done only on success, so an unreachable peer is retried on the next tick.
-        if self.deliver(&addr, contact_id, &frame).is_ok() {
-            self.burns_announced.insert(contact_id.to_string());
-        }
+        // Flagged while in flight; a failure clears the flag, so the next tick retries.
+        self.burns_announced.insert(contact_id.to_string());
+        let done = OutboundDone::Announced(Announce::Burns, contact_id.to_string());
+        let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
     }
 
     /// Record this build's app version (the pubspec form, `"0.1.27+412"`, is accepted; the build
@@ -1443,8 +1611,8 @@ impl Node {
         }
     }
 
-    /// Tell one chat our app version. Recorded as done only on success, so an unreachable peer is
-    /// retried on the next tick (`deliver` already falls back to the relay mailbox).
+    /// Tell one chat our app version. Flagged while in flight and cleared on failure, so an
+    /// unreachable peer is retried on the next tick (`deliver` already falls back to the relay).
     pub(crate) fn announce_version_to(&mut self, contact_id: &str) {
         let Some(version) = self.app_version.clone() else {
             return;
@@ -1455,11 +1623,9 @@ impl Node {
         }) else {
             return;
         };
-        if self.deliver(&addr, contact_id, &frame).is_ok() {
-            self.version_announced.insert(contact_id.to_string());
-            // Counts and versions only, never who: diag runs in field builds.
-            crate::diag!("version: told a contact we run {version}");
-        }
+        self.version_announced.insert(contact_id.to_string());
+        let done = OutboundDone::Announced(Announce::Version, contact_id.to_string());
+        let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
     }
 
     /// Tell one freshly paired chat what [`announce_captures`](Self::announce_captures) already told
@@ -1513,26 +1679,30 @@ impl Node {
         {
             // Direct-first (unlike `delete_chat`): when the peer *is* online, "they are
             // screenshotting this right now" is the informative case and should not wait for a
-            // relay poll. `deliver` already falls back to the relay when the dial fails, so an
-            // offline peer picks it up on their next drain.
-            if self.deliver(&addr, contact_id, &frame).is_err() {
-                // Neither the peer nor any relay was reachable — the phone itself is offline, which
-                // is an ordinary thing to be while screenshotting. Hold the sealed frame for the
-                // poller to retry, exactly as a chat-delete `Closed` is: the local side has already
-                // promised the user that "the other person was told", and unlike a chat message
-                // there is nothing the user can resend to make good on that.
-                self.pending_control.push(PendingControl {
+            // relay poll; an offline peer picks up the relay copy on their next drain.
+            //
+            // Held in `pending_control` from the start, exactly as a chat-delete `Closed` is: the
+            // local side has already promised the user that "the other person was told", the phone
+            // may well be offline while screenshotting, and unlike a chat message there is nothing
+            // the user can resend to make good on it. A copy landing removes it.
+            let relays = relay_targets(
+                self.chats
+                    .get(contact_id)
+                    .map_or(&[][..], |c| &c.contact.peer_relays),
+                &self.discovered_relays,
+            );
+            let handle = self.post_handle(contact_id);
+            self.queue_pending_control(
+                PendingControl {
                     recipient_ik: contact_id.to_string(),
                     peer_address: addr,
-                    relays: relay_targets(
-                        self.chats
-                            .get(contact_id)
-                            .map_or(&[][..], |c| &c.contact.peer_relays),
-                        &self.discovered_relays,
-                    ),
+                    relays,
                     bytes: wire::encode(&frame),
-                });
-            }
+                    handle,
+                    in_flight: false,
+                },
+                Route::DirectThenRelay,
+            );
         }
     }
 
@@ -1662,61 +1832,243 @@ impl Node {
     /// the peer is unreachable directly (so approvals/closes survive an offline peer).
     /// `recipient_ik` (the peer's identity key) addresses and seals the relay copy — the
     /// relay never sees the address or the frame's routing metadata.
-    fn deliver(&self, peer_address: &str, recipient_ik: &str, frame: &Frame) -> Result<()> {
-        self.deliver_on(peer_address, recipient_ik, frame, false)
+    ///
+    /// On an asynchronous transport this only **queues** the frame ([`Outbound`]) and returns
+    /// `Ok`: the dial happens later, without the core lock (§6). A caller that must know whether
+    /// it landed says so through the [`OutboundDone`] it passes to [`deliver_with`](Self::deliver_with).
+    fn deliver(&mut self, peer_address: &str, recipient_ik: &str, frame: &Frame) -> Result<()> {
+        self.deliver_with(
+            peer_address,
+            recipient_ik,
+            frame,
+            false,
+            OutboundDone::Nothing,
+        )
     }
 
-    /// [`deliver`](Self::deliver), or with `fresh` over a connection opened for this frame
-    /// ([`Transport::send_fresh`]), so a peer that has gone away is a failed dial — and a relay
-    /// copy — rather than a silent write into a connection left open from earlier traffic.
-    fn deliver_on(
-        &self,
+    /// [`deliver`](Self::deliver), with what to record once it has gone out, and with `fresh` over
+    /// a connection opened for this frame ([`Transport::send_fresh`]), so a peer that has gone away
+    /// is a failed dial — and a relay copy — rather than a silent write into a connection left open
+    /// from earlier traffic. `Err` only from a synchronous transport, which sends at once.
+    fn deliver_with(
+        &mut self,
         peer_address: &str,
         recipient_ik: &str,
         frame: &Frame,
         fresh: bool,
+        done: OutboundDone,
     ) -> Result<()> {
-        let bytes = wire::encode(frame);
-        let direct = if fresh {
-            self.transport.send_fresh(peer_address, &bytes)
-        } else {
-            self.transport.send(peer_address, &bytes)
-        };
-        if direct.is_err() {
-            // The direct onion dial failed. Expected while their descriptor is (re)publishing, but
-            // also what a *restricted* onion looks like to a peer it hasn't authorized yet (#22) —
-            // in which case the relay is the only way in until our ClientKey reaches them.
-            crate::diag!("deliver: direct dial failed — falling back to the relay");
-            // Fan out to the recipient's relay set (primary + their advertised extras, #17).
-            let peer_relays = self
-                .chats
-                .get(recipient_ik)
-                .map(|c| c.contact.peer_relays.clone())
-                .unwrap_or_default();
-            queue_on_relays(
-                self.transport.as_ref(),
-                &self.relay,
-                &peer_relays,
-                recipient_ik,
-                &self.post_handle(recipient_ik),
-                &bytes,
-            )
-            .inspect_err(|_| {
-                // States only what THIS attempt observed. `deliver` returns the error and several
-                // callers retry — `pending_control` holds a control frame until a copy lands, and
-                // `flush_pending_relay` re-queues messages once arti has warmed — so it is not in a
-                // position to declare the frame lost. It used to say "the frame is lost and the
-                // peer will never see it", and on 2026-08-08 that sent a device session hunting a
-                // Secure Folder bug over two messages that both arrived a few minutes later.
-                crate::diag!(
-                    "deliver: relay fallback also failed this attempt ({} peer relay(s) known) — \
-                     up to the caller whether it retries",
-                    peer_relays.len()
-                );
-            })?;
-            crate::diag!("deliver: queued on the relay for the peer to drain");
+        let send = self.detach(peer_address, recipient_ik, wire::encode(frame), fresh);
+        match self.send_or_queue(send, Route::DirectThenRelay, done) {
+            Some(false) => anyhow::bail!("peer offline and no relay accepted the message"),
+            _ => Ok(()),
         }
-        Ok(())
+    }
+
+    /// Snapshot what delivering `bytes` to one peer needs, so it can run without the lock: the
+    /// transport handle, the primary, the peer's advertised relays (#17) and the mailbox handle a
+    /// relay copy goes under.
+    fn detach(
+        &self,
+        peer_address: &str,
+        recipient_ik: &str,
+        bytes: Vec<u8>,
+        fresh: bool,
+    ) -> DetachedSend {
+        let peer_relays = self
+            .chats
+            .get(recipient_ik)
+            .map(|c| c.contact.peer_relays.clone())
+            .unwrap_or_default();
+        DetachedSend {
+            transport: Arc::clone(&self.transport),
+            primary: self.relay.clone(),
+            peer_relays,
+            recipient_ik: recipient_ik.to_string(),
+            handle: self.post_handle(recipient_ik),
+            peer_address: peer_address.to_string(),
+            bytes,
+            fresh,
+        }
+    }
+
+    /// Run `send` now on a synchronous transport (in-memory: instant, and tests expect the round
+    /// trip done on return), recording the outcome at once; otherwise queue it in
+    /// [`outbox`](Node::outbox) for delivery without the lock. `Some(delivered)` when it ran.
+    pub(crate) fn send_or_queue(
+        &mut self,
+        send: DetachedSend,
+        route: Route,
+        done: OutboundDone,
+    ) -> Option<bool> {
+        let out = Outbound { send, route, done };
+        if self.transport.is_synchronous() {
+            let finished = out.run();
+            let delivered = !matches!(finished.delivery, Delivery::Failed);
+            self.apply_outbound(vec![finished]);
+            return Some(delivered);
+        }
+        self.outbox.push(out);
+        None
+    }
+
+    /// Everything queued for delivery, for the poller to run off the lock.
+    pub(crate) fn take_outbox(&mut self) -> Vec<Outbound> {
+        std::mem::take(&mut self.outbox)
+    }
+
+    /// Only the entries an API call is waiting on ([`OutboundDone::Caller`]); the rest stay for the
+    /// poller, so a UI call never waits on someone else's dial.
+    pub(crate) fn take_caller_outbox(&mut self) -> Vec<Outbound> {
+        let (mine, rest) = std::mem::take(&mut self.outbox)
+            .into_iter()
+            .partition(Outbound::is_caller);
+        self.outbox = rest;
+        mine
+    }
+
+    /// Record what a round of [`Outbound`]s achieved. Returns the chats whose messages changed
+    /// (a retry that queued), for the UI to re-pull.
+    pub(crate) fn apply_outbound(&mut self, finished: Vec<Finished>) -> Vec<String> {
+        let mut affected: Vec<String> = Vec::new();
+        for Finished { done, delivery } in finished {
+            let delivered = !matches!(delivery, Delivery::Failed);
+            match done {
+                OutboundDone::Nothing => {}
+                OutboundDone::Caller(record) => {
+                    if let (Some((contact_id, msg_id)), Delivery::Relay(copies)) =
+                        (record, delivery)
+                    {
+                        if let Some(chat) = self.chats.get_mut(&contact_id) {
+                            chat.relay_receipts.insert(msg_id, copies);
+                            self.dirty = true;
+                        }
+                    }
+                }
+                OutboundDone::Announced(kind, contact_id) => {
+                    self.apply_announced(kind, &contact_id, delivered)
+                }
+                OutboundDone::PendingControl(bytes) => {
+                    if delivered {
+                        self.pending_control.retain(|p| p.bytes != bytes);
+                        self.dirty = true; // persist the now-shorter queue
+                    } else if let Some(p) =
+                        self.pending_control.iter_mut().find(|p| p.bytes == bytes)
+                    {
+                        p.in_flight = false; // still unreachable — the next poll tries again
+                    }
+                }
+                OutboundDone::PendingRelay(p) => match delivery {
+                    Delivery::Relay(copies) => {
+                        if let Some(chat) = self.chats.get_mut(&p.contact_id) {
+                            chat.relay_receipts.insert(p.msg_id.clone(), copies);
+                        }
+                        if !affected.contains(&p.contact_id) {
+                            affected.push(p.contact_id);
+                        }
+                    }
+                    // Still can't reach a relay — keep it for the next poll.
+                    _ => self.pending_relay.push(p),
+                },
+                OutboundDone::Unconfirmed(a) => {
+                    match delivery {
+                        Delivery::Relay(copies) => {
+                            if let Some(chat) = self.chats.get_mut(&a.contact_id) {
+                                chat.relay_receipts.insert(a.msg_id.clone(), copies);
+                                // Only a message still waiting: a receipt that landed while the copy
+                                // was being posted has already moved it on.
+                                if let Some(m) = chat.history.iter_mut().find(|m| {
+                                    m.from_me && m.msg_id == a.msg_id && m.delivery == "sent"
+                                }) {
+                                    m.delivery = "queued".to_string();
+                                }
+                                if !affected.contains(&a.contact_id) {
+                                    affected.push(a.contact_id.clone());
+                                }
+                            }
+                            crate::diag!(
+                                "send: no delivery receipt within {}s — put a relay copy behind it",
+                                crate::node::messaging::RECEIPT_TIMEOUT.as_secs()
+                            );
+                        }
+                        // No relay took it. Keep waiting rather than dropping the retry: the next sweep
+                        // tries again, and a receipt may still arrive in the meantime.
+                        _ => self.awaiting_receipt.push(a),
+                    }
+                }
+                OutboundDone::Cover => match delivery {
+                    Delivery::Relay(copies) => crate::diag!(
+                        "cover: posted a dummy to our own mailbox ({} relay(s))",
+                        copies.len()
+                    ),
+                    _ => crate::diag!("cover: post failed — no chaff this interval"),
+                },
+            }
+        }
+        affected
+    }
+
+    /// The outcome of one once-per-run announcement. Its flag went up when it was queued; a
+    /// failure takes it down again so the next tick retries.
+    fn apply_announced(&mut self, kind: Announce, contact_id: &str, delivered: bool) {
+        if kind == Announce::Mailbox {
+            crate::diag!(
+                "mailbox: sent our contribution — {}",
+                if delivered { "taken" } else { "not delivered" }
+            );
+            if delivered {
+                if let Some(pair) = self
+                    .chats
+                    .get_mut(contact_id)
+                    .and_then(|c| c.mailbox.as_mut())
+                {
+                    pair.announced_at.get_or_insert_with(crate::api::now_secs);
+                    self.dirty = true;
+                }
+            }
+        }
+        if kind == Announce::Version && delivered {
+            // Counts and versions only, never who: diag runs in field builds.
+            crate::diag!(
+                "version: told a contact we run {}",
+                self.app_version.as_deref().unwrap_or("?")
+            );
+        }
+        if delivered {
+            return;
+        }
+        match kind {
+            Announce::Burns => self.burns_announced.remove(contact_id),
+            Announce::Version => self.version_announced.remove(contact_id),
+            Announce::Mailbox => self.mailbox_announced.remove(contact_id),
+            Announce::Address => self.address_announced.remove(contact_id),
+        };
+    }
+
+    /// Hold a control frame in `pending_control` (persisted) and send it now: the first attempt
+    /// goes out by `route`, retries from [`flush_pending_control`](Self::flush_pending_control).
+    fn queue_pending_control(&mut self, mut p: PendingControl, route: Route) {
+        p.in_flight = true;
+        let send = self.detach_pending(&p);
+        let bytes = p.bytes.clone();
+        self.pending_control.push(p);
+        self.dirty = true;
+        self.send_or_queue(send, route, OutboundDone::PendingControl(bytes));
+    }
+
+    /// A [`DetachedSend`] for a `pending_control` entry, which carries its own routing because its
+    /// chat may be gone.
+    pub(crate) fn detach_pending(&self, p: &PendingControl) -> DetachedSend {
+        DetachedSend {
+            transport: Arc::clone(&self.transport),
+            primary: self.relay.clone(),
+            peer_relays: p.relays.clone(),
+            recipient_ik: p.recipient_ik.clone(),
+            handle: p.handle.clone(),
+            peer_address: p.peer_address.clone(),
+            bytes: p.bytes.clone(),
+            fresh: false,
+        }
     }
 
     /// Onion client authorization (#22): mint our client descriptor-encryption key for `contact`'s
@@ -2358,3 +2710,5 @@ mod tests_b;
 mod tests_directory;
 #[cfg(test)]
 mod tests_mailbox;
+#[cfg(test)]
+mod tests_outbox;

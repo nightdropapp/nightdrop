@@ -5,13 +5,14 @@
 //! This is NOT anonymized; it's for development and same-machine/LAN testing. Production
 //! uses `transport::tor`. The peer address is `host:port`.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use super::inbound::{read_frame, InboundBudget};
 use crate::transport::{Address, Transport};
 use crate::Result;
 
@@ -19,6 +20,8 @@ use crate::Result;
 pub struct TcpTransport {
     address: Address,
     inbound: Mutex<Receiver<(Address, Vec<u8>)>>,
+    /// Bytes read and not yet taken by the core ([`InboundBudget`]).
+    budget: InboundBudget,
 }
 
 impl TcpTransport {
@@ -27,13 +30,16 @@ impl TcpTransport {
         let listener = TcpListener::bind(addr)?;
         let address = listener.local_addr()?.to_string();
         let (tx, rx) = channel();
+        let budget = InboundBudget::default();
+        let readers = budget.clone();
         thread::spawn(move || {
             for conn in listener.incoming().flatten() {
                 let tx = tx.clone();
+                let budget = readers.clone();
                 thread::spawn(move || {
                     let mut stream = conn;
                     let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
-                    if let Ok(frame) = read_frame(&mut stream) {
+                    if let Ok(frame) = read_frame(&mut stream, &budget) {
                         // The TCP peer address isn't the app-level reply address (which the
                         // peer advertises in its Hello), so we report it as empty.
                         let _ = tx.send((Address::new(), frame));
@@ -44,6 +50,7 @@ impl TcpTransport {
         Ok(Self {
             address,
             inbound: Mutex::new(rx),
+            budget,
         })
     }
 }
@@ -61,7 +68,9 @@ impl Transport for TcpTransport {
     }
 
     fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
-        self.inbound.lock().unwrap().try_recv().ok()
+        let (from, frame) = self.inbound.lock().unwrap().try_recv().ok()?;
+        self.budget.release(frame.len());
+        Some((from, frame))
     }
 }
 
@@ -69,17 +78,6 @@ fn write_frame(w: &mut impl Write, frame: &[u8]) -> Result<()> {
     w.write_all(&(frame.len() as u32).to_be_bytes())?;
     w.write_all(frame)?;
     Ok(())
-}
-
-fn read_frame(r: &mut impl Read) -> Result<Vec<u8>> {
-    let mut prefix = [0u8; 4];
-    r.read_exact(&mut prefix)?;
-    let len = crate::wire::frame_len(prefix)?;
-    // Grow as bytes arrive rather than allocating the announced length up front.
-    let mut buf = Vec::new();
-    r.take(len as u64).read_to_end(&mut buf)?;
-    anyhow::ensure!(buf.len() == len, "connection closed mid-frame");
-    Ok(buf)
 }
 
 #[cfg(test)]
@@ -90,7 +88,9 @@ mod tests {
     fn an_oversized_frame_is_refused_before_its_body_is_read() {
         // Four bytes announcing ~4 GiB, and no body: refused on the prefix alone.
         let mut r = std::io::Cursor::new(vec![0xFF, 0xFF, 0xFF, 0xFF]);
-        let err = read_frame(&mut r).unwrap_err().to_string();
+        let err = read_frame(&mut r, &InboundBudget::default())
+            .unwrap_err()
+            .to_string();
         assert!(err.contains("over the"), "{err}");
     }
 
@@ -98,12 +98,12 @@ mod tests {
     fn a_frame_cut_short_is_an_error_and_a_whole_one_reads_back() {
         let mut short = 10u32.to_be_bytes().to_vec();
         short.extend_from_slice(b"abc");
-        assert!(read_frame(&mut std::io::Cursor::new(short)).is_err());
+        assert!(read_frame(&mut std::io::Cursor::new(short), &InboundBudget::default()).is_err());
 
         let mut whole = Vec::new();
         write_frame(&mut whole, b"hello").unwrap();
         assert_eq!(
-            read_frame(&mut std::io::Cursor::new(whole)).unwrap(),
+            read_frame(&mut std::io::Cursor::new(whole), &InboundBudget::default()).unwrap(),
             b"hello"
         );
     }

@@ -14,6 +14,7 @@ use std::sync::{Arc, Mutex};
 use crate::Result;
 
 pub mod client_auth;
+pub(crate) mod inbound;
 pub mod lan;
 pub mod tcp;
 

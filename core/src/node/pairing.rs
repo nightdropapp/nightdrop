@@ -113,7 +113,14 @@ impl Node {
         // (e.g. its descriptor is still republishing after a restart), queue it on the relay so
         // pairing completes when they next drain — instead of failing with a socket error.
         crate::diag!("pair: sending first-contact Hello to the peer");
-        self.deliver(peer_address, &bundle.identity_key, &frame)?;
+        // The caller (`Core::connect_via_qr`) sends this itself, off the lock, and reports a failure.
+        self.deliver_with(
+            peer_address,
+            &bundle.identity_key,
+            &frame,
+            false,
+            super::OutboundDone::Caller(None),
+        )?;
         crate::diag!("pair: Hello away — the peer should now show a chat request");
 
         let contact_id = bundle.identity_key.clone();

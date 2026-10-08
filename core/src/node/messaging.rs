@@ -290,37 +290,21 @@ impl Node {
             };
             let bytes = wire::encode(&frame);
             let targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
-            match queue_on_relays(
-                self.transport.as_ref(),
-                &self.relay,
-                &targets,
-                &a.contact_id,
-                &handle,
-                &bytes,
-            ) {
-                Ok(copies) => {
-                    chat.relay_receipts.insert(a.msg_id.clone(), copies);
-                    if let Some(m) = chat
-                        .history
-                        .iter_mut()
-                        .find(|m| m.from_me && m.msg_id == a.msg_id)
-                    {
-                        m.delivery = "queued".to_string();
-                    }
-                    if !affected.contains(&a.contact_id) {
-                        affected.push(a.contact_id.clone());
-                    }
-                    crate::diag!(
-                        "send: no delivery receipt within {}s — put a relay copy behind it",
-                        RECEIPT_TIMEOUT.as_secs()
-                    );
-                }
-                // No relay took it. Keep waiting rather than dropping the retry: the next sweep
-                // tries again, and a receipt may still arrive in the meantime.
-                Err(_) => still_waiting.push(a),
+            let mut send = self.detach("", &a.contact_id, bytes, false);
+            send.peer_relays = targets;
+            send.handle = handle;
+            let contact_id = a.contact_id.clone();
+            // Off the lock on Tor: `apply_outbound` flips the message to "queued" and records the
+            // copies, or puts the entry back to wait for the next sweep.
+            if self.send_or_queue(send, Route::RelayOnly, OutboundDone::Unconfirmed(a))
+                == Some(true)
+                && !affected.contains(&contact_id)
+            {
+                affected.push(contact_id);
             }
         }
-        self.awaiting_receipt = still_waiting;
+        // Extend, not assign: a failed post on a synchronous transport has already been put back.
+        self.awaiting_receipt.extend(still_waiting);
         affected
     }
 
@@ -481,11 +465,9 @@ impl Node {
     /// Retry queuing messages that reached neither the peer nor any relay when first sent (arti's
     /// circuits were cold). Called on the relay-poll cadence; each attempt also warms arti. On
     /// success the relay receipts are recorded (so edit/unsend can still recall the copy) and the
-    /// message stops being pending. Returns the contact ids whose messages just got queued.
+    /// message stops being pending. Returns the contact ids whose messages just got queued — on a
+    /// synchronous transport; otherwise the posts run off the lock and the poller reports them.
     pub(crate) fn flush_pending_relay(&mut self) -> Vec<String> {
-        if self.pending_relay.is_empty() {
-            return Vec::new();
-        }
         let mut affected = Vec::new();
         for p in std::mem::take(&mut self.pending_relay) {
             // Drop the retry if the chat was deleted/closed in the meantime.
@@ -497,25 +479,15 @@ impl Node {
             else {
                 continue;
             };
-            let peer_relays = relay_targets(&peer_relays, &self.discovered_relays);
-            match queue_on_relays(
-                self.transport.as_ref(),
-                &self.relay,
-                &peer_relays,
-                &p.contact_id,
-                &self.post_handle(&p.contact_id),
-                &p.bytes,
-            ) {
-                Ok(copies) => {
-                    if let Some(chat) = self.chats.get_mut(&p.contact_id) {
-                        chat.relay_receipts.insert(p.msg_id.clone(), copies);
-                    }
-                    if !affected.contains(&p.contact_id) {
-                        affected.push(p.contact_id.clone());
-                    }
-                }
-                // Still can't reach a relay — keep it for the next poll.
-                Err(_) => self.pending_relay.push(p),
+            let mut send = self.detach("", &p.contact_id, p.bytes.clone(), false);
+            send.peer_relays = relay_targets(&peer_relays, &self.discovered_relays);
+            let contact_id = p.contact_id.clone();
+            // Off the lock on Tor: `apply_outbound` records the receipts, or puts it back.
+            if self.send_or_queue(send, Route::RelayOnly, OutboundDone::PendingRelay(p))
+                == Some(true)
+                && !affected.contains(&contact_id)
+            {
+                affected.push(contact_id);
             }
         }
         affected
@@ -527,29 +499,28 @@ impl Node {
     /// [`Screenshot`](crate::wire::Frame::Screenshot) notice (#1) taken while the device was off
     /// the network.
     /// Called on the relay-poll cadence; re-posts the already-sealed frame (relay-first, direct
-    /// fallback) until a copy lands, then drops it. Chat-independent and in-memory, like
-    /// [`flush_pending_relay`](Self::flush_pending_relay).
+    /// fallback) off the lock, and drops it once a copy lands (`apply_outbound`).
+    /// Chat-independent, and persisted with the state until then.
     pub(crate) fn flush_pending_control(&mut self) {
-        if self.pending_control.is_empty() {
-            return;
+        let mut due = Vec::new();
+        for p in self.pending_control.iter_mut().filter(|p| !p.in_flight) {
+            p.in_flight = true; // one copy at a time: the next poll skips it until it comes back
+            due.push(p.bytes.clone());
         }
-        for p in std::mem::take(&mut self.pending_control) {
-            let queued = queue_on_relays(
-                self.transport.as_ref(),
-                &self.relay,
-                &p.relays,
-                &p.recipient_ik,
-                // v1: the chat is already gone, and the peer polls v1 throughout the transition.
-                &mailbox_handle(&p.recipient_ik),
-                &p.bytes,
-            )
-            .is_ok();
-            let direct = !queued && self.transport.send(&p.peer_address, &p.bytes).is_ok();
-            if queued || direct {
-                self.dirty = true; // delivered → persist the now-shorter queue
-            } else {
-                self.pending_control.push(p); // still unreachable — keep for the next poll
-            }
+        for bytes in due {
+            let Some(send) = self
+                .pending_control
+                .iter()
+                .find(|p| p.bytes == bytes)
+                .map(|p| self.detach_pending(p))
+            else {
+                continue;
+            };
+            self.send_or_queue(
+                send,
+                Route::RelayThenDirect,
+                OutboundDone::PendingControl(bytes),
+            );
         }
     }
 
@@ -577,28 +548,23 @@ impl Node {
         let Ok(blob) = relay_wrap(&me, &bytes) else {
             return;
         };
-        // Our own relay set, exactly as a peer would post to us.
-        let targets: Vec<String> = self.my_relays.clone();
-        // Logged every time, success or failure. A privacy feature whose whole output is
-        // indistinguishable from real traffic leaves nothing else to observe: without this line
-        // "cover traffic costs nothing measurable" and "cover traffic never ran" are the same
-        // reading, which is exactly the trap the relay watchdog fell into.
+        // Our own relay set, exactly as a peer would post to us. Logged every time, success or
+        // failure (`OutboundDone::Cover`): a privacy feature whose whole output is
+        // indistinguishable from real traffic leaves nothing else to observe, so without the line
+        // "cover traffic costs nothing measurable" and "cover traffic never ran" read the same —
+        // exactly the trap the relay watchdog fell into.
         // Our own v1 mailbox, which we poll throughout the transition (`mailbox-handles.md`).
-        let own = mailbox_handle(&me);
-        match queue_on_relays(
-            self.transport.as_ref(),
-            &Some(relay),
-            &targets,
-            &me,
-            &own,
-            &blob,
-        ) {
-            Ok(receipts) => crate::diag!(
-                "cover: posted a dummy to our own mailbox ({} relay(s))",
-                receipts.len()
-            ),
-            Err(e) => crate::diag!("cover: post failed ({e:#}) — no chaff this interval"),
-        }
+        let send = DetachedSend {
+            transport: Arc::clone(&self.transport),
+            primary: Some(relay),
+            peer_relays: self.my_relays.clone(),
+            recipient_ik: me.clone(),
+            handle: mailbox_handle(&me),
+            peer_address: String::new(), // relay only
+            bytes: blob,
+            fresh: false,
+        };
+        self.send_or_queue(send, Route::RelayOnly, OutboundDone::Cover);
     }
 
     /// The relays to ask for the list when our onion site cannot be reached: the primary, our own
@@ -738,10 +704,27 @@ impl Node {
     ///   final version, so their side shows no "edited" tag.
     /// * **Already delivered (or recall failed)**: send an E2E [`Edit`](Frame::Edit)
     ///   frame naming the `msg_id`; the peer replaces the text and shows "edited".
+    ///
+    /// In one go, for tests on a synchronous transport; the API runs the halves itself, around
+    /// the recall, so the network round is not under the lock.
+    #[cfg(test)]
     pub fn edit_message(&mut self, contact_id: &str, msg_id: &str, new_text: &str) -> Result<()> {
-        let from = self.identity_key();
-        // Chosen before the chat is borrowed mutably: a replacement copy goes where new mail goes.
-        let handle = self.post_handle(contact_id);
+        let recalled = self
+            .begin_edit(contact_id, msg_id, new_text)?
+            .map(|plan| plan.run());
+        self.finish_edit(contact_id, msg_id, new_text, recalled)
+    }
+
+    /// First half of [`edit_message`](Self::edit_message), under the lock: check the message may
+    /// be edited and change it locally. For a message still queued on relays it hands back the
+    /// copies to recall — a network round, for the caller to run without the lock — before
+    /// [`finish_edit`](Self::finish_edit) can know which path the edit takes.
+    pub(crate) fn begin_edit(
+        &mut self,
+        contact_id: &str,
+        msg_id: &str,
+        new_text: &str,
+    ) -> Result<Option<RecallPlan>> {
         let chat = self
             .chats
             .get_mut(contact_id)
@@ -762,39 +745,50 @@ impl Node {
         }
         msg.text = new_text.to_string();
         msg.edited = true;
-
-        // Path 1: replace the still-queued relay blob(s) so the old text is never delivered.
-        // With fan-out (#17) we recall every copy. Only an all-copy recall can be replaced
-        // invisibly: if even one relay says "not found" it may already have delivered the old
-        // message, so fall through and send a normal E2E edit instead.
-        if queued {
-            let copies = chat.relay_receipts.remove(msg_id).unwrap_or_default();
-            // Recall *every* fanned-out copy before re-posting the new text (each client is rebuilt
-            // from its stored address, so this survives a restart). Must not short-circuit — a
-            // `.any()` would strand the old text on the sibling relays (#17).
-            let recalled_all =
-                recall_receipts(self.transport.as_ref(), &self.relay, contact_id, &copies);
-            if recalled_all {
-                let message = crypto::encrypt(&mut chat.session, new_text.as_bytes())?;
-                let frame = Frame::Message {
-                    from,
-                    id: msg_id.to_string(),
-                    message: WireOlm::from_olm(&message),
-                };
-                let new_copies = queue_on_relays(
-                    self.transport.as_ref(),
-                    &self.relay,
-                    &chat.contact.peer_relays,
-                    contact_id,
-                    &handle,
-                    &wire::encode(&frame),
-                )?;
-                chat.relay_receipts.insert(msg_id.to_string(), new_copies);
-                return Ok(());
-            }
+        if !queued {
+            return Ok(None);
         }
+        // With fan-out (#17) every copy is recalled (`recall_receipts` never short-circuits — a
+        // `.any()` would strand the old text on the sibling relays), each client rebuilt from its
+        // stored address, so this survives a restart.
+        let copies = chat.relay_receipts.remove(msg_id).unwrap_or_default();
+        Ok(Some(self.recall_plan(contact_id, copies)))
+    }
 
-        // Path 2: the peer (may) have the original — send an explicit edit.
+    /// Second half of [`edit_message`](Self::edit_message), under the lock again. `recalled` is
+    /// whether every queued copy was recalled (`None`: the message was not queued).
+    ///
+    /// Path 1: all copies recalled — the old text can never be delivered, so post the new text as
+    /// the message itself. Only an all-copy recall can be replaced invisibly: if even one relay
+    /// says "not found" it may already have delivered the old message, so path 2 sends a normal E2E
+    /// edit instead. Either frame goes through the outbox for the caller to send
+    /// ([`OutboundDone::Caller`]).
+    pub(crate) fn finish_edit(
+        &mut self,
+        contact_id: &str,
+        msg_id: &str,
+        new_text: &str,
+        recalled: Option<bool>,
+    ) -> Result<()> {
+        let from = self.identity_key();
+        let chat = self
+            .chats
+            .get_mut(contact_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
+        if recalled == Some(true) {
+            let message = crypto::encrypt(&mut chat.session, new_text.as_bytes())?;
+            let frame = Frame::Message {
+                from,
+                id: msg_id.to_string(),
+                message: WireOlm::from_olm(&message),
+            };
+            let send = self.detach("", contact_id, wire::encode(&frame), false);
+            let done = OutboundDone::Caller(Some((contact_id.to_string(), msg_id.to_string())));
+            if self.send_or_queue(send, Route::RelayOnly, done) == Some(false) {
+                anyhow::bail!("peer offline and no relay accepted the message");
+            }
+            return Ok(());
+        }
         let envelope = pack_edit(msg_id, new_text);
         let message = crypto::encrypt(&mut chat.session, &envelope)?;
         let frame = Frame::Edit {
@@ -802,7 +796,13 @@ impl Node {
             message: WireOlm::from_olm(&message),
         };
         let peer_address = chat.peer_address.clone();
-        self.deliver(&peer_address, contact_id, &frame)
+        self.deliver_with(
+            &peer_address,
+            contact_id,
+            &frame,
+            false,
+            OutboundDone::Caller(None),
+        )
     }
 
     /// Unsend ("delete for both") one of our earlier text messages — same eligibility as
@@ -813,8 +813,25 @@ impl Node {
     ///   the message at all, so nothing needs to be sent.
     /// * **Already delivered (or recall failed)**: send a [`Unsend`](Frame::Unsend) frame naming
     ///   the `msg_id`; the peer replaces it with the same tombstone.
+    ///
+    /// In one go, for tests on a synchronous transport; the API runs the halves itself, around
+    /// the recall, so the network round is not under the lock.
+    #[cfg(test)]
     pub fn unsend_message(&mut self, contact_id: &str, msg_id: &str) -> Result<()> {
-        let from = self.identity_key();
+        let recalled = self
+            .begin_unsend(contact_id, msg_id)?
+            .map(|plan| plan.run());
+        self.finish_unsend(contact_id, msg_id, recalled)
+    }
+
+    /// First half of [`unsend_message`](Self::unsend_message), under the lock: the same checks and
+    /// hand-off as [`begin_edit`](Self::begin_edit). Nothing changes locally yet: which change it is
+    /// (gone, or a tombstone) depends on the recall.
+    pub(crate) fn begin_unsend(
+        &mut self,
+        contact_id: &str,
+        msg_id: &str,
+    ) -> Result<Option<RecallPlan>> {
         let chat = self
             .chats
             .get_mut(contact_id)
@@ -823,38 +840,53 @@ impl Node {
             anyhow::bail!("this chat was deleted");
         }
         let now = crate::api::now_secs();
-        let msg_index = chat
+        let msg = chat
             .history
-            .iter_mut()
-            .position(|m| m.from_me && !m.system && m.kind == "text" && m.msg_id == msg_id)
+            .iter()
+            .find(|m| m.from_me && !m.system && m.kind == "text" && m.msg_id == msg_id)
             .ok_or_else(|| anyhow::anyhow!("message not found or not deletable"))?;
-        let msg = &chat.history[msg_index];
         let queued = msg.delivery == "queued";
         let in_window = msg.at != 0 && now.saturating_sub(msg.at) <= EDIT_WINDOW.as_secs();
         if !queued && !in_window {
             anyhow::bail!("messages can only be unsent within 15 minutes of sending");
         }
-        // Path 1: recall every still-queued copy so the peer never receives the message (#17).
-        if queued {
-            let copies = chat.relay_receipts.remove(msg_id).unwrap_or_default();
-            // Recall *every* fanned-out copy (#17), rebuilding each client from its stored address so
-            // this still works after a restart. Must not short-circuit — a `.any()` would stop at the
-            // first success and leave sibling relays holding the message.
-            let recalled_all =
-                recall_receipts(self.transport.as_ref(), &self.relay, contact_id, &copies);
-            if recalled_all {
-                // The recipient never received this held message. Remove it locally as well:
-                // a tombstone would leave evidence of a message that never existed for them.
-                chat.history.remove(msg_index);
-                return Ok(());
-            }
+        if !queued {
+            return Ok(None);
         }
+        // Every still-queued copy (#17), each client rebuilt from its stored address so this still
+        // works after a restart.
+        let copies = chat.relay_receipts.remove(msg_id).unwrap_or_default();
+        Ok(Some(self.recall_plan(contact_id, copies)))
+    }
 
-        // The peer may already have the original (or a fanned-out copy remains), so preserve
-        // the conversation position locally and tell them to tombstone their copy too.
+    /// Second half of [`unsend_message`](Self::unsend_message), under the lock again.
+    pub(crate) fn finish_unsend(
+        &mut self,
+        contact_id: &str,
+        msg_id: &str,
+        recalled: Option<bool>,
+    ) -> Result<()> {
+        let from = self.identity_key();
+        let chat = self
+            .chats
+            .get_mut(contact_id)
+            .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
+        let Some(msg_index) = chat
+            .history
+            .iter()
+            .position(|m| m.from_me && !m.system && m.msg_id == msg_id)
+        else {
+            return Ok(()); // gone meanwhile (a burn, a chat clear): nothing left to unsend
+        };
+        if recalled == Some(true) {
+            // The recipient never received this held message. Remove it locally as well: a
+            // tombstone would leave evidence of a message that never existed for them.
+            chat.history.remove(msg_index);
+            return Ok(());
+        }
+        // The peer may already have the original (or a fanned-out copy remains), so preserve the
+        // conversation position locally and tell them to tombstone their copy too.
         make_tombstone(&mut chat.history[msg_index]);
-
-        // Path 2: the peer (may) have the original — tell them to delete it.
         let envelope = pack_unsend(msg_id);
         let message = crypto::encrypt(&mut chat.session, &envelope)?;
         let frame = Frame::Unsend {
@@ -862,7 +894,23 @@ impl Node {
             message: WireOlm::from_olm(&message),
         };
         let peer_address = chat.peer_address.clone();
-        self.deliver(&peer_address, contact_id, &frame)
+        self.deliver_with(
+            &peer_address,
+            contact_id,
+            &frame,
+            false,
+            OutboundDone::Caller(None),
+        )
+    }
+
+    /// What recalling `copies` of a message to `contact_id` needs, to run without the lock.
+    fn recall_plan(&self, contact_id: &str, copies: Vec<QueuedReceipt>) -> RecallPlan {
+        RecallPlan {
+            transport: Arc::clone(&self.transport),
+            primary: self.relay.clone(),
+            contact_id: contact_id.to_string(),
+            copies,
+        }
     }
 
     /// Send a media attachment (image/video) to a contact, E2E-encrypted on the session and
@@ -1426,7 +1474,13 @@ impl Node {
         fresh: bool,
     ) {
         if self.transport.is_synchronous() {
-            let _ = self.deliver_on(peer_address, contact_id, frame, fresh);
+            let _ = self.deliver_with(
+                peer_address,
+                contact_id,
+                frame,
+                fresh,
+                OutboundDone::Nothing,
+            );
             return;
         }
         let peer_relays = self
@@ -1569,8 +1623,10 @@ impl Node {
             .filter(|id| !self.address_announced.contains(id))
             .collect();
         for contact_id in pending {
-            if self.send_address_to(&contact_id) == Some(true) {
-                self.address_announced.insert(contact_id);
+            // Flagged while in flight; a failed delivery clears it again (`apply_outbound`).
+            self.address_announced.insert(contact_id.clone());
+            if self.send_address_to(&contact_id).is_none() {
+                self.address_announced.remove(&contact_id);
             }
         }
     }
@@ -1585,8 +1641,9 @@ impl Node {
     }
 
     /// Encrypt our current address for one chat and send it (relay fallback in `deliver`).
-    /// `None` if the session cannot encrypt; otherwise whether delivery succeeded.
-    fn send_address_to(&mut self, contact_id: &str) -> Option<bool> {
+    /// `None` if the session cannot encrypt. Whether it landed is recorded when it has gone out:
+    /// a failure clears the chat's `address_announced` flag, so the next tick retries.
+    fn send_address_to(&mut self, contact_id: &str) -> Option<()> {
         let from = self.identity_key();
         let address = self.address();
         let chat = self.chats.get_mut(contact_id)?;
@@ -1596,7 +1653,9 @@ impl Node {
             message: WireOlm::from_olm(&message),
         };
         let peer_address = chat.peer_address.clone();
-        Some(self.deliver(&peer_address, contact_id, &frame).is_ok())
+        let done = OutboundDone::Announced(Announce::Address, contact_id.to_string());
+        let _ = self.deliver_with(&peer_address, contact_id, &frame, false, done);
+        Some(())
     }
 
     /// If the live transport address differs from the one we last persisted (a changed onion,

@@ -1315,6 +1315,30 @@ impl NightdropCore {
     /// would `unwrap`-panic, bricking the core for the rest of the session. We take the guard
     /// anyway (`into_inner`): the worst case is one operation left partial state behind, which is
     /// far better than an app that is permanently unresponsive until restart.
+    /// Send the entries an API call queued and is waiting on ([`Node::take_caller_outbox`]), with
+    /// the lock released, then record what happened. `Err` if any of them reached neither the peer
+    /// nor a relay — what the call used to return when it dialled inline, under the lock.
+    fn send_for_caller(&self, sends: Vec<crate::node::Outbound>) -> Result<()> {
+        if sends.is_empty() {
+            return Ok(());
+        }
+        let finished = crate::node::run_outbox(sends);
+        let failed = finished.iter().any(|f| f.caller_failed());
+        let affected = {
+            let mut g = self.lock();
+            let affected = g.me.apply_outbound(finished);
+            g.save_soon();
+            affected
+        };
+        if !affected.is_empty() {
+            emit_chats("message", affected);
+        }
+        if failed {
+            anyhow::bail!("peer offline and no relay accepted the message");
+        }
+        Ok(())
+    }
+
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -1422,16 +1446,11 @@ impl NightdropCore {
             g.me.set_my_relays(cleaned);
             g.save();
         }
+        // Notify existing contacts (E2E `Relays` frame). Sealing is instant; the dials go through
+        // the outbox, which the poller sends without the lock — so neither this call nor anything
+        // else waits on a cold Tor.
+        self.lock().me.announce_relays();
         emit("contacts");
-        // Notify existing contacts (E2E `Relays` frame) in the BACKGROUND. A slow/cold arti
-        // (Tor) would otherwise block the FFI call for tens of seconds; the edit is already
-        // saved, so this is best-effort and must never hold up the UI.
-        let inner = std::sync::Arc::clone(&self.inner);
-        std::thread::spawn(move || {
-            let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
-            g.me.announce_relays();
-            g.save(); // persist any relay receipts created while announcing
-        });
     }
 
     /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
@@ -1584,17 +1603,24 @@ impl NightdropCore {
     /// is the relay-free pairing path used over Tor (the QR carries the inviter's `.onion`).
     pub fn connect_via_qr(&self, payload: &str) -> Result<Contact> {
         let (addr, bundle) = parse_invite(payload)?;
-        let mut g = self.lock();
-        let contact_id = g.me.connect_with_bundle(&addr, &bundle)?;
-        // The recipient must accept before anything is delivered (they always require approval, §5),
-        // just like a short-code join — show the waiting notice until we hear back (cleared on the
-        // approval signal or the first received message).
-        g.me.note_awaiting_approval(&contact_id);
-        g.save(); // new chat (and a consumed session) — persist
-        g.me.contacts()
-            .into_iter()
-            .find(|c| c.id == contact_id)
-            .ok_or_else(|| anyhow::anyhow!("chat not created"))
+        let (contact, sends) = {
+            let mut g = self.lock();
+            let contact_id = g.me.connect_with_bundle(&addr, &bundle)?;
+            // The recipient must accept before anything is delivered (they always require
+            // approval, §5), just like a short-code join — show the waiting notice until we hear
+            // back (cleared on the approval signal or the first received message).
+            g.me.note_awaiting_approval(&contact_id);
+            g.save(); // new chat (and a consumed session) — persist
+            let contact =
+                g.me.contacts()
+                    .into_iter()
+                    .find(|c| c.id == contact_id)
+                    .ok_or_else(|| anyhow::anyhow!("chat not created"))?;
+            (contact, g.me.take_caller_outbox())
+        };
+        // The Hello: a dial to the inviter's onion (relay fallback), without the lock.
+        self.send_for_caller(sends)?;
+        Ok(contact)
     }
 
     /// Create a short-code invite via the rendezvous mailbox (§5b/§5c). Returns the full
@@ -1630,27 +1656,36 @@ impl NightdropCore {
         }
         let payload =
             crate::node::run_join_handshake(&relays, slot, secret, SHORT_CODE_JOIN_TIMEOUT)?;
-        let mut g = self.lock();
-        let contact = g.me.connect_from_invite_payload(&payload)?;
-        // Short-code pairing needs the inviter to accept before anything is delivered — show a
-        // notice until we hear back (cleared on approval or the first received message).
-        g.me.note_awaiting_approval(&contact.id);
-        g.save();
+        let (contact, sends) = {
+            let mut g = self.lock();
+            let contact = g.me.connect_from_invite_payload(&payload)?;
+            // Short-code pairing needs the inviter to accept before anything is delivered — show
+            // a notice until we hear back (cleared on approval or the first received message).
+            g.me.note_awaiting_approval(&contact.id);
+            g.save();
+            (contact, g.me.take_caller_outbox())
+        };
+        // The Hello, sent without the lock: the inviter's onion, or their relay.
+        self.send_for_caller(sends)?;
         Ok(contact)
     }
 
     /// Approve or decline a pending inbound request. On approval it becomes a contact.
     pub fn authorize(&self, contact_id: &str, accept: bool) -> Result<()> {
-        let mut g = self.lock();
-        g.me.authorize(contact_id, accept)?;
-        if !accept {
-            if let Some(demo) = g.demo.as_mut() {
-                demo.drop_peer(contact_id);
+        let sends = {
+            let mut g = self.lock();
+            g.me.authorize(contact_id, accept)?;
+            if !accept {
+                if let Some(demo) = g.demo.as_mut() {
+                    demo.drop_peer(contact_id);
+                }
             }
-        }
-        g.save();
+            g.save();
+            g.me.take_caller_outbox()
+        };
         emit("contacts");
-        Ok(())
+        // The approval itself, without the lock (§6): a peer dial, and a relay post if that fails.
+        self.send_for_caller(sends)
     }
 
     /// Open a new chat against a fresh in-process peer (demo only): stands up a real `Node`
@@ -1986,11 +2021,18 @@ impl NightdropCore {
     /// the relay (the peer never saw it — the queued blob is recalled and replaced).
     /// The message is marked `edited`; the peer's copy updates via an E2E edit frame.
     pub fn edit_message(&self, contact_id: &str, msg_id: &str, text: &str) -> Result<()> {
-        let mut g = self.lock();
-        g.me.edit_message(contact_id, msg_id, text)?;
-        g.save();
+        // Three steps so no network round runs under the lock (§6): check and edit locally, recall
+        // any still-queued relay copies without the lock, then seal the frame the recall calls for.
+        let plan = self.lock().me.begin_edit(contact_id, msg_id, text)?;
+        let recalled = plan.map(|p| p.run());
+        let sends = {
+            let mut g = self.lock();
+            g.me.finish_edit(contact_id, msg_id, text, recalled)?;
+            g.save();
+            g.me.take_caller_outbox()
+        };
         emit_chats("message", vec![contact_id.to_string()]);
-        Ok(())
+        self.send_for_caller(sends)
     }
 
     /// Unsend ("delete for both") one of our own messages (`msg_id` from [`ChatMessage`]).
@@ -1998,11 +2040,17 @@ impl NightdropCore {
     /// still queued (then the relay blob is recalled so the peer never receives it). The
     /// message becomes a "deleted" tombstone (`kind == "deleted"`) on both sides.
     pub fn unsend_message(&self, contact_id: &str, msg_id: &str) -> Result<()> {
-        let mut g = self.lock();
-        g.me.unsend_message(contact_id, msg_id)?;
-        g.save();
+        // The same three steps as `edit_message`.
+        let plan = self.lock().me.begin_unsend(contact_id, msg_id)?;
+        let recalled = plan.map(|p| p.run());
+        let sends = {
+            let mut g = self.lock();
+            g.me.finish_unsend(contact_id, msg_id, recalled)?;
+            g.save();
+            g.me.take_caller_outbox()
+        };
         emit_chats("message", vec![contact_id.to_string()]);
-        Ok(())
+        self.send_for_caller(sends)
     }
 
     /// Set the local user's display name within one chat (§4).
@@ -2628,6 +2676,24 @@ fn register_tor_core(inner: &Arc<Mutex<Inner>>, poller: &Arc<StopSignal>) {
 /// The thread holds an [`ExitGuard`] for its whole life, so [`NightdropCore::shutdown`] can wait
 /// for it to *finish* rather than merely asking it to — see that method for why the difference
 /// matters (arti's state lock, and the guard heal that healed forever).
+/// Record a finished outbox round under the lock, and tell the UI about any chat it changed.
+fn apply_outbox_round(inner: &Mutex<Inner>, finished: Vec<crate::node::Finished>) {
+    let affected = {
+        let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+        let affected = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            g.me.apply_outbound(finished)
+        }))
+        .unwrap_or_default();
+        // A retry that landed shortened a persisted queue; one that recorded receipts changed a
+        // chat. Debounced like the rest of the background churn (§1.5.4).
+        g.save_soon();
+        affected
+    };
+    if !affected.is_empty() {
+        emit_chats("message", affected);
+    }
+}
+
 fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
     thread::spawn(move || {
         let _exit = ExitGuard::new(Arc::clone(&stop));
@@ -2649,6 +2715,11 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
         let mut directory_job: Option<thread::JoinHandle<crate::node::DirectoryFetchResult>> = None;
         let mut next_cover: Option<std::time::Instant> = None;
         let mut cover_delay = next_cover_delay();
+        // Control frames and relay retries the core sealed under the lock (`Node::outbox`):
+        // announcements, chat-delete and screenshot notices, relay retries, cover traffic. Each is
+        // a peer dial and/or relay posts, so a round runs on its own thread, and only one at a
+        // time: whatever is queued meanwhile waits for the next round.
+        let mut outbox_job: Option<thread::JoinHandle<Vec<crate::node::Finished>>> = None;
         while !stop.stopped() {
             // Foreground: pump often for snappy delivery. Backgrounded: poll far less often
             // to cut battery/CPU and avoid chatty background work (the warm Tor stream still
@@ -2802,6 +2873,20 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
             } else {
                 next_cover = None; // turning it off resets the clock; on again re-samples
             }
+            if outbox_job.as_ref().is_some_and(|j| j.is_finished()) {
+                if let Some(finished) = outbox_job.take().and_then(|j| j.join().ok()) {
+                    apply_outbox_round(&inner, finished);
+                }
+            }
+            if outbox_job.is_none() {
+                let sends = {
+                    let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+                    g.me.take_outbox()
+                };
+                if !sends.is_empty() {
+                    outbox_job = Some(thread::spawn(move || crate::node::run_outbox(sends)));
+                }
+            }
         }
         // A drain still in flight must be applied, not dropped: a relay `take` is destructive, so
         // the blobs it holds exist nowhere else. Joining waits for it; its requests abandon as the
@@ -2819,6 +2904,25 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
         // it) so nothing outlives the poller. Its result is not needed.
         if let Some(job) = directory_job.take() {
             let _ = job.join();
+        }
+        // An outbox round holds the transport too, and its outcomes matter: a chat-delete notice
+        // that landed must leave `pending_control`, and one that did not must stay in it. Then
+        // whatever never went out is recorded as failed, so every retry is back where the save
+        // finds it (`shutdown_core` writes it once the poller is gone).
+        if let Some(finished) = outbox_job.take().and_then(|j| j.join().ok()) {
+            apply_outbox_round(&inner, finished);
+        }
+        {
+            let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
+            let unsent: Vec<_> =
+                g.me.take_outbox()
+                    .into_iter()
+                    .map(crate::node::Outbound::abandon)
+                    .collect();
+            if !unsent.is_empty() {
+                g.me.apply_outbound(unsent);
+                g.save_soon();
+            }
         }
         // Drop our handle on the core — and through it the transport, if we are the last holder —
         // *before* the exit guard fires. `wait_for_exit` promises the caller that this thread is
@@ -3216,6 +3320,86 @@ mod tests {
         release.store(true, Ordering::Relaxed);
         let outcomes = driver.join().unwrap().expect("a send was planned");
         core.lock().me.apply_send_outcomes(outcomes);
+    }
+
+    /// Approving a request dials the peer (and posts to the relay if that fails). It used to do so
+    /// inside `Node::authorize`, under the core lock, so a dead peer froze every other call for
+    /// the length of the dial. The approval is still reported to the caller, but sent off the lock.
+    #[test]
+    fn an_approval_dial_does_not_hold_the_core_lock() {
+        struct BlockingTransport {
+            inner: crate::transport::MemoryTransport,
+            armed: Arc<AtomicBool>,
+            entered: Arc<AtomicBool>,
+            release: Arc<AtomicBool>,
+        }
+        impl Transport for BlockingTransport {
+            fn address(&self) -> String {
+                self.inner.address()
+            }
+            fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+                if !self.armed.load(Ordering::Relaxed) {
+                    return self.inner.send(peer, frame);
+                }
+                self.entered.store(true, Ordering::Relaxed);
+                while !self.release.load(Ordering::Relaxed) {
+                    thread::sleep(Duration::from_millis(5));
+                }
+                anyhow::bail!("never got there")
+            }
+            fn try_recv(&self) -> Option<(String, Vec<u8>)> {
+                self.inner.try_recv()
+            }
+        }
+
+        let net = MemoryNetwork::new();
+        let armed = Arc::new(AtomicBool::new(false));
+        let entered = Arc::new(AtomicBool::new(false));
+        let release = Arc::new(AtomicBool::new(false));
+        let core = Arc::new(NightdropCore::new_with_transport(
+            Box::new(BlockingTransport {
+                inner: net.endpoint("me.onion"),
+                armed: Arc::clone(&armed),
+                entered: Arc::clone(&entered),
+                release: Arc::clone(&release),
+            }),
+            None,
+            false,
+        ));
+        let invite = core.create_invite().unwrap();
+        let mut peer = crate::node::Node::new(Box::new(net.endpoint("peer.onion")));
+        let (addr, bundle) = parse_invite(&invite.qr_payload).unwrap();
+        peer.connect_with_bundle(&addr, &bundle).unwrap();
+        core.poll_once().unwrap();
+        let contact = core.incoming_requests()[0].id.clone();
+
+        armed.store(true, Ordering::Relaxed);
+        let approving = {
+            let core = Arc::clone(&core);
+            thread::spawn(move || core.authorize(&contact, true))
+        };
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !entered.load(Ordering::Relaxed) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the approval never dialled"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            core.inner.try_lock().is_ok(),
+            "the approval is mid-dial and holding the core lock"
+        );
+        release.store(true, Ordering::Relaxed);
+        assert!(
+            approving.join().unwrap().is_err(),
+            "an approval that reached no one (no relay here) is still reported as failed"
+        );
+        assert_eq!(
+            core.contacts().len(),
+            1,
+            "the chat is approved locally all the same"
+        );
     }
 
     /// A received message must be surfaced before its delivery receipt goes out. The receipt is a

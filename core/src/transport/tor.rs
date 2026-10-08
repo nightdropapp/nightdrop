@@ -39,6 +39,7 @@ use crate::lifecycle::{ExitGuard, StopSignal};
 // The virtual port a relay's onion is dialed on lives with the protocol, so the core's transport
 // and the relay binary's own self-dial watchdog cannot drift apart on it.
 use crate::relay_client::RELAY_PORT;
+use crate::transport::inbound::InboundBudget;
 use crate::transport::{client_auth, Address, Transport};
 use crate::Result;
 
@@ -184,11 +185,12 @@ async fn write_all_stalling<W: futures::AsyncWrite + Unpin>(
     Ok(())
 }
 
-/// Read one `\n`-terminated line, failing if no byte arrives within `stall`. EOF before the newline
-/// returns what arrived, as `read_line` did.
+/// Read one `\n`-terminated line, failing if no byte arrives within `stall` or if it grows past
+/// `max` bytes. EOF before the newline returns what arrived, as `read_line` did.
 async fn read_line_stalling<R: futures::AsyncRead + Unpin>(
     r: &mut R,
     stall: Duration,
+    max: usize,
 ) -> Result<String> {
     let mut line = Vec::new();
     let mut chunk = [0u8; 16 * 1024];
@@ -199,11 +201,18 @@ async fn read_line_stalling<R: futures::AsyncRead + Unpin>(
         if n == 0 {
             break;
         }
-        if let Some(end) = chunk[..n].iter().position(|&b| b == b'\n') {
-            line.extend_from_slice(&chunk[..=end]);
+        let (take, done) = match chunk[..n].iter().position(|&b| b == b'\n') {
+            Some(end) => (end + 1, true),
+            None => (n, false),
+        };
+        anyhow::ensure!(
+            line.len() + take <= max,
+            "relay response longer than {max} bytes; dropped"
+        );
+        line.extend_from_slice(&chunk[..take]);
+        if done {
             break;
         }
-        line.extend_from_slice(&chunk[..n]);
     }
     String::from_utf8(line).map_err(|_| anyhow::anyhow!("relay response was not UTF-8"))
 }
@@ -217,6 +226,8 @@ pub struct TorTransport {
     runtime: Arc<Runtime>,
     client: Arc<TorClient<PreferredRuntime>>,
     inbound: Mutex<Receiver<(Address, Vec<u8>)>>,
+    /// Bytes of inbound frames read and not yet taken by the core (`transport::inbound`).
+    inbound_budget: InboundBudget,
     /// Warm outbound streams, one per peer `.onion` (reused across frames, idle-closed).
     out_streams: OutStreams,
     /// Raised when this transport is dropped. Stops the idle reaper *and* cancels any relay
@@ -315,6 +326,7 @@ impl TorTransport {
         let nickname_owned: HsNickname = nickname.parse().context("onion service nickname")?;
         let auth_dir = client_auth_dir.map(str::to_string);
         let auth_dir_for_svc = auth_dir.clone();
+        let inbound_budget = InboundBudget::default();
         let (onion, client, service, inbound_rx) = runtime.block_on(async {
             // Bound the bootstrap so a blocked/dead network fails cleanly instead of hanging the
             // app forever (the UI then offers a retry; bridges can help — docs/bridges.md).
@@ -377,15 +389,21 @@ impl TorTransport {
             // frames, so read in a loop until the peer closes it.
             let (tx, rx) = channel::<(Address, Vec<u8>)>();
             let mut streams = handle_rend_requests(rend_requests);
+            let readers = inbound_budget.clone();
             tokio::spawn(async move {
                 while let Some(request) = streams.next().await {
                     let tx = tx.clone();
+                    let budget = readers.clone();
                     tokio::spawn(async move {
                         if let Ok(mut stream) = request.accept(Connected::new_empty()).await {
                             // The caller is anonymous at the transport layer; routing uses
                             // the frame's own ids / advertised reply address.
-                            while let Ok(frame) = read_frame(&mut stream).await {
-                                let _ = tx.send((Address::new(), frame));
+                            while let Ok(frame) = read_frame(&mut stream, &budget).await {
+                                let len = frame.len();
+                                if tx.send((Address::new(), frame)).is_err() {
+                                    budget.release(len); // the transport is gone
+                                    break;
+                                }
                             }
                         }
                     });
@@ -408,6 +426,7 @@ impl TorTransport {
             runtime,
             client,
             inbound: Mutex::new(inbound_rx),
+            inbound_budget,
             out_streams,
             closing,
             auth_dir,
@@ -514,7 +533,12 @@ impl TorTransport {
                         .map_err(|_| anyhow::anyhow!("relay dial timed out"))?
                         .with_context(|| format!("relay connect {relay_onion}"))?;
                     write_all_stalling(&mut stream, req.as_bytes(), RELAY_STALL_TIMEOUT).await?;
-                    read_line_stalling(&mut stream, RELAY_STALL_TIMEOUT).await
+                    read_line_stalling(
+                        &mut stream,
+                        RELAY_STALL_TIMEOUT,
+                        crate::relay_client::MAX_RESPONSE_LINE_BYTES,
+                    )
+                    .await
                 };
                 // `futures::select` rather than `tokio::select!` so this needs no new dependency
                 // (tokio's `macros` feature); the two futures are pinned locally and neither is
@@ -899,7 +923,9 @@ impl Transport for TorTransport {
     }
 
     fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
-        self.inbound.lock().unwrap().try_recv().ok()
+        let (from, frame) = self.inbound.lock().unwrap().try_recv().ok()?;
+        self.inbound_budget.release(frame.len());
+        Some((from, frame))
     }
 }
 
@@ -1404,15 +1430,21 @@ async fn write_frame<W: futures::AsyncWrite + Unpin>(w: &mut W, frame: &[u8]) ->
     write_all_stalling(w, frame, RELAY_STALL_TIMEOUT).await
 }
 
-/// Read one length-prefixed frame.
-async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R) -> Result<Vec<u8>> {
+/// Read one length-prefixed frame, reserving its length in `budget` before the body (see
+/// [`InboundBudget`]); `try_recv` releases it when the core takes the frame.
+async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R, budget: &InboundBudget) -> Result<Vec<u8>> {
     let mut prefix = [0u8; 4];
     r.read_exact(&mut prefix).await?;
     let len = crate::wire::frame_len(prefix)?;
+    budget.reserve(len).await?;
     // Grow as bytes arrive rather than allocating the announced length up front.
     let mut buf = Vec::new();
-    (&mut *r).take(len as u64).read_to_end(&mut buf).await?;
-    anyhow::ensure!(buf.len() == len, "connection closed mid-frame");
+    let read = (&mut *r).take(len as u64).read_to_end(&mut buf).await;
+    if read.is_err() || buf.len() != len {
+        budget.release(len);
+        read?;
+        anyhow::bail!("connection closed mid-frame");
+    }
     Ok(buf)
 }
 
@@ -1702,7 +1734,7 @@ mod stall_tests {
     #[test]
     fn a_stalled_relay_exchange_fails_instead_of_hanging() {
         let stall = Duration::from_millis(100);
-        let read = rt().block_on(read_line_stalling(&mut Stalled, stall));
+        let read = rt().block_on(read_line_stalling(&mut Stalled, stall, 1024));
         assert!(read.unwrap_err().to_string().contains("stalled"));
         let write = rt().block_on(write_all_stalling(&mut Stalled, b"req\n", stall));
         assert!(write.unwrap_err().to_string().contains("stalled"));
@@ -1712,7 +1744,7 @@ mod stall_tests {
     fn a_line_arriving_in_pieces_is_read_whole_and_no_further() {
         let mut src = futures::io::Cursor::new(b"{\"ok\":tr".to_vec());
         let got = rt()
-            .block_on(read_line_stalling(&mut src, Duration::from_secs(1)))
+            .block_on(read_line_stalling(&mut src, Duration::from_secs(1), 1024))
             .unwrap();
         assert_eq!(
             got, "{\"ok\":tr",
@@ -1720,9 +1752,28 @@ mod stall_tests {
         );
         let mut src = futures::io::Cursor::new(b"line one\nline two\n".to_vec());
         let got = rt()
-            .block_on(read_line_stalling(&mut src, Duration::from_secs(1)))
+            .block_on(read_line_stalling(&mut src, Duration::from_secs(1), 1024))
             .unwrap();
         assert_eq!(got, "line one\n");
+    }
+
+    /// A relay's reply is bounded (`relay_client::MAX_RESPONSE_LINE_BYTES`); one that keeps going
+    /// is refused at the cap rather than buffered until the phone runs out of memory.
+    #[test]
+    fn a_relay_reply_past_the_cap_is_refused() {
+        let mut src = futures::io::Cursor::new(vec![b'x'; 5000]);
+        let err = rt()
+            .block_on(read_line_stalling(&mut src, Duration::from_secs(1), 4096))
+            .unwrap_err();
+        assert!(err.to_string().contains("longer than"), "{err}");
+        let mut src = futures::io::Cursor::new(b"exactly\n".to_vec());
+        let got = rt()
+            .block_on(read_line_stalling(&mut src, Duration::from_secs(1), 8))
+            .unwrap();
+        assert_eq!(
+            got, "exactly\n",
+            "a line that fits, newline included, is read"
+        );
     }
 }
 

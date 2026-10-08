@@ -732,6 +732,11 @@ impl AuthTransport {
 }
 
 impl Transport for AuthTransport {
+    /// The wrapped in-memory transport delivers instantly, so frames go out inline as on any test
+    /// transport; without this they would wait in the outbox for a poller these tests do not run.
+    fn is_synchronous(&self) -> bool {
+        self.inner.is_synchronous()
+    }
     fn address(&self) -> Address {
         self.inner.address()
     }

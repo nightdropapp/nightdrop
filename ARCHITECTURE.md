@@ -468,17 +468,43 @@ on a re-pair (new session) exactly like `verified`.
   Two consequences worth keeping: `shutdown` **tries** for the lock with a bound and proceeds
   without it rather than waiting (an unbounded acquire made "bounded shutdown" a lie), and the
   transport is held as an `Arc` so a send can carry a handle across the unlocked window.
-  Still doing their I/O under the lock, and owed the same treatment: `flush_pending_control`, and every control frame sent through `Node::deliver` — the once-per-run
-  announcements (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`)
-  and `announce_relays`, which `set_my_relays` runs on a background thread that still takes the
-  lock — and the relay recall + re-post when a still-queued message is edited or unsent. Each is a
-  direct dial bounded by `PEER_DIAL_TIMEOUT`, then a relay post. (The
-  relay-directory fetch got the treatment in 0.1.28: `begin_directory_fetch` → `fetch_directory`
-  → `finish_directory_fetch`; the server-backup post in 0.1.29; and in 0.1.29 the inviter side of
-  short-code pairing, which now runs as its own job on the 2 s pairing cadence —
-  `invite_service_plan` → `service_invites` → `apply_invite_service`. It used to run only after a
-  whole mailbox drain round, and once v2 polling fragments made a round take over a minute on a
-  phone, an Android inviter answered after the joiner's 120 s wait had run out.)
+  **Control frames and relay retries go through an outbox (0.2).** `Node::deliver` used to dial
+  inline, so every control frame did its I/O under the lock: the once-per-run announcements
+  (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`), `announce_relays`,
+  name/verification/storage/disappearing changes, chat-delete and screenshot notices, the
+  `flush_pending_control`/`flush_pending_relay`/`sweep_unconfirmed` retries, cover traffic, and the
+  relay recall + re-post of an edit or unsend. Now each is sealed under the lock (the ratchet has to
+  advance there) into an `Outbound` — the frame, its route (direct then relay, relay then direct,
+  relay only) and what to record when it lands — and `Node::send_or_queue` either runs it at once on
+  a synchronous transport (tests, demo) or queues it. The poller runs queued entries on their own
+  job, one round at a time, and re-takes the lock only to apply them (`apply_outbound`).
+
+  What used to hang off a synchronous result is recorded instead. A once-per-run announcement sets
+  its flag when queued, so the next tick does not queue a second copy, and clears it on failure, so
+  the tick after retries. A chat-delete `Closed` or a screenshot notice goes into the persisted
+  `pending_control` before its first attempt, marked in flight while queued; a copy landing removes
+  it, and since the chat may be gone it carries its own mailbox handle. At poller exit anything still
+  queued is applied as failed, so every retry is back in place for the final save. The four calls a
+  user waits on — approving a request, the QR `Hello`, a short-code join's `Hello`, edit and unsend —
+  take their own entries (`take_caller_outbox`) and send them after releasing the lock, still
+  reporting a failure; edit and unsend run as three steps (`begin_edit` → recall without the lock →
+  `finish_edit`), because the frame they send depends on whether the recall succeeded. Logout and
+  the duress wipe still deliver inline: they end the session, so nothing is left to wait on the lock.
+  (Earlier steps on the same road: the relay-directory fetch in 0.1.28, the server-backup post and
+  the inviter side of short-code pairing in 0.1.29 — `invite_service_plan` → `service_invites` →
+  `apply_invite_service`. That one used to run only after a whole mailbox drain round, and once v2
+  polling fragments made a round take over a minute on a phone, an Android inviter answered after
+  the joiner's 120 s wait had run out.)
+- **Inbound bytes are bounded, not only each frame.** A peer frame is capped by its length prefix
+  (`wire::MAX_FRAME_BYTES`, sized for the largest attachment) before its body is read, but frames go
+  into a channel the core drains on its own schedule, and any number of streams can be reading at
+  once. Every networked transport (Tor, TCP, LAN) therefore shares an `InboundBudget`
+  (`transport/inbound.rs`): 64 MiB of frames read, being read, or waiting for the core. A reader
+  reserves a frame's length after its prefix and waits for room — stalling that sender's stream, so
+  the back-pressure is the network's — and drops the connection after 60 s. One frame is always
+  admitted when nothing is held, so an attachment larger than the budget still arrives alone. The
+  same holds for what a relay sends back: a relay reply line is read with a cap
+  (`relay_client::MAX_RESPONSE_LINE_BYTES`), which the relay side makes safe to enforce (§11.2).
 - **Offline / space-saving path:** a **minimal relay** stores **E2E-encrypted blobs
   only**, for at most **24h**, when a peer is offline or when the user opts into
   server storage to save device space.
@@ -1041,6 +1067,12 @@ envelope; message content inside remains Double-Ratchet E2E as always.
 `take_many(handles)` drains one polling fragment (at most 64 handles) in one round-trip; a relay
 that predates it answers "bad request" and the client falls back to one `take` per handle. The
 handles in it already share a circuit, so batching tells the relay nothing the circuit did not.
+
+A draining reply (`take`, `take_many`, `fetch`) carries at most `TAKE_BUDGET_BYTES` (32 MiB) of
+blobs, oldest first, plus always its first blob; the rest stays queued for the next poll (0.2).
+That bound is what lets a client cap the reply line it reads (one budget plus one maximum blob,
+base64): a take is destructive, so a client that refused a long but genuine reply would lose the
+mail in it, and before the budget a reply was bounded only by the relay's whole store.
 
 The relay enforces **resource limits** (`RelayLimits`): a max blob size, per-mailbox depth and
 byte caps, and a global byte ceiling — all **reject-new**, so a flooder can neither OOM the

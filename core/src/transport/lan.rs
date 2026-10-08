@@ -26,13 +26,14 @@
 //! reaches this layer. Use this when Tor is unavailable and the local network is already trusted
 //! enough for the participants to be in the same place; it is not a replacement for Tor's anonymity.
 
-use std::io::{Read, Write};
+use std::io::Write;
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream, UdpSocket};
 use std::sync::mpsc::{channel, Receiver};
 use std::sync::Mutex;
 use std::thread;
 use std::time::Duration;
 
+use super::inbound::{read_frame, InboundBudget};
 use crate::transport::{Address, Transport};
 use crate::Result;
 
@@ -46,6 +47,8 @@ pub struct LanTransport {
     /// The advertised `host:port` peers dial — the detected LAN IP, not `0.0.0.0`/loopback.
     address: Address,
     inbound: Mutex<Receiver<(Address, Vec<u8>)>>,
+    /// Bytes read and not yet taken by the core ([`InboundBudget`]).
+    budget: InboundBudget,
 }
 
 impl LanTransport {
@@ -61,16 +64,19 @@ impl LanTransport {
             None => bound.to_string(),
         };
         let (tx, rx) = channel();
+        let budget = InboundBudget::default();
+        let readers = budget.clone();
         thread::spawn(move || {
             for conn in listener.incoming().flatten() {
                 let tx = tx.clone();
+                let budget = readers.clone();
                 thread::spawn(move || {
                     let mut stream = conn;
                     let _ = stream.set_read_timeout(Some(READ_IDLE));
                     // A connection may carry many frames (a peer that keeps it warm); drain until
                     // it closes or idles out. The TCP source address is not the app-level reply
                     // address (peers advertise that in their Hello), so report it empty.
-                    while let Ok(frame) = read_frame(&mut stream) {
+                    while let Ok(frame) = read_frame(&mut stream, &budget) {
                         if tx.send((Address::new(), frame)).is_err() {
                             break;
                         }
@@ -81,6 +87,7 @@ impl LanTransport {
         Ok(Self {
             address,
             inbound: Mutex::new(rx),
+            budget,
         })
     }
 }
@@ -98,7 +105,9 @@ impl Transport for LanTransport {
     }
 
     fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
-        self.inbound.lock().unwrap().try_recv().ok()
+        let (from, frame) = self.inbound.lock().unwrap().try_recv().ok()?;
+        self.budget.release(frame.len());
+        Some((from, frame))
     }
 }
 
@@ -124,17 +133,6 @@ fn write_frame(w: &mut impl Write, frame: &[u8]) -> Result<()> {
     w.write_all(&(frame.len() as u32).to_be_bytes())?;
     w.write_all(frame)?;
     Ok(())
-}
-
-fn read_frame(r: &mut impl Read) -> Result<Vec<u8>> {
-    let mut prefix = [0u8; 4];
-    r.read_exact(&mut prefix)?;
-    let len = crate::wire::frame_len(prefix)?;
-    // Grow as bytes arrive rather than allocating the announced length up front.
-    let mut buf = Vec::new();
-    r.take(len as u64).read_to_end(&mut buf)?;
-    anyhow::ensure!(buf.len() == len, "connection closed mid-frame");
-    Ok(buf)
 }
 
 #[cfg(test)]

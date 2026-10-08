@@ -431,14 +431,17 @@ impl Node {
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
-            if self.send_mailbox_key(&id) {
-                self.mailbox_announced.insert(id);
+            // Flagged while in flight; a failed delivery clears it again (`apply_outbound`).
+            self.mailbox_announced.insert(id.clone());
+            if !self.send_mailbox_key(&id) {
+                self.mailbox_announced.remove(&id);
             }
         }
     }
 
     /// Send our contribution — with our confirmation once we can compute the secret — on the chat.
-    /// Returns whether a relay or the peer took it.
+    /// Returns whether a frame went out (queued, on an asynchronous transport); the delivery itself
+    /// is recorded when it completes.
     pub(super) fn send_mailbox_key(&mut self, contact_id: &str) -> bool {
         #[cfg(test)]
         if self.legacy_v1_only {
@@ -480,26 +483,14 @@ impl Node {
             )
         };
         self.dirty = true;
-        let taken = self.deliver(&addr, contact_id, &frame).is_ok();
-        crate::diag!(
-            "mailbox: sent our contribution{} — {}",
-            if frame_confirms {
-                " + confirmation"
-            } else {
-                ""
-            },
-            if taken { "taken" } else { "not delivered" }
-        );
-        if taken {
-            if let Some(pair) = self
-                .chats
-                .get_mut(contact_id)
-                .and_then(|c| c.mailbox.as_mut())
-            {
-                pair.announced_at.get_or_insert_with(crate::api::now_secs);
-            }
+        if frame_confirms {
+            crate::diag!("mailbox: sending our contribution + confirmation");
         }
-        taken
+        // Whether it lands is recorded when it has gone out (`apply_outbound`): the relay copy's
+        // `announced_at`, and the `mailbox_announced` flag cleared again on failure.
+        let done = super::OutboundDone::Announced(super::Announce::Mailbox, contact_id.to_string());
+        let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
+        true
     }
 
     /// A [`Frame::MailboxKey`] from `from`. Stores their contribution, checks their confirmation,

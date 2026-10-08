@@ -180,7 +180,7 @@ impl Node {
 
     /// Serialize the undelivered chat-delete `Closed` queue (§11.6) for persistence: the sealed
     /// frame bytes go out base64-encoded (the whole state is sealed around them).
-    fn export_pending_control(&self) -> Vec<crate::storage::PersistedPendingControl> {
+    pub(super) fn export_pending_control(&self) -> Vec<crate::storage::PersistedPendingControl> {
         use base64::Engine as _;
         self.pending_control
             .iter()
@@ -189,6 +189,7 @@ impl Node {
                 peer_address: p.peer_address.clone(),
                 relays: p.relays.clone(),
                 bytes: base64::engine::general_purpose::STANDARD.encode(&p.bytes),
+                handle: p.handle.clone(),
             })
             .collect()
     }
@@ -210,6 +211,12 @@ impl Node {
                     peer_address: p.peer_address.clone(),
                     relays: p.relays.clone(),
                     bytes,
+                    handle: if p.handle.is_empty() {
+                        super::mailbox_handle(&p.recipient_ik)
+                    } else {
+                        p.handle.clone()
+                    },
+                    in_flight: false,
                 })
             })
             .collect()
