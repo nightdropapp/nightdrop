@@ -56,4 +56,52 @@ void main() {
     expect(find.textContaining('does not stop it'), findsOneWidget);
     expect(find.textContaining('costs battery and data'), findsOneWidget);
   });
+
+  // Offered once at setup, before the identity exists (optional-relay.md §7): off unless chosen,
+  // with the same limit stated, and applied before the identity is created.
+  testWidgets('setup offers cover traffic before the identity is created', (tester) async {
+    final core = _CoverCore();
+    await tester.pumpWidget(NightdropApp(core: core));
+    await tester.tap(find.text('Create my identity'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Before you start'), findsOneWidget);
+    expect(find.textContaining('does not stop it'), findsOneWidget);
+    expect(core.identity, isNull, reason: 'nothing is created until the user continues');
+
+    await tester.tap(find.byKey(const Key('setup-cover')));
+    await tester.pump();
+    await tester.ensureVisible(find.byKey(const Key('setup-create')));
+    await tester.tap(find.byKey(const Key('setup-create')));
+    await tester.pumpAndSettle();
+
+    expect(core.cover, isTrue);
+    expect(core.identity, isNotNull);
+    expect(find.text('Chats'), findsOneWidget);
+  });
+
+  testWidgets('setup leaves cover traffic off by default', (tester) async {
+    final core = _CoverCore();
+    await tester.pumpWidget(NightdropApp(core: core));
+    await tester.tap(find.text('Create my identity'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.byKey(const Key('setup-create')));
+    await tester.tap(find.byKey(const Key('setup-create')));
+    await tester.pumpAndSettle();
+
+    expect(core.cover, isFalse);
+    expect(core.identity, isNotNull);
+  });
+
+  testWidgets('backing out of setup creates nothing', (tester) async {
+    final core = _CoverCore();
+    await tester.pumpWidget(NightdropApp(core: core));
+    await tester.tap(find.text('Create my identity'));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+
+    expect(core.identity, isNull);
+    expect(find.text('Create my identity'), findsOneWidget);
+  });
 }

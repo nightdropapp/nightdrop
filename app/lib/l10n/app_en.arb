@@ -766,6 +766,22 @@
   "@backgroundDeliveryBody": {
     "description": "Explanation in the background-delivery dialog."
   },
+  "setupTitle": "Before you start",
+  "@setupTitle": {
+    "description": "Title of the one setup page shown before an identity is created."
+  },
+  "setupIntro": "A few choices change what Night Drop does on the network from the start. Everything here is off unless you turn it on.",
+  "@setupIntro": {
+    "description": "Intro text on the setup page."
+  },
+  "setupCoverTitle": "Cover traffic",
+  "@setupCoverTitle": {
+    "description": "Switch label on the setup page for cover traffic (dummy mail to yourself)."
+  },
+  "setupChangeLater": "You can change each of these later from the menu on the main screen.",
+  "@setupChangeLater": {
+    "description": "Note at the bottom of the setup page."
+  },
   "onboardingBackgroundTitle": "Receive messages in the background?",
   "@onboardingBackgroundTitle": {
     "description": "Title of the background-delivery offer shown during onboarding."

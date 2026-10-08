@@ -584,6 +584,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.';
 
   @override
+  String get setupTitle => 'Before you start';
+
+  @override
+  String get setupIntro =>
+      'A few choices change what Night Drop does on the network from the start. Everything here is off unless you turn it on.';
+
+  @override
+  String get setupCoverTitle => 'Cover traffic';
+
+  @override
+  String get setupChangeLater =>
+      'You can change each of these later from the menu on the main screen.';
+
+  @override
   String get onboardingBackgroundTitle => 'Receive messages in the background?';
 
   @override

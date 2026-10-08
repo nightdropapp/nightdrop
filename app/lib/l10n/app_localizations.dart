@@ -1066,6 +1066,30 @@ abstract class AppLocalizations {
   /// **'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.'**
   String get backgroundDeliveryBody;
 
+  /// Title of the one setup page shown before an identity is created.
+  ///
+  /// In en, this message translates to:
+  /// **'Before you start'**
+  String get setupTitle;
+
+  /// Intro text on the setup page.
+  ///
+  /// In en, this message translates to:
+  /// **'A few choices change what Night Drop does on the network from the start. Everything here is off unless you turn it on.'**
+  String get setupIntro;
+
+  /// Switch label on the setup page for cover traffic (dummy mail to yourself).
+  ///
+  /// In en, this message translates to:
+  /// **'Cover traffic'**
+  String get setupCoverTitle;
+
+  /// Note at the bottom of the setup page.
+  ///
+  /// In en, this message translates to:
+  /// **'You can change each of these later from the menu on the main screen.'**
+  String get setupChangeLater;
+
   /// Title of the background-delivery offer shown during onboarding.
   ///
   /// In en, this message translates to:

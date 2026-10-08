@@ -186,12 +186,11 @@ never drained, which is what gives it away.
   reaches a relay (`cover-traffic.md` §2), and an onion address is not geolocatable the way an
   IPv4 address is.
 * **Cover traffic remains opt-in.** It blurs per-mailbox volume and timing, which is exactly the
-  residual profile this scheme cannot erase, so 0.1.23 also offers it at onboarding beside the
-  background-delivery prompt — **before** `createIdentity`, because `_Root` swaps the screen out
-  from under a dialog awaited after it (see the comment on `_offerBackgroundDelivery`). Showing
-  both prompts *during* identity creation is a worthwhile but separate change: it alters `_Root`'s
-  routing condition, which was hardened on 2026-09-21 after a raced relaunch offered onboarding
-  over a live identity.
+  residual profile this scheme cannot erase, so from 0.2 the one setup step before `createIdentity`
+  offers it beside background delivery (`onboarding/setup_screen.dart`; until then it was only in
+  the home menu, though this paragraph said otherwise). The choices are made on a page that pops
+  before the identity exists, because `_Root` swaps the onboarding screen out from under anything
+  still open once it does.
 
 ## 7. Consequences elsewhere
 

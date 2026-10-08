@@ -184,10 +184,6 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-/// Cover traffic (#4). Opt-in, and the dialog carries the limit as prominently as the benefit:
-/// this is chaff, not constant-rate transmission, so it raises the cost of traffic analysis
-/// without ending it. A user who believes it makes them untrackable is worse off than one who
-/// knows what it actually buys. See `docs/design/cover-traffic.md` §4.
 /// Manually reset the Tor connection. Confirmed first because it drops the connection and
 /// reconnects, which takes a minute or two — but it is the only remedy for a guard set that has
 /// churned out of the network, and until this existed a user in that state could only reinstall.
@@ -217,6 +213,10 @@ Future<void> _confirmResetTor(BuildContext context, NightdropCore core) async {
   await core.resetTorConnection();
 }
 
+/// Cover traffic (#4). Opt-in, and the dialog carries the limit as prominently as the benefit:
+/// this is chaff, not constant-rate transmission, so it raises the cost of traffic analysis
+/// without ending it. A user who believes it makes them untrackable is worse off than one who
+/// knows what it actually buys. See `docs/design/cover-traffic.md` §4.
 Future<void> _coverTrafficSettings(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
   final on = await core.coverTrafficEnabled();
