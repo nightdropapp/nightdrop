@@ -876,6 +876,14 @@ user may be one tap from installing, so a partial or mismatched download must ne
 path. A mismatch is a hard error, not a retry: we asked an authenticated onion for a file it
 told us the hash of.
 
+**AppImage managers are a separate, clearnet path — outside the app.** From 0.1.30 the AppImage
+embeds update information (`gh-releases-zsync|…|latest|…zsync`, `scripts/build-appimage.sh`) and
+each GitHub release carries the matching `.zsync`, so AppImageUpdate, Gear Lever or AppImageLauncher
+can update it. Those tools ask GitHub directly, not through Tor — the same server, by the same route,
+as downloading the AppImage from GitHub in the first place — and only when the user asks: Gear
+Lever's startup check is opt-in (`fetch-updates-in-background`, default off). The app itself never
+reads that information or contacts GitHub; its own check above stays Tor-only.
+
 **The app never installs.** Android verifies signatures itself and refuses to replace Night Drop
 with anything not signed by our release key, so the worst a compromised site achieves is a
 wasted download — not a swapped app. Adding an in-app installer would mean

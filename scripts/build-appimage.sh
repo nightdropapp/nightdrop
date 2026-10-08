@@ -62,7 +62,17 @@ esac; shift; done
 # The newest glibc any shipped binary may require: Ubuntu 22.04's. Raising it drops every distro
 # older than the new value, so it is a decision, not a side effect of whatever the build box runs.
 MAX_GLIBC=2.35
-BUILD_IMAGE=nightdrop-linux-build:22.04
+# The suffix changes whenever scripts/linux-build/Containerfile does, so an image built from an
+# older file is never reused (it is only built when missing). 2: zsync, for the .zsync below.
+BUILD_IMAGE=nightdrop-linux-build:22.04-2
+
+# Where AppImage update tools (AppImageUpdate, Gear Lever, AppImageLauncher) look for a newer build:
+# the .zsync asset of this repo's latest GitHub release. Embedded in the AppImage at packaging time;
+# the .zsync is generated next to it and must be uploaded to every GitHub release beside the
+# AppImage. These tools reach GitHub directly, not through Tor, and only when the user asks (Gear
+# Lever's background check is off by default) — the app's own update check stays Tor-only
+# (ARCHITECTURE.md §10a).
+UPDATE_INFO="gh-releases-zsync|nightdropapp|nightdrop|latest|Night_Drop-x86_64.AppImage.zsync"
 
 # appimagetool: prefer PATH, then ~/.local/bin. Run under FUSE if available, else self-extract.
 AITOOL="$(command -v appimagetool || echo "$HOME/.local/bin/appimagetool")"
@@ -194,9 +204,27 @@ ok "icons → AppDir usr/share/icons/hicolor/*/apps/$APP_ID.png (16–512) + .Di
 
 mkdir -p "$OUT_DIR"
 c "Packaging AppImage…"
-ARCH=x86_64 "${AITOOL_RUN[@]}" "$APPDIR" "$OUT" >/dev/null 2>&1 \
-  || ARCH=x86_64 "${AITOOL_RUN[@]}" "$APPDIR" "$OUT"   # re-run verbosely on failure
+ARCH=x86_64 "${AITOOL_RUN[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
+  || ARCH=x86_64 "${AITOOL_RUN[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
 chmod +x "$OUT"
+
+# The .zsync that UPDATE_INFO points at: block checksums of this exact file, so an update tool can
+# fetch only the blocks that changed. Its URL is the AppImage's bare name, resolved next to the
+# .zsync on the release. appimagetool writes one itself only when zsyncmake is installed, which it
+# is not on the dev box; the build image has it.
+ZSYNC="$OUT.zsync"
+rm -f "$ZSYNC"
+if command -v zsyncmake >/dev/null; then
+  ( cd "$OUT_DIR" && zsyncmake -u "$(basename "$OUT")" -o "$(basename "$ZSYNC")" "$(basename "$OUT")" ) >/dev/null
+elif command -v podman >/dev/null && podman image exists "$BUILD_IMAGE"; then
+  podman run --rm --userns=keep-id --security-opt label=disable -v "$OUT_DIR:$OUT_DIR" -w "$OUT_DIR" \
+    "$BUILD_IMAGE" zsyncmake -u "$(basename "$OUT")" -o "$(basename "$ZSYNC")" "$(basename "$OUT")" >/dev/null
+fi
+if [ -s "$ZSYNC" ]; then
+  ok "update information embedded; $(basename "$ZSYNC") written — upload it to the GitHub release"
+else
+  err "no $(basename "$ZSYNC"): install zsync, or build the image (drop --host) — AppImage update tools will find no update"
+fi
 
 ok "single-file build → $OUT ($(du -h "$OUT" | cut -f1))"
 
