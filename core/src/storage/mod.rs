@@ -221,6 +221,47 @@ pub struct PersistedFile {
     pub data: String,
 }
 
+/// One entry in our relay list (`docs/design/optional-relay.md` §2). The Night Drop relay is
+/// symbolic: it stands for the baked-in relay plus whatever the signed directory lists now, so it
+/// follows a rotation instead of freezing the onions of the day it was chosen.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RelayEntry {
+    NightDrop,
+    Onion(String),
+}
+
+/// Someone's **complete** relay set, the shape `Frame::RelaySet` carries (`optional-relay.md` §3):
+/// whether they receive on the Night Drop relay, and the onions they added. Both empty = direct
+/// only.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RelaySet {
+    pub nightdrop: bool,
+    pub relays: Vec<String>,
+}
+
+impl RelaySet {
+    /// The set a relay list stands for.
+    pub fn of(entries: &[RelayEntry]) -> Self {
+        let mut set = RelaySet::default();
+        for e in entries {
+            match e {
+                RelayEntry::NightDrop => set.nightdrop = true,
+                RelayEntry::Onion(addr) => {
+                    if !set.relays.contains(addr) {
+                        set.relays.push(addr.clone());
+                    }
+                }
+            }
+        }
+        set
+    }
+
+    /// No relay at all: direct only.
+    pub fn is_empty(&self) -> bool {
+        !self.nightdrop && self.relays.is_empty()
+    }
+}
+
 /// A frame — a chat-delete `Closed` (§11.6), a screenshot notice, or a joiner's first-contact
 /// `Hello` — that hasn't reached a
 /// relay yet, persisted so it survives an app restart before the poller's retry lands (otherwise
@@ -231,6 +272,10 @@ pub struct PersistedPendingControl {
     pub peer_address: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relays: Vec<String>,
+    /// Whether the recipient's set includes the Night Drop relay. Absent in states written before
+    /// 0.2, when every copy also went to the Night Drop relay.
+    #[serde(default = "yes", skip_serializing_if = "is_true")]
+    pub nightdrop: bool,
     /// base64-encoded sealed control-frame bytes (the whole [`PersistedState`] is sealed around it).
     pub bytes: String,
     /// The mailbox handle to post under: the chat's v2 handle when it had one. Empty in states
@@ -292,9 +337,18 @@ pub struct PersistedState {
     /// not migrated off the on-disk keystore yet. Empty otherwise.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub onion_keys: Vec<PersistedFile>,
-    /// Our advertised **extra** relay addresses (#17). `#[serde(default)]` for forward-compat.
+    /// The onions in our relay list. Before 0.2 this was the whole list of *extra* relays, on top
+    /// of an implicit Night Drop relay; it is still written so the state reads the same either way.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub my_relays: Vec<String>,
+    /// Our relay list (`optional-relay.md` §2), in the user's order. `None` in states written
+    /// before 0.2, which start as Night Drop + `my_relays`, exactly what they were using.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relays: Option<Vec<RelayEntry>>,
+    /// Relays removed from the list, still drained until the unix time beside each: mail already
+    /// queued there for us lives a day.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub relays_draining: Vec<(RelayEntry, u64)>,
     /// Shared relays learned from the operator-signed relay directory (§3.1), and the version we
     /// accepted. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -334,6 +388,10 @@ pub struct PersistedRelayKey {
     pub public: String,
     /// Base64 of the 32-byte secret.
     pub secret: String,
+}
+
+fn is_true(b: &bool) -> bool {
+    *b
 }
 
 fn is_zero_u64(n: &u64) -> bool {
@@ -474,6 +532,8 @@ mod tests {
             onion_keys: Vec::new(),
             onion_identity: None,
             my_relays: Vec::new(),
+            relays: None,
+            relays_draining: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
             directory_next_check: 0,

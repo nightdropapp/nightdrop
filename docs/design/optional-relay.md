@@ -96,6 +96,11 @@ Rules:
    joiner's `Hello`, and the sealed short-code response) and as the inviter's first frame after it.
 4. Sent on pairing, whenever the list changes, and once at startup if it changed while the app was
    closed. This is the same once-per-change behaviour `announce_relays` has today.
+5. **Contacts paired before 0.2 are not unknown (decided 2026-10-09).** On upgrade each existing
+   contact's set is seeded from what we already post to: Night Drop plus the extras they announced
+   in `Frame::Relays`. Their first `RelaySet` replaces it. Without the seed, rule 3 would hold
+   every existing chat until both people happened to be online at once, and the `RelaySet` that
+   ends the hold would itself have no route. Only contacts paired under 0.2 start unknown.
 
 The chat shows the contact's state where it affects delivery:
 
@@ -172,7 +177,8 @@ today to restore keys after a restart). So:
   QR screenshot posted online therefore lets at most one stranger knock, as a request the user
   can decline, within a day. The joiner's reply pass is replaced by the normal `ClientKey`
   exchange after Accept, then revoked.
-* This applies to **every** pairing in 0.2, not only to direct-only users. It removes the relay from
+* This applies to **every** pairing in 0.2, not only to direct-only users, so the sealed
+  short-code response carries the inviter's pass exactly as the QR does. It removes the relay from
   first contact for everyone, so one path is tested instead of two.
 
 **Short codes need the rendezvous**, which lives on a relay, so a direct-only user can neither
@@ -194,6 +200,12 @@ QR stays available.
 
 **Per-chat server storage** posts to the *recipient's* relays and is sent by the *sender*, so it
 needs relays on both sides. Its persistent in-chat warning is unchanged where it is available.
+
+**Cover traffic after v1 mailboxes (decided 2026-10-09).** Cover traffic posted to our own v1
+mailbox. 0.2 drops v1, and real mail already goes to per-pair handles, so chaff on a mailbox
+nobody else posts to would cover nothing. In 0.2 each cover post goes to the current inbound
+handle of one contact picked at random, on our own relays, so it lands in the mailboxes real mail
+uses. With no contacts yet it goes to a self handle derived the same way.
 
 ## 7. Onboarding
 
@@ -244,6 +256,10 @@ a direct-only user's contacts see their messages arrive the moment that user com
    `nightdrop-relay sign-directory`; a daily `onion_get` in the core; relays kept as the fallback.
 1. **Core list model:** a `RelayEntry { NightDrop | Onion(String) }` list, a cap of 4, the
    migration in §2, and the 24 h drain-out. `queue_on_relays` stops taking an implicit primary.
+   **Built 2026-10-09** (`Node::relays`, `post_route`; tests in `node/tests_relay_list.rs`). A
+   0.1.x state's extras past the cap drain out rather than vanish, and a direct-only device
+   already posts to no relay. Until step 2 a contact's set is still Night Drop + their
+   `Frame::Relays` extras (`Node::peer_relay_set`).
 2. **`Frame::RelaySet`** replacing `Frame::Relays`, the set inside pairing, and "unknown = hold".
 3. **The held queue (§4)**, generalised from `pending_relay`, with retry and flush-on-inbound.
 4. **Pairing credentials (§5)** for QR and `Hello`.
@@ -272,6 +288,9 @@ Changing relay TTLs. Groups (`group-chat.md`, 0.3), which will inherit whatever 
 ## 11. Open questions
 
 None remaining.
+
+**Decided 2026-10-09:** existing contacts are seeded, not unknown (§3 rule 5); cover traffic posts
+to a random contact's pair handle (§6).
 
 **Decided 2026-10-05:** no one-off short code for direct-only users (they pair by QR only); no
 "I'm online" signal, built switched off (§4); retry cap 5 min while open, 15 min in the background

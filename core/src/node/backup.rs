@@ -105,7 +105,9 @@ impl Node {
             media: Vec::new(), // populated only for backups (see `backup_with_mode`)
             onion_keys: Vec::new(), // populated only for backups (see `backup_with_mode`)
             onion_identity: None, // likewise
-            my_relays: self.my_relays.clone(),
+            my_relays: self.my_relays(),
+            relays: Some(self.relays.clone()),
+            relays_draining: self.relays_draining.clone(),
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
             directory_next_check: self.directory_next_check,
@@ -188,6 +190,7 @@ impl Node {
                 recipient_ik: p.recipient_ik.clone(),
                 peer_address: p.peer_address.clone(),
                 relays: p.relays.clone(),
+                nightdrop: p.nightdrop,
                 bytes: base64::engine::general_purpose::STANDARD.encode(&p.bytes),
                 handle: p.handle.clone(),
             })
@@ -210,6 +213,7 @@ impl Node {
                     recipient_ik: p.recipient_ik.clone(),
                     peer_address: p.peer_address.clone(),
                     relays: p.relays.clone(),
+                    nightdrop: p.nightdrop,
                     bytes,
                     handle: if p.handle.is_empty() {
                         super::mailbox_handle(&p.recipient_ik)
@@ -329,7 +333,12 @@ impl Node {
         node.pending_media = state.media.clone();
         // Remember the address we last persisted, so startup can detect an onion change (#11).
         node.restored_address = state.address.clone();
-        node.my_relays = state.my_relays.clone();
+        let (relays, overflow) = super::restored_relays(state);
+        node.relays = relays;
+        node.relays_draining = state.relays_draining.clone();
+        let until = crate::api::now_secs() + super::RELAY_TTL.as_secs();
+        node.relays_draining
+            .extend(overflow.into_iter().map(|e| (e, until)));
         node.discovered_relays = state.discovered_relays.clone();
         node.directory_version = state.directory_version;
         node.directory_next_check = state.directory_next_check;

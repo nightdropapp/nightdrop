@@ -122,8 +122,11 @@ impl Node {
             super::PendingControl {
                 recipient_ik: bundle.identity_key.clone(),
                 peer_address: peer_address.to_string(),
-                // Their relay set is unknown before the first reply; the primary is always tried.
+                // Their relay set is unknown before the first reply, so the copy goes to the Night
+                // Drop relay, as 0.1.x did. Pairing passes (`optional-relay.md` §5) make this a
+                // direct-only frame.
                 relays: Vec::new(),
+                nightdrop: true,
                 bytes: wire::encode(&frame),
                 handle,
                 in_flight: false,
@@ -298,14 +301,14 @@ impl Node {
     /// take went to the same relay twice — a joiner's opener "posted to 2/2 relays" was two copies
     /// on one relay (2026-10-07), the same doubling the drain plan already guards against.
     pub(crate) fn relay_set(&self) -> Vec<RelayClient> {
-        let mut relays: Vec<RelayClient> = self.relay.iter().cloned().collect();
-        let mut seen: Vec<&str> = self
-            .relay
+        let (primary, onions) = self.post_route(&self.my_relay_set());
+        let mut relays: Vec<RelayClient> = primary.iter().cloned().collect();
+        let mut seen: Vec<&str> = primary
             .as_ref()
             .and_then(|p| p.addr())
             .into_iter()
             .collect();
-        for addr in self.my_relays.iter().chain(self.discovered_relays.iter()) {
+        for addr in &onions {
             if seen.contains(&addr.as_str()) {
                 continue;
             }

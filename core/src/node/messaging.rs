@@ -153,6 +153,7 @@ impl Node {
     /// lock. No-op if the chat was deleted before delivery ran.
     pub(crate) fn attempt_delivery(&mut self, contact_id: &str, msg_id: &str, bytes: &[u8]) {
         let handle = self.post_handle(contact_id);
+        let (primary, targets) = self.route_to(contact_id);
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
         };
@@ -161,10 +162,9 @@ impl Node {
         // opt-in server storage is enabled (§6). Fans out to the recipient's whole relay set (#17).
         let mut needs_relay_retry = false;
         if !delivered || chat.contact.remote_storage {
-            let targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
             match queue_on_relays(
                 self.transport.as_ref(),
-                &self.relay,
+                &primary,
                 &targets,
                 contact_id,
                 &handle,
@@ -289,9 +289,7 @@ impl Node {
                 message: WireOlm::from_olm(&message),
             };
             let bytes = wire::encode(&frame);
-            let targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
             let mut send = self.detach("", &a.contact_id, bytes, false);
-            send.peer_relays = targets;
             send.handle = handle;
             let contact_id = a.contact_id.clone();
             // Off the lock on Tor: `apply_outbound` flips the message to "queued" and records the
@@ -388,13 +386,14 @@ impl Node {
             let Some(chat) = self.chats.get(&p.contact_id) else {
                 continue;
             };
-            let relay_targets = relay_targets(&chat.contact.peer_relays, &self.discovered_relays);
+            let (primary, relay_targets) = self.route_to(&p.contact_id);
             items.push(PlannedSend {
                 handle: self.post_handle(&p.contact_id),
                 contact_id: p.contact_id,
                 msg_id: p.msg_id,
                 bytes: p.bytes,
                 peer_address: chat.peer_address.clone(),
+                primary,
                 relay_targets,
                 remote_storage: chat.contact.remote_storage,
             });
@@ -404,7 +403,6 @@ impl Node {
         }
         Some(SendPlan {
             transport: Arc::clone(&self.transport),
-            primary: self.relay.clone(),
             items,
         })
     }
@@ -471,16 +469,10 @@ impl Node {
         let mut affected = Vec::new();
         for p in std::mem::take(&mut self.pending_relay) {
             // Drop the retry if the chat was deleted/closed in the meantime.
-            let Some(peer_relays) = self
-                .chats
-                .get(&p.contact_id)
-                .filter(|c| !c.closed)
-                .map(|c| c.contact.peer_relays.clone())
-            else {
+            if self.chats.get(&p.contact_id).is_none_or(|c| c.closed) {
                 continue;
-            };
-            let mut send = self.detach("", &p.contact_id, p.bytes.clone(), false);
-            send.peer_relays = relay_targets(&peer_relays, &self.discovered_relays);
+            }
+            let send = self.detach("", &p.contact_id, p.bytes.clone(), false);
             let contact_id = p.contact_id.clone();
             // Off the lock on Tor: `apply_outbound` records the receipts, or puts it back.
             if self.send_or_queue(send, Route::RelayOnly, OutboundDone::PendingRelay(p))
@@ -536,9 +528,10 @@ impl Node {
     /// Best-effort and silent: a failed cover post is not worth a retry, a log line, or a user's
     /// attention. See `docs/design/cover-traffic.md`.
     pub(crate) fn send_cover_traffic(&mut self) {
-        let Some(relay) = self.relay.clone() else {
+        let (primary, peer_relays) = self.post_route(&self.my_relay_set());
+        if primary.is_none() && peer_relays.is_empty() {
             return; // nothing to cover: no relay means no mailbox to watch
-        };
+        }
         // Random payload, then the same fixed-size bucketing every frame gets — which is what makes
         // this indistinguishable from a real message rather than merely encrypted.
         let mut padding = vec![0u8; 32 + (rand::random::<usize>() % 96)];
@@ -556,8 +549,8 @@ impl Node {
         // Our own v1 mailbox, which we poll throughout the transition (`mailbox-handles.md`).
         let send = DetachedSend {
             transport: Arc::clone(&self.transport),
-            primary: Some(relay),
-            peer_relays: self.my_relays.clone(),
+            primary,
+            peer_relays,
             recipient_ik: me.clone(),
             handle: mailbox_handle(&me),
             peer_address: String::new(), // relay only
@@ -597,9 +590,9 @@ impl Node {
         self.discovered_relays = cleaned;
         self.directory_version = dir.version;
         // Forget health for relays we no longer advertise/discover.
-        let keep = self.discovered_relays.clone();
-        self.relay_reachable
-            .retain(|addr, _| keep.contains(addr) || self.my_relays.contains(addr));
+        let mut keep = self.discovered_relays.clone();
+        keep.extend(self.polled_relay_set(crate::api::now_secs()).relays);
+        self.relay_reachable.retain(|addr, _| keep.contains(addr));
         self.dirty = true; // the version moved, even when the set did not
         DirectoryOutcome::Applied { changed }
     }
@@ -1021,12 +1014,15 @@ impl Node {
                     bytes: incoming,
                 });
             } else if self.transport.send(&peer_address, &incoming).is_err() {
-                let handle = self.post_handle(contact_id);
-                if let Some(relay) = &self.relay {
-                    if let Ok(sealed) = relay_wrap(contact_id, &incoming) {
-                        let _ = relay.post(&handle, &sealed, RELAY_TTL);
-                    }
-                }
+                let (primary, targets) = self.route_to(contact_id);
+                let _ = queue_on_relays(
+                    self.transport.as_ref(),
+                    &primary,
+                    &targets,
+                    contact_id,
+                    &self.post_handle(contact_id),
+                    &incoming,
+                );
             }
         }
 
@@ -1098,15 +1094,11 @@ impl Node {
             media_bytes.len(),
         );
         if !delivered || remote_storage {
-            let peer_relays = self
-                .chats
-                .get(contact_id)
-                .map(|c| c.contact.peer_relays.clone())
-                .unwrap_or_default();
+            let (primary, targets) = self.route_to(contact_id);
             let posted = queue_on_relays(
                 self.transport.as_ref(),
-                &self.relay,
-                &peer_relays,
+                &primary,
+                &targets,
                 contact_id,
                 &self.post_handle(contact_id),
                 &media_bytes,
@@ -1280,19 +1272,19 @@ impl Node {
     /// [`relay_drain_plan`](Self::relay_drain_plan) as of `now` (unix secs).
     pub(crate) fn relay_drain_plan_at(&self, now: u64) -> Option<RelayDrainPlan> {
         use rand::seq::SliceRandom as _;
+        // Our list and anything still draining out of it; direct only with nothing draining polls
+        // nothing.
+        let (primary, onions) = self.expand_relay_set(&self.polled_relay_set(now));
         let mut relays: Vec<(Option<String>, RelayClient)> = Vec::new();
-        if let Some(primary) = &self.relay {
+        if let Some(primary) = &primary {
             relays.push((None, primary.clone()));
         }
         // Each relay once. The signed directory normally lists the primary itself, so without this
         // every round polled the one relay twice under two names — double the requests, and with
         // fragments double the onion connections (seen on a phone, 2026-09-26).
-        let primary_addr = self
-            .relay
-            .as_ref()
-            .and_then(|p| p.addr().map(str::to_string));
+        let primary_addr = primary.as_ref().and_then(|p| p.addr().map(str::to_string));
         let mut seen: Vec<&str> = primary_addr.iter().map(String::as_str).collect();
-        for addr in self.my_relays.iter().chain(self.discovered_relays.iter()) {
+        for addr in &onions {
             if seen.contains(&addr.as_str()) {
                 continue;
             }
@@ -1483,14 +1475,10 @@ impl Node {
             );
             return;
         }
-        let peer_relays = self
-            .chats
-            .get(contact_id)
-            .map(|c| c.contact.peer_relays.clone())
-            .unwrap_or_default();
+        let (primary, peer_relays) = self.route_to(contact_id);
         let send = DetachedSend {
             transport: Arc::clone(&self.transport),
-            primary: self.relay.clone(),
+            primary,
             peer_relays,
             recipient_ik: contact_id.to_string(),
             handle: self.post_handle(contact_id),
@@ -1740,7 +1728,7 @@ impl Node {
     /// their mail to us never reached it. Nothing to say while we advertise no extras: an empty
     /// set is what the peer already assumes.
     pub(crate) fn announce_relays_to(&mut self, contact_id: &str) {
-        if !self.my_relays.is_empty() {
+        if !self.my_relays().is_empty() {
             self.send_relays_to(contact_id);
         }
     }
@@ -1748,7 +1736,7 @@ impl Node {
     /// One `Relays` frame to an approved, open chat (the peer drops it from anyone else).
     fn send_relays_to(&mut self, contact_id: &str) {
         let from = self.identity_key();
-        let list = self.my_relays.join(",");
+        let list = self.my_relays().join(",");
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
         };
@@ -1857,6 +1845,7 @@ impl Node {
     pub(super) fn send_burn_receipt(&mut self, contact_id: &str, target_id: &str) {
         let from = self.identity_key();
         let handle = self.post_handle(contact_id);
+        let (primary, peer_relays) = self.route_to(contact_id);
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
         };
@@ -1869,8 +1858,8 @@ impl Node {
         };
         let send = DetachedSend {
             transport: Arc::clone(&self.transport),
-            primary: self.relay.clone(),
-            peer_relays: chat.contact.peer_relays.clone(),
+            primary,
+            peer_relays,
             recipient_ik: contact_id.to_string(),
             handle,
             peer_address: chat.peer_address.clone(),

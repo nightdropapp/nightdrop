@@ -16,6 +16,7 @@ use crate::crypto;
 use crate::identity::{LocalIdentity, PreKeyBundle};
 use crate::relay_client::RelayClient;
 use crate::storage::{PersistedChat, PersistedMessage, PersistedState, StoreKey};
+pub use crate::storage::{RelayEntry, RelaySet};
 use crate::transport::{Address, Transport};
 use crate::wire::{self, Frame, WireOlm};
 use crate::{Result, DEFAULT_NAME};
@@ -24,6 +25,12 @@ use crate::{Result, DEFAULT_NAME};
 /// time-bomb horizon for opt-in server-storage (ephemeral) chats (§11.4), and the age past
 /// which a still-unacked queued message is shown as "expired" (§11.3).
 const RELAY_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// The most entries our own relay list holds (`optional-relay.md` §2). Everyone writing to us
+/// posts each offline message to every entry, so this bounds the copies one message makes. A
+/// contact's announced set is held to the same cap, so nobody can make us post a message a
+/// thousand times.
+pub const MAX_RELAYS: usize = 4;
 
 /// How long after sending a text message it can still be edited (product rule; a message
 /// still queued on the relay stays editable regardless, since the peer never saw it).
@@ -358,6 +365,44 @@ fn queue_on_relays(
     Ok(copies)
 }
 
+/// A relay list as stored: duplicates and blank onions dropped, onions trimmed, at most
+/// [`MAX_RELAYS`] entries. Returns the list and what the cap cut, which the caller drains out.
+fn normalize_relays(list: Vec<RelayEntry>) -> (Vec<RelayEntry>, Vec<RelayEntry>) {
+    let mut kept = Vec::new();
+    let mut overflow = Vec::new();
+    for e in list {
+        let e = match e {
+            RelayEntry::Onion(addr) => match addr.trim() {
+                "" => continue,
+                a => RelayEntry::Onion(a.to_string()),
+            },
+            e => e,
+        };
+        if kept.contains(&e) || overflow.contains(&e) {
+            continue;
+        }
+        if kept.len() < MAX_RELAYS {
+            kept.push(e);
+        } else {
+            overflow.push(e);
+        }
+    }
+    (kept, overflow)
+}
+
+/// The relay list a saved state stands for (`optional-relay.md` §2), and what the cap cut from it.
+/// A state from before 0.2 has no list: it starts as Night Drop + its extras, exactly what it was
+/// using.
+pub(crate) fn restored_relays(state: &PersistedState) -> (Vec<RelayEntry>, Vec<RelayEntry>) {
+    let list = match &state.relays {
+        Some(list) => list.clone(),
+        None => std::iter::once(RelayEntry::NightDrop)
+            .chain(state.my_relays.iter().cloned().map(RelayEntry::Onion))
+            .collect(),
+    };
+    normalize_relays(list)
+}
+
 /// A version string worth storing or announcing: `MAJOR.MINOR.PATCH` digits only, kept short. A
 /// peer's announce is untrusted input that ends up in the UI, so anything else is ignored.
 fn is_plausible_version(v: &str) -> bool {
@@ -595,19 +640,6 @@ impl Chat {
     }
 }
 
-/// Where a relay copy for a contact goes besides the implicit primary: their advertised relays
-/// (#17) plus our shared discovered ones (§3.1), without duplicates. Every relay post to a contact
-/// uses this set, so a copy is never missing from a relay the peer polls.
-fn relay_targets(peer_relays: &[String], discovered: &[String]) -> Vec<String> {
-    let mut targets = peer_relays.to_vec();
-    for r in discovered {
-        if !targets.contains(r) {
-            targets.push(r.clone());
-        }
-    }
-    targets
-}
-
 /// One device. Owns the identity, the transport endpoint, and all chats. A contact is
 /// keyed by the peer's long-term Curve25519 identity key (base64), which both sides learn
 /// during the handshake.
@@ -617,13 +649,17 @@ pub struct Node {
     /// core lock** — the same split the relay drain already uses (§1.5.2). Constructors still take
     /// a `Box` (nothing else changes) and convert here.
     transport: Arc<dyn Transport>,
-    /// The **primary** relay — the shared, baked-in default both peers fall back to. Kept for
-    /// all existing code paths; multi-relay (#17) fans out *in addition* to this.
+    /// The client for the baked-in **Night Drop relay**. Used only for sets that include
+    /// [`RelayEntry::NightDrop`] (with the directory's relays beside it, `discovered_relays`), and
+    /// to recall copies already posted to it.
     relay: Option<RelayClient>,
-    /// Extra relay addresses that also host **our** mailbox, advertised to contacts so their
-    /// mail is redundantly deliverable (#17). We poll the primary + these; peers post to their
-    /// own `peer_relays`. Persisted.
-    my_relays: Vec<String>,
+    /// Our relay list (`optional-relay.md` §2): where we receive, in the user's order, at most
+    /// [`MAX_RELAYS`]. Contacts post our offline mail to exactly this set, and we poll it. Empty =
+    /// direct only: no relay is used at all, for receiving or sending. Persisted.
+    relays: Vec<RelayEntry>,
+    /// Relays removed from [`relays`](Self::relays), each with the unix time we stop draining it.
+    /// Posting there stops at once, but mail already queued for us lives a day. Persisted.
+    relays_draining: Vec<(RelayEntry, u64)>,
     chats: HashMap<String, Chat>,
     /// When true, an inbound `Hello` from a new contact must be authorized before any
     /// message is delivered or sent (§5 authorization-before-first-message).
@@ -815,7 +851,6 @@ pub struct Node {
 /// did nothing at all. The app was least able to recover exactly when it most needed to.
 pub(crate) struct SendPlan {
     transport: Arc<dyn Transport>,
-    primary: Option<RelayClient>,
     items: Vec<PlannedSend>,
 }
 
@@ -826,7 +861,9 @@ struct PlannedSend {
     msg_id: String,
     bytes: Vec<u8>,
     peer_address: String,
-    /// The recipient's advertised relays plus our discovered set (#17 fan-out).
+    /// Where a relay copy goes ([`Node::route_to`]): the Night Drop relay's client when the
+    /// recipient's set includes it, and the onions to post to besides.
+    primary: Option<RelayClient>,
     relay_targets: Vec<String>,
     /// Opt-in server storage: post a copy even when the direct send succeeds (§6).
     remote_storage: bool,
@@ -874,7 +911,7 @@ pub(crate) fn execute_sends(plan: &SendPlan) -> SendOutcomes {
         if !delivered || p.remote_storage {
             match queue_on_relays(
                 plan.transport.as_ref(),
-                &plan.primary,
+                &p.primary,
                 &p.relay_targets,
                 &p.contact_id,
                 &p.handle,
@@ -1135,9 +1172,11 @@ pub(crate) struct PendingControl {
     recipient_ik: String,
     /// The peer's onion/address, for the direct-send fallback.
     peer_address: String,
-    /// The relay fan-out set captured at delete time (peer_relays + discovered), since the chat —
-    /// and thus its `peer_relays` — is gone by the time we retry.
+    /// The recipient's relay set captured when it was queued, since the chat may be gone by the
+    /// time we retry: their onions, and whether they use the Night Drop relay. Expanded at send
+    /// time ([`Node::post_route`]), so a Night Drop copy follows a directory rotation.
     relays: Vec<String>,
+    nightdrop: bool,
     /// The already-sealed control frame bytes — re-posted verbatim (ratchet not re-advanced).
     bytes: Vec<u8>,
     /// The mailbox handle the relay copy goes under, chosen while the chat still existed
@@ -1206,7 +1245,8 @@ impl Node {
             identity,
             transport: Arc::from(transport),
             relay: None,
-            my_relays: Vec::new(),
+            relays: vec![RelayEntry::NightDrop],
+            relays_draining: Vec::new(),
             chats: HashMap::new(),
             require_authorization: false,
             last_invite_code: None,
@@ -1428,14 +1468,8 @@ impl Node {
             })
         {
             let bytes = wire::encode(&frame);
-            // Same relay set send() uses: the peer's advertised relays (#17) + our shared discovered
-            // relays (§3.1), alongside the implicit primary.
-            let targets = relay_targets(
-                self.chats
-                    .get(contact_id)
-                    .map_or(&[][..], |c| &c.contact.peer_relays),
-                &self.discovered_relays,
-            );
+            // The peer's set as of now: the chat is gone by the time a retry runs.
+            let set = self.peer_relay_set(contact_id);
             // Held in `pending_control` from the start, not only after a failed first attempt: the
             // send now happens off the lock, after this call returns, and the chat is gone by then.
             // A copy landing removes it; until then it is saved with the state and retried.
@@ -1444,7 +1478,8 @@ impl Node {
                 PendingControl {
                     recipient_ik: contact_id.to_string(),
                     peer_address: addr,
-                    relays: targets,
+                    relays: set.relays,
+                    nightdrop: set.nightdrop,
                     bytes,
                     handle,
                     in_flight: false,
@@ -1685,18 +1720,14 @@ impl Node {
             // local side has already promised the user that "the other person was told", the phone
             // may well be offline while screenshotting, and unlike a chat message there is nothing
             // the user can resend to make good on it. A copy landing removes it.
-            let relays = relay_targets(
-                self.chats
-                    .get(contact_id)
-                    .map_or(&[][..], |c| &c.contact.peer_relays),
-                &self.discovered_relays,
-            );
+            let set = self.peer_relay_set(contact_id);
             let handle = self.post_handle(contact_id);
             self.queue_pending_control(
                 PendingControl {
                     recipient_ik: contact_id.to_string(),
                     peer_address: addr,
-                    relays,
+                    relays: set.relays,
+                    nightdrop: set.nightdrop,
                     bytes: wire::encode(&frame),
                     handle,
                     in_flight: false,
@@ -1743,11 +1774,7 @@ impl Node {
                 continue;
             };
             let bytes = wire::encode(&frame);
-            let peer_relays = self
-                .chats
-                .get(id)
-                .map(|c| c.contact.peer_relays.clone())
-                .unwrap_or_default();
+            let (primary, targets) = self.route_to(id);
             // Prefer the relay store-and-forward so an **offline** peer still gets the "chat
             // deleted" notice within its 24h window (§1.3): the identity is about to be wiped, so a
             // direct-only send that races with the peer being briefly unreachable would be lost with
@@ -1755,8 +1782,8 @@ impl Node {
             // and count a chat we couldn't reach either way.
             let queued = queue_on_relays(
                 self.transport.as_ref(),
-                &self.relay,
-                &peer_relays,
+                &primary,
+                &targets,
                 id,
                 &self.post_handle(id),
                 &bytes,
@@ -1875,14 +1902,10 @@ impl Node {
         bytes: Vec<u8>,
         fresh: bool,
     ) -> DetachedSend {
-        let peer_relays = self
-            .chats
-            .get(recipient_ik)
-            .map(|c| c.contact.peer_relays.clone())
-            .unwrap_or_default();
+        let (primary, peer_relays) = self.route_to(recipient_ik);
         DetachedSend {
             transport: Arc::clone(&self.transport),
-            primary: self.relay.clone(),
+            primary,
             peer_relays,
             recipient_ik: recipient_ik.to_string(),
             handle: self.post_handle(recipient_ik),
@@ -2059,10 +2082,14 @@ impl Node {
     /// A [`DetachedSend`] for a `pending_control` entry, which carries its own routing because its
     /// chat may be gone.
     pub(crate) fn detach_pending(&self, p: &PendingControl) -> DetachedSend {
+        let (primary, peer_relays) = self.post_route(&RelaySet {
+            nightdrop: p.nightdrop,
+            relays: p.relays.clone(),
+        });
         DetachedSend {
             transport: Arc::clone(&self.transport),
-            primary: self.relay.clone(),
-            peer_relays: p.relays.clone(),
+            primary,
+            peer_relays,
             recipient_ik: p.recipient_ik.clone(),
             handle: p.handle.clone(),
             peer_address: p.peer_address.clone(),
@@ -2148,18 +2175,121 @@ impl Node {
         self.relay = None;
     }
 
-    /// Set the **extra** relay addresses that also host our mailbox (#17) — advertised to
-    /// contacts and polled alongside the primary. The primary (baked-in default) is implicit.
+    /// Replace the onions in our relay list, keeping the Night Drop entry as it is. The 0.1.x
+    /// "My relays" screen edits only these.
     pub fn set_my_relays(&mut self, relays: Vec<String>) {
-        self.my_relays = relays;
-        // Forget health for relays we no longer advertise (and start freshly-added ones "unknown").
-        let keep = self.my_relays.clone();
-        self.relay_reachable.retain(|addr, _| keep.contains(addr));
+        let mut list: Vec<RelayEntry> = self
+            .relays
+            .iter()
+            .filter(|e| **e == RelayEntry::NightDrop)
+            .cloned()
+            .collect();
+        list.extend(relays.into_iter().map(RelayEntry::Onion));
+        self.set_relay_list(list);
     }
 
-    /// Our advertised extra relays (does not include the implicit primary).
+    /// The onions in our relay list.
     pub fn my_relays(&self) -> Vec<String> {
-        self.my_relays.clone()
+        self.my_relay_set().relays
+    }
+
+    /// The set our relay list stands for: what contacts are told and post to.
+    pub fn my_relay_set(&self) -> RelaySet {
+        RelaySet::of(&self.relays)
+    }
+
+    /// Replace our relay list. Duplicates and blank onions are dropped and anything past
+    /// [`MAX_RELAYS`] is cut, so the result is what [`relay_list`](Self::relay_list) returns.
+    /// A relay that leaves the list is drained for another [`RELAY_TTL`], since mail already
+    /// queued there for us is still on its way; one that comes back stops draining.
+    pub fn set_relay_list(&mut self, list: Vec<RelayEntry>) {
+        self.set_relay_list_at(list, crate::api::now_secs());
+    }
+
+    pub(crate) fn set_relay_list_at(&mut self, list: Vec<RelayEntry>, now: u64) {
+        let (list, overflow) = normalize_relays(list);
+        let until = now + RELAY_TTL.as_secs();
+        for gone in std::mem::take(&mut self.relays)
+            .into_iter()
+            .filter(|e| !list.contains(e))
+            .chain(overflow)
+        {
+            self.relays_draining.retain(|(e, _)| *e != gone);
+            self.relays_draining.push((gone, until));
+        }
+        self.relays_draining
+            .retain(|(e, until)| !list.contains(e) && *until > now);
+        self.relays = list;
+        // Forget health for relays we no longer poll (and start freshly-added ones "unknown").
+        let keep = self.polled_relay_set(now).relays;
+        self.relay_reachable.retain(|addr, _| keep.contains(addr));
+        self.dirty = true;
+    }
+
+    /// What we poll as of `now`: our list plus the relays still draining.
+    pub(crate) fn polled_relay_set(&self, now: u64) -> RelaySet {
+        let mut entries = self.relays.clone();
+        entries.extend(
+            self.relays_draining
+                .iter()
+                .filter(|(_, until)| *until > now)
+                .map(|(e, _)| e.clone()),
+        );
+        RelaySet::of(&entries)
+    }
+
+    /// The relay set we post to for `contact_id`. Until `Frame::RelaySet` (0.2), a contact's set is
+    /// the Night Drop relay plus the extras they announced, which is what 0.1.x posted to.
+    pub(crate) fn peer_relay_set(&self, contact_id: &str) -> RelaySet {
+        RelaySet {
+            nightdrop: true,
+            relays: self
+                .chats
+                .get(contact_id)
+                .map(|c| c.contact.peer_relays.clone())
+                .unwrap_or_default(),
+        }
+    }
+
+    /// Where a relay copy for `contact_id` goes: see [`post_route`](Self::post_route).
+    pub(crate) fn route_to(&self, contact_id: &str) -> (Option<RelayClient>, Vec<String>) {
+        self.post_route(&self.peer_relay_set(contact_id))
+    }
+
+    /// Where a relay copy for someone with relay set `set` goes: the Night Drop relay's client and
+    /// the directory's relays when the set includes it, and the set's own onions, once each. There
+    /// is no implicit relay: an empty set gets nothing. Neither does anyone while **we** are direct
+    /// only, which means this device never talks to a relay, sending included
+    /// (`optional-relay.md` §3 rule 2).
+    pub(crate) fn post_route(&self, set: &RelaySet) -> (Option<RelayClient>, Vec<String>) {
+        if self.relays.is_empty() {
+            return (None, Vec::new());
+        }
+        self.expand_relay_set(set)
+    }
+
+    /// `set` as clients to talk to, without the direct-only rule: the Night Drop client when it is
+    /// in the set, and the onions besides it, each once. The directory normally lists the Night
+    /// Drop relay itself; [`queue_on_relays`] and the drain skip that address beside the client.
+    fn expand_relay_set(&self, set: &RelaySet) -> (Option<RelayClient>, Vec<String>) {
+        let primary = if set.nightdrop {
+            self.relay.clone()
+        } else {
+            None
+        };
+        let mut targets: Vec<String> = Vec::new();
+        let nightdrop = if set.nightdrop {
+            &self.discovered_relays[..]
+        } else {
+            &[][..]
+        };
+        // A contact's set is untrusted input: past the cap, extra onions are ignored (§2).
+        for addr in set.relays.iter().take(MAX_RELAYS).chain(nightdrop) {
+            if !targets.contains(addr) {
+                targets.push(addr.clone());
+            }
+        }
+        (primary, targets)
     }
 
     /// A handle to our transport, so a caller can do bounded network work **after releasing the
@@ -2176,7 +2306,7 @@ impl Node {
     /// `true` (optimistic — don't cry wolf before the first poll). Lets the UI warn "your relay is
     /// offline — add a backup" for a self-hosted relay that stops answering.
     pub fn relay_health(&self) -> Vec<(String, bool)> {
-        self.my_relays
+        self.my_relays()
             .iter()
             .map(|addr| {
                 (
@@ -2720,3 +2850,5 @@ mod tests_directory;
 mod tests_mailbox;
 #[cfg(test)]
 mod tests_outbox;
+#[cfg(test)]
+mod tests_relay_list;
