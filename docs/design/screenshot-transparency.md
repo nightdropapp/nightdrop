@@ -164,9 +164,10 @@ all-clear. The Dart banner is gated on `== true` and the Rust test asserts the `
 explicitly.
 
 Announced on change (`Node::announce_captures`) and to each newly paired chat
-(`announce_captures_to`, called from both the joiner and the inviter side of pairing). Node state is
-not persisted, so the value goes out once per launch — deliberate, since a send is best-effort and a
-peer who missed the first one would otherwise never hear it. It is **not** a history event: it is a
+(`announce_captures_to`, called from both the joiner and the inviter side of pairing). Until 0.2
+the value went out once per launch, so a peer who missed it heard it next time. From 0.2 each chat
+records what it confirmed (`Chat::told_captures`, persisted) and an undelivered value is re-sent on
+later ticks (`reannounce_captures`), so a launch no longer tells every contact we came online. It is **not** a history event: it is a
 standing property of a device, so a rollout must not post a system message into every existing chat.
 
 **Verified on hardware (2026-08-08).** Galaxy S25 (Android 16, `canDetect` true) paired to the Linux

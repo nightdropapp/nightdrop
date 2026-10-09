@@ -78,6 +78,17 @@ pub struct PersistedChat {
     /// before 0.2 is, so the first 0.2 launch tells every contact once.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relays_told: Option<RelaySet>,
+    /// What the peer last confirmed hearing of our standing announcements (burn support, app
+    /// version, address), so a launch re-sends only what changed. Absent on a chat from before
+    /// 0.2, which is told once.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub told_burns: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub told_version: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub told_address: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub told_captures: Option<bool>,
     /// Whether the peer's build understands burn messages (`Frame::Burns`). `None`/absent means
     /// unknown, which is treated as unsupported — burn is never offered on a guess.
     #[serde(default)]

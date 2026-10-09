@@ -40,6 +40,8 @@ in a code review, and confirmed with a live Tor test that failed on the restore 
   new field, so a 0.1.29 backup still restores on them — on a new address, as before.
 - Every restore path seals the identity immediately and announces a changed address.
 - Every start announces our address to each contact once per run (`Node::reannounce_address`).
+  From 0.2 it goes only to contacts whose confirmed copy differs (`Chat::told_address`), which a
+  restored identity on a new onion always does, so the repair below still happens.
   A contact that already holds it ignores it silently; one holding a stale address is repaired.
   That is what heals installs already affected: after updating, their contacts learn the address
   within one launch, with no re-pairing.

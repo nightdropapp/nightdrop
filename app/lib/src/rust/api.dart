@@ -613,7 +613,8 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// what to send, because on a device that cannot report captures the peer's silence means
   /// nothing, and silence reading as "nothing happened" is a guarantee this app does not make.
   ///
-  /// Safe to call on every launch: only a change is put on the wire.
+  /// Safe to call on every launch: a chat is sent the value only when it differs from what
+  /// that chat confirmed.
   Future<void> setCaptureReporting({required bool visible});
 
   /// Set a chat's disappearing-messages timer (`secs`, 0 = off). A shared setting: messages

@@ -64,7 +64,7 @@ fn an_announcement_on_an_async_transport_is_queued_then_sent_off_the_lock() {
     let queued = alice.outbox.len();
     assert!(queued >= 1, "the announcement waits in the outbox");
     assert!(
-        alice.version_announced.contains(&bob_id),
+        alice.version_announced.contains_key(&bob_id),
         "flagged while in flight"
     );
 
@@ -81,7 +81,7 @@ fn an_announcement_on_an_async_transport_is_queued_then_sent_off_the_lock() {
         "delivered once the outbox ran"
     );
     assert!(
-        alice.version_announced.contains(&bob_id),
+        alice.version_announced.contains_key(&bob_id),
         "and recorded as done"
     );
 }
@@ -97,7 +97,7 @@ fn a_failed_announcement_clears_its_flag_so_the_next_tick_retries() {
     let sent = run_outbox(alice.take_outbox());
     alice.apply_outbound(sent);
     assert!(
-        !alice.version_announced.contains(&bob_id),
+        !alice.version_announced.contains_key(&bob_id),
         "a failed delivery must not count as announced"
     );
 
@@ -161,7 +161,7 @@ fn an_unsent_outbox_is_recorded_as_failed_so_retries_survive_a_shutdown() {
     alice.set_app_version("0.2.0");
     alice.announce_version();
     alice.report_screenshot(&bob_id);
-    assert!(alice.version_announced.contains(&bob_id));
+    assert!(alice.version_announced.contains_key(&bob_id));
     assert_eq!(alice.pending_control.len(), 1);
 
     // The poller stops before the round ran.
@@ -172,7 +172,7 @@ fn an_unsent_outbox_is_recorded_as_failed_so_retries_survive_a_shutdown() {
         .collect();
     alice.apply_outbound(unsent);
     assert!(
-        !alice.version_announced.contains(&bob_id),
+        !alice.version_announced.contains_key(&bob_id),
         "an announcement that never went out is not done"
     );
     assert_eq!(

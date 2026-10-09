@@ -1698,6 +1698,7 @@ fn a_burn_announce_to_an_unreachable_peer_is_retried_until_it_lands() {
         .contact
         .peer_supports_burn = None;
     alice.burns_announced.clear();
+    alice.chats.get_mut(&bob_contact).unwrap().told_burns = false;
 
     // Bob drops off before Alice ever announces (no relay attached, so there is no fallback
     // either — the frame simply cannot be delivered).

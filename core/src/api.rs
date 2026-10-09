@@ -724,15 +724,21 @@ impl Inner {
         // enough to run every tick; `sweep_time` still runs it again as the slower backstop.
         let burned = self.me.sweep_burns();
         if relay_due {
-            // Tell pre-existing chats that this build can burn. Self-guarded to once per run, and
-            // done here rather than at startup so the transport has had a chance to warm up —
+            // Standing announcements, each sent to a chat only when it differs from what that chat
+            // confirmed (so a launch tells nobody we are online, `ANNOUNCE_ONLINE_ON_START`), and
+            // re-sent on later ticks until it lands.
+            //
+            // Tell pre-existing chats that this build can burn. Done here rather than at startup
+            // so the transport has had a chance to warm up —
             // a chat paired before the feature shipped would otherwise never hear it, leaving
             // burn unavailable for precisely the contacts someone already talks to.
             self.me.announce_burns();
-            // Our app version (`Frame::Version`), same cadence and the same once-per-run guard.
+            // Our app version (`Frame::Version`), same cadence and the same guard.
             self.me.announce_version();
-            // And our address, once per run: repairs a contact holding a stale one.
+            // And our address: repairs a contact holding a stale one.
             self.me.reannounce_address();
+            // Whether we can report screenshots, to any chat that missed it.
+            self.me.reannounce_captures();
             // v2 mailbox handles (`mailbox-handles.md`): offer our contribution to every chat not
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
@@ -1930,7 +1936,8 @@ impl NightdropCore {
     /// what to send, because on a device that cannot report captures the peer's silence means
     /// nothing, and silence reading as "nothing happened" is a guarantee this app does not make.
     ///
-    /// Safe to call on every launch: only a change is put on the wire.
+    /// Safe to call on every launch: a chat is sent the value only when it differs from what
+    /// that chat confirmed.
     pub fn set_capture_reporting(&self, visible: bool) -> Result<()> {
         let mut g = self.lock();
         g.me.announce_captures(visible);

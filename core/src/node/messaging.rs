@@ -1592,30 +1592,32 @@ impl Node {
         sent
     }
 
-    /// Tell every established contact our address once per run, whether or not it changed.
+    /// Tell every established contact our address where it has not confirmed the current one.
     ///
-    /// [`announce_address_if_changed`](Self::announce_address_if_changed) can only see a change
-    /// against the address it last persisted, so a change it missed is never repaired by it: a
-    /// file-backup restore from 0.1.16–0.1.28 came back on a new onion without announcing it,
-    /// and the save that followed made the new address the baseline
-    /// (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`). Receivers ignore an
-    /// address they already hold, silently. Per run and success-gated, like
-    /// [`announce_version`](Self::announce_version): one small frame per contact per launch.
+    /// Compared per chat against what that contact confirmed ([`Chat::told_address`]), not against
+    /// the address we last persisted: [`announce_address_if_changed`](Self::announce_address_if_changed)
+    /// can only see a change against that baseline, so a change it missed was never repaired: a
+    /// file-backup restore from 0.1.16–0.1.28 came back on a new onion without announcing it, and
+    /// the save that followed made the new address the baseline
+    /// (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`). Until 0.2 this sent to
+    /// everyone on every launch, which told every contact when we came online; now a launch sends
+    /// nothing unless something changed ([`ANNOUNCE_ONLINE_ON_START`]).
     pub fn reannounce_address(&mut self) {
         if !self.announce_ready() {
             return;
         }
+        let address = self.address();
         let pending: Vec<String> = self
             .address_targets()
             .into_iter()
-            .filter(|id| !self.address_announced.contains(id))
+            .filter(|id| {
+                !self.address_announced.contains_key(id)
+                    && (self.announce_online
+                        || self.chats[id].told_address.as_deref() != Some(address.as_str()))
+            })
             .collect();
         for contact_id in pending {
-            // Flagged while in flight; a failed delivery clears it again (`apply_outbound`).
-            self.address_announced.insert(contact_id.clone());
-            if self.send_address_to(&contact_id).is_none() {
-                self.address_announced.remove(&contact_id);
-            }
+            self.send_address_to(&contact_id);
         }
     }
 
@@ -1634,8 +1636,17 @@ impl Node {
     fn send_address_to(&mut self, contact_id: &str) -> Option<()> {
         let from = self.identity_key();
         let address = self.address();
-        let chat = self.chats.get_mut(contact_id)?;
-        let message = crypto::encrypt(&mut chat.session, address.as_bytes()).ok()?;
+        // Flagged while in flight, with what went out; a failed delivery clears it again.
+        self.address_announced
+            .insert(contact_id.to_string(), address.clone());
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            self.address_announced.remove(contact_id);
+            return None;
+        };
+        let Ok(message) = crypto::encrypt(&mut chat.session, address.as_bytes()) else {
+            self.address_announced.remove(contact_id);
+            return None;
+        };
         let frame = Frame::Address {
             from,
             message: WireOlm::from_olm(&message),

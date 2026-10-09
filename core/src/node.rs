@@ -26,6 +26,14 @@ use crate::{Result, DEFAULT_NAME};
 /// which a still-unacked queued message is shown as "expired" (§11.3).
 const RELAY_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
+/// Whether this device tells every contact it has just come online, by re-sending its standing
+/// announcements (burn support, app version, address) on each launch instead of only when they
+/// change (`optional-relay.md` §4). **Off (decided 2026-10-05, made real 2026-10-09):** it would
+/// tell every contact when we open the app. On, a contact holding messages for a direct-only
+/// device flushes them as soon as it hears from it, rather than at its next retry. Kept as one
+/// switch so turning it on later is a one-line change; `node/tests_announce.rs` runs both.
+pub(crate) const ANNOUNCE_ONLINE_ON_START: bool = false;
+
 /// The most entries our own relay list holds (`optional-relay.md` §2). Everyone writing to us
 /// posts each offline message to every entry, so this bounds the copies one message makes. A
 /// contact's announced set is held to the same cap, so nobody can make us post a message a
@@ -631,6 +639,15 @@ struct Chat {
     /// Our relay set as the peer last confirmed hearing it; [`Node::announce_relay_set`] tells
     /// every chat where this differs from ours. Persisted.
     relays_told: Option<RelaySet>,
+    /// What the peer last confirmed hearing of our standing announcements: that we can burn, our
+    /// app version, our address. Each is re-sent only when ours differs, so a launch tells nobody
+    /// we are online ([`ANNOUNCE_ONLINE_ON_START`]). Persisted; a chat from before 0.2 has none,
+    /// so the first 0.2 launch tells it once.
+    told_burns: bool,
+    told_version: Option<String>,
+    told_address: Option<String>,
+    /// Whether the peer last confirmed hearing that we can report screenshots (#1).
+    told_captures: Option<bool>,
 }
 
 impl Chat {
@@ -680,6 +697,10 @@ impl Chat {
             mailbox: None,
             relay_set: None,
             relays_told: None,
+            told_burns: false,
+            told_version: None,
+            told_address: None,
+            told_captures: None,
         }
     }
 }
@@ -721,26 +742,30 @@ pub struct Node {
     /// default**: it discloses our reading behaviour, and the person whose behaviour it is should
     /// choose. Nothing depends on it — with it off, a sender's copy simply lives its full 24h.
     burn_receipts: bool,
-    /// Contacts this run has successfully told that we understand burn messages (see
-    /// [`Node::announce_burns`]). Per-contact and success-gated rather than a single flag: a
-    /// peer who was unreachable on the first attempt must be retried, or burn stays unavailable
-    /// for that chat until the app is restarted. Not persisted — re-announcing on a fresh launch
-    /// is cheap and self-heals.
+    /// Contacts told this run that we understand burn messages, or being told (see
+    /// [`Node::announce_burns`]). A failure removes the contact so the next tick retries; what
+    /// a contact confirmed is kept per chat ([`Chat::told_burns`]), so nothing is re-sent on a
+    /// later launch unless [`announce_online`](Self::announce_online).
     burns_announced: std::collections::HashSet<String>,
+    /// [`ANNOUNCE_ONLINE_ON_START`]; a field so tests can run both settings.
+    announce_online: bool,
+    /// Contacts told our screenshot capability this run, or being told, with the value that went
+    /// out (see [`Node::announce_captures`]). Like [`burns_announced`](Self::burns_announced).
+    captures_announced: HashMap<String, bool>,
     /// This build's app version (`"0.1.27"`), set by the app via
     /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
     /// announced until then: a guessed version would be worse than none.
     app_version: Option<String>,
-    /// Contacts this run has told our app version (see [`Node::announce_version`]). Per run and
-    /// success-gated, like [`burns_announced`](Self::burns_announced).
-    version_announced: std::collections::HashSet<String>,
+    /// Contacts told our app version this run, or being told, with the version that went out (see
+    /// [`Node::announce_version`]). Like [`burns_announced`](Self::burns_announced).
+    version_announced: HashMap<String, String>,
     /// Contacts this run has sent our v2 mailbox contribution to (see [`Node::announce_mailbox`]).
     /// Per run, like [`burns_announced`](Self::burns_announced): an unconfirmed pair is retried on
     /// every launch, which is what heals a lost frame.
     mailbox_announced: std::collections::HashSet<String>,
-    /// Contacts this run has told our address (see [`Node::reannounce_address`]). Per run and
-    /// success-gated, like [`burns_announced`](Self::burns_announced).
-    address_announced: std::collections::HashSet<String>,
+    /// Contacts told our address this run, or being told, with the address that went out (see
+    /// [`Node::reannounce_address`]). Like [`burns_announced`](Self::burns_announced).
+    address_announced: HashMap<String, String>,
     /// Keys our polling-fragment partition (`mailbox.rs`, `poll_fragments`). Random per device,
     /// persisted, so a partition stays fixed for its epoch across restarts.
     poll_seed: [u8; 32],
@@ -1100,7 +1125,7 @@ pub(crate) enum Delivery {
     Failed,
 }
 
-/// Which once-per-run announcement an [`OutboundDone::Announced`] stands for.
+/// Which standing announcement an [`OutboundDone::Announced`] stands for.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Announce {
     Burns,
@@ -1108,6 +1133,7 @@ pub(crate) enum Announce {
     Mailbox,
     Address,
     RelaySet,
+    Captures,
 }
 
 /// What a finished [`Outbound`] changes in the core, applied under the lock by
@@ -1119,7 +1145,7 @@ pub(crate) enum OutboundDone {
     /// With a `(contact, msg_id)`, the relay receipts are also recorded against that message: an
     /// edit's replacement copy, which a later edit or unsend must be able to recall.
     Caller(Option<(String, String)>),
-    /// A once-per-run announcement. Its flag is set when queued, so the next tick does not queue a
+    /// A standing announcement. Its flag is set when queued, so the next tick does not queue a
     /// second copy while this one is in flight, and cleared again if it fails, so the tick after
     /// retries.
     Announced(Announce, String),
@@ -1301,10 +1327,12 @@ impl Node {
             last_invite_code: None,
             captures_visible: None,
             burns_announced: std::collections::HashSet::new(),
+            announce_online: ANNOUNCE_ONLINE_ON_START,
+            captures_announced: HashMap::new(),
             app_version: None,
-            version_announced: std::collections::HashSet::new(),
+            version_announced: HashMap::new(),
             mailbox_announced: std::collections::HashSet::new(),
-            address_announced: std::collections::HashSet::new(),
+            address_announced: HashMap::new(),
             poll_seed: {
                 use rand::RngCore;
                 let mut seed = [0u8; 32];
@@ -1584,38 +1612,37 @@ impl Node {
     /// who needs this is the one deciding what to send, because below Android 14 a capture raises
     /// no notice and the absence of one therefore means nothing.
     ///
-    /// Announced only when the value changes from what this node last announced. That state is not
-    /// persisted, so it does go out once per launch — deliberately, since a send is best-effort and
-    /// a peer who missed the first one would otherwise never hear it. Within a session, a repeated
-    /// call is free.
-    ///
-    /// Only reaches chats that exist *now*; [`announce_captures_to`](Self::announce_captures_to)
-    /// covers the ones paired afterwards.
+    /// Each chat is sent the value only when it differs from what that chat confirmed
+    /// ([`Chat::told_captures`], persisted), and an undelivered one is re-sent on later ticks
+    /// ([`reannounce_captures`](Self::reannounce_captures)). Until 0.2 it went to every chat on
+    /// every launch, which told contacts when we came online ([`ANNOUNCE_ONLINE_ON_START`]).
     pub fn announce_captures(&mut self, visible: bool) {
-        if self.captures_visible == Some(visible) {
-            return;
+        if self.captures_visible != Some(visible) {
+            self.captures_visible = Some(visible);
+            self.captures_announced.clear();
         }
-        self.captures_visible = Some(visible);
-        let marker = if visible {
-            MARK_CAPTURES_VISIBLE
-        } else {
-            MARK_CAPTURES_SILENT
+        self.reannounce_captures();
+    }
+
+    /// [`announce_captures`](Self::announce_captures) again for every chat that has not confirmed
+    /// the current value: the retry, run on the relay tick. Silent until the app has told us the
+    /// value — guessing would be the false reassurance the whole signal exists to remove.
+    pub fn reannounce_captures(&mut self) {
+        let Some(visible) = self.captures_visible else {
+            return;
         };
         let ids: Vec<String> = self
             .chats
             .iter()
-            .filter(|(_, c)| !c.closed)
+            .filter(|(id, c)| {
+                !c.closed
+                    && !self.captures_announced.contains_key(id.as_str())
+                    && (self.announce_online || c.told_captures != Some(visible))
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
-            if let Some((addr, frame)) = self.authed_control(&id, marker, |from, message| {
-                Frame::Captures { from, message }
-            }) {
-                // Best-effort and deliberately quiet: this is a standing property, not an event, so
-                // a failed send costs nothing that the next change or re-pair will not fix. It must
-                // never block or noisily retry the way a message does.
-                let _ = self.deliver(&addr, &id, &frame);
-            }
+            self.announce_captures_to(&id);
         }
     }
 
@@ -1624,8 +1651,9 @@ impl Node {
     /// Needed because [`announce_burns_to`](Self::announce_burns_to) only fires at pairing, so a
     /// chat that already existed before this feature shipped would never hear it — and an
     /// unannounced peer reads as unsupported, which would leave burn permanently unavailable for
-    /// exactly the contacts someone already talks to. Called once per run; the flag keeps a
-    /// restart from re-announcing to everyone.
+    /// exactly the contacts someone already talks to. Runs on the relay tick and sends only to
+    /// chats that have not confirmed it ([`Chat::told_burns`]), so a launch re-announces to
+    /// nobody ([`ANNOUNCE_ONLINE_ON_START`]).
     pub fn announce_burns(&mut self) {
         if !self.announce_ready() {
             return;
@@ -1633,7 +1661,11 @@ impl Node {
         let ids: Vec<String> = self
             .chats
             .iter()
-            .filter(|(id, c)| !c.closed && !self.burns_announced.contains(id.as_str()))
+            .filter(|(id, c)| {
+                !c.closed
+                    && !self.burns_announced.contains(id.as_str())
+                    && (self.announce_online || !c.told_burns)
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
@@ -1671,15 +1703,15 @@ impl Node {
             return;
         }
         self.app_version = Some(version);
-        self.version_announced.clear();
+        self.version_announced.clear(); // chats told the old one now differ, and are told again
     }
 
     /// Tell every open chat which Night Drop version this build is (`Frame::Version`).
     ///
     /// Needed so a later build can tell which contacts are still on an older release: 0.2 does not
     /// talk to 0.1.x and has to say so per chat, which it can only do for contacts that announced.
-    /// Same shape as [`announce_burns`](Self::announce_burns): once per run per chat, retried
-    /// while undelivered, and quiet. An older peer cannot decode the frame and skips it.
+    /// Same shape as [`announce_burns`](Self::announce_burns): to each chat whose confirmed
+    /// version differs ([`Chat::told_version`]), retried while undelivered, and quiet. An older peer cannot decode the frame and skips it.
     pub fn announce_version(&mut self) {
         if self.app_version.is_none() || !self.announce_ready() {
             return;
@@ -1687,7 +1719,11 @@ impl Node {
         let ids: Vec<String> = self
             .chats
             .iter()
-            .filter(|(id, c)| !c.closed && !self.version_announced.contains(id.as_str()))
+            .filter(|(id, c)| {
+                !c.closed
+                    && !self.version_announced.contains_key(id.as_str())
+                    && (self.announce_online || c.told_version != self.app_version)
+            })
             .map(|(id, _)| id.clone())
             .collect();
         for id in ids {
@@ -1707,7 +1743,8 @@ impl Node {
         }) else {
             return;
         };
-        self.version_announced.insert(contact_id.to_string());
+        self.version_announced
+            .insert(contact_id.to_string(), version.clone());
         let done = OutboundDone::Announced(Announce::Version, contact_id.to_string());
         let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
     }
@@ -1731,7 +1768,11 @@ impl Node {
         if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
             Frame::Captures { from, message }
         }) {
-            let _ = self.deliver(&addr, contact_id, &frame);
+            // Flagged while in flight, with the value; a failure clears it for the next tick.
+            self.captures_announced
+                .insert(contact_id.to_string(), visible);
+            let done = OutboundDone::Announced(Announce::Captures, contact_id.to_string());
+            let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
         }
     }
 
@@ -2080,8 +2121,9 @@ impl Node {
         affected
     }
 
-    /// The outcome of one once-per-run announcement. Its flag went up when it was queued; a
-    /// failure takes it down again so the next tick retries.
+    /// The outcome of one standing announcement. Its flag went up when it was queued; a
+    /// failure takes it down again so the next tick retries, and a delivery records what the
+    /// peer now holds (`Chat::told_*`).
     fn apply_announced(&mut self, kind: Announce, contact_id: &str, delivered: bool) {
         if kind == Announce::Mailbox {
             crate::diag!(
@@ -2117,14 +2159,29 @@ impl Node {
             return;
         }
         if delivered {
+            // What the peer now holds, so a later launch does not send it again.
+            let version = self.version_announced.get(contact_id).cloned();
+            let address = self.address_announced.get(contact_id).cloned();
+            let captures = self.captures_announced.get(contact_id).copied();
+            if let Some(chat) = self.chats.get_mut(contact_id) {
+                match kind {
+                    Announce::Burns => chat.told_burns = true,
+                    Announce::Captures if captures.is_some() => chat.told_captures = captures,
+                    Announce::Version if version.is_some() => chat.told_version = version,
+                    Announce::Address if address.is_some() => chat.told_address = address,
+                    _ => {}
+                }
+                self.dirty = true;
+            }
             return;
         }
         match kind {
             Announce::RelaySet => false,
             Announce::Burns => self.burns_announced.remove(contact_id),
-            Announce::Version => self.version_announced.remove(contact_id),
+            Announce::Version => self.version_announced.remove(contact_id).is_some(),
             Announce::Mailbox => self.mailbox_announced.remove(contact_id),
-            Announce::Address => self.address_announced.remove(contact_id),
+            Announce::Address => self.address_announced.remove(contact_id).is_some(),
+            Announce::Captures => self.captures_announced.remove(contact_id).is_some(),
         };
     }
 
@@ -2384,7 +2441,7 @@ impl Node {
         self.transport.published()
     }
 
-    /// Whether to send the optional once-per-run announcements (burn support, the v2 mailbox
+    /// Whether to send the optional standing announcements (burn support, the v2 mailbox
     /// contribution). Before Tor is up every one of them costs a failed dial and a failed relay post
     /// and is retried anyway, so they wait for the onion to publish — or for
     /// [`ANNOUNCE_FALLBACK`] after start, because `published()` has been measured reading false on
@@ -2904,6 +2961,8 @@ fn base64_handle(bytes: &[u8]) -> String {
 
 #[cfg(test)]
 mod tests_a;
+#[cfg(test)]
+mod tests_announce;
 #[cfg(test)]
 mod tests_b;
 #[cfg(test)]

@@ -282,8 +282,9 @@ on a re-pair (new session) exactly like `verified`.
   on 2026-09-29 a single hspool retry loop logged 28,000 lines in under a minute and rotated a
   whole day's log away.
 - **Each side announces its app version (from 0.1.27).** `Frame::Version` carries the sender's
-  Night Drop version (`"0.1.27"`, no build number), E2E-encrypted on the session, once per run per
-  chat and at pairing, retried until delivered — the `Frame::Burns` pattern. The receiver stores it
+  Night Drop version (`"0.1.27"`, no build number), E2E-encrypted on the session, at pairing and
+  whenever it differs from what that chat confirmed (persisted per chat, so a launch sends nothing
+  new; see "standing announcements" below), retried until delivered — the `Frame::Burns` pattern. The receiver stores it
   as `peer_app_version` (`None` = not announced: an older build). It exists so 0.2, which does not
   talk to 0.1.x, can tell per chat who is still on 0.1.x. The cost is that a contact learns your
   exact release; contacts are already authorized and already learn your capabilities, and the
@@ -479,9 +480,17 @@ on a re-pair (new session) exactly like `verified`.
   a synchronous transport (tests, demo) or queues it. The poller runs queued entries on their own
   job, one round at a time, and re-takes the lock only to apply them (`apply_outbound`).
 
-  What used to hang off a synchronous result is recorded instead. A once-per-run announcement sets
+  What used to hang off a synchronous result is recorded instead. A standing announcement sets
   its flag when queued, so the next tick does not queue a second copy, and clears it on failure, so
-  the tick after retries. A chat-delete `Closed`, a screenshot notice, or a joiner's first-contact `Hello` goes into the persisted
+  the tick after retries.
+
+  **Standing announcements are sent on change, not per launch (0.2).** Burn support, app version,
+  address, screenshot capability and the relay set are each recorded per chat as what that
+  contact confirmed (`Chat::told_*`, `relays_told`, persisted), and re-sent only when ours differs.
+  Until 0.2 the first four went to every contact on every launch, trying their device first, which
+  told every contact when we came online and, with held messages (`optional-relay.md` §4), would
+  have flushed their queues at once. `ANNOUNCE_ONLINE_ON_START` (off) restores the per-launch
+  behaviour as a deliberate "I'm online" signal; `node/tests_announce.rs` runs both settings. A chat-delete `Closed`, a screenshot notice, or a joiner's first-contact `Hello` goes into the persisted
   `pending_control` before its first attempt, marked in flight while queued; a copy landing removes
   it, and since the chat may be gone it carries its own mailbox handle. At poller exit anything still
   queued is applied as failed, so every retry is back in place for the final save. The calls a user

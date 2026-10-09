@@ -131,6 +131,11 @@ device**, marked **"Waiting for {name} to come online"**, and is retried directl
   on each launch. The implementation includes it behind a single core constant
   (`ANNOUNCE_ONLINE_ON_START = false`, beside the other announce settings in `node.rs`), with a
   test that runs both settings, so turning it on later is a one-line change, not a design.
+  **Found while building it (2026-10-09):** the signal already existed. Burn support, app version,
+  address and screenshot capability went to every contact on every launch, trying their device
+  first. **Decided:** they are sent on change only. Each chat records what it confirmed
+  (`Chat::told_*`), so a launch sends nothing new; the constant restores the per-launch sends.
+  Built 2026-10-09 (`node/tests_announce.rs`).
 * **Flush at once on any inbound frame from that peer:** hearing from them proves they are online
   right now, and costs nothing extra.
 * **Control frames** (receipts, `Version`, `Address`, `ClientKey`, edits, unsends, burns) follow

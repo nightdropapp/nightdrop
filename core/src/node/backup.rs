@@ -70,6 +70,10 @@ impl Node {
                     relay_set: chat.relay_set.clone(),
                     relay_set_unknown: chat.relay_set.is_none(),
                     relays_told: chat.relays_told.clone(),
+                    told_burns: chat.told_burns,
+                    told_version: chat.told_version.clone(),
+                    told_address: chat.told_address.clone(),
+                    told_captures: chat.told_captures,
                     peer_supports_burn: chat.contact.peer_supports_burn,
                     peer_app_version: chat.contact.peer_app_version.clone(),
                     mailbox_own,
@@ -730,6 +734,10 @@ fn chat_from_persisted(
             })),
         },
         relays_told: chat.relays_told.clone(),
+        told_burns: chat.told_burns,
+        told_version: chat.told_version.clone(),
+        told_address: chat.told_address.clone(),
+        told_captures: chat.told_captures,
     }
 }
 
