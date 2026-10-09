@@ -267,6 +267,126 @@ void main() {
         reason: 'the confirmation gate must be reached, not a crash');
   });
 
+  // The warning that a wipe cannot be rehearsed is the one place the user is told (duress-wipe.md
+  // §6). On the phone, arming from the end of the app-lock flow set the code and showed nothing.
+  testWidgets('arming a wipe code from the app-lock flow shows its warning', (tester) async {
+    final core = _EnableCore();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showAppLockSettings(context, core),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use a PIN'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '135790');
+    await tester.enterText(find.byType(TextField).at(1), '135790');
+    await tester.tap(find.text('Turn on app lock'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I understand — turn it on'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Set a wipe code'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '246802');
+    await tester.enterText(find.byType(TextField).at(1), '246802');
+    await tester.tap(find.widgetWithText(FilledButton, 'Set a wipe code'));
+    await tester.pumpAndSettle();
+
+    expect(core.duressArmedWith, '246802');
+    expect(find.text('Before you set this'), findsOneWidget,
+        reason: 'the cannot-be-rehearsed warning must follow arming');
+  });
+
+  // Arming takes seconds on a phone, and the screen that started it can be rebuilt away meanwhile.
+  // The warning must still be shown: it is the only place the user is told.
+  testWidgets('the wipe-code warning survives the starting screen going away', (tester) async {
+    final core = _EnableCore()..onArm = () {};
+    final swap = ValueNotifier(0);
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        body: ValueListenableBuilder<int>(
+          valueListenable: swap,
+          builder: (_, n, __) => Builder(
+            key: ValueKey(n), // a new element each time: the old context is unmounted
+            builder: (context) => ElevatedButton(
+              onPressed: () => showAppLockSettings(context, core),
+              child: const Text('open'),
+            ),
+          ),
+        ),
+      ),
+    ));
+    core.onArm = () => swap.value++;
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use a PIN'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '135790');
+    await tester.enterText(find.byType(TextField).at(1), '135790');
+    await tester.tap(find.text('Turn on app lock'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I understand — turn it on'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Set a wipe code'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '246802');
+    await tester.enterText(find.byType(TextField).at(1), '246802');
+    await tester.tap(find.widgetWithText(FilledButton, 'Set a wipe code'));
+    await tester.pumpAndSettle();
+
+    expect(core.duressArmedWith, '246802');
+    expect(find.text('Before you set this'), findsOneWidget);
+  });
+
+  // With the keyboard up, the confirm field and its error are out of sight. A rejected press must
+  // bring them into view, or it looks like the button does nothing.
+  testWidgets('a rejected wipe code moves focus to the confirm field and its error', (tester) async {
+    final core = _EnableCore();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showAppLockSettings(context, core),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use a PIN'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '135790');
+    await tester.enterText(find.byType(TextField).at(1), '135790');
+    await tester.tap(find.text('Turn on app lock'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I understand — turn it on'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Set a wipe code'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '246802');
+    await tester.tap(find.widgetWithText(FilledButton, 'Set a wipe code'));
+    await tester.pumpAndSettle();
+
+    final confirm = tester.widget<EditableText>(
+        find.descendant(of: find.byType(TextField).at(1), matching: find.byType(EditableText)));
+    expect(confirm.focusNode.hasFocus, isTrue);
+    expect(find.text("Those don't match."), findsOneWidget);
+    expect(core.duressArmedWith, isNull);
+  });
+
   // The other half of the same report: "remove" is offered only when there is something to remove.
   testWidgets('remove is offered only once a wipe code is armed', (tester) async {
     final core = _DuressSettingsCore()..armed = true;
@@ -408,6 +528,18 @@ class _WipeFilesCore extends MockNightdropCore {
 /// A core with no lock set, so the settings entry point takes the "enable" path.
 class _EnableCore extends MockNightdropCore {
   String? enabledWith;
+  String? duressArmedWith;
+
+  /// Runs while arming, standing in for whatever rebuilds the screen during the slow derivation.
+  void Function()? onArm;
+
+  @override
+  Future<void> setDuressSecret(String secret, String duress) async {
+    duressArmedWith = duress;
+    onArm?.call();
+    // Let a frame through, as the seconds of key derivation do on a phone.
+    await WidgetsBinding.instance.endOfFrame;
+  }
 
   @override
   Future<bool> isStoreLocked() async => false;

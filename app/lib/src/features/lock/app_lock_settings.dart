@@ -161,6 +161,11 @@ Future<void> _armDuress(BuildContext context, NightdropCore core, String current
   if (duress == null || !context.mounted) return;
 
   final messenger = ScaffoldMessenger.of(context);
+  // The navigator, not the caller's context, shows the warning. Arming takes seconds (key
+  // derivation, then a self-check), and the screen that started this can be rebuilt away in that
+  // time; with `context` the warning was then skipped without a sound while the code stayed armed,
+  // and this warning is the only place the user is ever told (duress-wipe.md §6). Seen on a phone.
+  final navigator = Navigator.of(context);
   // Arm first, so the warning is only shown for a code that actually took. The core self-checks
   // the slot it writes and rolls back if it fails, so reaching the dialog below means it works.
   try {
@@ -171,9 +176,9 @@ Future<void> _armDuress(BuildContext context, NightdropCore core, String current
     messenger.showSnackBar(SnackBar(content: Text(l10n.duressSame)));
     return;
   }
-  if (!context.mounted) return;
+  if (!navigator.mounted) return;
   await showDialog<void>(
-    context: context,
+    context: navigator.context,
     builder: (context) => AlertDialog(
       title: Text(l10n.duressWarnTitle),
       content: SingleChildScrollView(child: Text(l10n.duressWarnBody)),
@@ -258,7 +263,14 @@ Future<String?> _askNewDuress(BuildContext context) async {
               error = null;
             }
           });
-          if (error == null) Navigator.of(context).pop(a);
+          if (error == null) {
+            Navigator.of(context).pop(a);
+          } else {
+            // The error sits under the confirm field, which the keyboard hides. Focusing it scrolls
+            // it into view; without this, a press on the button with the second field empty did
+            // nothing anyone could see (phone, 2026-10-08).
+            secondFocus.requestFocus();
+          }
         }
 
         return AlertDialog(
