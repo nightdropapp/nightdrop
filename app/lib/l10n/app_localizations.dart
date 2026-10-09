@@ -1855,7 +1855,7 @@ abstract class AppLocalizations {
   /// No description provided for @duressWarnTitle.
   ///
   /// In en, this message translates to:
-  /// **'Before you set this'**
+  /// **'Your wipe code is set'**
   String get duressWarnTitle;
 
   /// No description provided for @duressWarnBody.
@@ -1867,7 +1867,7 @@ abstract class AppLocalizations {
   /// No description provided for @duressUnderstand.
   ///
   /// In en, this message translates to:
-  /// **'I understand — set it'**
+  /// **'I understand'**
   String get duressUnderstand;
 
   /// No description provided for @duressDone.

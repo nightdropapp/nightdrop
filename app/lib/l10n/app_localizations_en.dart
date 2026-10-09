@@ -1062,14 +1062,14 @@ class AppLocalizationsEn extends AppLocalizations {
       'This must be different from the code that opens your messages.';
 
   @override
-  String get duressWarnTitle => 'Before you set this';
+  String get duressWarnTitle => 'Your wipe code is set';
 
   @override
   String get duressWarnBody =>
       'You cannot practise this. Entering the wipe code destroys everything on this device, every time, with no confirmation and no undo — that is what makes it work under pressure.\n\nWe have checked that the code you just chose does work. You will not be reminded that a wipe code is set: showing it anywhere would tell whoever picks up your phone that it exists.\n\nYour contacts are not told anything. The wipe code deliberately gives the app no way to read your messages, which also leaves it no way to send on your behalf — so your contacts simply stop hearing from you. Agree on another way to reach each other before you need it.';
 
   @override
-  String get duressUnderstand => 'I understand — set it';
+  String get duressUnderstand => 'I understand';
 
   @override
   String get duressDone => 'Wipe code set.';

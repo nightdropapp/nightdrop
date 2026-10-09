@@ -301,7 +301,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(core.duressArmedWith, '246802');
-    expect(find.text('Before you set this'), findsOneWidget,
+    expect(find.text('Your wipe code is set'), findsOneWidget,
         reason: 'the cannot-be-rehearsed warning must follow arming');
   });
 
@@ -345,7 +345,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(core.duressArmedWith, '246802');
-    expect(find.text('Before you set this'), findsOneWidget);
+    expect(find.text('Your wipe code is set'), findsOneWidget);
   });
 
   // With the keyboard up, the confirm field and its error are out of sight. A rejected press must
