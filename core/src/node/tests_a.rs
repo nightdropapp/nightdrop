@@ -699,9 +699,7 @@ fn offline_mail_fans_out_across_the_recipients_relay_set_and_dedups() {
     alice.pump().unwrap();
     let bob_contact = alice.contacts()[0].id.clone();
 
-    // Bob announces his relay set; Alice learns it as peer_relays (Frame::Relays).
-    bob.announce_relays();
-    alice.pump().unwrap();
+    // Bob's set rode in his Hello; Alice knows it at once.
     assert_eq!(
         alice.contacts()[0].peer_relays,
         vec![relay2_addr.to_string()]
@@ -897,6 +895,8 @@ fn logout_reaches_an_offline_peer_via_the_relay() {
     let bundle = bob.publish_bundle();
     alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    // Alice reads Bob's first frame: his relay set, without which her copies to him are held.
+    alice.pump().unwrap();
     let alice_contact = bob.contacts()[0].id.clone();
 
     // Bob goes offline, THEN alice logs out (deleting her identity). A direct-only send would be
@@ -928,6 +928,8 @@ fn delete_chat_closed_survives_no_reachable_relay_and_delivers_on_retry() {
     let bundle = bob.publish_bundle();
     let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    // Alice reads Bob's first frame: his relay set, without which her copies to him are held.
+    alice.pump().unwrap();
     let alice_contact = bob.contacts()[0].id.clone();
 
     // Peer offline AND no relay reachable to Alice → the Closed reaches neither path at delete time.
@@ -977,6 +979,8 @@ fn pending_delete_signal_persists_across_a_restart() {
     let bundle = bob.publish_bundle();
     let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    // Alice reads Bob's first frame: his relay set, without which her copies to him are held.
+    alice.pump().unwrap();
     let alice_contact = bob.contacts()[0].id.clone();
 
     // Delete while nothing is reachable → the Closed is queued for retry.
@@ -1562,6 +1566,8 @@ fn screenshot_notice_survives_an_offline_peer_via_the_relay() {
     let bundle = bob.publish_bundle();
     let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    // Alice reads Bob's first frame: his relay set, without which her copies to him are held.
+    alice.pump().unwrap();
     let alice_contact = bob.contacts()[0].id.clone();
 
     // Bob's client is closed when Alice screenshots the chat.
@@ -1593,6 +1599,8 @@ fn screenshot_notice_survives_a_total_outage_and_delivers_on_retry() {
     let bundle = bob.publish_bundle();
     let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    // Alice reads Bob's first frame: his relay set, without which her copies to him are held.
+    alice.pump().unwrap();
     let alice_contact = bob.contacts()[0].id.clone();
 
     // Peer unreachable AND Alice has no relay: both delivery paths are down at capture time.
@@ -1684,6 +1692,8 @@ fn cover_traffic_is_indistinguishable_mail_that_never_surfaces() {
     let bundle = bob.publish_bundle();
     let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    // Alice reads Bob's first frame: his relay set, without which her copies to him are held.
+    alice.pump().unwrap();
 
     // A real message and a cover post both land as one sealed blob in a mailbox: from the relay's
     // side they are the same event, which is the entire point.

@@ -62,9 +62,22 @@ pub struct PersistedChat {
     /// only (never sets our own `verified`). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]
     pub peer_verified: bool,
-    /// The peer's advertised extra relay addresses (#17). `#[serde(default)]` for forward-compat.
+    /// The peer's extra relays as 0.1.x knew them (#17), on top of an implicit Night Drop relay.
+    /// Read only to seed [`relay_set`](Self::relay_set) for a chat from before 0.2.
     #[serde(default)]
     pub peer_relays: Vec<String>,
+    /// The peer's complete relay set (`Frame::RelaySet`, `optional-relay.md` §3). Absent, with
+    /// `relay_set_unknown` false, on a chat from before 0.2: it is seeded with Night Drop +
+    /// `peer_relays`, exactly what we posted to (§3 rule 5).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_set: Option<RelaySet>,
+    /// A 0.2 chat whose peer has not told us their set yet: hold, never assume (§3 rule 3).
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub relay_set_unknown: bool,
+    /// Our set as this peer last confirmed hearing it. Absent = never told, which a chat from
+    /// before 0.2 is, so the first 0.2 launch tells every contact once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relays_told: Option<RelaySet>,
     /// Whether the peer's build understands burn messages (`Frame::Burns`). `None`/absent means
     /// unknown, which is treated as unsupported — burn is never offered on a guess.
     #[serde(default)]
@@ -388,6 +401,10 @@ pub struct PersistedRelayKey {
     pub public: String,
     /// Base64 of the 32-byte secret.
     pub secret: String,
+}
+
+fn is_false(b: &bool) -> bool {
+    !*b
 }
 
 fn is_true(b: &bool) -> bool {

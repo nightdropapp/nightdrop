@@ -737,6 +737,9 @@ impl Inner {
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
             self.me.announce_mailbox();
+            // Our relay set to any chat that has not confirmed the current one (`optional-relay.md`
+            // §3 rule 4): the retry for a change that did not land, and the first 0.2 launch.
+            self.me.announce_relay_set();
             // (The inviter side of short-code pairing runs on its own job in the poller loop, on
             // the pairing cadence — not here, where it waited for whole drain rounds.)
             // Retry messages that couldn't reach the peer or any relay when first sent (arti was
@@ -1449,7 +1452,7 @@ impl NightdropCore {
         // Notify existing contacts (E2E `Relays` frame). Sealing is instant; the dials go through
         // the outbox, which the poller sends without the lock — so neither this call nor anything
         // else waits on a cold Tor.
-        self.lock().me.announce_relays();
+        self.lock().me.announce_relay_set();
         emit("contacts");
     }
 
@@ -2931,6 +2934,27 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
         // holding nothing, and a closure's captures otherwise outlive its body.
         drop(inner);
     });
+}
+
+/// Our relay set for an invite payload's `rs=` parameter: URL-safe base64 of its JSON.
+pub(crate) fn encode_relay_set(set: &crate::node::RelaySet) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .encode(serde_json::to_vec(set).unwrap_or_default())
+}
+
+/// The inviter's relay set from an invite payload's `rs=` parameter, which only a short-code
+/// response carries (`optional-relay.md` §3 rule 3). `None` when absent or unreadable.
+pub(crate) fn parse_invite_relay_set(payload: &str) -> Option<crate::node::RelaySet> {
+    use base64::Engine as _;
+    let (_, query) = payload.split_once("://pair?")?;
+    let value = query.split('&').find_map(|kv| kv.strip_prefix("rs="))?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(value)
+        .ok()?;
+    serde_json::from_slice(&bytes)
+        .ok()
+        .map(crate::node::sanitize_peer_set)
 }
 
 /// Parse `nightdrop://pair?addr=...&ik=...&otk=...` into (address, pre-key bundle).

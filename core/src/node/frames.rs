@@ -21,6 +21,9 @@ impl Node {
                 crate::diag!("pair: inbound Hello — a peer is requesting a chat");
                 let olm = message.to_olm()?;
                 let accepted = crypto::accept_inbound(&mut self.identity, &identity_key, &olm)?;
+                // Where the joiner's offline mail goes, from the first frame (`optional-relay.md`
+                // §3 rule 3). `None` only from a Hello we cannot read, which then holds.
+                let joiner_relays = super::hello_relay_set(&accepted.first_plaintext);
                 let contact_id = identity_key;
                 // Prefer the address the sender advertised (works over Tor/relay where the
                 // transport can't tell us who called); fall back to the transport's view.
@@ -54,6 +57,9 @@ impl Node {
                         chat.session = accepted.session;
                         chat.peer_address = peer_address.clone();
                         chat.closed = false;
+                        chat.relay_set = joiner_relays.clone();
+                        // A new session starts with nothing told on it.
+                        chat.relays_told = None;
                         chat.contact.verified = false; // new session invalidates prior verification
                         chat.contact.peer_verified = false; // …as does the peer's prior signal
                         already_authorized = chat.authorized;
@@ -94,16 +100,15 @@ impl Node {
                     );
                     // Inbound request: needs approval unless we auto-authorize. The most recent
                     // invite code goes with it so approval can echo it.
-                    self.chats.insert(
-                        contact_id.clone(),
-                        Chat::new_paired(
-                            &contact_id,
-                            &peer_address,
-                            accepted.session,
-                            !self.require_authorization,
-                            self.last_invite_code.clone(),
-                        ),
+                    let mut chat = Chat::new_paired(
+                        &contact_id,
+                        &peer_address,
+                        accepted.session,
+                        !self.require_authorization,
+                        self.last_invite_code.clone(),
                     );
+                    chat.relay_set = joiner_relays.clone();
+                    self.chats.insert(contact_id.clone(), chat);
                 }
                 // Re-pair warning (§1.2): a known contact just re-established the chat with a new
                 // session, so the safety number must be re-checked (louder if they were verified).
@@ -132,22 +137,17 @@ impl Node {
                     self.announce_captures_to(&contact_id);
                     self.announce_burns_to(&contact_id);
                     self.announce_version_to(&contact_id);
-                    // Our extra relays: only once approved (an auto-approved chat now, a request
-                    // when the user approves it — see `authorize`).
-                    self.announce_relays_to(&contact_id);
+                    // Our relay set: the joiner holds mail for us until it arrives. Only once
+                    // approved (an auto-approved chat now, a request when the user approves it —
+                    // see `authorize`).
+                    self.announce_relay_set_to(&contact_id);
                     // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
                     // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
                     self.send_mailbox_key(&contact_id);
                 }
-                if accepted.first_plaintext.is_empty() {
-                    return Ok(None);
-                }
-                let text = String::from_utf8_lossy(&accepted.first_plaintext).into_owned();
-                if let Some(chat) = self.chats.get_mut(&contact_id) {
-                    chat.history
-                        .push(ChatMessage::text(false, text.clone(), String::new()));
-                }
-                Ok(Some((contact_id, text)))
+                // The plaintext is the `HelloBody` (our relay set above), never a message: nothing
+                // is shown, and the first real message arrives as a `Message` once approved.
+                Ok(None)
             }
             Frame::Message { from, id, message } => {
                 let olm = message.to_olm()?;
@@ -423,10 +423,10 @@ impl Node {
                             "approved",
                         ));
                     }
-                    // What we told them at pairing landed on a request, which drops it; now they
-                    // will take it. (`Approved` is unauthenticated, but this only re-sends our own
-                    // relay list on our session with them, which a forger cannot read.)
-                    self.announce_relays_to(&from);
+                    // Our set went in the Hello, so this is normally a no-op; it covers a list
+                    // edited while we waited. (`Approved` is unauthenticated, but this only sends
+                    // our own set on our session with them, which a forger cannot read.)
+                    self.announce_relay_set_to(&from);
                     return Ok(Some((from, String::new())));
                 }
                 Ok(None)
@@ -693,9 +693,9 @@ impl Node {
                 self.announce_client_key(&from, &new_address);
                 Ok(Some((from, String::new())))
             }
-            Frame::Relays { from, message } => {
-                // The peer changed their advertised extra relay set (#17): decrypt and store it as
-                // this contact's peer_relays, so future offline mail fans out to those relays too.
+            Frame::RelaySet { from, message } => {
+                // The peer's complete relay set (`optional-relay.md` §3): their offline mail goes
+                // to exactly this, and nowhere while it is empty.
                 let olm = message.to_olm()?;
                 let Some(chat) = self.chats.get_mut(&from) else {
                     return Ok(None);
@@ -704,17 +704,15 @@ impl Node {
                     return Ok(None);
                 }
                 let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
-                let list = String::from_utf8_lossy(&plaintext).into_owned();
-                let relays: Vec<String> = list
-                    .split(',')
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect();
-                if relays == chat.contact.peer_relays {
+                let set = match serde_json::from_slice::<RelaySet>(&plaintext) {
+                    Ok(set) => super::sanitize_peer_set(set),
+                    Err(_) => return Ok(None),
+                };
+                if chat.relay_set.as_ref() == Some(&set) {
                     return Ok(None);
                 }
-                chat.contact.peer_relays = relays;
-                devlog!("[nightdrop] peer {from} announced a new relay set");
+                chat.relay_set = Some(set);
+                devlog!("[nightdrop] peer {from} announced their relay set");
                 Ok(Some((from, String::new())))
             }
             Frame::ClientKey { from, client_key } => {

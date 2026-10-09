@@ -265,9 +265,14 @@ a direct-only user's contacts see their messages arrive the moment that user com
    migration in §2, and the 24 h drain-out. `queue_on_relays` stops taking an implicit primary.
    **Built 2026-10-09** (`Node::relays`, `post_route`; tests in `node/tests_relay_list.rs`). A
    0.1.x state's extras past the cap drain out rather than vanish, and a direct-only device
-   already posts to no relay. Until step 2 a contact's set is still Night Drop + their
-   `Frame::Relays` extras (`Node::peer_relay_set`).
+   already posts to no relay.
 2. **`Frame::RelaySet`** replacing `Frame::Relays`, the set inside pairing, and "unknown = hold".
+   **Built 2026-10-09** (`WIRE_VERSION` 3; tests in `node/tests_relay_set.rs`). The joiner's set
+   is the `Hello` plaintext (`HelloBody`), the short-code response carries the inviter's as `rs=`,
+   and a QR joiner holds until the inviter's first `RelaySet`. Each chat keeps the set it was last
+   confirmed to hold of ours (`relays_told`), so a change, or the first 0.2 launch, is re-sent on
+   later ticks until it lands. The one exception to "unknown is held" is the QR `Hello` itself,
+   which still goes to Night Drop until step 4 lets it go direct.
 3. **The held queue (§4)**, generalised from `pending_relay`, with retry and flush-on-inbound.
 4. **Pairing credentials (§5)** for QR and `Hello`.
 5. **Gate the features in §6** in the core, with the UI showing the reasons.

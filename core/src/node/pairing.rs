@@ -94,16 +94,33 @@ impl Node {
     }
 
     /// Joiner side: open an outbound session to a peer from their bundle + address, and
-    /// send the opening `Hello` (an empty handshake message). Returns the new contact id.
+    /// send the opening `Hello`, which carries our relay set. Returns the new contact id. The
+    /// inviter's set is unknown until they send it (QR); see
+    /// [`connect_with_bundle_and_set`](Self::connect_with_bundle_and_set).
     pub fn connect_with_bundle(
         &mut self,
         peer_address: &str,
         bundle: &PreKeyBundle,
     ) -> Result<String> {
+        self.connect_with_bundle_and_set(peer_address, bundle, None)
+    }
+
+    /// [`connect_with_bundle`](Self::connect_with_bundle) when the invite also told us the
+    /// inviter's relay set (a short-code response does, `optional-relay.md` §3 rule 3).
+    pub fn connect_with_bundle_and_set(
+        &mut self,
+        peer_address: &str,
+        bundle: &PreKeyBundle,
+        inviter_relays: Option<RelaySet>,
+    ) -> Result<String> {
         // Before anything reaches the network: at the cap, nothing is sent.
         self.check_contact_cap(&bundle.identity_key)?;
         let mut session = crypto::open_outbound(&self.identity, bundle)?;
-        let hello = crypto::encrypt(&mut session, b"")?;
+        let mine = self.my_relay_set();
+        let body = serde_json::to_vec(&super::HelloBody {
+            relays: mine.clone(),
+        })?;
+        let hello = crypto::encrypt(&mut session, &body)?;
         let frame = Frame::Hello {
             identity_key: self.identity_key(),
             address: self.address(), // where the peer should reply (we may be unreachable-by-metadata)
@@ -118,15 +135,19 @@ impl Node {
         // that fails), and retried on every relay poll until a copy lands.
         crate::diag!("pair: sending first-contact Hello to the peer");
         let handle = self.post_handle(&bundle.identity_key);
+        // A short code told us the inviter's set. From a QR it is unknown until their first reply,
+        // so the copy goes to the Night Drop relay, as 0.1.x did: the one exception to "unknown is
+        // held", until pairing passes (`optional-relay.md` §5) let the Hello go direct.
+        let hello_set = inviter_relays.clone().unwrap_or(RelaySet {
+            nightdrop: true,
+            relays: Vec::new(),
+        });
         self.queue_pending_control(
             super::PendingControl {
                 recipient_ik: bundle.identity_key.clone(),
                 peer_address: peer_address.to_string(),
-                // Their relay set is unknown before the first reply, so the copy goes to the Night
-                // Drop relay, as 0.1.x did. Pairing passes (`optional-relay.md` §5) make this a
-                // direct-only frame.
-                relays: Vec::new(),
-                nightdrop: true,
+                relays: hello_set.relays,
+                nightdrop: hello_set.nightdrop,
                 bytes: wire::encode(&frame),
                 handle,
                 in_flight: false,
@@ -148,6 +169,10 @@ impl Node {
             chat.closed = false;
             chat.contact.verified = false;
             chat.contact.peer_verified = false;
+            if inviter_relays.is_some() {
+                chat.relay_set = inviter_relays;
+            }
+            chat.relays_told = Some(mine);
             chat.history.push(ChatMessage::system(
                 "🔑 Re-paired with a new secure session. Compare the safety number again if you \
                  want to confirm who this is."
@@ -156,10 +181,11 @@ impl Node {
         } else {
             // We initiated this chat, so it is authorized at once. The joiner already knows the
             // chat is live; the code is tracked on the inviter side for the approval echo.
-            self.chats.insert(
-                contact_id.clone(),
-                Chat::new_paired(&contact_id, peer_address, session, true, None),
-            );
+            let mut chat = Chat::new_paired(&contact_id, peer_address, session, true, None);
+            chat.relay_set = inviter_relays;
+            // The Hello carries it, and is held until it lands.
+            chat.relays_told = Some(mine);
+            self.chats.insert(contact_id.clone(), chat);
         }
         // Onion client auth (#22): hand the inviter our client key for their onion so they can
         // authorize us to reach their (possibly restricted) descriptor. No-op off Tor.
@@ -169,7 +195,6 @@ impl Node {
         self.announce_captures_to(&contact_id);
         self.announce_burns_to(&contact_id);
         self.announce_version_to(&contact_id);
-        self.announce_relays_to(&contact_id);
         // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
         // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
         self.send_mailbox_key(&contact_id);
@@ -204,11 +229,14 @@ impl Node {
             anyhow::bail!("no relay configured");
         }
         let bundle = self.publish_bundle();
+        // Our relay set rides in the sealed response, so the joiner knows where our mail goes
+        // before its first message (`optional-relay.md` §3 rule 3).
         let payload = format!(
-            "nightdrop://pair?addr={}&ik={}&otk={}",
+            "nightdrop://pair?addr={}&ik={}&otk={}&rs={}",
             self.address(),
             bundle.identity_key,
-            bundle.one_time_key
+            bundle.one_time_key,
+            crate::api::encode_relay_set(&self.my_relay_set())
         );
         // Replace any stale invite for the same slot (e.g. the code was regenerated).
         self.pending_invites.retain(|p| p.slot != slot);
@@ -327,7 +355,8 @@ impl Node {
     /// [`run_join_handshake`], and return the new contact.
     pub fn connect_from_invite_payload(&mut self, payload: &str) -> Result<Contact> {
         let (addr, bundle) = crate::api::parse_invite(payload)?;
-        let contact_id = self.connect_with_bundle(&addr, &bundle)?;
+        let inviter_relays = crate::api::parse_invite_relay_set(payload);
+        let contact_id = self.connect_with_bundle_and_set(&addr, &bundle, inviter_relays)?;
         self.contacts()
             .into_iter()
             .find(|c| c.id == contact_id)

@@ -470,7 +470,7 @@ on a re-pair (new session) exactly like `verified`.
   transport is held as an `Arc` so a send can carry a handle across the unlocked window.
   **Control frames and relay retries go through an outbox (0.2).** `Node::deliver` used to dial
   inline, so every control frame did its I/O under the lock: the once-per-run announcements
-  (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`), `announce_relays`,
+  (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`), `announce_relay_set`,
   name/verification/storage/disappearing changes, chat-delete and screenshot notices, the
   `flush_pending_control`/`flush_pending_relay`/`sweep_unconfirmed` retries, cover traffic, and the
   relay recall + re-post of an edit or unsend. Now each is sealed under the lock (the ratchet has to
@@ -522,12 +522,17 @@ on a re-pair (new session) exactly like `verified`.
     and the newer side is told (§5.4).
   - When server storage is active, **both parties see a persistent in-chat warning**
     that messages are stored remotely.
-- **Multi-relay / self-hosting (#17):** a recipient may advertise an **extra relay set** on
-  top of the shared primary default (`my_relays`, announced in-band as `Frame::Relays`, held by
-  the peer as a contact's `peer_relays`). Because a mailbox handle (v1 or v2) is
+- **Multi-relay / self-hosting (#17), optional relay (0.2):** each device keeps a **relay list**
+  of up to 4 entries, the Night Drop relay (symbolic: the baked-in relay plus the signed
+  directory's) and onions the user added; an empty list is **direct only**
+  (`docs/design/optional-relay.md`). Contacts are told the **complete** set E2E
+  (`Frame::RelaySet`, also inside the pairing `Hello` and the short-code response), and a sender
+  posts to exactly that set: no implicit relay, nothing while the recipient's set is unknown or
+  empty, and nothing at all while the sender is direct only (`Node::post_route`). A relay removed
+  from the list is still drained for 24 h. Because a mailbox handle (v1 or v2) is
   **relay-agnostic** (the same handle works on every relay) and every queued blob is already
   sealed under a recipient-derived key, a sender simply seals **once** and posts the identical
-  blob to the primary **plus** the recipient's set (`queue_on_relays`); the recipient drains all
+  blob to every relay in the recipient's set (`queue_on_relays`); the recipient drains all
   of them and **de-duplicates by content hash** (`seen_frames`), and an edit/unsend recalls
   **every** copy. This buys **availability + censorship-resistance** if a relay is down or
   blocked — it is explicitly **not** an anonymity layer and relays never gossip (anonymity stays
@@ -631,7 +636,7 @@ on a re-pair (new session) exactly like `verified`.
   half rides arti's **experimental** restricted-discovery API, so that test is the upgrade canary and
   restriction stays opt-in until exercised across physical devices — see `docs/design/onion-client-auth.md`.
 - **Framing & versioning:** peers exchange `Frame`s (`core/src/wire`) as a versioned envelope
-  `{"v":2,"f":<frame>}` (`WIRE_VERSION`), length-prefixed and padded as above. Everything in a
+  `{"v":3,"f":<frame>}` (`WIRE_VERSION`; 3 since 0.2), length-prefixed and padded as above. Everything in a
   frame is already E2E-encrypted or public handshake material — the transport and relay
   see only these bytes. The version lets two installed builds detect an incompatible
   protocol change and reject it with a clear error rather than misparse it; bump it on any

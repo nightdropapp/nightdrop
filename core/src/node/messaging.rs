@@ -1712,46 +1712,55 @@ impl Node {
         reannounced
     }
 
-    /// Tell every established contact our current advertised extra relay set (#17), so their
-    /// offline mail to us fans out to those relays too. E2E `Relays` frame, best-effort (relay
-    /// fallback). Called after the user edits their relays; a contact paired later is told at
-    /// pairing ([`announce_relays_to`](Self::announce_relays_to)).
-    pub fn announce_relays(&mut self) {
-        let targets: Vec<String> = self.chats.keys().cloned().collect();
-        for contact_id in &targets {
-            self.send_relays_to(contact_id);
+    /// Tell every open, approved chat our relay set where it has not confirmed the current one
+    /// (`optional-relay.md` §3 rule 4): after the user edits the list, after an upgrade from 0.1.x
+    /// (which never told anyone a complete set), and again on later ticks for any that did not
+    /// land. One in flight per chat.
+    pub fn announce_relay_set(&mut self) {
+        let mine = self.my_relay_set();
+        let ids: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(id, c)| {
+                c.authorized
+                    && !c.closed
+                    && c.relays_told.as_ref() != Some(&mine)
+                    && !self.relay_set_in_flight.contains_key(id.as_str())
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.announce_relay_set_to(&id);
         }
     }
 
-    /// Tell one newly established contact our extra relay set. The broadcast above only runs on an
-    /// edit, so without this a contact paired after the user added a relay never learned it, and
-    /// their mail to us never reached it. Nothing to say while we advertise no extras: an empty
-    /// set is what the peer already assumes.
-    pub(crate) fn announce_relays_to(&mut self, contact_id: &str) {
-        if !self.my_relays().is_empty() {
-            self.send_relays_to(contact_id);
-        }
-    }
-
-    /// One `Relays` frame to an approved, open chat (the peer drops it from anyone else).
-    fn send_relays_to(&mut self, contact_id: &str) {
-        let from = self.identity_key();
-        let list = self.my_relays().join(",");
-        let Some(chat) = self.chats.get_mut(contact_id) else {
+    /// Send one chat our relay set (`Frame::RelaySet`), unless it already confirmed this one or
+    /// one is in flight. A request is not told: it drops control frames until approved, and
+    /// approving tells it ([`authorize`](Self::authorize)).
+    pub(crate) fn announce_relay_set_to(&mut self, contact_id: &str) {
+        let mine = self.my_relay_set();
+        let Some(chat) = self.chats.get(contact_id) else {
             return;
         };
-        if !chat.authorized || chat.closed {
+        if !chat.authorized
+            || chat.closed
+            || chat.relays_told.as_ref() == Some(&mine)
+            || self.relay_set_in_flight.contains_key(contact_id)
+        {
             return;
         }
-        let Ok(message) = crypto::encrypt(&mut chat.session, list.as_bytes()) else {
-            return; // unusable session: nothing can be sent on it
+        let Ok(body) = serde_json::to_vec(&mine) else {
+            return;
         };
-        let frame = Frame::Relays {
-            from,
-            message: WireOlm::from_olm(&message),
+        let Some((addr, frame)) = self.authed_control(contact_id, &body, |from, message| {
+            Frame::RelaySet { from, message }
+        }) else {
+            return;
         };
-        let peer_address = chat.peer_address.clone();
-        let _ = self.deliver(&peer_address, contact_id, &frame);
+        self.relay_set_in_flight
+            .insert(contact_id.to_string(), mine);
+        let done = OutboundDone::Announced(Announce::RelaySet, contact_id.to_string());
+        let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
     }
 
     /// Set this chat's disappearing-messages timer (`secs`, 0 = off). Messages older than the

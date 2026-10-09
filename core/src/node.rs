@@ -390,6 +390,41 @@ fn normalize_relays(list: Vec<RelayEntry>) -> (Vec<RelayEntry>, Vec<RelayEntry>)
     (kept, overflow)
 }
 
+/// A relay set a contact told us, made safe to post to: onions trimmed, blanks, implausible
+/// values and duplicates dropped, at most [`MAX_RELAYS`] (`optional-relay.md` §2: a hostile
+/// contact cannot make us post one message a thousand times).
+pub(crate) fn sanitize_peer_set(set: RelaySet) -> RelaySet {
+    let mut relays: Vec<String> = Vec::new();
+    for addr in set.relays {
+        let addr = addr.trim();
+        if addr.is_empty() || addr.len() > 128 || relays.iter().any(|r| r == addr) {
+            continue;
+        }
+        if relays.len() == MAX_RELAYS {
+            break;
+        }
+        relays.push(addr.to_string());
+    }
+    RelaySet {
+        nightdrop: set.nightdrop,
+        relays,
+    }
+}
+
+/// The plaintext inside a pairing `Hello` (`optional-relay.md` §3 rule 3): the joiner's relay set,
+/// so the inviter knows where the joiner's offline mail goes from the first frame.
+#[derive(serde::Serialize, serde::Deserialize)]
+pub(crate) struct HelloBody {
+    pub(crate) relays: RelaySet,
+}
+
+/// The relay set a `Hello` plaintext carries; `None` if it carries none we can read.
+pub(crate) fn hello_relay_set(plaintext: &[u8]) -> Option<RelaySet> {
+    serde_json::from_slice::<HelloBody>(plaintext)
+        .ok()
+        .map(|b| sanitize_peer_set(b.relays))
+}
+
 /// The relay list a saved state stands for (`optional-relay.md` §2), and what the cap cut from it.
 /// A state from before 0.2 has no list: it starts as Night Drop + its extras, exactly what it was
 /// using.
@@ -589,6 +624,13 @@ struct Chat {
     remote_storage_healthy: bool,
     /// Our side of the v2 mailbox agreement (`mailbox.rs`). `None` until we first announce.
     mailbox: Option<mailbox::MailboxPair>,
+    /// The peer's complete relay set (`Frame::RelaySet`, `optional-relay.md` §3): where their
+    /// offline mail goes. `None` = not told yet, which holds every relay copy rather than guess
+    /// (§3 rule 3); a chat from before 0.2 is seeded instead (rule 5). Persisted.
+    relay_set: Option<RelaySet>,
+    /// Our relay set as the peer last confirmed hearing it; [`Node::announce_relay_set`] tells
+    /// every chat where this differs from ours. Persisted.
+    relays_told: Option<RelaySet>,
 }
 
 impl Chat {
@@ -636,6 +678,8 @@ impl Chat {
             relay_receipts: HashMap::new(),
             remote_storage_healthy: true,
             mailbox: None,
+            relay_set: None,
+            relays_told: None,
         }
     }
 }
@@ -657,6 +701,9 @@ pub struct Node {
     /// [`MAX_RELAYS`]. Contacts post our offline mail to exactly this set, and we poll it. Empty =
     /// direct only: no relay is used at all, for receiving or sending. Persisted.
     relays: Vec<RelayEntry>,
+    /// Our relay set as it went out in each `RelaySet` still in flight, by contact, so a delivery
+    /// records exactly what the peer heard ([`Chat::relays_told`]). In memory only.
+    relay_set_in_flight: HashMap<String, RelaySet>,
     /// Relays removed from [`relays`](Self::relays), each with the unix time we stop draining it.
     /// Posting there stops at once, but mail already queued for us lives a day. Persisted.
     relays_draining: Vec<(RelayEntry, u64)>,
@@ -1060,6 +1107,7 @@ pub(crate) enum Announce {
     Version,
     Mailbox,
     Address,
+    RelaySet,
 }
 
 /// What a finished [`Outbound`] changes in the core, applied under the lock by
@@ -1247,6 +1295,7 @@ impl Node {
             relay: None,
             relays: vec![RelayEntry::NightDrop],
             relays_draining: Vec::new(),
+            relay_set_in_flight: HashMap::new(),
             chats: HashMap::new(),
             require_authorization: false,
             last_invite_code: None,
@@ -1443,8 +1492,8 @@ impl Node {
             false,
             OutboundDone::Caller(None),
         )?;
-        // A request could not be told our extra relays while it was one.
-        self.announce_relays_to(contact_id);
+        // A request could not be told our relays while it was one.
+        self.announce_relay_set_to(contact_id);
         Ok(())
     }
 
@@ -1469,7 +1518,7 @@ impl Node {
         {
             let bytes = wire::encode(&frame);
             // The peer's set as of now: the chat is gone by the time a retry runs.
-            let set = self.peer_relay_set(contact_id);
+            let set = self.peer_relay_set(contact_id).unwrap_or_default();
             // Held in `pending_control` from the start, not only after a failed first attempt: the
             // send now happens off the lock, after this call returns, and the chat is gone by then.
             // A copy landing removes it; until then it is saved with the state and retried.
@@ -1720,7 +1769,7 @@ impl Node {
             // local side has already promised the user that "the other person was told", the phone
             // may well be offline while screenshotting, and unlike a chat message there is nothing
             // the user can resend to make good on it. A copy landing removes it.
-            let set = self.peer_relay_set(contact_id);
+            let set = self.peer_relay_set(contact_id).unwrap_or_default();
             let handle = self.post_handle(contact_id);
             self.queue_pending_control(
                 PendingControl {
@@ -2057,10 +2106,21 @@ impl Node {
                 self.app_version.as_deref().unwrap_or("?")
             );
         }
+        if kind == Announce::RelaySet {
+            let sent = self.relay_set_in_flight.remove(contact_id);
+            if delivered {
+                if let Some(chat) = self.chats.get_mut(contact_id) {
+                    chat.relays_told = sent;
+                    self.dirty = true;
+                }
+            }
+            return;
+        }
         if delivered {
             return;
         }
         match kind {
+            Announce::RelaySet => false,
             Announce::Burns => self.burns_announced.remove(contact_id),
             Announce::Version => self.version_announced.remove(contact_id),
             Announce::Mailbox => self.mailbox_announced.remove(contact_id),
@@ -2238,22 +2298,19 @@ impl Node {
         RelaySet::of(&entries)
     }
 
-    /// The relay set we post to for `contact_id`. Until `Frame::RelaySet` (0.2), a contact's set is
-    /// the Night Drop relay plus the extras they announced, which is what 0.1.x posted to.
-    pub(crate) fn peer_relay_set(&self, contact_id: &str) -> RelaySet {
-        RelaySet {
-            nightdrop: true,
-            relays: self
-                .chats
-                .get(contact_id)
-                .map(|c| c.contact.peer_relays.clone())
-                .unwrap_or_default(),
-        }
+    /// The relay set `contact_id` told us (`Frame::RelaySet`). `None` while unknown.
+    pub(crate) fn peer_relay_set(&self, contact_id: &str) -> Option<RelaySet> {
+        self.chats.get(contact_id).and_then(|c| c.relay_set.clone())
     }
 
-    /// Where a relay copy for `contact_id` goes: see [`post_route`](Self::post_route).
+    /// Where a relay copy for `contact_id` goes: see [`post_route`](Self::post_route). Nowhere
+    /// while their set is unknown: unknown is held, never treated as "use Night Drop"
+    /// (`optional-relay.md` §3 rule 3).
     pub(crate) fn route_to(&self, contact_id: &str) -> (Option<RelayClient>, Vec<String>) {
-        self.post_route(&self.peer_relay_set(contact_id))
+        match self.peer_relay_set(contact_id) {
+            Some(set) => self.post_route(&set),
+            None => (None, Vec::new()),
+        }
     }
 
     /// Where a relay copy for someone with relay set `set` goes: the Night Drop relay's client and
@@ -2358,6 +2415,11 @@ impl Node {
                 dto.local_name = c.local_name.clone();
                 dto.identity_tag = identity_tag(&c.contact.id);
                 dto.peer_on_old_version = Self::peer_on_old_version(c);
+                dto.peer_relays = c
+                    .relay_set
+                    .as_ref()
+                    .map(|s| s.relays.clone())
+                    .unwrap_or_default();
                 dto
             })
             .collect()
@@ -2852,3 +2914,5 @@ mod tests_mailbox;
 mod tests_outbox;
 #[cfg(test)]
 mod tests_relay_list;
+#[cfg(test)]
+mod tests_relay_set;

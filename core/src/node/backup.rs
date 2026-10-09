@@ -62,7 +62,14 @@ impl Node {
                     verified: chat.contact.verified,
                     peer_verified: chat.contact.peer_verified,
                     peer_captures_silent: chat.contact.peer_captures_silent,
-                    peer_relays: chat.contact.peer_relays.clone(),
+                    peer_relays: chat
+                        .relay_set
+                        .as_ref()
+                        .map(|s| s.relays.clone())
+                        .unwrap_or_default(),
+                    relay_set: chat.relay_set.clone(),
+                    relay_set_unknown: chat.relay_set.is_none(),
+                    relays_told: chat.relays_told.clone(),
                     peer_supports_burn: chat.contact.peer_supports_burn,
                     peer_app_version: chat.contact.peer_app_version.clone(),
                     mailbox_own,
@@ -682,7 +689,7 @@ fn chat_from_persisted(
             verified: chat.verified,
             peer_verified: chat.peer_verified,
             peer_captures_silent: chat.peer_captures_silent,
-            peer_relays: chat.peer_relays.clone(),
+            peer_relays: Vec::new(), // filled in `contacts()` from `relay_set`
             peer_supports_burn: chat.peer_supports_burn,
             peer_app_version: chat.peer_app_version.clone(),
             remote_storage_healthy: true,
@@ -712,6 +719,17 @@ fn chat_from_persisted(
         relay_receipts,
         remote_storage_healthy: true,
         mailbox: super::mailbox::from_persisted(chat),
+        relay_set: match (&chat.relay_set, chat.relay_set_unknown) {
+            (Some(set), _) => Some(super::sanitize_peer_set(set.clone())),
+            (None, true) => None,
+            // A chat from before 0.2: what we were already posting to (`optional-relay.md` §3
+            // rule 5), so no existing chat starts holding its mail.
+            (None, false) => Some(super::sanitize_peer_set(RelaySet {
+                nightdrop: true,
+                relays: chat.peer_relays.clone(),
+            })),
+        },
+        relays_told: chat.relays_told.clone(),
     }
 }
 

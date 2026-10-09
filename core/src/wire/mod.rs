@@ -3,7 +3,7 @@
 //! public handshake material — the transport (and any relay) only ever sees these bytes,
 //! never plaintext or keys.
 //!
-//! Encoding is a versioned [`Envelope`] JSON (`{"v":2,"f":<frame>}`), wrapped by [`encode`] in a
+//! Encoding is a versioned [`Envelope`] JSON (`{"v":3,"f":<frame>}`), wrapped by [`encode`] in a
 //! 4-byte length prefix and **zero-padded to a fixed size bucket** so an observer of the (already
 //! encrypted) transport can't use frame length to tell one frame from another — a short text, a
 //! rename, and a control ack all look identical on the wire (`ARCHITECTURE.md` §6, metadata
@@ -218,11 +218,13 @@ pub enum Frame {
     /// is **E2E-encrypted** on the session; the receiver updates where it routes replies, so
     /// the contact survives a lost onion keystore (§5c). See `node::announce_address`.
     Address { from: String, message: WireOlm },
-    /// The sender changed their advertised **extra relay set** (#17). The new comma-joined list
-    /// of relay addresses is **E2E-encrypted** on the session; the receiver stores it as the
-    /// contact's `peer_relays` and fans out future offline mail to those relays too. See
-    /// `node::announce_relays`.
-    Relays { from: String, message: WireOlm },
+    /// The sender's **complete** relay set (`optional-relay.md` §3): whether they receive on the
+    /// Night Drop relay and the onions they added, both empty for direct only. JSON of
+    /// [`RelaySet`](crate::storage::RelaySet), **E2E-encrypted** on the session. The receiver posts
+    /// the sender's offline mail to exactly this set, and to nothing while it has none. Replaces
+    /// 0.1.x's `Relays`, which carried only extras on top of an implicit Night Drop relay. See
+    /// `node::announce_relay_set`.
+    RelaySet { from: String, message: WireOlm },
     /// "This is the Night Drop version I run" (from 0.1.27): the sender's app version, E2E-encrypted
     /// on the session, as a standing property of the chat - no history entry. Lets a later build
     /// tell which contacts are still on an older release (0.2 does not talk to 0.1.x, and must say
@@ -314,7 +316,11 @@ impl Frame {
 ///
 /// v2 added **length-prefixed, zero-padded framing** (see [`encode`]) and moved the
 /// control frames (`Closed`/`Ack`/`BackedUp`/`Verified`) behind the ratchet.
-pub const WIRE_VERSION: u8 = 2;
+///
+/// v3 is the 0.2 protocol release (`docs/design/optional-relay.md`): `RelaySet` replaces
+/// `Relays`, and the `Hello` plaintext carries the joiner's relay set. 0.1.x and 0.2 do not talk
+/// to each other, by design.
+pub const WIRE_VERSION: u8 = 3;
 
 /// Size buckets a frame is padded up to, so an observer of the (already encrypted) transport
 /// can't use length to tell frames apart — a short text, a rename, and a control signal all
