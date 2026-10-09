@@ -1246,7 +1246,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String nameContactBody(String tag) {
-    return 'A name only you see — it is never sent, and they can\'\'t see or change it. Until you set one, this contact shows as $tag, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.';
+    return 'A name only you see — it is never sent, and they can’t see or change it. Until you set one, this contact shows as $tag, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.';
   }
 
   @override

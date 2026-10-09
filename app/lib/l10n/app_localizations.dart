@@ -2137,7 +2137,7 @@ abstract class AppLocalizations {
   /// Explains the local nickname and the identity tag. Must not imply the tag verifies anyone: it is short enough to grind, so the safety number remains the real check.
   ///
   /// In en, this message translates to:
-  /// **'A name only you see — it is never sent, and they can\'\'t see or change it. Until you set one, this contact shows as {tag}, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.'**
+  /// **'A name only you see — it is never sent, and they can’t see or change it. Until you set one, this contact shows as {tag}, which comes from their key: it changes if their identity does. It is not proof of who they are — compare the safety number for that.'**
   String nameContactBody(String tag);
 
   /// Shown in a chat when nothing authenticated has arrived from the peer for a long time. Deliberately states the observation only: the app cannot tell a wiped identity from a lost phone or a holiday, and must not imply it can.

@@ -681,7 +681,9 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         ],
       ),
     );
-    controller.dispose();
+    // Not disposed here: `showDialog` returns as the dialog *starts* to close, and its TextField is
+    // still built through the exit animation. Disposing the controller now crashed the debug build
+    // ("used after being disposed", then "_dependents.isEmpty"). Unreferenced, it is collected.
     if (name != null && mounted) {
       await NightdropScope.of(context).setLocalName(widget.contactId, name);
     }

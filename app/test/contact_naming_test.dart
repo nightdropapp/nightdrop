@@ -60,4 +60,25 @@ void main() {
     expect(tag.style?.fontFamily, 'monospace');
     expect(find.byType(IdentityTag), findsNWidgets(2));
   });
+
+  // Through the real dialog, as on the phone: naming a contact from the chat's menu crashed the
+  // debug build with "_dependents.isEmpty" (test build, 2026-10-08).
+  testWidgets('naming a contact from the chat menu saves cleanly', (tester) async {
+    final core = await pumpList(tester);
+    await tester.tap(find.text('K7QF2M'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byIcon(Icons.more_vert).last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.textContaining('Name this contact'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining("can''t"), findsNothing,
+        reason: 'ICU-style doubled apostrophes are not unescaped here');
+    await tester.enterText(find.byType(TextField).last, 'Dana');
+    await tester.tap(find.text('Save'));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(core.contacts.first.localName, 'Dana');
+    expect(find.text('Dana'), findsWidgets);
+  });
 }
