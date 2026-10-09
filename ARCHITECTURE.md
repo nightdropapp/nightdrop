@@ -1290,8 +1290,12 @@ has it has run. Verified on a Galaxy S25 (2026-10-08): after a real reboot the p
 "for broadcast BootReceiver" right after the first unlock, and a message sent meanwhile notified
 without the app being opened. It took a while: for about the first 15 minutes after boot Android's
 Doze firewall blocked the app's network (`dumpsys netpolicy`: `blocked=DOZE|APP_BACKGROUND`) until a
-rule change lifted it, so delivery after a reboot can lag that long. The app was then "Optimized"
-for battery; whether "Unrestricted" (the user battery allowlist) removes the delay is being tested. Android also delivers `BOOT_COMPLETED` to an app leaving the stopped state as it starts,
+rule change lifted it, so delivery after a reboot can lag that long. That was with the app's battery
+setting on "Optimized". Set to "Unrestricted" (the user battery allowlist), the same test (2026-10-09)
+had no block at all (`allowed=…POWER_SAVE_ALLOWLIST`): Tor up 2 minutes after unlock, the waiting
+message taken from the relay at 4 minutes and notified. So the delay is the battery setting, which the
+user controls; `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` would only let the app show the system dialog
+for it. Android also delivers `BOOT_COMPLETED` to an app leaving the stopped state as it starts,
 i.e. right after a force-stop when the user opens it; the receiver stands aside when its process is
 in the foreground, because the activity then starts the engine itself.
 
