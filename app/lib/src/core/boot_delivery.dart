@@ -44,6 +44,9 @@ class BootDelivery {
       }
       return;
     }
+    // Opened meanwhile: the screen shows the lock screen (or the error) itself, and the lifecycle
+    // handler owns the service from here.
+    if (_onScreen) return;
     await BackgroundDelivery.stop(force: true);
     if (core.needsUnlock) {
       await NotificationService.show(

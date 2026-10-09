@@ -1535,6 +1535,23 @@ class RustNightdropCore extends NightdropCore {
         throw StateError('store key survived its delete');
       }
     });
+    // Everything else this identity left in the keystore. A backup snooze date, a "backed up" flag
+    // or an update-check time beside an app presenting itself as freshly installed says an identity
+    // was here (seen after a duress wipe on a phone, 2026-10-08); and a surviving "backed up" flag
+    // would make the *next* identity look backed up, so it would never be reminded to make one.
+    await step('preferences', () async {
+      for (final key in const [
+        _kBackedUp,
+        _kBackupSnoozeUntil,
+        _kProtocolNoticeDismissed,
+        _kUpdateCheckedAt,
+        _kUpdateHidden,
+        _kCoverTraffic,
+        _kBurnReceipts,
+      ]) {
+        await _secure.delete(key: key);
+      }
+    });
     String? support;
     await step('app dir', () async {
       support = (await getApplicationSupportDirectory()).path;

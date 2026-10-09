@@ -1,5 +1,6 @@
 package app.nightdrop
 
+import android.app.ActivityManager
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
@@ -31,6 +32,13 @@ class BootReceiver : BroadcastReceiver() {
         if (!isEnabled(app)) return
         // Already running (an update can land while the app is open): nothing to bring back.
         if (FlutterEngineCache.getInstance().get(MainActivity.ENGINE_ID) != null) return
+        // Being opened right now. Android delivers BOOT_COMPLETED to an app leaving the stopped
+        // state (after a force-stop) as it starts, which is usually because the user just tapped
+        // it: the broadcast then arrives before the activity has made its engine, and starting a
+        // `--boot` engine here would hand the screen a boot-path engine that posts "locked, open
+        // Night Drop" while it is being opened (test build, 2026-10-08). The activity starts the
+        // engine itself.
+        if (inForeground(app)) return
 
         val loader = FlutterInjector.instance().flutterLoader()
         loader.startInitialization(app)
@@ -41,6 +49,14 @@ class BootReceiver : BroadcastReceiver() {
             DartExecutor.DartEntrypoint(loader.findAppBundlePath(), "main"),
             listOf(BOOT_ARG),
         )
+    }
+
+    /** Whether this process is starting for, or showing, a screen the user is looking at. */
+    private fun inForeground(context: Context): Boolean {
+        val am = context.getSystemService(ActivityManager::class.java) ?: return false
+        val me = am.runningAppProcesses?.firstOrNull { it.pid == android.os.Process.myPid() }
+            ?: return false
+        return me.importance <= ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND
     }
 
     companion object {
