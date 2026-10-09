@@ -762,7 +762,7 @@
   "@backgroundDelivery": {
     "description": "Title of the background-delivery settings dialog."
   },
-  "backgroundDeliveryBody": "Keep receiving messages while Night Drop is closed. It checks over Tor and shows a permanent notification. No Google push service.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.",
+  "backgroundDeliveryBody": "Keep receiving messages while Night Drop is closed. It checks over Tor and shows a permanent notification. No Google push service. To tuck the notification away, long-press it and choose “Minimize” (or turn off “Background delivery status”); messages keep arriving.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.",
   "@backgroundDeliveryBody": {
     "description": "Explanation in the background-delivery dialog."
   },
@@ -786,7 +786,7 @@
   "@onboardingBackgroundTitle": {
     "description": "Title of the background-delivery offer shown during onboarding."
   },
-  "onboardingBackgroundBody": "Without this, Android pauses Night Drop when it’s off screen, and messages arrive only when you open it.\n\nWhen on, Night Drop keeps checking over Tor and shows a permanent notification. No Google push service. Uses some battery.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.",
+  "onboardingBackgroundBody": "Without this, Android pauses Night Drop when it’s off screen, and messages arrive only when you open it.\n\nWhen on, Night Drop keeps checking over Tor and shows a permanent notification. No Google push service. Uses some battery. To tuck the notification away, long-press it and choose “Minimize” (or turn off “Background delivery status”); messages keep arriving.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.",
   "@onboardingBackgroundBody": {
     "description": "Explanation of what background delivery does, its privacy properties and its costs, shown during onboarding."
   },

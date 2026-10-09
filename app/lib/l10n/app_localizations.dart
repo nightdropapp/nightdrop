@@ -1063,7 +1063,7 @@ abstract class AppLocalizations {
   /// Explanation in the background-delivery dialog.
   ///
   /// In en, this message translates to:
-  /// **'Keep receiving messages while Night Drop is closed. It checks over Tor and shows a permanent notification. No Google push service.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.'**
+  /// **'Keep receiving messages while Night Drop is closed. It checks over Tor and shows a permanent notification. No Google push service. To tuck the notification away, long-press it and choose “Minimize” (or turn off “Background delivery status”); messages keep arriving.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.'**
   String get backgroundDeliveryBody;
 
   /// Title of the one setup page shown before an identity is created.
@@ -1099,7 +1099,7 @@ abstract class AppLocalizations {
   /// Explanation of what background delivery does, its privacy properties and its costs, shown during onboarding.
   ///
   /// In en, this message translates to:
-  /// **'Without this, Android pauses Night Drop when it’s off screen, and messages arrive only when you open it.\n\nWhen on, Night Drop keeps checking over Tor and shows a permanent notification. No Google push service. Uses some battery.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.'**
+  /// **'Without this, Android pauses Night Drop when it’s off screen, and messages arrive only when you open it.\n\nWhen on, Night Drop keeps checking over Tor and shows a permanent notification. No Google push service. Uses some battery. To tuck the notification away, long-press it and choose “Minimize” (or turn off “Background delivery status”); messages keep arriving.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.'**
   String get onboardingBackgroundBody;
 
   /// Button accepting background delivery during onboarding.
