@@ -185,6 +185,13 @@ today to restore keys after a restart). So:
 create nor join one (decided), not even once through the Night Drop rendezvous (decided 2026-10-05).
 QR stays available.
 
+**Short codes meet only on shared relays (decided 2026-10-09).** Both sides look for each other on
+their own lists (`Node::rendezvous_relays`), never on a relay they removed. A code therefore works
+when the two lists share a relay, which by default is Night Drop. Someone who removed Night Drop
+and kept only their own relay can pair by short code with people on that relay, and by QR with
+everyone else. A join that finds nobody says so and points to the QR code, rather than blaming
+the network.
+
 ## 6. What else depends on the relay
 
 | Feature | With relays | Direct only |
@@ -290,7 +297,7 @@ Changing relay TTLs. Groups (`group-chat.md`, 0.3), which will inherit whatever 
 None remaining.
 
 **Decided 2026-10-09:** existing contacts are seeded, not unknown (§3 rule 5); cover traffic posts
-to a random contact's pair handle (§6).
+to a random contact's pair handle (§6); short codes meet only on relays both lists share (§5).
 
 **Decided 2026-10-05:** no one-off short code for direct-only users (they pair by QR only); no
 "I'm online" signal, built switched off (§4); retry cap 5 min while open, 15 min in the background
