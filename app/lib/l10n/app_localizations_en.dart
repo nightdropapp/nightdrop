@@ -581,28 +581,27 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get backgroundDeliveryBody =>
-      'Keep receiving messages while Night Drop is in the background. This runs a foreground service with a persistent notification and checks for messages over Tor — no push provider, nothing leaves your device to a server.';
+      'Keep receiving messages while Night Drop is closed. It checks over Tor and shows a permanent notification. No Google push service.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.';
 
   @override
   String get setupTitle => 'Before you start';
 
   @override
   String get setupIntro =>
-      'A few choices change what Night Drop does on the network from the start. Everything here is off unless you turn it on.';
+      'These change what Night Drop does on the network. All are off unless you turn them on.';
 
   @override
   String get setupCoverTitle => 'Cover traffic';
 
   @override
-  String get setupChangeLater =>
-      'You can change each of these later from the menu on the main screen.';
+  String get setupChangeLater => 'You can change these later in the menu.';
 
   @override
   String get onboardingBackgroundTitle => 'Receive messages in the background?';
 
   @override
   String get onboardingBackgroundBody =>
-      'Android suspends Night Drop whenever it is not on screen, so without this, messages only arrive once you open the app.\n\nTurning it on keeps Night Drop running with a permanent notification and checks for messages over Tor. There is no push service — nothing is registered with Google, and nothing about you leaves your device.\n\nIt uses some battery. If you set an app lock later, your key stays in memory while locked so messages can still be decrypted.\n\nYou can change this any time under Background delivery in the menu.';
+      'Without this, Android pauses Night Drop when it’s off screen, and messages arrive only when you open it.\n\nWhen on, Night Drop keeps checking over Tor and shows a permanent notification. No Google push service. Uses some battery.\n\nTo keep receiving right after a restart, set Night Drop’s battery use to “Unrestricted” in Android’s app settings. On “Optimized”, it can take about 15 minutes.';
 
   @override
   String get onboardingBackgroundEnable => 'Turn on';
@@ -1062,17 +1061,20 @@ class AppLocalizationsEn extends AppLocalizations {
       'This must be different from the code that opens your messages.';
 
   @override
-  String get duressWarnTitle => 'Your wipe code is set';
+  String get duressWarnTitle => 'Before you set this';
 
   @override
   String get duressWarnBody =>
-      'You cannot practise this. Entering the wipe code destroys everything on this device, every time, with no confirmation and no undo — that is what makes it work under pressure.\n\nWe have checked that the code you just chose does work. You will not be reminded that a wipe code is set: showing it anywhere would tell whoever picks up your phone that it exists.\n\nYour contacts are not told anything. The wipe code deliberately gives the app no way to read your messages, which also leaves it no way to send on your behalf — so your contacts simply stop hearing from you. Agree on another way to reach each other before you need it.';
+      'You cannot practise this. Entering the wipe code destroys everything on this device, every time, with no confirmation and no undo — that is what makes it work under pressure.\n\nNight Drop checks that the code works when it sets it. You will not be reminded that a wipe code is set: showing it anywhere would tell whoever picks up your phone that it exists.\n\nYour contacts are not told anything. The wipe code deliberately gives the app no way to read your messages, which also leaves it no way to send on your behalf — so your contacts simply stop hearing from you. Agree on another way to reach each other before you need it.';
 
   @override
-  String get duressUnderstand => 'I understand';
+  String get duressUnderstand => 'I understand — set it';
 
   @override
   String get duressDone => 'Wipe code set.';
+
+  @override
+  String get duressCancelled => 'Cancelled — your wipe code was not changed.';
 
   @override
   String get duressCleared => 'Wipe code removed.';
@@ -1220,11 +1222,11 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get coverTrafficBody =>
-      'Sends occasional dummy mail to yourself, so the server that holds your offline messages sees activity it can\'t tell apart from real messages. Without it, that server can build a picture of when you\'re awake and active — not what you say, or to whom, but when.';
+      'Sends dummy messages to yourself now and then, so the relay can’t tell when you’re really active.';
 
   @override
   String get coverTrafficLimit =>
-      'This raises the cost of watching you; it does not stop it. Real messages are still sent on top of the dummy ones, so someone patient can still see when you\'re genuinely busy. It also costs battery and data, and only runs while the app is open (or with background delivery on).';
+      'It makes watching you harder but does not stop it, and costs battery and data.';
 
   @override
   String get coverTrafficOn => 'Cover traffic is on.';

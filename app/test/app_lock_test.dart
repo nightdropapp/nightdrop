@@ -267,20 +267,25 @@ void main() {
         reason: 'the confirmation gate must be reached, not a crash');
   });
 
-  // The warning that a wipe cannot be rehearsed is the one place the user is told (duress-wipe.md
-  // §6). On the phone, arming from the end of the app-lock flow set the code and showed nothing.
-  testWidgets('arming a wipe code from the app-lock flow shows its warning', (tester) async {
-    final core = _EnableCore();
+  /// Pump an app with a button that opens app-lock settings, and walk it to the wipe-code warning.
+  Future<_EnableCore> toWipeWarning(WidgetTester tester,
+      {_EnableCore? core, ValueNotifier<int>? swap}) async {
+    final c = core ?? _EnableCore();
+    Widget button(BuildContext context) => ElevatedButton(
+          onPressed: () => showAppLockSettings(context, c),
+          child: const Text('open'),
+        );
     await tester.pumpWidget(MaterialApp(
       localizationsDelegates: AppLocalizations.localizationsDelegates,
       supportedLocales: AppLocalizations.supportedLocales,
       home: Scaffold(
-        body: Builder(
-          builder: (context) => ElevatedButton(
-            onPressed: () => showAppLockSettings(context, core),
-            child: const Text('open'),
-          ),
-        ),
+        body: swap == null
+            ? Builder(builder: button)
+            : ValueListenableBuilder<int>(
+                valueListenable: swap,
+                // A new element each time: the old context is unmounted.
+                builder: (_, n, __) => Builder(key: ValueKey(n), builder: button),
+              ),
       ),
     ));
     await tester.tap(find.text('open'));
@@ -299,53 +304,56 @@ void main() {
     await tester.enterText(find.byType(TextField).at(1), '246802');
     await tester.tap(find.widgetWithText(FilledButton, 'Set a wipe code'));
     await tester.pumpAndSettle();
+    return c;
+  }
 
+  // The warning (duress-wipe.md §6) comes before anything is set, so the user can still back out.
+  testWidgets('the wipe-code warning comes first, and only "set it" arms', (tester) async {
+    final core = await toWipeWarning(tester);
+    expect(find.text('Before you set this'), findsOneWidget);
+    expect(core.duressArmedWith, isNull, reason: 'nothing is set while the warning is up');
+
+    await tester.tap(find.text('I understand — set it'));
+    await tester.pumpAndSettle();
     expect(core.duressArmedWith, '246802');
-    expect(find.text('Your wipe code is set'), findsOneWidget,
-        reason: 'the cannot-be-rehearsed warning must follow arming');
+    expect(find.text('Wipe code set.'), findsOneWidget);
   });
 
-  // Arming takes seconds on a phone, and the screen that started it can be rebuilt away meanwhile.
-  // The warning must still be shown: it is the only place the user is told.
-  testWidgets('the wipe-code warning survives the starting screen going away', (tester) async {
-    final core = _EnableCore()..onArm = () {};
-    final swap = ValueNotifier(0);
-    await tester.pumpWidget(MaterialApp(
-      localizationsDelegates: AppLocalizations.localizationsDelegates,
-      supportedLocales: AppLocalizations.supportedLocales,
-      home: Scaffold(
-        body: ValueListenableBuilder<int>(
-          valueListenable: swap,
-          builder: (_, n, __) => Builder(
-            key: ValueKey(n), // a new element each time: the old context is unmounted
-            builder: (context) => ElevatedButton(
-              onPressed: () => showAppLockSettings(context, core),
-              child: const Text('open'),
-            ),
-          ),
-        ),
-      ),
-    ));
-    core.onArm = () => swap.value++;
-    await tester.tap(find.text('open'));
+  testWidgets('cancelling the wipe-code warning sets nothing and says so', (tester) async {
+    final core = await toWipeWarning(tester);
+    await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Use a PIN'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), '135790');
-    await tester.enterText(find.byType(TextField).at(1), '135790');
-    await tester.tap(find.text('Turn on app lock'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('I understand — turn it on'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Set a wipe code'));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField).at(0), '246802');
-    await tester.enterText(find.byType(TextField).at(1), '246802');
-    await tester.tap(find.widgetWithText(FilledButton, 'Set a wipe code'));
-    await tester.pumpAndSettle();
+    expect(core.duressArmedWith, isNull);
+    expect(find.text('Cancelled — your wipe code was not changed.'), findsOneWidget);
+  });
 
-    expect(core.duressArmedWith, '246802');
-    expect(find.text('Your wipe code is set'), findsOneWidget);
+  testWidgets('the back button cancels the wipe-code warning', (tester) async {
+    final core = await toWipeWarning(tester);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(core.duressArmedWith, isNull);
+    expect(find.text('Before you set this'), findsNothing);
+    expect(find.text('Cancelled — your wipe code was not changed.'), findsOneWidget);
+  });
+
+  // The checks before the warning take seconds on a phone, and the screen that started the flow
+  // can be rebuilt away meanwhile. The warning must still be shown: it is the only place the user
+  // is told.
+  testWidgets('the wipe-code warning survives the starting screen going away', (tester) async {
+    final swap = ValueNotifier(0);
+    final core = _EnableCore()..onVerify = () => swap.value++;
+    await toWipeWarning(tester, core: core, swap: swap);
+    expect(find.text('Before you set this'), findsOneWidget);
+  });
+
+  testWidgets('a wipe code equal to the unlock secret is refused before the warning',
+      (tester) async {
+    final core = _EnableCore()..normalSecret = '246802';
+    await toWipeWarning(tester, core: core);
+    expect(find.text('Before you set this'), findsNothing);
+    expect(core.duressArmedWith, isNull);
+    expect(find.text('This must be different from the code that opens your messages.'),
+        findsOneWidget);
   });
 
   // With the keyboard up, the confirm field and its error are out of sight. A rejected press must
@@ -530,15 +538,24 @@ class _EnableCore extends MockNightdropCore {
   String? enabledWith;
   String? duressArmedWith;
 
-  /// Runs while arming, standing in for whatever rebuilds the screen during the slow derivation.
-  void Function()? onArm;
+  /// Runs during the secret check, standing in for whatever rebuilds the screen during the slow
+  /// derivation on a phone.
+  void Function()? onVerify;
+
+  /// What `verifyStoreSecret` accepts: the normal unlock secret.
+  String normalSecret = '135790';
+
+  @override
+  Future<bool> verifyStoreSecret(String secret) async {
+    onVerify?.call();
+    // Let a frame through, as the seconds of key derivation do on a phone.
+    await WidgetsBinding.instance.endOfFrame;
+    return secret == normalSecret;
+  }
 
   @override
   Future<void> setDuressSecret(String secret, String duress) async {
     duressArmedWith = duress;
-    onArm?.call();
-    // Let a frame through, as the seconds of key derivation do on a phone.
-    await WidgetsBinding.instance.endOfFrame;
   }
 
   @override

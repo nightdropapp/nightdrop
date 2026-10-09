@@ -161,36 +161,55 @@ Future<void> _armDuress(BuildContext context, NightdropCore core, String current
   if (duress == null || !context.mounted) return;
 
   final messenger = ScaffoldMessenger.of(context);
-  // The navigator, not the caller's context, shows the warning. Arming takes seconds (key
-  // derivation, then a self-check), and the screen that started this can be rebuilt away in that
-  // time; with `context` the warning was then skipped without a sound while the code stayed armed,
-  // and this warning is the only place the user is ever told (duress-wipe.md §6). Seen on a phone.
+  // A result replaces whatever is showing ("App lock is on." from the step before), instead of
+  // queueing behind it and appearing seconds after the dialog has gone.
+  void say(String text) => messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(content: Text(text)));
+  // The navigator, not the caller's context, shows the warning: the checks below take seconds (key
+  // derivation), and the screen that started this can be rebuilt away in that time. With `context`
+  // the warning was once skipped without a sound (phone, 2026-10-08).
   final navigator = Navigator.of(context);
-  // Arm first, so the warning is only shown for a code that actually took. The core self-checks
-  // the slot it writes and rolls back if it fails, so reaching the dialog below means it works.
-  try {
-    await core.setDuressSecret(current, duress);
-  } catch (_) {
-    // The secret was verified above, so this is the other rejection: a code that would also open
-    // the normal slot, and so could never reach the duress one.
-    messenger.showSnackBar(SnackBar(content: Text(l10n.duressSame)));
+  // Refused before the warning, so it is only ever shown for a code that can be set: a wipe code
+  // that also opens the normal slot could never reach the duress one. This is the one rejection
+  // arming has; checking it first is what lets the warning come *before* anything changes.
+  if (await core.verifyStoreSecret(duress)) {
+    say(l10n.duressSame);
     return;
   }
   if (!navigator.mounted) return;
-  await showDialog<void>(
+  // Warn first, arm after. The user can still back out here — Cancel, or the back button — and
+  // nothing has changed: an existing wipe code stays as it was. Arming first and disarming on cancel
+  // could not do that for a replacement, whose old code is gone once the new one is written.
+  final confirmed = await showDialog<bool>(
     context: navigator.context,
     builder: (context) => AlertDialog(
       title: Text(l10n.duressWarnTitle),
       content: SingleChildScrollView(child: Text(l10n.duressWarnBody)),
       actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(false),
+          child: Text(l10n.cancel),
+        ),
         FilledButton(
-          onPressed: () => Navigator.of(context).pop(),
+          onPressed: () => Navigator.of(context).pop(true),
           child: Text(l10n.duressUnderstand),
         ),
       ],
     ),
   );
-  messenger.showSnackBar(SnackBar(content: Text(l10n.duressDone)));
+  if (confirmed != true) {
+    say(l10n.duressCancelled);
+    return;
+  }
+  // The core self-checks the slot it writes and rolls back if the check fails.
+  try {
+    await core.setDuressSecret(current, duress);
+  } catch (_) {
+    say(l10n.duressSame);
+    return;
+  }
+  say(l10n.duressDone);
 }
 
 /// Disarm.

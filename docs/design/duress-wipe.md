@@ -144,7 +144,11 @@ re-creates exactly the tell §3 removes. Settings offers two actions — *set or
 secret*, and *remove it* — with no state readout, and removing when nothing is armed is a
 successful no-op that looks identical to removing a real one.
 
-**The warning appears at arming time and nowhere else** (decision of 2026-08-01). This is not a
+**The warning appears at arming time and nowhere else** (decision of 2026-08-01). It comes **before** the code is
+written (from 2026-10-09), with Cancel; Cancel or the back button changes nothing and says so, which
+also keeps an existing code when a replacement is abandoned. The one way arming can be refused (a
+wipe code that also opens the normal slot) is checked before the warning, so it is never shown for a
+code that cannot be set. This is not a
 matter of not nagging: a persistent mention anywhere — a banner, a periodic reminder, a menu row
 reading "Wipe code: on" — would reveal to whoever picks up the phone that duress is armed. The
 arming flow is the only place the warning can live without becoming the tell. Everything after is

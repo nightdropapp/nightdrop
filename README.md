@@ -24,6 +24,23 @@ downloading a privacy tool.
 Downloads on both are the same artifacts, and every release is signed — see
 [`docs/reproducible-builds.md`](docs/reproducible-builds.md) to verify a build yourself.
 
+## Receiving messages in the background (Android)
+
+Turn on **Background delivery** (offered at setup, or in the menu). Night Drop then keeps checking
+for messages over Tor and shows a permanent notification; there is no Google push service. It comes
+back by itself after a restart or an update.
+
+**Set Night Drop's battery use to "Unrestricted"** in Android's settings for the app (on Samsung:
+Settings › Apps › Night Drop › Battery). On "Optimized", Android cuts the app off from the network
+for about 15 minutes after a restart, so messages wait that long; on "Unrestricted" they arrive as
+soon as Tor is up (measured on a Galaxy S25: 4 minutes after unlocking, against 16). Night Drop does
+not ask for this itself; it is your setting to make.
+
+What background delivery uses: the notification permission (Android 13+, asked when you turn it on),
+a foreground service (the permanent notification; you can minimise or hide it, and messages still
+arrive), and starting after a restart or update. If you set an app lock, Night Drop cannot open your
+messages after a restart until you unlock it once, and says so in a notification.
+
 ## Status
 
 **Feature-complete and verified end to end** (Rust and Flutter test suites passing, `cargo
