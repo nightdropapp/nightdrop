@@ -150,108 +150,133 @@ enum _DuressAction { set, remove }
 /// The warning lands at arming and nowhere else — a standing reminder elsewhere would be the tell.
 Future<void> _setDuress(BuildContext context, NightdropCore core) async {
   final current = await _askVerifiedSecret(context, core);
-  if (current == null || !context.mounted) return;
+  if (current is! String || !context.mounted) return;
   await _armDuress(context, core, current);
 }
 
 /// Ask for a wipe code and arm it, given an already-verified normal secret.
+///
+/// Every slow step (each is a deliberately expensive key derivation, seconds on a phone) runs while
+/// its dialog is still open and showing a spinner, and the dialog only closes when the step is done.
+/// Done between dialogs instead, the screen went blank for seconds after each tap, which looked as
+/// though the flow had been abandoned (phone, 2026-10-09).
 Future<void> _armDuress(BuildContext context, NightdropCore core, String current) async {
   final l10n = AppLocalizations.of(context)!;
-  final duress = await _askNewDuress(context);
-  if (duress == null || !context.mounted) return;
-
   final messenger = ScaffoldMessenger.of(context);
   // A result replaces whatever is showing ("App lock is on." from the step before), instead of
   // queueing behind it and appearing seconds after the dialog has gone.
   void say(String text) => messenger
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
-  // The navigator, not the caller's context, shows the warning: the checks below take seconds (key
-  // derivation), and the screen that started this can be rebuilt away in that time. With `context`
-  // the warning was once skipped without a sound (phone, 2026-10-08).
+  // The navigator, not the caller's context, shows the dialogs: the screen that started this can be
+  // rebuilt away while a slow step runs, and with `context` the warning was once skipped without a
+  // sound (phone, 2026-10-08).
   final navigator = Navigator.of(context);
-  // Refused before the warning, so it is only ever shown for a code that can be set: a wipe code
-  // that also opens the normal slot could never reach the duress one. This is the one rejection
-  // arming has; checking it first is what lets the warning come *before* anything changes.
-  if (await core.verifyStoreSecret(duress)) {
-    say(l10n.duressSame);
-    return;
-  }
-  if (!navigator.mounted) return;
+
+  // The new code is checked inside its own dialog: one that also opens the normal slot could never
+  // reach the duress one, and that is the one refusal arming has. So the warning below is only ever
+  // shown for a code that can be set.
+  final duress = await _askNewDuress(navigator.context, core);
+  if (duress == null || !navigator.mounted) return;
+
   // Warn first, arm after. The user can still back out here — Cancel, or the back button — and
   // nothing has changed: an existing wipe code stays as it was. Arming first and disarming on cancel
   // could not do that for a replacement, whose old code is gone once the new one is written.
-  final confirmed = await showDialog<bool>(
+  final armed = await showDialog<bool>(
     context: navigator.context,
-    builder: (context) => AlertDialog(
+    builder: (context) => _BusyDialog(
       title: Text(l10n.duressWarnTitle),
       content: SingleChildScrollView(child: Text(l10n.duressWarnBody)),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(l10n.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(l10n.duressUnderstand),
-        ),
-      ],
+      cancelLabel: l10n.cancel,
+      actionLabel: l10n.duressUnderstand,
+      // The core self-checks the slot it writes and rolls back if the check fails.
+      action: () async {
+        try {
+          await core.setDuressSecret(current, duress);
+          return const _Done(true);
+        } catch (_) {
+          return const _Done(false);
+        }
+      },
     ),
   );
-  if (confirmed != true) {
+  if (armed == null) {
     say(l10n.duressCancelled);
-    return;
+  } else {
+    say(armed ? l10n.duressDone : l10n.duressSame);
   }
-  // The core self-checks the slot it writes and rolls back if the check fails.
-  try {
-    await core.setDuressSecret(current, duress);
-  } catch (_) {
-    say(l10n.duressSame);
-    return;
-  }
-  say(l10n.duressDone);
 }
 
-/// Disarm.
+/// Disarm. The removal runs inside the secret dialog, after the secret checks out.
 Future<void> _removeDuress(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
-  final current = await _askVerifiedSecret(context, core);
-  if (current == null || !context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
-  try {
-    await core.clearDuressSecret(current);
-    messenger.showSnackBar(SnackBar(content: Text(l10n.duressCleared)));
-  } catch (_) {
-    messenger.showSnackBar(SnackBar(content: Text(l10n.appLockWrongSecret)));
-  }
+  final removed = await _askVerifiedSecret(
+    context,
+    core,
+    then: (current) async {
+      try {
+        await core.clearDuressSecret(current);
+        return true;
+      } catch (_) {
+        return false;
+      }
+    },
+  );
+  if (removed == null) return;
+  messenger
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+        content: Text(removed == true ? l10n.duressCleared : l10n.appLockWrongSecret)));
 }
 
 /// Ask for the current secret and **check it before returning**, so a wrong one is rejected on the
-/// spot instead of surfacing several screens later. Returns null if the user cancels or gives up.
-Future<String?> _askVerifiedSecret(BuildContext context, NightdropCore core) async {
+/// spot instead of surfacing several screens later. The check runs with the dialog still open: a
+/// wrong secret shows its error in place, and nothing closes until the secret is right. With [then],
+/// that next step runs inside the same dialog too, and its result is returned instead of the secret.
+/// Null if the user cancels.
+Future<Object?> _askVerifiedSecret(
+  BuildContext context,
+  NightdropCore core, {
+  Future<Object?> Function(String secret)? then,
+}) async {
   final l10n = AppLocalizations.of(context)!;
-  String? error;
-  while (true) {
-    if (!context.mounted) return null;
-    // Each attempt gets a fresh dialog owning its own controller, so nothing here has to outlive
-    // the dialog it belongs to — which is what made the previous shared-controller version tear
-    // one down mid-animation.
-    final secret = await _askCurrentSecret(
-      context,
-      label: l10n.duressCurrentSecret,
-      error: error,
-    );
-    if (secret == null) return null;
-    if (await core.verifyStoreSecret(secret)) return secret;
-    // Generic, and identical for "wrong secret" and "that's the wipe code" — this screen never
-    // confirms to anyone which of the two they typed.
-    error = l10n.appLockWrongSecret;
-  }
+  final controller = TextEditingController();
+  return showDialog<Object?>(
+    context: context,
+    builder: (context) => _Owns(
+      disposer: controller.dispose,
+      child: _BusyDialog(
+        content: (error, submit) => TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration: InputDecoration(labelText: l10n.duressCurrentSecret, errorText: error),
+          onSubmitted: (_) => submit(),
+        ),
+        cancelLabel: l10n.cancel,
+        actionLabel: l10n.confirm,
+        action: () async {
+          final secret = controller.text;
+          if (secret.isEmpty) return const _Retry(null);
+          if (!await core.verifyStoreSecret(secret)) {
+            // Generic, and identical for "wrong secret" and "that's the wipe code" — this screen
+            // never confirms to anyone which of the two they typed.
+            controller.clear();
+            return _Retry(l10n.appLockWrongSecret);
+          }
+          return _Done(then == null ? secret : await then(secret));
+        },
+      ),
+    ),
+  );
 }
 
 /// Ask twice for a new wipe code. Minimum length follows the same rule as the normal secret: a
 /// digits-only code is a PIN (6), anything else is a passphrase (12).
-Future<String?> _askNewDuress(BuildContext context) async {
+Future<String?> _askNewDuress(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
   final first = TextEditingController();
   final second = TextEditingController();
@@ -260,6 +285,7 @@ Future<String?> _askNewDuress(BuildContext context) async {
   // field's action key moves focus to the second, and the framework scrolls it into view.
   final secondFocus = FocusNode();
   String? error;
+  var busy = false;
   final result = await showDialog<String>(
     context: context,
     builder: (context) => _Owns(
@@ -270,19 +296,27 @@ Future<String?> _askNewDuress(BuildContext context) async {
       },
       child: StatefulBuilder(
       builder: (context, setState) {
-        void submit() {
+        Future<void> submit() async {
+          if (busy) return;
           final a = first.text, b = second.text;
           final digitsOnly = RegExp(r'^\d+$').hasMatch(a);
+          String? problem;
+          if (a.length < (digitsOnly ? 6 : 12)) {
+            problem = digitsOnly ? l10n.appLockTooShortPin : l10n.appLockTooShortPassphrase;
+          } else if (a != b) {
+            problem = l10n.appLockMismatch;
+          } else {
+            // Slow (key derivation), so the dialog stays up with a spinner while it runs.
+            setState(() => busy = true);
+            final opensLock = await core.verifyStoreSecret(a);
+            if (!context.mounted) return;
+            if (opensLock) problem = l10n.duressSame;
+          }
           setState(() {
-            if (a.length < (digitsOnly ? 6 : 12)) {
-              error = digitsOnly ? l10n.appLockTooShortPin : l10n.appLockTooShortPassphrase;
-            } else if (a != b) {
-              error = l10n.appLockMismatch;
-            } else {
-              error = null;
-            }
+            busy = false;
+            error = problem;
           });
-          if (error == null) {
+          if (problem == null) {
             Navigator.of(context).pop(a);
           } else {
             // The error sits under the confirm field, which the keyboard hides. Focusing it scrolls
@@ -292,7 +326,9 @@ Future<String?> _askNewDuress(BuildContext context) async {
           }
         }
 
-        return AlertDialog(
+        return PopScope(
+          canPop: !busy,
+          child: AlertDialog(
           title: Text(l10n.duressTitle),
           content: SingleChildScrollView(
             child: Column(
@@ -330,60 +366,21 @@ Future<String?> _askNewDuress(BuildContext context) async {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: busy ? null : () => Navigator.of(context).pop(),
               child: Text(l10n.cancel),
             ),
-            FilledButton(onPressed: submit, child: Text(l10n.duressSet)),
+            FilledButton(
+              onPressed: busy ? null : submit,
+              child: busy ? const _Spinner() : Text(l10n.duressSet),
+            ),
           ],
+          ),
         );
         },
       ),
     ),
   );
   return result;
-}
-
-/// One obscured field for the secret the user already has. `error` re-displays a previous failure.
-/// The `controller` is owned by the caller, so a retry loop can reuse it (see
-/// [_askVerifiedSecret]) instead of disposing one that a closing dialog still references.
-Future<String?> _askCurrentSecret(
-  BuildContext context, {
-  required String label,
-  String? error,
-}) async {
-  final l10n = AppLocalizations.of(context)!;
-  // Created here and owned by the dialog: each attempt gets its own, disposed when that dialog's
-  // element unmounts. A controller shared across attempts and disposed at the end of the loop is
-  // torn down while the last dialog is still animating out.
-  final controller = TextEditingController();
-  final secret = await showDialog<String>(
-    context: context,
-    builder: (context) => _Owns(
-      disposer: controller.dispose,
-      child: AlertDialog(
-        content: TextField(
-        controller: controller,
-        autofocus: true,
-        obscureText: true,
-        autocorrect: false,
-        enableSuggestions: false,
-        decoration: InputDecoration(labelText: label, errorText: error),
-        onSubmitted: (v) => Navigator.of(context).pop(v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.cancel),
-        ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: Text(l10n.confirm),
-          ),
-        ],
-      ),
-    ),
-  );
-  return (secret == null || secret.isEmpty) ? null : secret;
 }
 
 class _Choice extends StatelessWidget {
@@ -429,28 +426,23 @@ Future<void> _enable(BuildContext context, NightdropCore core,
   final secret = await _askNewSecret(context, usePin: usePin, minLength: minLength);
   if (secret == null || !context.mounted) return;
 
-  // Last gate, because this is the irreversible part: there is no recovery path by design.
-  final confirmed = await showDialog<bool>(
+  // Last gate, because this is the irreversible part: there is no recovery path by design. The lock
+  // is written while this dialog is still up (a key derivation, seconds on a phone).
+  final enabled = await showDialog<bool>(
     context: context,
-    builder: (context) => AlertDialog(
+    builder: (context) => _BusyDialog(
       title: Text(l10n.appLockEnable),
       content: Text(l10n.appLockWarnNoRecovery),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(false),
-          child: Text(l10n.cancel),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.of(context).pop(true),
-          child: Text(l10n.appLockIUnderstand),
-        ),
-      ],
+      cancelLabel: l10n.cancel,
+      actionLabel: l10n.appLockIUnderstand,
+      action: () async {
+        await core.enableStoreLock(secret);
+        return const _Done(true);
+      },
     ),
   );
-  if (confirmed != true || !context.mounted) return;
+  if (enabled != true || !context.mounted) return;
 
-  await core.enableStoreLock(secret);
-  if (!context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
   messenger.showSnackBar(SnackBar(content: Text(l10n.appLockEnabled)));
   // Background delivery keeps the key resident while locked; say so rather than letting the user
@@ -491,46 +483,43 @@ Future<void> _enable(BuildContext context, NightdropCore core,
 
 Future<void> _disable(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
+  final messenger = ScaffoldMessenger.of(context);
   final controller = TextEditingController();
-  final secret = await showDialog<String>(
+  // The removal runs with the dialog open: a wrong secret shows its error in place (the core proves
+  // knowledge before removing anything), and the dialog closes only once the lock is gone.
+  final disabled = await showDialog<bool>(
     context: context,
     builder: (context) => _Owns(
       disposer: controller.dispose,
-      child: AlertDialog(
+      child: _BusyDialog(
         title: Text(l10n.appLockDisable),
-      content: TextField(
-        controller: controller,
-        autofocus: true,
-        obscureText: true,
-        autocorrect: false,
-        enableSuggestions: false,
-        decoration: InputDecoration(labelText: l10n.appLockCurrentSecret),
-        onSubmitted: (v) => Navigator.of(context).pop(v),
-      ),
-      actions: [
-        TextButton(
-          onPressed: () => Navigator.of(context).pop(),
-          child: Text(l10n.cancel),
+        content: (error, submit) => TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          decoration:
+              InputDecoration(labelText: l10n.appLockCurrentSecret, errorText: error),
+          onSubmitted: (_) => submit(),
         ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: Text(l10n.appLockDisable),
-          ),
-        ],
+        cancelLabel: l10n.cancel,
+        actionLabel: l10n.appLockDisable,
+        action: () async {
+          if (controller.text.isEmpty) return const _Retry(null);
+          try {
+            await core.disableStoreLock(controller.text);
+            return const _Done(true);
+          } catch (_) {
+            controller.clear();
+            return _Retry(l10n.appLockWrongSecret);
+          }
+        },
       ),
     ),
   );
-  if (secret == null || secret.isEmpty || !context.mounted) return;
-  try {
-    await core.disableStoreLock(secret);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(l10n.appLockDisabled)));
-  } catch (_) {
-    // A wrong secret changes nothing (the core proves knowledge before removing the lock).
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(l10n.appLockWrongSecret)));
+  if (disabled == true) {
+    messenger.showSnackBar(SnackBar(content: Text(l10n.appLockDisabled)));
   }
 }
 
@@ -648,4 +637,102 @@ class _OwnsState extends State<_Owns> {
 
   @override
   Widget build(BuildContext context) => widget.child;
+}
+
+/// What a [_BusyDialog] action produced: close with [value], or stay open showing [error].
+sealed class _Outcome {
+  const _Outcome();
+}
+
+class _Done extends _Outcome {
+  const _Done(this.value);
+  final Object? value;
+}
+
+class _Retry extends _Outcome {
+  const _Retry(this.error);
+  final String? error;
+}
+
+/// A dialog whose confirm button runs a slow [action] **while the dialog stays open**: a spinner in
+/// the button, both buttons disabled, back blocked. The action either finishes it ([_Done], which
+/// pops with its value) or keeps it open with an error shown in place ([_Retry]). Cancel pops null.
+///
+/// Exists because the app lock's steps are deliberately slow key derivations, and running them
+/// after the dialog had closed left the screen blank for seconds between dialogs.
+class _BusyDialog extends StatefulWidget {
+  const _BusyDialog({
+    this.title,
+    required this.content,
+    required this.cancelLabel,
+    required this.actionLabel,
+    required this.action,
+  });
+
+  final Widget? title;
+
+  /// A widget, or a `Widget Function(String? error, VoidCallback submit)` for a field that shows the
+  /// latest [_Retry] error and submits from the keyboard's action key.
+  final Object content;
+  final String cancelLabel;
+  final String actionLabel;
+  final Future<_Outcome> Function() action;
+
+  @override
+  State<_BusyDialog> createState() => _BusyDialogState();
+}
+
+class _BusyDialogState extends State<_BusyDialog> {
+  bool _busy = false;
+  String? _error;
+
+  Future<void> _run() async {
+    if (_busy) return;
+    setState(() => _busy = true);
+    final outcome = await widget.action();
+    if (!mounted) return;
+    switch (outcome) {
+      case _Done(:final value):
+        Navigator.of(context).pop(value);
+      case _Retry(:final error):
+        setState(() {
+          _busy = false;
+          _error = error;
+        });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final content = widget.content;
+    final body = content is Widget Function(String?, VoidCallback)
+        ? content(_error, _run)
+        : content as Widget;
+    return PopScope(
+      canPop: !_busy,
+      child: AlertDialog(
+        title: widget.title,
+        content: body,
+        actions: [
+          TextButton(
+            onPressed: _busy ? null : () => Navigator.of(context).pop(),
+            child: Text(widget.cancelLabel),
+          ),
+          FilledButton(
+            onPressed: _busy ? null : _run,
+            child: _busy ? const _Spinner() : Text(widget.actionLabel),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The small spinner shown in a button while its action runs.
+class _Spinner extends StatelessWidget {
+  const _Spinner();
+
+  @override
+  Widget build(BuildContext context) =>
+      const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2));
 }

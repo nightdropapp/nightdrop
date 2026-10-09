@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:night_drop/l10n/app_localizations.dart';
@@ -356,6 +358,62 @@ void main() {
         findsOneWidget);
   });
 
+  // Each step is a slow key derivation on a phone. It must run with its dialog still up and a
+  // spinner showing; run after the dialog closed, the screen sat blank for seconds between dialogs
+  // (phone, 2026-10-09).
+  testWidgets('arming runs inside the warning, with a spinner, and nothing blank', (tester) async {
+    final core = await toWipeWarning(tester);
+    core.armGate = Completer<void>();
+    await tester.tap(find.text('I understand — set it'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('Before you set this'), findsOneWidget, reason: 'still open while arming');
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(core.duressArmedWith, isNull);
+
+    core.armGate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.text('Before you set this'), findsNothing);
+    expect(core.duressArmedWith, '246802');
+    expect(find.text('Wipe code set.'), findsOneWidget);
+  });
+
+  testWidgets('turning the lock on runs inside its confirmation, with a spinner', (tester) async {
+    final core = _EnableCore()..enableGate = Completer<void>();
+    await tester.pumpWidget(MaterialApp(
+      localizationsDelegates: AppLocalizations.localizationsDelegates,
+      supportedLocales: AppLocalizations.supportedLocales,
+      home: Scaffold(
+        body: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showAppLockSettings(context, core),
+            child: const Text('open'),
+          ),
+        ),
+      ),
+    ));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Use a PIN'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField).at(0), '135790');
+    await tester.enterText(find.byType(TextField).at(1), '135790');
+    await tester.tap(find.text('Turn on app lock'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('I understand — turn it on'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(find.text('I understand — turn it on'), findsNothing,
+        reason: 'the button shows a spinner instead of its label');
+    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.text('Set a wipe code'), findsNothing, reason: 'the next step waits');
+
+    core.enableGate!.complete();
+    await tester.pumpAndSettle();
+    expect(core.enabledWith, '135790');
+    expect(find.text('Set a wipe code'), findsOneWidget, reason: 'then the offer follows');
+  });
+
   // With the keyboard up, the confirm field and its error are out of sight. A rejected press must
   // bring them into view, or it looks like the button does nothing.
   testWidgets('a rejected wipe code moves focus to the confirm field and its error', (tester) async {
@@ -553,8 +611,13 @@ class _EnableCore extends MockNightdropCore {
     return secret == normalSecret;
   }
 
+  /// Holds `setDuressSecret` / `enableStoreLock` open until completed, like a slow derivation.
+  Completer<void>? armGate;
+  Completer<void>? enableGate;
+
   @override
   Future<void> setDuressSecret(String secret, String duress) async {
+    await armGate?.future;
     duressArmedWith = duress;
   }
 
@@ -563,6 +626,7 @@ class _EnableCore extends MockNightdropCore {
 
   @override
   Future<void> enableStoreLock(String secret) async {
+    await enableGate?.future;
     enabledWith = secret;
   }
 }
