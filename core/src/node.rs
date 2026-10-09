@@ -2491,8 +2491,13 @@ const RENDEZVOUS_POLL: Duration = Duration::from_millis(500);
 /// long it waits between rounds. A flaky Tor path can take many circuit attempts to reach the
 /// relay's onion (the relay may take dozens to publish its own descriptor), so one failed round is
 /// not "unreachable" — only a full window of failures is.
+///
+/// Two minutes, because that is how long a brand-new Tor state takes to reach the relay at all:
+/// measured on a phone (2026-10-09), a fresh identity's first relay round failed outright and the
+/// next, two and a half minutes after Tor started, succeeded. Joining straight after creating an
+/// identity — what a new user does — fell inside that window, and 45 s gave up on it every time.
 #[cfg(not(test))]
-const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_secs(45);
+const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_secs(120);
 #[cfg(test)]
 const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_millis(300);
 const POST_RETRY_INTERVAL: Duration = Duration::from_secs(2);
@@ -2611,7 +2616,10 @@ pub fn run_join_handshake(
                  reachable",
                 POST_ESTABLISH_TIMEOUT.as_secs()
             );
-            anyhow::bail!("could not reach any relay to start pairing — check your connection");
+            anyhow::bail!(
+                "could not reach the relay yet — Tor may still be starting. Try again in a minute; \
+                 the code stays valid for 10 minutes"
+            );
         }
         std::thread::sleep(POST_RETRY_INTERVAL);
     }
