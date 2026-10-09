@@ -1291,8 +1291,10 @@ has it has run. Verified on a Galaxy S25 (2026-10-08): after a real reboot the p
 without the app being opened. It took a while: for about the first 15 minutes after boot Android's
 Doze firewall blocked the app's network (`dumpsys netpolicy`: `blocked=DOZE|APP_BACKGROUND`) until a
 rule change lifted it, so delivery after a reboot can lag that long. An exemption from battery
-optimisation would likely shorten it; not requested (it is a separate permission and a policy
-question). Android also delivers `BOOT_COMPLETED` to an app leaving the stopped state as it starts,
+optimisation would **not** have helped: the app was already "Unrestricted" (on the user
+`deviceidle` allowlist, standby bucket EXEMPTED), and the firewall rule change that lifted the block
+listed it as allowed. The allowlist was there; the firewall applied it late after boot. Why is not
+established (possibly Samsung-specific), and the app has no lever for it. Android also delivers `BOOT_COMPLETED` to an app leaving the stopped state as it starts,
 i.e. right after a force-stop when the user opens it; the receiver stands aside when its process is
 in the foreground, because the activity then starts the engine itself.
 
