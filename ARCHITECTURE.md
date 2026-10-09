@@ -1286,7 +1286,15 @@ With an app lock set, the key is not in memory after a restart, so the core cann
 Briar, whose database needs a password, it then posts a reminder notification ("Night Drop is
 locked") and ends the process instead of running a service that can receive nothing. The first
 update *to* this version is the one gap: the copy of the setting is written only once a build that
-has it has run.
+has it has run. Verified on a Galaxy S25 (2026-10-08): after a real reboot the process was started
+"for broadcast BootReceiver" right after the first unlock, and a message sent meanwhile notified
+without the app being opened. It took a while: for about the first 15 minutes after boot Android's
+Doze firewall blocked the app's network (`dumpsys netpolicy`: `blocked=DOZE|APP_BACKGROUND`) until a
+rule change lifted it, so delivery after a reboot can lag that long. An exemption from battery
+optimisation would likely shorten it; not requested (it is a separate permission and a policy
+question). Android also delivers `BOOT_COMPLETED` to an app leaving the stopped state as it starts,
+i.e. right after a force-stop when the user opens it; the receiver stands aside when its process is
+in the foreground, because the activity then starts the engine itself.
 
 **Desktop: close to the tray** (0.2, Linux and Windows). Closing the window used to end the process.
 "Keep running when closed…" in the menu (`desktop/desktop_shell.dart`) hides the window in the tray

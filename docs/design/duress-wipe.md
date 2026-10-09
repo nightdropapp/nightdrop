@@ -1,7 +1,10 @@
 # Design draft — Duress wipe (#3)
 
-**Status:** 🟢 **implemented** (core, FFI, wipe, and UI — 2026-08-01). Not yet exercised on a
-device, and testing it on one destroys that identity by design; see §9.
+**Status:** 🟢 **implemented** (core, FFI, wipe, and UI — 2026-08-01). Exercised on a device
+(Galaxy S25, 2026-10-08, a test app id): arming from the end of the app-lock flow, the warning, and
+the wipe from the lock screen, which left only Flutter's own two files and an empty keystore. Three
+faults found and fixed that day: the warning could be skipped, a rejected code showed its error under
+the keyboard, and the keystore preferences survived the wipe (§5).
 **Relates to:** `docs/design/app-lock.md` §4 (which constrained this design before it was written),
 `ARCHITECTURE.md` §7d, and `Node::logout` — the non-coerced version of the same destruction.
 
@@ -65,7 +68,10 @@ Cost: a normal unlock goes from ~141 ms to ~282 ms. Still far under the "under a
 Deletes, in this order: the lock file, the state blob, decrypted media, the arti state (the onion
 identity), and the keystore copy of the store key. The lock file **must** go with the rest — leaving
 it behind would show a lock screen for a store that no longer exists, which is both broken and
-conspicuous.
+conspicuous. The identity's other keystore entries go too (backup snooze and "backed up" flag,
+protocol-notice and update-check state, cover traffic, burn receipts; from 2026-10-08): left behind,
+they say an identity was here, and a surviving "backed up" flag would stop the next identity from
+ever being reminded to back up.
 
 **Each removal stands alone (2026-08-02, after a device test).** This was one `try` around the whole
 list with a silent `catch`, and its *first* statement was the keystore delete — the one call that
