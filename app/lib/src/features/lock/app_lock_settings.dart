@@ -253,7 +253,8 @@ Future<Object?> _askVerifiedSecret(
           obscureText: true,
           autocorrect: false,
           enableSuggestions: false,
-          decoration: InputDecoration(labelText: l10n.duressCurrentSecret, errorText: error),
+          decoration: InputDecoration(
+              labelText: l10n.duressCurrentSecret, errorText: error, errorMaxLines: 3),
           onSubmitted: (_) => submit(),
         ),
         cancelLabel: l10n.cancel,
@@ -358,6 +359,8 @@ Future<String?> _askNewDuress(BuildContext context, NightdropCore core) async {
                   decoration: InputDecoration(
                     labelText: l10n.duressConfirm,
                     errorText: error,
+                    // Errors here are whole sentences; one truncated line cut them mid-word.
+                    errorMaxLines: 3,
                   ),
                   onSubmitted: (_) => submit(),
                 ),
@@ -500,7 +503,8 @@ Future<void> _disable(BuildContext context, NightdropCore core) async {
           autocorrect: false,
           enableSuggestions: false,
           decoration:
-              InputDecoration(labelText: l10n.appLockCurrentSecret, errorText: error),
+              InputDecoration(
+              labelText: l10n.appLockCurrentSecret, errorText: error, errorMaxLines: 3),
           onSubmitted: (_) => submit(),
         ),
         cancelLabel: l10n.cancel,
@@ -586,6 +590,8 @@ Future<String?> _askNewSecret(BuildContext context,
                   decoration: InputDecoration(
                     labelText: l10n.appLockConfirmSecret,
                     errorText: error,
+                    // Errors here are whole sentences; one truncated line cut them mid-word.
+                    errorMaxLines: 3,
                   ),
                   onSubmitted: (_) => submit(),
                 ),
