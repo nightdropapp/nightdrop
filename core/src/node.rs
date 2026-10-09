@@ -1127,9 +1127,9 @@ pub(crate) struct PendingRelaySend {
     bytes: Vec<u8>,
 }
 
-/// An authenticated control signal awaiting delivery: a chat-delete `Closed` (its chat already
-/// removed) or a screenshot notice (see [`Node::pending_control`]). Carries its own routing so it
-/// survives the chat.
+/// A frame awaiting delivery that must not be lost: a chat-delete `Closed` (its chat already
+/// removed), a screenshot notice, or a joiner's first-contact `Hello` (see
+/// [`Node::pending_control`]). Carries its own routing so it survives the chat.
 pub(crate) struct PendingControl {
     /// The peer's identity key — seals + addresses the relay copy (its mailbox handle).
     recipient_ik: String,

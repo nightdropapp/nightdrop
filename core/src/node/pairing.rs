@@ -109,19 +109,28 @@ impl Node {
             address: self.address(), // where the peer should reply (we may be unreachable-by-metadata)
             message: WireOlm::from_olm(&hello),
         };
-        // Relay-fallback the first-contact Hello: if the inviter's onion isn't reachable yet
-        // (e.g. its descriptor is still republishing after a restart), queue it on the relay so
-        // pairing completes when they next drain — instead of failing with a socket error.
+        // Held for delivery, not tried once. The first-contact Hello is the frame pairing depends on,
+        // and the joiner's Tor is often minutes old (a fresh install joins right after setup): a
+        // single attempt that reached neither the inviter's onion nor the relay used to fail the
+        // join for good — the code already spent, the inviter never shown a request, and this side
+        // left waiting for an approval that could not come (phone, 2026-10-09). In
+        // `pending_control` it is saved with the state, tried now (the onion first, the relay if
+        // that fails), and retried on every relay poll until a copy lands.
         crate::diag!("pair: sending first-contact Hello to the peer");
-        // The caller (`Core::connect_via_qr`) sends this itself, off the lock, and reports a failure.
-        self.deliver_with(
-            peer_address,
-            &bundle.identity_key,
-            &frame,
-            false,
-            super::OutboundDone::Caller(None),
-        )?;
-        crate::diag!("pair: Hello away — the peer should now show a chat request");
+        let handle = self.post_handle(&bundle.identity_key);
+        self.queue_pending_control(
+            super::PendingControl {
+                recipient_ik: bundle.identity_key.clone(),
+                peer_address: peer_address.to_string(),
+                // Their relay set is unknown before the first reply; the primary is always tried.
+                relays: Vec::new(),
+                bytes: wire::encode(&frame),
+                handle,
+                in_flight: false,
+            },
+            super::Route::DirectThenRelay,
+        );
+        crate::diag!("pair: Hello queued — retried until the peer or a relay takes it");
 
         let contact_id = bundle.identity_key.clone();
         if let Some(chat) = self.chats.get_mut(&contact_id) {

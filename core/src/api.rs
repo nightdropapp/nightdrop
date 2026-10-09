@@ -1618,7 +1618,8 @@ impl NightdropCore {
                     .ok_or_else(|| anyhow::anyhow!("chat not created"))?;
             (contact, g.me.take_caller_outbox())
         };
-        // The Hello: a dial to the inviter's onion (relay fallback), without the lock.
+        // The Hello is held and retried by the poller (`pending_control`), so a cold Tor does not
+        // fail the join; anything else this call queued for its caller is sent here, off the lock.
         self.send_for_caller(sends)?;
         Ok(contact)
     }
@@ -1665,7 +1666,8 @@ impl NightdropCore {
             g.save();
             (contact, g.me.take_caller_outbox())
         };
-        // The Hello, sent without the lock: the inviter's onion, or their relay.
+        // The Hello is held and retried by the poller (`pending_control`), so a cold Tor does not
+        // fail the join; anything else this call queued for its caller is sent here, off the lock.
         self.send_for_caller(sends)?;
         Ok(contact)
     }

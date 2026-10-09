@@ -222,3 +222,51 @@ impl Node {
             .unwrap();
     }
 }
+
+/// A joiner whose Tor is minutes old can reach neither the inviter's onion nor the relay with its
+/// first Hello. That used to fail the join for good: the code spent, the inviter never shown a
+/// request (phone, 2026-10-09). The Hello is now held and retried until it lands.
+#[test]
+fn a_hello_that_cannot_go_out_yet_is_held_and_arrives_later() {
+    let net = MemoryNetwork::new();
+    let down = Arc::new(AtomicBool::new(true));
+    let mut inviter = Node::new(Box::new(net.endpoint("inviter")));
+    inviter.set_require_authorization(true);
+    let mut joiner = Node::new(Box::new(Deferred {
+        inner: net.endpoint("joiner"),
+        down: Arc::clone(&down),
+    }));
+    let bundle = inviter.publish_bundle();
+    joiner
+        .connect_with_bundle("inviter", &bundle)
+        .expect("joining does not fail on a network that is not up yet");
+    assert_eq!(joiner.pending_control.len(), 1, "the Hello is held");
+    assert_eq!(
+        joiner.export_pending_control().len(),
+        1,
+        "and saved with the state"
+    );
+
+    // First attempt: nobody reachable.
+    let sent = run_outbox(joiner.take_outbox());
+    joiner.apply_outbound(sent);
+    inviter.pump().unwrap();
+    assert_eq!(inviter.pending_count(), 0, "nothing arrived yet");
+    assert_eq!(joiner.pending_control.len(), 1, "still held");
+
+    // The network comes up; the next poll's retry delivers it.
+    down.store(false, Ordering::Relaxed);
+    joiner.flush_pending_control();
+    let sent = run_outbox(joiner.take_outbox());
+    joiner.apply_outbound(sent);
+    inviter.pump().unwrap();
+    assert_eq!(
+        inviter.pending_count(),
+        1,
+        "the inviter now shows the request"
+    );
+    assert!(
+        joiner.pending_control.is_empty(),
+        "and the joiner stops retrying"
+    );
+}

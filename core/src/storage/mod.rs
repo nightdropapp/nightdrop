@@ -221,7 +221,8 @@ pub struct PersistedFile {
     pub data: String,
 }
 
-/// A control frame — a chat-delete `Closed` (§11.6) or a screenshot notice — that hasn't reached a
+/// A frame — a chat-delete `Closed` (§11.6), a screenshot notice, or a joiner's first-contact
+/// `Hello` — that hasn't reached a
 /// relay yet, persisted so it survives an app restart before the poller's retry lands (otherwise
 /// one sent during a relay/arti outage, followed by a restart, would silently never reach the peer).
 #[derive(Debug, Clone, Serialize, Deserialize)]

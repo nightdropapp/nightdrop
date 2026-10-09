@@ -481,11 +481,11 @@ on a re-pair (new session) exactly like `verified`.
 
   What used to hang off a synchronous result is recorded instead. A once-per-run announcement sets
   its flag when queued, so the next tick does not queue a second copy, and clears it on failure, so
-  the tick after retries. A chat-delete `Closed` or a screenshot notice goes into the persisted
+  the tick after retries. A chat-delete `Closed`, a screenshot notice, or a joiner's first-contact `Hello` goes into the persisted
   `pending_control` before its first attempt, marked in flight while queued; a copy landing removes
   it, and since the chat may be gone it carries its own mailbox handle. At poller exit anything still
-  queued is applied as failed, so every retry is back in place for the final save. The four calls a
-  user waits on — approving a request, the QR `Hello`, a short-code join's `Hello`, edit and unsend —
+  queued is applied as failed, so every retry is back in place for the final save. The calls a user
+  waits on — approving a request, edit and unsend —
   take their own entries (`take_caller_outbox`) and send them after releasing the lock, still
   reporting a failure; edit and unsend run as three steps (`begin_edit` → recall without the lock →
   `finish_edit`), because the frame they send depends on whether the recall succeeded. Logout and
