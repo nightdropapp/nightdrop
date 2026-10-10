@@ -218,6 +218,17 @@ pub trait Transport: Send + Sync {
         None
     }
 
+    /// A **pairing pass** (`docs/design/optional-relay.md` §5): a fresh client descriptor-encryption
+    /// keypair, as the public `descriptor:x25519:…` string and the 32-byte secret, **not** installed
+    /// anywhere. The side being dialled authorizes the public half on its own onion
+    /// ([`authorize_client`](Transport::authorize_client)) and hands the secret to the other side,
+    /// which installs it ([`insert_client_key`](Transport::insert_client_key)). Unlike
+    /// [`make_client_key`](Transport::make_client_key) it leaves our keystore alone, which holds one
+    /// key per onion and must keep the one in use. `None` without restricted discovery (non-Tor).
+    fn mint_pass(&self) -> Option<Result<(String, [u8; 32])>> {
+        None
+    }
+
     /// Put a previously-saved client secret back into the keystore at startup. With the keystore
     /// in memory this is what keeps a restricted peer reachable across restarts; without it every
     /// chat would silently fall back to relay-only after each launch.

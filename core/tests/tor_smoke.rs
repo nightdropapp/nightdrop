@@ -273,6 +273,109 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
     }
 }
 
+/// A **pairing pass** (`docs/design/optional-relay.md` §5) on real Tor: the side being dialled
+/// mints the key (`Transport::mint_pass`), authorizes its public half on its own onion, and hands
+/// the secret over, as a QR does; the holder installs it (`insert_client_key`) and is admitted.
+/// The reverse of the exchange above, where the client mints its own key, so it is tested on its
+/// own: the pass's public string comes from our formatting, and arti must parse it from the key
+/// directory and encrypt the descriptor to it. Without this, direct-only users could pair once and
+/// never again, silently. An unrelated client is still refused.
+///
+/// Very slow: four onion bootstraps + a restricted republish. Keep `#[ignore]`d.
+#[test]
+#[ignore = "needs network; four onion bootstraps + restricted-discovery republish (very slow)"]
+fn a_pass_minted_by_the_onion_admits_whoever_holds_it() {
+    use nightdrop::transport::Transport as _;
+    use std::path::Path;
+    use std::time::Duration;
+
+    let a_state = scratch("pass-a-state");
+    let a_auth = scratch("pass-a-auth");
+    let b_state = scratch("pass-b-state");
+    let c_state = scratch("pass-c-state");
+
+    // 1. A public, to learn its address and identity, and to mint the pass as an inviter does.
+    let (a_addr, a_onion_key, pass_secret) = {
+        let a = TorTransport::bootstrap("nightdroppass-a", Some(&a_state), Some(&a_auth), None)
+            .expect("bootstrap A (public)");
+        let addr = a.address();
+        let key = a
+            .onion_key_material()
+            .expect("read back A's onion identity");
+        let (public, secret) = a
+            .mint_pass()
+            .expect("Tor mints passes")
+            .expect("mint a pass");
+        eprintln!("A's pass public half: {public}");
+        a.authorize_client("pass:test", &public)
+            .expect("A authorizes its own pass");
+        (addr, key, secret)
+    };
+    assert_eq!(client_auth::authorized_count(Path::new(&a_auth)), 1);
+    std::thread::sleep(Duration::from_secs(3));
+
+    // 2. A restricted, on its own identity: only the pass's holder can read its descriptor.
+    let a = TorTransport::bootstrap(
+        "nightdroppass-a",
+        Some(&a_state),
+        Some(&a_auth),
+        Some(a_onion_key),
+    )
+    .expect("re-bootstrap A (restricted)");
+    assert_eq!(a.address(), a_addr);
+    assert!(
+        wait_until(Duration::from_secs(180), || a.published()),
+        "A's restricted descriptor never became reachable"
+    );
+
+    // 3. B installs the pass, as a joiner does from a QR, and is admitted.
+    let b = TorTransport::bootstrap("nightdroppass-b", Some(&b_state), None, None)
+        .expect("bootstrap B");
+    b.insert_client_key(&a_addr, &pass_secret)
+        .expect("B installs the pass");
+    let mut b_sent = false;
+    for _ in 0..40 {
+        if b.send(&a_addr, b"hello with a pass").is_ok() {
+            b_sent = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    assert!(
+        b_sent,
+        "the pass holder could not reach the restricted onion"
+    );
+    let mut got = None;
+    for _ in 0..600 {
+        if let Some((_, frame)) = a.try_recv() {
+            got = Some(frame);
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    assert_eq!(got.expect("A receives the frame"), b"hello with a pass");
+
+    // 4. C holds nothing: refused, now that B has proved the descriptor is live.
+    let c = TorTransport::bootstrap("nightdroppass-c", Some(&c_state), None, None)
+        .expect("bootstrap C");
+    let mut c_reached = false;
+    for _ in 0..40 {
+        if c.send(&a_addr, b"no pass").is_ok() {
+            c_reached = true;
+            break;
+        }
+        std::thread::sleep(Duration::from_secs(3));
+    }
+    assert!(
+        !c_reached,
+        "a client without the pass reached the restricted onion"
+    );
+
+    for d in [&a_state, &a_auth, &b_state, &c_state] {
+        let _ = std::fs::remove_dir_all(d);
+    }
+}
+
 /// Is a relay actually reachable from a client, over Tor, right now?
 ///
 /// Debug aid for the "could not reach any relay to start pairing" failure,

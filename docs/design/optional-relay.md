@@ -298,7 +298,28 @@ a direct-only user's contacts see their messages arrive the moment that user com
    * The v2 mailbox agreement is skipped for a contact with no relay route (mailboxes live on
      relays).
    * Not yet measured: the battery cost of the background retries on two phones (§9 tests).
-4. **Pairing credentials (§5)** for QR and `Hello`.
+4. **Pairing credentials (§5)** for QR and `Hello`. **Built 2026-10-09** (tests in
+   `node/tests_pass.rs`, which simulate restricted discovery, and on real Tor
+   `tor_smoke::a_pass_minted_by_the_onion_admits_whoever_holds_it`). As built:
+   * The inviter mints a pass (`Transport::mint_pass`, not installed anywhere), authorizes it as
+     `pass:<one-time key>`, and puts the secret in the QR and the short-code response as `ck=`.
+     Persisted with the state; revoked when a `Hello` uses that one-time key, or after 24 h
+     (`expire_passes`, from `sweep_time`).
+   * The joiner installs the pass for the inviter's onion and sends, inside the E2E `Hello`, its
+     own client key for the inviter's onion and a reply pass for its own (authorized at once for
+     the inviter). It switches from the pass to its own key when the inviter's first `RelaySet`
+     arrives: only approved chats are sent one, and it is authenticated, unlike `Approved`.
+   * **Decided 2026-10-09: the reply pass stays the inviter's key** for the joiner's onion; it is
+     not replaced after Accept. Replacing it needs the joiner's descriptor republished for the new
+     key, and with no relay to cover that gap a direct-only pair could not reach each other.
+     Holding a secret the joiner minted gives the inviter nothing but that reach.
+   * Both keys wait on the request (`peer_key_pending`, `pass_pending`, persisted) and are applied
+     on Accept (`apply_pending_keys`); Decline drops them. A `ClientKey` frame from a request is
+     held the same way, no longer authorized on arrival.
+   * A request is also told nothing about us before Accept: burn support, version, screenshot
+     capability and the relay set all wait for it, rather than telling whoever scanned a QR.
+   * The `Hello` goes directly only, for everyone, held and retried like any relay-less frame.
+   * A transport without `mint_pass` (none ship) falls back to the 0.1 `ClientKey` exchange.
 5. **Gate the features in §6** in the core, with the UI showing the reasons.
 6. **UI:** the onboarding step, "My relays" with the Night Drop entry, chat banners, and the
    "Waiting for … to come online" status.

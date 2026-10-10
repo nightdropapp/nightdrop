@@ -492,6 +492,12 @@ on a re-pair (new session) exactly like `verified`.
   have flushed their queues at once. `ANNOUNCE_ONLINE_ON_START` (off) restores the per-launch
   behaviour as a deliberate "I'm online" signal; `node/tests_announce.rs` runs both settings.
 
+  **Pairing passes (0.2, `optional-relay.md` §5).** Pairing never uses a relay. The QR and the
+  short-code response carry a single-use, 24-hour pass for the inviter's onion, so the joiner's
+  `Hello` gets through even when that onion admits only contacts; the `Hello` carries the joiner's
+  key for the inviter's onion and a reply pass for its own. Both wait for the user's Accept, and
+  a request is told nothing about us until then.
+
   **The held queue (0.2, `optional-relay.md` §4).** A frame that reaches neither the peer nor a
   relay is held (`Node::held`, persisted, in send order) instead of being dropped. With no relay
   between the two people (either is direct only, or the peer's set is not known yet) messages

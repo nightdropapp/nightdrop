@@ -20,10 +20,30 @@ impl Node {
             } => {
                 crate::diag!("pair: inbound Hello — a peer is requesting a chat");
                 let olm = message.to_olm()?;
+                // Which invite this answers: its one-time key, which also names the pass we issued
+                // with it.
+                let otk = match &olm {
+                    vodozemac::olm::OlmMessage::PreKey(m) => Some(m.one_time_key().to_base64()),
+                    vodozemac::olm::OlmMessage::Normal(_) => None,
+                };
                 let accepted = crypto::accept_inbound(&mut self.identity, &identity_key, &olm)?;
+                // A pass is single-use (`optional-relay.md` §5): this Hello used it.
+                if let Some(otk) = &otk {
+                    self.spend_pass(otk);
+                }
                 // Where the joiner's offline mail goes, from the first frame (`optional-relay.md`
                 // §3 rule 3). `None` only from a Hello we cannot read, which then holds.
                 let joiner_relays = super::hello_relay_set(&accepted.first_plaintext);
+                // And the joiner's half of onion access (§5), held unused until the user accepts.
+                let body = super::hello_body(&accepted.first_plaintext);
+                let joiner_key = body
+                    .as_ref()
+                    .and_then(|b| b.client_key.clone())
+                    .filter(|k| crate::transport::client_auth::validate_key(k).is_ok());
+                let reply_pass = body
+                    .as_ref()
+                    .and_then(|b| b.pass.as_deref())
+                    .and_then(super::decode_secret);
                 let contact_id = identity_key;
                 // Prefer the address the sender advertised (works over Tor/relay where the
                 // transport can't tell us who called); fall back to the transport's view.
@@ -60,6 +80,8 @@ impl Node {
                         chat.relay_set = joiner_relays.clone();
                         // A new session starts with nothing told on it.
                         chat.relays_told = None;
+                        chat.peer_key_pending = joiner_key.clone();
+                        chat.pass_pending = reply_pass;
                         chat.contact.verified = false; // new session invalidates prior verification
                         chat.contact.peer_verified = false; // …as does the peer's prior signal
                         already_authorized = chat.authorized;
@@ -108,6 +130,8 @@ impl Node {
                         self.last_invite_code.clone(),
                     );
                     chat.relay_set = joiner_relays.clone();
+                    chat.peer_key_pending = joiner_key.clone();
+                    chat.pass_pending = reply_pass;
                     self.chats.insert(contact_id.clone(), chat);
                 }
                 // Re-pair warning (§1.2): a known contact just re-established the chat with a new
@@ -127,19 +151,26 @@ impl Node {
                         ));
                     }
                 }
-                // Onion client auth (#22): now that we know the joiner's onion, hand them our client
-                // key for *their* onion (the reverse leg of the exchange) so we can reach them, and
-                // authorize their side implicitly happens when their `ClientKey` arrives. No-op off Tor.
-                if !peer_address.is_empty() {
+                // Onion client auth (#22, `optional-relay.md` §5). A 0.2 joiner sent its key for our
+                // onion and a reply pass for its own: they wait for the user's Accept
+                // (`apply_pending_keys`). Without a reply pass (a transport with no restricted
+                // discovery), answer with our own key as before. No-op off Tor.
+                let authorized = self.chats.get(&contact_id).is_some_and(|c| c.authorized);
+                if authorized {
+                    self.apply_pending_keys(&contact_id);
+                }
+                if !peer_address.is_empty() && reply_pass.is_none() {
                     self.announce_client_key(&contact_id, &peer_address);
+                }
+                // Nothing else goes to a request: what this build is and can do is not a stranger's
+                // business until the user accepts them (`authorize` sends it then).
+                if !peer_address.is_empty() && authorized {
                     // Screenshot capability (#1) — same reason as the joiner side: this chat did not
                     // exist when the launch-time broadcast ran.
                     self.announce_captures_to(&contact_id);
                     self.announce_burns_to(&contact_id);
                     self.announce_version_to(&contact_id);
-                    // Our relay set: the joiner holds mail for us until it arrives. Only once
-                    // approved (an auto-approved chat now, a request when the user approves it —
-                    // see `authorize`).
+                    // Our relay set: the joiner holds mail for us until it arrives.
                     self.announce_relay_set_to(&contact_id);
                     // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
                     // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
@@ -708,6 +739,14 @@ impl Node {
                     Ok(set) => super::sanitize_peer_set(set),
                     Err(_) => return Ok(None),
                 };
+                // Only an approved chat is sent a `RelaySet`, and this one decrypted on their
+                // ratchet: the inviter has accepted us. Our own key for their onion replaces their
+                // invite's pass now (`optional-relay.md` §5).
+                if let Some(own) = chat.own_key_pending.take() {
+                    let _ = self.transport.insert_client_key(&chat.peer_address, &own);
+                    chat.client_key = Some(own);
+                    crate::diag!("pair: accepted — our own onion key replaces the invite's pass");
+                }
                 if chat.relay_set.as_ref() == Some(&set) {
                     return Ok(None);
                 }
@@ -717,12 +756,16 @@ impl Node {
             }
             Frame::ClientKey { from, client_key } => {
                 // Onion client auth (#22): the peer handed us their client key for our onion.
-                // Authorize it only for a contact we actually have a chat with (approved or a
-                // pending inbound request) — never a pure stranger — so nobody can plant a key by
-                // guessing our identity id. `authorize_client` validates the key and is a no-op off
-                // Tor / when no auth dir is configured. Silent (no UI change).
-                if self.chats.contains_key(&from) {
-                    let _ = self.transport.authorize_client(&from, &client_key);
+                // Authorized only for an **approved** contact (`optional-relay.md` §5): onion access
+                // follows the user's decision, so a pending request's key waits for Accept, and a
+                // Decline leaves it none. A stranger with no chat plants nothing. `authorize_client`
+                // validates the key and is a no-op off Tor. Silent (no UI change).
+                if let Some(chat) = self.chats.get_mut(&from) {
+                    if chat.authorized {
+                        let _ = self.transport.authorize_client(&from, &client_key);
+                    } else if crate::transport::client_auth::validate_key(&client_key).is_ok() {
+                        chat.peer_key_pending = Some(client_key);
+                    }
                 }
                 Ok(None)
             }

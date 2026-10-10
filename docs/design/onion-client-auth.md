@@ -145,10 +145,12 @@ just one machine.
 - **Restriction latches on the next launch.** The `enabled` flag is decided at service-launch time;
   the directory is `watch_configuration(true)`, so keys added mid-session republish the descriptor to
   the new set, but the *first* device to gain a contact only becomes restricted on its next start.
-- **First contact under restriction uses the relay.** A new joiner's direct onion connect is blocked
-  until we authorize them; `node::deliver` already falls back to the relay mailbox, so the pairing
-  `Hello` (and the `ClientKey` in it) still lands, we authorize them, and direct reachability follows
-  on the next republish. QR and short-code pairing both keep working.
+- **First contact under restriction uses a pass (0.2).** Until 0.2 a new joiner's blocked direct
+  connect fell back to the relay mailbox. From 0.2 pairing uses no relay: the QR and the
+  short-code response carry a single-use pass for our onion, authorized as `pass:<one-time key>`,
+  and the joiner's key and a reply pass for its onion ride in the E2E `Hello`, applied when the
+  user accepts (`optional-relay.md` §5). An issued pass counts towards `authorized_count`, so a
+  fresh device that shows a QR is restricted from its next launch, with the pass admitted.
 
 ## 9. What shipped
 

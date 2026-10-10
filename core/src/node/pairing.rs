@@ -113,12 +113,66 @@ impl Node {
         bundle: &PreKeyBundle,
         inviter_relays: Option<RelaySet>,
     ) -> Result<String> {
+        self.connect_with_invite(
+            peer_address,
+            bundle,
+            InviteExtras {
+                relays: inviter_relays,
+                pass: None,
+            },
+        )
+    }
+
+    /// Join from an invite: open the session and send the `Hello`, using whatever else the invite
+    /// carried (`optional-relay.md` §3 and §5).
+    ///
+    /// Onion access, both ways, without a relay:
+    /// * the inviter's **pass** (`ck=`) is installed for their onion, so our `Hello` gets through
+    ///   even when their onion admits only contacts;
+    /// * our own client key for their onion goes *inside* the `Hello`, and is installed in place of
+    ///   the pass once they accept (their first `RelaySet`);
+    /// * a **reply pass** for our onion, authorized now for them, goes in the `Hello` too, so they
+    ///   can reach us once they accept, whatever our onion admits.
+    pub(crate) fn connect_with_invite(
+        &mut self,
+        peer_address: &str,
+        bundle: &PreKeyBundle,
+        invite: InviteExtras,
+    ) -> Result<String> {
+        let InviteExtras {
+            relays: inviter_relays,
+            pass,
+        } = invite;
         // Before anything reaches the network: at the cap, nothing is sent.
         self.check_contact_cap(&bundle.identity_key)?;
         let mut session = crypto::open_outbound(&self.identity, bundle)?;
         let mine = self.my_relay_set();
+        if let Some(pass) = &pass {
+            if let Err(e) = self.transport.insert_client_key(peer_address, pass) {
+                crate::diag!("pair: could not install the invite's pass: {e:#}");
+            }
+        }
+        let own_key = self.transport.mint_pass().and_then(Result::ok);
+        let own_key_minted = own_key.as_ref().map(|_| ());
+        // No pass: our own key is what we present, from now on.
+        if let (None, Some((_, secret))) = (&pass, &own_key) {
+            let _ = self.transport.insert_client_key(peer_address, secret);
+        }
+        let reply_pass = self
+            .transport
+            .mint_pass()
+            .and_then(Result::ok)
+            .filter(|(public, _)| {
+                self.transport
+                    .authorize_client(&bundle.identity_key, public)
+                    .is_ok()
+            });
         let body = serde_json::to_vec(&super::HelloBody {
             relays: mine.clone(),
+            client_key: own_key.as_ref().map(|(public, _)| public.clone()),
+            pass: reply_pass
+                .as_ref()
+                .map(|(_, secret)| super::encode_secret(secret)),
         })?;
         let hello = crypto::encrypt(&mut session, &body)?;
         let frame = Frame::Hello {
@@ -128,26 +182,22 @@ impl Node {
         };
         // Held for delivery, not tried once. The first-contact Hello is the frame pairing depends on,
         // and the joiner's Tor is often minutes old (a fresh install joins right after setup): a
-        // single attempt that reached neither the inviter's onion nor the relay used to fail the
-        // join for good — the code already spent, the inviter never shown a request, and this side
-        // left waiting for an approval that could not come (phone, 2026-10-09). In
-        // `pending_control` it is saved with the state, tried now (the onion first, the relay if
-        // that fails), and retried on every relay poll until a copy lands.
+        // single attempt that reached nothing used to fail the join for good — the code already
+        // spent, the inviter never shown a request, and this side left waiting for an approval
+        // that could not come (phone, 2026-10-09). In `pending_control` it is saved with the state
+        // and retried until it lands.
+        //
+        // **Directly only, for everyone** (`optional-relay.md` §5): the pass gets it through the
+        // inviter's onion, so no relay is part of first contact, and one path is tested rather
+        // than two.
         crate::diag!("pair: sending first-contact Hello to the peer");
         let handle = self.post_handle(&bundle.identity_key);
-        // A short code told us the inviter's set. From a QR it is unknown until their first reply,
-        // so the copy goes to the Night Drop relay, as 0.1.x did: the one exception to "unknown is
-        // held", until pairing passes (`optional-relay.md` §5) let the Hello go direct.
-        let hello_set = inviter_relays.clone().unwrap_or(RelaySet {
-            nightdrop: true,
-            relays: Vec::new(),
-        });
         self.queue_pending_control(
             super::PendingControl {
                 recipient_ik: bundle.identity_key.clone(),
                 peer_address: peer_address.to_string(),
-                relays: hello_set.relays,
-                nightdrop: hello_set.nightdrop,
+                relays: Vec::new(),
+                nightdrop: false,
                 bytes: wire::encode(&frame),
                 handle,
                 in_flight: false,
@@ -173,6 +223,7 @@ impl Node {
                 chat.relay_set = inviter_relays;
             }
             chat.relays_told = Some(mine);
+            set_join_keys(chat, pass, own_key.map(|(_, secret)| secret));
             chat.history.push(ChatMessage::system(
                 "🔑 Re-paired with a new secure session. Compare the safety number again if you \
                  want to confirm who this is."
@@ -185,11 +236,15 @@ impl Node {
             chat.relay_set = inviter_relays;
             // The Hello carries it, and is held until it lands.
             chat.relays_told = Some(mine);
+            set_join_keys(&mut chat, pass, own_key.map(|(_, secret)| secret));
             self.chats.insert(contact_id.clone(), chat);
         }
-        // Onion client auth (#22): hand the inviter our client key for their onion so they can
-        // authorize us to reach their (possibly restricted) descriptor. No-op off Tor.
-        self.announce_client_key(&contact_id, peer_address);
+        // Onion client auth (#22): our client key for their onion rode in the Hello (above), so
+        // the inviter authorizes it when the user accepts, not before. A transport that cannot
+        // mint one this way sends it the 0.1 way, in a `ClientKey` frame (no-op off Tor).
+        if own_key_minted.is_none() {
+            self.announce_client_key(&contact_id, peer_address);
+        }
         // Screenshot capability (#1): a contact paired after the launch-time broadcast would
         // otherwise never learn it, and be left reading our silence as "they'd be told".
         self.announce_captures_to(&contact_id);
@@ -230,14 +285,18 @@ impl Node {
         }
         let bundle = self.publish_bundle();
         // Our relay set rides in the sealed response, so the joiner knows where our mail goes
-        // before its first message (`optional-relay.md` §3 rule 3).
-        let payload = format!(
+        // before its first message (`optional-relay.md` §3 rule 3), and so does a pass for our
+        // onion, as in a QR (§5).
+        let mut payload = format!(
             "nightdrop://pair?addr={}&ik={}&otk={}&rs={}",
             self.address(),
             bundle.identity_key,
             bundle.one_time_key,
             crate::api::encode_relay_set(&self.my_relay_set())
         );
+        if let Some(ck) = self.issue_pass(&bundle.one_time_key) {
+            payload.push_str(&format!("&ck={ck}"));
+        }
         // Replace any stale invite for the same slot (e.g. the code was regenerated).
         self.pending_invites.retain(|p| p.slot != slot);
         self.pending_invites.push(PendingInvite {
@@ -355,8 +414,8 @@ impl Node {
     /// [`run_join_handshake`], and return the new contact.
     pub fn connect_from_invite_payload(&mut self, payload: &str) -> Result<Contact> {
         let (addr, bundle) = crate::api::parse_invite(payload)?;
-        let inviter_relays = crate::api::parse_invite_relay_set(payload);
-        let contact_id = self.connect_with_bundle_and_set(&addr, &bundle, inviter_relays)?;
+        let invite = crate::api::parse_invite_extras(payload);
+        let contact_id = self.connect_with_invite(&addr, &bundle, invite)?;
         self.contacts()
             .into_iter()
             .find(|c| c.id == contact_id)
@@ -471,4 +530,30 @@ pub(crate) fn service_invites(plan: &InviteServicePlan) -> InviteServiceOutcome 
         outcome.openers.push((slot.clone(), seen));
     }
     outcome
+}
+
+/// What an invite carries besides the address and bundle (`optional-relay.md` §3 and §5).
+#[derive(Default)]
+pub(crate) struct InviteExtras {
+    /// The inviter's relay set (a short-code response carries it; a QR does not).
+    pub(crate) relays: Option<RelaySet>,
+    /// The inviter's pairing pass for their onion (`ck=`).
+    pub(crate) pass: Option<[u8; 32]>,
+}
+
+/// A joiner's onion keys for the inviter's onion. With a pass, it is what we present until they
+/// accept, and our own key waits; without one (an invite from a transport with no restricted
+/// discovery) our own key is all there is, used at once. Either way `client_key` holds what is
+/// installed, so a restart restores it.
+fn set_join_keys(chat: &mut super::Chat, pass: Option<[u8; 32]>, own: Option<[u8; 32]>) {
+    match pass {
+        Some(pass) => {
+            chat.client_key = Some(pass);
+            chat.own_key_pending = own;
+        }
+        None => {
+            chat.client_key = own.or(chat.client_key);
+            chat.own_key_pending = None;
+        }
+    }
 }

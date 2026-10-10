@@ -427,19 +427,50 @@ pub(crate) fn sanitize_peer_set(set: RelaySet) -> RelaySet {
     }
 }
 
-/// The plaintext inside a pairing `Hello` (`optional-relay.md` §3 rule 3): the joiner's relay set,
-/// so the inviter knows where the joiner's offline mail goes from the first frame.
+/// The plaintext inside a pairing `Hello`: the joiner's relay set (`optional-relay.md` §3 rule 3),
+/// so the inviter knows where the joiner's offline mail goes from the first frame, and the
+/// joiner's half of onion access (§5): its client key for the inviter's onion, and a **reply
+/// pass** for its own. E2E as the pre-key message, so only the inviter reads them, and both stay
+/// unused until the inviter accepts.
 #[derive(serde::Serialize, serde::Deserialize)]
 pub(crate) struct HelloBody {
     pub(crate) relays: RelaySet,
+    /// `descriptor:x25519:…`, for the inviter to authorize on its onion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) client_key: Option<String>,
+    /// The secret of a key the joiner authorized on its own onion for the inviter, base64.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) pass: Option<String>,
+}
+
+/// A `Hello` plaintext; `None` if we cannot read it.
+pub(crate) fn hello_body(plaintext: &[u8]) -> Option<HelloBody> {
+    serde_json::from_slice::<HelloBody>(plaintext).ok()
 }
 
 /// The relay set a `Hello` plaintext carries; `None` if it carries none we can read.
 pub(crate) fn hello_relay_set(plaintext: &[u8]) -> Option<RelaySet> {
-    serde_json::from_slice::<HelloBody>(plaintext)
-        .ok()
-        .map(|b| sanitize_peer_set(b.relays))
+    hello_body(plaintext).map(|b| sanitize_peer_set(b.relays))
 }
+
+/// A 32-byte secret as it travels in a payload: URL-safe base64, no padding.
+pub(crate) fn encode_secret(secret: &[u8; 32]) -> String {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(secret)
+}
+
+/// The reverse of [`encode_secret`]; `None` unless exactly 32 bytes.
+pub(crate) fn decode_secret(s: &str) -> Option<[u8; 32]> {
+    use base64::Engine as _;
+    base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(s.trim())
+        .ok()?
+        .try_into()
+        .ok()
+}
+
+/// How long an issued pairing pass stays authorized if nobody uses it (`optional-relay.md` §5).
+const PASS_TTL_SECS: u64 = 24 * 60 * 60;
 
 /// The relay list a saved state stands for (`optional-relay.md` §2), and what the cap cut from it.
 /// A state from before 0.2 has no list: it starts as Night Drop + its extras, exactly what it was
@@ -656,6 +687,13 @@ struct Chat {
     told_address: Option<String>,
     /// Whether the peer last confirmed hearing that we can report screenshots (#1).
     told_captures: Option<bool>,
+    /// Pairing passes in waiting (`optional-relay.md` §5). Joiner: our own client secret for the
+    /// inviter's onion, installed in place of their QR pass once their `RelaySet` proves they
+    /// accepted. Inviter: the joiner's client key for our onion and their reply pass, both held
+    /// unused until the user taps Accept, and dropped on Decline. Persisted.
+    own_key_pending: Option<[u8; 32]>,
+    peer_key_pending: Option<String>,
+    pass_pending: Option<[u8; 32]>,
     /// Bumped by every authenticated frame from the peer ([`Chat::mark_alive`]), so a caller can
     /// tell which chats it heard from in one round even within the same second, which `last_seen`
     /// cannot. In memory only.
@@ -721,6 +759,9 @@ impl Chat {
             told_version: None,
             told_address: None,
             told_captures: None,
+            own_key_pending: None,
+            peer_key_pending: None,
+            pass_pending: None,
             alive_count: 0,
         }
     }
@@ -857,6 +898,9 @@ pub struct Node {
     /// kept until delivered or the chat is deleted. Only frames explicitly held are here, never
     /// everything in the "sent" state (see [`awaiting_receipt`](Self::awaiting_receipt)).
     held: Vec<HeldSend>,
+    /// Pairing passes we issued and have not revoked: `(auth name, invite one-time key, expiry)`
+    /// (`optional-relay.md` §5). Persisted.
+    passes: Vec<(String, String, u64)>,
     /// When each contact with no relay route is next tried directly: `(delay, next_at)` in seconds,
     /// see [`HELD_RETRY_FIRST_SECS`]. Absent = due now. In memory: after a restart everything is
     /// due once, which is one dial per held contact.
@@ -1358,6 +1402,7 @@ mod frames;
 mod mailbox;
 mod messaging;
 mod pairing;
+pub(crate) use pairing::InviteExtras;
 
 /// How long a directly-sent message may sit unconfirmed before a relay copy goes behind it.
 /// Re-exported for the api-layer test that drives a whole poll cycle, so it ages a message by the
@@ -1413,6 +1458,7 @@ impl Node {
             relay_reachable: std::collections::HashMap::new(),
             held: Vec::new(),
             held_backoff: HashMap::new(),
+            passes: Vec::new(),
             background: false,
             pending_sends: Vec::new(),
             pending_control: Vec::new(),
@@ -1569,6 +1615,8 @@ impl Node {
         if let Some(chat) = self.chats.get_mut(contact_id) {
             chat.authorized = true;
         }
+        // Onion access follows the user's decision: only now does the request reach us.
+        self.apply_pending_keys(contact_id);
         let from = self.identity_key();
         let code = code.unwrap_or_default();
         devlog!("[nightdrop] authorize: approved {contact_id}; sending approval (code='{code}')");
@@ -1580,8 +1628,11 @@ impl Node {
             false,
             OutboundDone::Caller(None),
         )?;
-        // A request could not be told our relays while it was one.
+        // A request was told nothing about us; now it is a contact.
         self.announce_relay_set_to(contact_id);
+        self.announce_captures_to(contact_id);
+        self.announce_burns_to(contact_id);
+        self.announce_version_to(contact_id);
         Ok(())
     }
 
@@ -1696,7 +1747,8 @@ impl Node {
             .chats
             .iter()
             .filter(|(id, c)| {
-                !c.closed
+                c.authorized
+                    && !c.closed
                     && !self.captures_announced.contains_key(id.as_str())
                     && (self.announce_online || c.told_captures != Some(visible))
                     && self.may_retry(id, now)
@@ -1725,7 +1777,8 @@ impl Node {
             .chats
             .iter()
             .filter(|(id, c)| {
-                !c.closed
+                c.authorized
+                    && !c.closed
                     && !self.burns_announced.contains(id.as_str())
                     && (self.announce_online || !c.told_burns)
                     && self.may_retry(id, now)
@@ -1785,7 +1838,8 @@ impl Node {
             .chats
             .iter()
             .filter(|(id, c)| {
-                !c.closed
+                c.authorized
+                    && !c.closed
                     && !self.version_announced.contains_key(id.as_str())
                     && (self.announce_online || c.told_version != self.app_version)
                     && self.may_retry(id, now)
@@ -2562,6 +2616,74 @@ impl Node {
         }
     }
 
+    /// Issue a **pairing pass** for an invite whose bundle carries one-time key `otk`
+    /// (`optional-relay.md` §5): authorize a fresh key on our onion and return its secret for the
+    /// QR or short-code payload (`&ck=`). Whoever holds it can fetch our descriptor, which lets
+    /// their `Hello` through even once our onion admits only contacts. It gets them that far and no
+    /// further: the `Hello` still lands as a request the user must accept. Single-use (revoked when
+    /// a `Hello` uses `otk`) and gone after a day. `None` where there is no restricted discovery.
+    pub(crate) fn issue_pass(&mut self, otk: &str) -> Option<String> {
+        let (public, secret) = self.transport.mint_pass()?.ok()?;
+        let name = format!("pass:{otk}");
+        self.transport.authorize_client(&name, &public).ok()?;
+        self.passes.push((
+            name,
+            otk.to_string(),
+            crate::api::now_secs() + PASS_TTL_SECS,
+        ));
+        self.dirty = true;
+        Some(encode_secret(&secret))
+    }
+
+    /// Revoke the pass issued with the invite whose one-time key a `Hello` just used: single-use.
+    pub(crate) fn spend_pass(&mut self, otk: &str) {
+        let transport = Arc::clone(&self.transport);
+        let before = self.passes.len();
+        self.passes.retain(|(name, o, _)| {
+            let spent = o == otk;
+            if spent {
+                let _ = transport.revoke_client(name);
+                crate::diag!("pair: the invite's pass was used — revoked");
+            }
+            !spent
+        });
+        self.dirty |= self.passes.len() != before;
+    }
+
+    /// Revoke passes nobody used within [`PASS_TTL_SECS`], so a QR posted online stops letting
+    /// strangers knock after a day.
+    pub(crate) fn expire_passes(&mut self, now: u64) {
+        let transport = Arc::clone(&self.transport);
+        let before = self.passes.len();
+        self.passes.retain(|(name, _, expires)| {
+            let live = *expires > now;
+            if !live {
+                let _ = transport.revoke_client(name);
+            }
+            live
+        });
+        self.dirty |= self.passes.len() != before;
+    }
+
+    /// Accepting a request: authorize the joiner's client key on our onion and install their reply
+    /// pass as our key for theirs (`optional-relay.md` §5). Until now both were held unused, so a
+    /// request had no way to reach us beyond the `Hello` it came in with.
+    fn apply_pending_keys(&mut self, contact_id: &str) {
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return;
+        };
+        if let Some(key) = chat.peer_key_pending.take() {
+            let _ = self.transport.authorize_client(contact_id, &key);
+        }
+        if let Some(pass) = chat.pass_pending.take() {
+            if !chat.peer_address.is_empty() {
+                let _ = self.transport.insert_client_key(&chat.peer_address, &pass);
+            }
+            chat.client_key = Some(pass);
+        }
+        self.dirty = true;
+    }
+
     /// Tests only: how many frames are held.
     #[cfg(test)]
     pub(crate) fn held_count(&self) -> usize {
@@ -3277,6 +3399,8 @@ mod tests_held;
 mod tests_mailbox;
 #[cfg(test)]
 mod tests_outbox;
+#[cfg(test)]
+mod tests_pass;
 #[cfg(test)]
 mod tests_relay_list;
 #[cfg(test)]

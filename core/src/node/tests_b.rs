@@ -810,44 +810,52 @@ fn pairing_exchanges_onion_client_keys_and_delete_revokes_them() {
 }
 
 #[test]
-fn declining_a_request_revokes_the_strangers_client_key() {
+fn a_request_gets_onion_access_only_when_accepted() {
+    // `optional-relay.md` §5: onion authorization follows the user's decision. A request's client
+    // key is held, not authorized; Decline leaves it nothing, and only Accept lets it reach us.
     use crate::transport::client_auth;
 
-    let base = std::env::temp_dir().join(format!("nightdrop-declineauth-{}", std::process::id()));
-    let alice_auth = base.join("alice");
-    let _ = std::fs::remove_dir_all(&base);
-    let net = MemoryNetwork::new();
-    let mut alice = Node::new(Box::new(AuthTransport {
-        inner: net.endpoint("alice"),
-        auth_dir: alice_auth.clone(),
-    }));
-    alice.set_require_authorization(true);
-    let mut stranger = Node::new(Box::new(AuthTransport {
-        inner: net.endpoint("stranger"),
-        auth_dir: base.join("stranger"),
-    }));
-    let stranger_ik = stranger.identity_key();
+    for accept in [false, true] {
+        let base = std::env::temp_dir().join(format!(
+            "nightdrop-requestauth-{}-{accept}",
+            std::process::id()
+        ));
+        let alice_auth = base.join("alice");
+        let _ = std::fs::remove_dir_all(&base);
+        let net = MemoryNetwork::new();
+        let mut alice = Node::new(Box::new(AuthTransport {
+            inner: net.endpoint("alice"),
+            auth_dir: alice_auth.clone(),
+        }));
+        alice.set_require_authorization(true);
+        let mut stranger = Node::new(Box::new(AuthTransport {
+            inner: net.endpoint("stranger"),
+            auth_dir: base.join("stranger"),
+        }));
+        let stranger_ik = stranger.identity_key();
 
-    let bundle = alice.publish_bundle();
-    stranger.connect_with_bundle("alice", &bundle).unwrap();
-    alice.pump().unwrap();
-    assert_eq!(
-        alice.pending_count(),
-        1,
-        "the stranger's request awaits approval"
-    );
-    assert!(
-        client_auth::is_authorized(&alice_auth, &stranger_ik),
-        "a pending request's client key is already authorized"
-    );
+        let bundle = alice.publish_bundle();
+        stranger.connect_with_bundle("alice", &bundle).unwrap();
+        alice.pump().unwrap();
+        assert_eq!(
+            alice.pending_count(),
+            1,
+            "the stranger's request awaits approval"
+        );
+        assert!(
+            !client_auth::is_authorized(&alice_auth, &stranger_ik),
+            "a pending request cannot reach our onion"
+        );
 
-    alice.authorize(&stranger_ik, false).unwrap();
-    assert_eq!(alice.pending_count(), 0);
-    assert!(
-        !client_auth::is_authorized(&alice_auth, &stranger_ik),
-        "declining revokes it"
-    );
-    let _ = std::fs::remove_dir_all(&base);
+        alice.authorize(&stranger_ik, accept).unwrap();
+        assert_eq!(alice.pending_count(), 0);
+        assert_eq!(
+            client_auth::is_authorized(&alice_auth, &stranger_ik),
+            accept,
+            "accepted: authorized; declined: nothing"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
 }
 
 #[test]

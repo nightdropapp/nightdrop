@@ -1586,12 +1586,17 @@ impl NightdropCore {
     pub fn create_invite(&self) -> Result<PairingInvite> {
         let mut g = self.lock();
         let bundle = g.me.publish_bundle();
-        let qr_payload = format!(
+        let mut qr_payload = format!(
             "nightdrop://pair?addr={}&ik={}&otk={}",
             g.me.address(),
             bundle.identity_key,
             bundle.one_time_key
         );
+        // A pass for our onion (`optional-relay.md` §5): lets the joiner's Hello through even once
+        // our onion admits only contacts. Single-use, and gone in a day if nobody scans it.
+        if let Some(ck) = g.me.issue_pass(&bundle.one_time_key) {
+            qr_payload.push_str(&format!("&ck={ck}"));
+        }
         let short_code = random_short_code();
         // Remember the code so an approval can echo it back to the joiner (§5).
         g.me.set_last_invite_code(short_code.clone());
@@ -1614,9 +1619,10 @@ impl NightdropCore {
     /// is the relay-free pairing path used over Tor (the QR carries the inviter's `.onion`).
     pub fn connect_via_qr(&self, payload: &str) -> Result<Contact> {
         let (addr, bundle) = parse_invite(payload)?;
+        let invite = parse_invite_extras(payload);
         let (contact, sends) = {
             let mut g = self.lock();
-            let contact_id = g.me.connect_with_bundle(&addr, &bundle)?;
+            let contact_id = g.me.connect_with_invite(&addr, &bundle, invite)?;
             // The recipient must accept before anything is delivered (they always require
             // approval, §5), just like a short-code join — show the waiting notice until we hear
             // back (cleared on the approval signal or the first received message).
@@ -2966,6 +2972,25 @@ pub(crate) fn parse_invite_relay_set(payload: &str) -> Option<crate::node::Relay
     serde_json::from_slice(&bytes)
         .ok()
         .map(crate::node::sanitize_peer_set)
+}
+
+/// One query parameter of an invite payload.
+fn invite_param<'a>(payload: &'a str, key: &str) -> Option<&'a str> {
+    let (_, query) = payload.split_once("://pair?")?;
+    query.split('&').find_map(|kv| {
+        kv.split_once('=')
+            .filter(|(k, _)| *k == key)
+            .map(|(_, v)| v)
+    })
+}
+
+/// Everything an invite payload carries besides the address and bundle: the inviter's relay set
+/// (`rs=`) and pairing pass (`ck=`). Absent or unreadable parts are `None`.
+pub(crate) fn parse_invite_extras(payload: &str) -> crate::node::InviteExtras {
+    crate::node::InviteExtras {
+        relays: parse_invite_relay_set(payload),
+        pass: invite_param(payload, "ck").and_then(crate::node::decode_secret),
+    }
 }
 
 /// Parse `nightdrop://pair?addr=...&ik=...&otk=...` into (address, pre-key bundle).

@@ -866,6 +866,17 @@ impl Transport for TorTransport {
         Some(self.make_service_discovery_key(peer_onion))
     }
 
+    fn mint_pass(&self) -> Option<Result<(String, [u8; 32])>> {
+        let mut bytes = [0u8; 32];
+        rand::RngCore::fill_bytes(&mut rand::thread_rng(), &mut bytes);
+        let secret = tor_hscrypto::pk::HsClientDescEncSecretKey::from(
+            tor_llcrypto::pk::curve25519::StaticSecret::from(bytes),
+        );
+        // arti's own formatting (`descriptor:x25519:<BASE32>`), the form its key directory parses.
+        let public = tor_hscrypto::pk::HsClientDescEncKey::from(&secret);
+        Some(Ok((public.to_string(), bytes)))
+    }
+
     fn insert_client_key(&self, peer_onion: &str, secret: &[u8; 32]) -> Result<()> {
         let hsid = HsId::from_str(peer_onion).context("parse peer onion address")?;
         let secret = tor_hscrypto::pk::HsClientDescEncSecretKey::from(

@@ -2059,6 +2059,7 @@ impl Node {
     pub fn sweep_time(&mut self) {
         self.sweep_burns();
         let now = crate::api::now_secs();
+        self.expire_passes(now);
         let horizon = RELAY_TTL.as_secs();
         let mut changed = false;
         let mut dead_media: Vec<String> = Vec::new();

@@ -74,6 +74,9 @@ impl Node {
                     told_version: chat.told_version.clone(),
                     told_address: chat.told_address.clone(),
                     told_captures: chat.told_captures,
+                    own_key_pending: chat.own_key_pending.as_ref().map(super::encode_secret),
+                    peer_key_pending: chat.peer_key_pending.clone(),
+                    pass_pending: chat.pass_pending.as_ref().map(super::encode_secret),
                     peer_supports_burn: chat.contact.peer_supports_burn,
                     peer_app_version: chat.contact.peer_app_version.clone(),
                     mailbox_own,
@@ -119,6 +122,15 @@ impl Node {
             my_relays: self.my_relays(),
             relays: Some(self.relays.clone()),
             relays_draining: self.relays_draining.clone(),
+            passes: self
+                .passes
+                .iter()
+                .map(|(name, otk, expires)| crate::storage::PersistedPass {
+                    name: name.clone(),
+                    otk: otk.clone(),
+                    expires: *expires,
+                })
+                .collect(),
             held: self
                 .held
                 .iter()
@@ -359,6 +371,11 @@ impl Node {
         let (relays, overflow) = super::restored_relays(state);
         node.relays = relays;
         node.relays_draining = state.relays_draining.clone();
+        node.passes = state
+            .passes
+            .iter()
+            .map(|p| (p.name.clone(), p.otk.clone(), p.expires))
+            .collect();
         node.held = state
             .held
             .iter()
@@ -765,6 +782,12 @@ fn chat_from_persisted(
         told_version: chat.told_version.clone(),
         told_address: chat.told_address.clone(),
         told_captures: chat.told_captures,
+        own_key_pending: chat
+            .own_key_pending
+            .as_deref()
+            .and_then(super::decode_secret),
+        peer_key_pending: chat.peer_key_pending.clone(),
+        pass_pending: chat.pass_pending.as_deref().and_then(super::decode_secret),
         alive_count: 0,
     }
 }

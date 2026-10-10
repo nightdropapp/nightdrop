@@ -89,6 +89,15 @@ pub struct PersistedChat {
     pub told_address: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub told_captures: Option<bool>,
+    /// Pairing passes in waiting (`optional-relay.md` §5), base64. Joiner: our own client secret for
+    /// the inviter's onion, installed in place of their QR pass once they accept. Inviter: the
+    /// joiner's client key for our onion and their reply pass, both unused until Accept.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub own_key_pending: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_key_pending: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pass_pending: Option<String>,
     /// Whether the peer's build understands burn messages (`Frame::Burns`). `None`/absent means
     /// unknown, which is treated as unsupported — burn is never offered on a guess.
     #[serde(default)]
@@ -320,6 +329,15 @@ pub struct PersistedHeld {
     pub bytes: String,
 }
 
+/// A pairing pass we issued (`optional-relay.md` §5): authorized on our onion under `name` until a
+/// `Hello` uses the invite's one-time key `otk`, or until `expires` (unix seconds).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedPass {
+    pub name: String,
+    pub otk: String,
+    pub expires: u64,
+}
+
 /// A short-code invite this device is hosting, persisted so it survives a **core rebuild**.
 ///
 /// It used to live only in memory, and a rebuild is not rare: the guard heal does one, so does
@@ -388,6 +406,9 @@ pub struct PersistedState {
     /// The held queue, in send order (`optional-relay.md` §4).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub held: Vec<PersistedHeld>,
+    /// Pairing passes we issued in a QR or short code and have not revoked yet (§5).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub passes: Vec<PersistedPass>,
     /// Shared relays learned from the operator-signed relay directory (§3.1), and the version we
     /// accepted. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -578,6 +599,7 @@ mod tests {
             relays: None,
             relays_draining: Vec::new(),
             held: Vec::new(),
+            passes: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
             directory_next_check: 0,
