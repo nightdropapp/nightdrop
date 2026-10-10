@@ -1713,6 +1713,8 @@ fn a_burn_announce_to_an_unreachable_peer_is_retried_until_it_lands() {
     );
 
     // The retry is the point: a later tick must try again rather than treating the run as done.
+    // With no relay it waits out the retry backoff first (`optional-relay.md` §4).
+    alice.let_backoff_elapse();
     alice.announce_burns();
     bob.pump().unwrap();
     assert_eq!(
@@ -1958,6 +1960,7 @@ fn a_version_announce_is_retried_until_it_lands_and_resent_on_a_new_version() {
     bob.pump().unwrap();
     assert_eq!(bob.contacts()[0].peer_app_version, None, "Bob was offline");
 
+    alice.let_backoff_elapse(); // no relay: the retry waits out its backoff
     alice.announce_version();
     bob.pump().unwrap();
     assert_eq!(

@@ -868,6 +868,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get deliveryHeld => 'Held for delivery';
 
   @override
+  String deliveryWaiting(String name) {
+    return 'Waiting for $name to come online';
+  }
+
+  @override
   String get deliveryExpired => 'Not delivered (expired)';
 
   @override

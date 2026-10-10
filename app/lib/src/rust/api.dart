@@ -810,6 +810,8 @@ class ChatMessage {
   ///   has it: the frame can still be lost there. Transient — if no receipt names it within
   ///   `RECEIPT_TIMEOUT` the core puts a relay copy behind it and it becomes `"queued"`.
   /// * `"queued"` — held on a relay until they collect it.
+  /// * `"waiting"` — held on this device: no relay connects us, and they were offline. Sent
+  ///   directly once they are online (`docs/design/optional-relay.md` §4); never expires.
   /// * `"delivered"` — **only** state that means arrival, and only ever set by a
   ///   [`Frame::Delivered`](crate::wire::Frame::Delivered) naming this message. A dial
   ///   succeeding, a message arriving from them, and their relay `Ack` all used to set it; each

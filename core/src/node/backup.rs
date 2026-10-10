@@ -119,6 +119,18 @@ impl Node {
             my_relays: self.my_relays(),
             relays: Some(self.relays.clone()),
             relays_draining: self.relays_draining.clone(),
+            held: self
+                .held
+                .iter()
+                .map(|h| crate::storage::PersistedHeld {
+                    contact_id: h.contact_id.clone(),
+                    msg_id: h.msg_id.clone(),
+                    bytes: {
+                        use base64::Engine as _;
+                        base64::engine::general_purpose::STANDARD.encode(&h.bytes)
+                    },
+                })
+                .collect(),
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
             directory_next_check: self.directory_next_check,
@@ -347,6 +359,21 @@ impl Node {
         let (relays, overflow) = super::restored_relays(state);
         node.relays = relays;
         node.relays_draining = state.relays_draining.clone();
+        node.held = state
+            .held
+            .iter()
+            .filter_map(|h| {
+                use base64::Engine as _;
+                Some(super::HeldSend {
+                    contact_id: h.contact_id.clone(),
+                    msg_id: h.msg_id.clone(),
+                    bytes: base64::engine::general_purpose::STANDARD
+                        .decode(&h.bytes)
+                        .ok()?,
+                    in_flight: false,
+                })
+            })
+            .collect();
         let until = crate::api::now_secs() + super::RELAY_TTL.as_secs();
         node.relays_draining
             .extend(overflow.into_iter().map(|e| (e, until)));
@@ -738,6 +765,7 @@ fn chat_from_persisted(
         told_version: chat.told_version.clone(),
         told_address: chat.told_address.clone(),
         told_captures: chat.told_captures,
+        alive_count: 0,
     }
 }
 

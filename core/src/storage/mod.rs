@@ -308,6 +308,18 @@ pub struct PersistedPendingControl {
     pub handle: String,
 }
 
+/// One frame of the held queue (`docs/design/optional-relay.md` §4): sealed, waiting for its
+/// recipient to come online or for a relay to take it. For a direct-only pair it is the only copy.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PersistedHeld {
+    pub contact_id: String,
+    /// The message it carries; empty for a control frame.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub msg_id: String,
+    /// base64 of the sealed frame (the whole [`PersistedState`] is sealed around it).
+    pub bytes: String,
+}
+
 /// A short-code invite this device is hosting, persisted so it survives a **core rebuild**.
 ///
 /// It used to live only in memory, and a rebuild is not rare: the guard heal does one, so does
@@ -373,6 +385,9 @@ pub struct PersistedState {
     /// queued there for us lives a day.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relays_draining: Vec<(RelayEntry, u64)>,
+    /// The held queue, in send order (`optional-relay.md` §4).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub held: Vec<PersistedHeld>,
     /// Shared relays learned from the operator-signed relay directory (§3.1), and the version we
     /// accepted. `#[serde(default)]` for forward-compat.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -562,6 +577,7 @@ mod tests {
             my_relays: Vec::new(),
             relays: None,
             relays_draining: Vec::new(),
+            held: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
             directory_next_check: 0,

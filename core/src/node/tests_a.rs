@@ -2010,7 +2010,18 @@ fn a_dropped_relay_message_is_not_acked_as_delivered() {
     bob.set_relay(relay.clone());
 
     let bundle = alice.publish_bundle();
-    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    // As a short-code join: Bob knows Alice's relay set before she approves, so his message goes
+    // to her relay rather than being held for her (`optional-relay.md` §3).
+    let alice_contact = bob
+        .connect_with_bundle_and_set(
+            "alice",
+            &bundle,
+            Some(RelaySet {
+                nightdrop: true,
+                relays: Vec::new(),
+            }),
+        )
+        .unwrap();
     alice.pump().unwrap();
     assert_eq!(
         alice.pending_authorizations().len(),

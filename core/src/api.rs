@@ -400,6 +400,8 @@ pub struct ChatMessage {
     ///   has it: the frame can still be lost there. Transient — if no receipt names it within
     ///   `RECEIPT_TIMEOUT` the core puts a relay copy behind it and it becomes `"queued"`.
     /// * `"queued"` — held on a relay until they collect it.
+    /// * `"waiting"` — held on this device: no relay connects us, and they were offline. Sent
+    ///   directly once they are online (`docs/design/optional-relay.md` §4); never expires.
     /// * `"delivered"` — **only** state that means arrival, and only ever set by a
     ///   [`Frame::Delivered`](crate::wire::Frame::Delivered) naming this message. A dial
     ///   succeeding, a message arriving from them, and their relay `Ack` all used to set it; each
@@ -750,7 +752,7 @@ impl Inner {
             // the pairing cadence — not here, where it waited for whole drain rounds.)
             // Retry messages that couldn't reach the peer or any relay when first sent (arti was
             // cold): now that Tor has had time to warm, re-queue them so they finally deliver.
-            for id in self.me.flush_pending_relay() {
+            for id in self.me.flush_held() {
                 if !affected.contains(&id) {
                     affected.push(id);
                 }
@@ -2107,6 +2109,8 @@ impl NightdropCore {
     /// immediate relay catch-up so queued offline mail appears right away.
     pub fn set_background(&self, background: bool) {
         BACKGROUND.store(background, std::sync::atomic::Ordering::Relaxed);
+        // The held-queue retry cap is longer in the background (`optional-relay.md` §4).
+        self.lock().me.set_background(background);
         if !background {
             RELAY_POLL_NOW.store(true, std::sync::atomic::Ordering::Relaxed);
         }
@@ -3425,8 +3429,13 @@ mod tests {
         );
         release.store(true, Ordering::Relaxed);
         assert!(
-            approving.join().unwrap().is_err(),
-            "an approval that reached no one (no relay here) is still reported as failed"
+            approving.join().unwrap().is_ok(),
+            "with no relay route an approval that reached no one is held for them, not an error"
+        );
+        assert_eq!(
+            core.lock().me.held_count(),
+            1,
+            "held, to go out when they are next reachable (`optional-relay.md` §4)"
         );
         assert_eq!(
             core.contacts().len(),

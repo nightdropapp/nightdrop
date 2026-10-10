@@ -1510,6 +1510,12 @@ abstract class AppLocalizations {
   /// **'Held for delivery'**
   String get deliveryHeld;
 
+  /// Delivery status: held on this device because no relay connects the two people and the contact was offline. It is sent directly as soon as they are online.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for {name} to come online'**
+  String deliveryWaiting(String name);
+
   /// Delivery status: expired unread.
   ///
   /// In en, this message translates to:

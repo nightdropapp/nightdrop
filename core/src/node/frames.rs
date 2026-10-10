@@ -174,7 +174,7 @@ impl Node {
                     );
                 })?;
                 // Decrypting on their ratchet is proof it was them (silence-detection design).
-                chat.last_seen = Some(crate::api::now_secs());
+                chat.mark_alive();
                 let text = String::from_utf8_lossy(&plaintext).into_owned();
                 // Their message proves they are alive; it says nothing whatever about whether they
                 // picked up OUR earlier queued ones, which is what promoting those claimed.
@@ -218,7 +218,7 @@ impl Node {
                 let plaintext = crypto::decrypt(&mut chat.session, &olm).inspect_err(|_| {
                     crate::diag!("recv: a burn message FAILED TO DECRYPT — DROPPED");
                 })?;
-                chat.last_seen = Some(crate::api::now_secs());
+                chat.mark_alive();
                 let (burn_secs, text) = unpack_burn(&plaintext)?;
                 if burn_secs == 0 {
                     // A burn frame whose duration we cannot read must not be rendered as an
@@ -583,7 +583,7 @@ impl Node {
                 // wire (peers on older builds still send it) as proof of life; `Frame::Delivered`
                 // is what confirms a message.
                 if let Some(chat) = self.chats.get_mut(&from) {
-                    chat.last_seen = Some(crate::api::now_secs());
+                    chat.mark_alive();
                 }
                 Ok(None)
             }
@@ -600,7 +600,7 @@ impl Node {
                 };
                 let named = String::from_utf8_lossy(&plaintext).into_owned();
                 // Proof of life, exactly like any other authenticated frame from them.
-                chat.last_seen = Some(crate::api::now_secs());
+                chat.mark_alive();
                 // An empty payload names nothing. It would otherwise match the first attachment in
                 // the chat, since media carries no `msg_id` — a wildcard, and the one shape of this
                 // frame that could confirm a message nobody vouched for.

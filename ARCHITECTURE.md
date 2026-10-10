@@ -473,7 +473,7 @@ on a re-pair (new session) exactly like `verified`.
   inline, so every control frame did its I/O under the lock: the once-per-run announcements
   (`announce_burns`, `announce_version`, `announce_mailbox`, `reannounce_address`), `announce_relay_set`,
   name/verification/storage/disappearing changes, chat-delete and screenshot notices, the
-  `flush_pending_control`/`flush_pending_relay`/`sweep_unconfirmed` retries, cover traffic, and the
+  `flush_pending_control`/`flush_held`/`sweep_unconfirmed` retries, cover traffic, and the
   relay recall + re-post of an edit or unsend. Now each is sealed under the lock (the ratchet has to
   advance there) into an `Outbound` — the frame, its route (direct then relay, relay then direct,
   relay only) and what to record when it lands — and `Node::send_or_queue` either runs it at once on
@@ -490,7 +490,15 @@ on a re-pair (new session) exactly like `verified`.
   Until 0.2 the first four went to every contact on every launch, trying their device first, which
   told every contact when we came online and, with held messages (`optional-relay.md` §4), would
   have flushed their queues at once. `ANNOUNCE_ONLINE_ON_START` (off) restores the per-launch
-  behaviour as a deliberate "I'm online" signal; `node/tests_announce.rs` runs both settings. A chat-delete `Closed`, a screenshot notice, or a joiner's first-contact `Hello` goes into the persisted
+  behaviour as a deliberate "I'm online" signal; `node/tests_announce.rs` runs both settings.
+
+  **The held queue (0.2, `optional-relay.md` §4).** A frame that reaches neither the peer nor a
+  relay is held (`Node::held`, persisted, in send order) instead of being dropped. With no relay
+  between the two people (either is direct only, or the peer's set is not known yet) messages
+  show "waiting", and control frames are held with them. Such a contact is retried directly, oldest
+  frame first and one at a time, on a per-contact backoff (1 min doubling to 5 min, 15 in the
+  background) that every other retry to them also respects, and flushed at once when a frame
+  arrives from them directly. A chat-delete `Closed`, a screenshot notice, or a joiner's first-contact `Hello` goes into the persisted
   `pending_control` before its first attempt, marked in flight while queued; a copy landing removes
   it, and since the chat may be gone it carries its own mailbox handle. At poller exit anything still
   queued is applied as failed, so every retry is back in place for the final save. The calls a user

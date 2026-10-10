@@ -1140,6 +1140,15 @@
   "@deliveryHeld": {
     "description": "Delivery status: queued on a relay."
   },
+  "deliveryWaiting": "Waiting for {name} to come online",
+  "@deliveryWaiting": {
+    "description": "Delivery status: held on this device because no relay connects the two people and the contact was offline. It is sent directly as soon as they are online.",
+    "placeholders": {
+      "name": {
+        "type": "String"
+      }
+    }
+  },
   "deliveryExpired": "Not delivered (expired)",
   "@deliveryExpired": {
     "description": "Delivery status: expired unread."

@@ -114,7 +114,7 @@ The chat shows the contact's state where it affects delivery:
 With no relay on either side of a pair, a message to an offline peer stays **on the sender's
 device**, marked **"Waiting for {name} to come online"**, and is retried directly.
 
-* **Persistent.** This generalises `pending_relay` (`node.rs`, retried by `flush_pending_relay`).
+* **Persistent.** This generalises `pending_relay` (now `Node::held`, retried by `flush_held`).
   That queue already re-queues messages that reached neither the peer nor a relay, but only in
   memory: a restart drops the retry and leaves the message "queued" forever. That is tolerable
   when a relay usually takes the copy within seconds, and not when holding is the only path, so
@@ -279,6 +279,25 @@ a direct-only user's contacts see their messages arrive the moment that user com
    later ticks until it lands. The one exception to "unknown is held" is the QR `Hello` itself,
    which still goes to Night Drop until step 4 lets it go direct.
 3. **The held queue (§4)**, generalised from `pending_relay`, with retry and flush-on-inbound.
+   **Built 2026-10-09** (`Node::held`, persisted in the state; tests in `node/tests_held.rs` and
+   `tests_outbox.rs`). As built:
+   * Anything that reaches neither the peer nor a relay is held in send order. Messages show
+     **"waiting"** ("Waiting for {name} to come online") when no relay connects the pair, and
+     "queued" otherwise. Control frames to a contact with no relay route (a rename, a timer, an
+     approval, an edit) are held with them instead of being lost or reported as failed.
+   * A contact with no relay route gets its oldest held frame only, directly on a fresh
+     connection, on a per-contact backoff of 1, 2, 4 then 5 min (15 in the background); when it
+     lands the rest follow at once. Every other retry to that contact (`pending_control`,
+     unconfirmed messages, standing announcements) waits on the same backoff, so an offline
+     contact is dialled once per retry, not every 15 s tick.
+   * Any authenticated frame arriving **directly** resets the backoff and flushes at once
+     (`Node::heard_from`, from `pump`; counted by `Chat::alive_count`, since `last_seen` has
+     one-second resolution). A relay-drained frame does not count: it may be hours old.
+   * Editing or unsending a message still held edits the held copy in place or drops it; nothing
+     is sent. "waiting" never expires; deleting the chat drops its held frames.
+   * The v2 mailbox agreement is skipped for a contact with no relay route (mailboxes live on
+     relays).
+   * Not yet measured: the battery cost of the background retries on two phones (§9 tests).
 4. **Pairing credentials (§5)** for QR and `Hello`.
 5. **Gate the features in §6** in the core, with the UI showing the reasons.
 6. **UI:** the onboarding step, "My relays" with the Night Drop entry, chat banners, and the

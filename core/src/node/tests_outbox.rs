@@ -101,6 +101,7 @@ fn a_failed_announcement_clears_its_flag_so_the_next_tick_retries() {
         "a failed delivery must not count as announced"
     );
 
+    alice.let_backoff_elapse(); // no relay: the retry waits out its backoff
     alice.announce_version();
     assert!(
         !alice.outbox.is_empty(),
@@ -134,8 +135,10 @@ fn a_chat_delete_notice_stays_persisted_until_a_copy_lands() {
     assert_eq!(alice.pending_control.len(), 1);
     assert!(!alice.pending_control[0].in_flight);
 
-    // The peer comes back: the retry lands and the entry goes.
+    // The peer comes back: the retry (once its backoff runs out, there being no relay) lands
+    // and the entry goes.
     down.store(false, Ordering::Relaxed);
+    alice.let_backoff_elapse();
     alice.flush_pending_control();
     let sent = run_outbox(alice.take_outbox());
     alice.apply_outbound(sent);
@@ -254,8 +257,10 @@ fn a_hello_that_cannot_go_out_yet_is_held_and_arrives_later() {
     assert_eq!(inviter.pending_count(), 0, "nothing arrived yet");
     assert_eq!(joiner.pending_control.len(), 1, "still held");
 
-    // The network comes up; the next poll's retry delivers it.
+    // The network comes up; the next retry delivers it (with no relay here, once its backoff has
+    // run out).
     down.store(false, Ordering::Relaxed);
+    joiner.let_backoff_elapse();
     joiner.flush_pending_control();
     let sent = run_outbox(joiner.take_outbox());
     joiner.apply_outbound(sent);
@@ -269,4 +274,43 @@ fn a_hello_that_cannot_go_out_yet_is_held_and_arrives_later() {
         joiner.pending_control.is_empty(),
         "and the joiner stops retrying"
     );
+}
+
+/// The held queue on an asynchronous transport, as on a phone: a send that reaches no one goes
+/// through the poller's plan, execute and apply steps into the queue, and the retry goes out
+/// through the outbox, one frame at a time and in order (`optional-relay.md` §4).
+#[test]
+fn held_messages_go_out_through_the_outbox_in_order() {
+    let (mut alice, mut bob, bob_id, alice_id, down) = paired();
+    down.store(true, Ordering::Relaxed);
+    alice.send(&bob_id, "first").unwrap();
+    alice.send(&bob_id, "second").unwrap();
+    let plan = alice.plan_pending_sends().unwrap();
+    alice.apply_send_outcomes(execute_sends(&plan));
+    assert_eq!(alice.held_count(), 2);
+    assert!(alice
+        .messages(&bob_id)
+        .iter()
+        .filter(|m| m.from_me)
+        .all(|m| m.delivery == "waiting"));
+
+    down.store(false, Ordering::Relaxed);
+    alice.let_backoff_elapse();
+    alice.flush_held();
+    assert_eq!(alice.outbox.len(), 1, "only the oldest goes first");
+    let sent = run_outbox(alice.take_outbox());
+    alice.apply_outbound(sent);
+    assert_eq!(alice.outbox.len(), 1, "and the next follows once it landed");
+    let sent = run_outbox(alice.take_outbox());
+    alice.apply_outbound(sent);
+    assert_eq!(alice.held_count(), 0);
+
+    bob.pump().unwrap();
+    let got: Vec<String> = bob
+        .messages(&alice_id)
+        .into_iter()
+        .filter(|m| !m.from_me && !m.system)
+        .map(|m| m.text)
+        .collect();
+    assert_eq!(got, vec!["first", "second"]);
 }

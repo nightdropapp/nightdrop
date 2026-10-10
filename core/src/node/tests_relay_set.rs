@@ -192,6 +192,7 @@ fn an_announcement_that_did_not_land_is_retried_until_it_does() {
     );
 
     net.reconnect("alice");
+    bob.let_backoff_elapse(); // no relay route to her: the retry waits out its backoff
     bob.announce_relay_set(); // the next tick
     alice.pump().unwrap();
     assert_eq!(bob.chats[&alice_id].relays_told, Some(bob.my_relay_set()));

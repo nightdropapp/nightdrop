@@ -824,6 +824,10 @@ fn launch_announcements_wait_for_the_onion_or_the_fallback() {
             up: Arc::clone(&up),
         }));
         let mut bob = Node::new(Box::new(net.endpoint("bob")));
+        // Mailboxes live on relays: with no relay route there is nothing to agree.
+        let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+        alice.set_relay(relay.clone());
+        bob.set_relay(relay);
         bob.legacy_v1_only = true; // never answers, so the pair stays open to announce
         let bundle = alice.publish_bundle();
         let bob_id = bob.connect_with_bundle("alice", &bundle).unwrap();

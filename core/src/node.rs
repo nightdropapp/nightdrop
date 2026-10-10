@@ -34,6 +34,14 @@ const RELAY_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// switch so turning it on later is a one-line change; `node/tests_announce.rs` runs both.
 pub(crate) const ANNOUNCE_ONLINE_ON_START: bool = false;
 
+/// Retry backoff for a contact with no relay route, so held frames go only direct
+/// (`optional-relay.md` §4): the first retry after a minute, doubling to a cap of five minutes while
+/// the app is open and fifteen in the background. Every retry is a descriptor fetch plus a circuit,
+/// so the background cap is the battery cost. Hearing from the contact directly resets it.
+const HELD_RETRY_FIRST_SECS: u64 = 60;
+const HELD_RETRY_CAP_OPEN_SECS: u64 = 5 * 60;
+const HELD_RETRY_CAP_BACKGROUND_SECS: u64 = 15 * 60;
+
 /// The most entries our own relay list holds (`optional-relay.md` §2). Everyone writing to us
 /// posts each offline message to every entry, so this bounds the copies one message makes. A
 /// contact's announced set is held to the same cap, so nobody can make us post a message a
@@ -648,6 +656,18 @@ struct Chat {
     told_address: Option<String>,
     /// Whether the peer last confirmed hearing that we can report screenshots (#1).
     told_captures: Option<bool>,
+    /// Bumped by every authenticated frame from the peer ([`Chat::mark_alive`]), so a caller can
+    /// tell which chats it heard from in one round even within the same second, which `last_seen`
+    /// cannot. In memory only.
+    alive_count: u64,
+}
+
+impl Chat {
+    /// The peer just proved it is alive: a frame that decrypted or verified on their ratchet.
+    fn mark_alive(&mut self) {
+        self.last_seen = Some(crate::api::now_secs());
+        self.alive_count += 1;
+    }
 }
 
 impl Chat {
@@ -701,6 +721,7 @@ impl Chat {
             told_version: None,
             told_address: None,
             told_captures: None,
+            alive_count: 0,
         }
     }
 }
@@ -827,13 +848,21 @@ pub struct Node {
     /// user self-hosts) did not answer our drain, so contacts' mail to us via it may be stuck. Drives
     /// the "your relay is offline — add a backup" warning. Absent = not yet probed (treated as up).
     relay_reachable: std::collections::HashMap<String, bool>,
-    /// Sent messages that reached neither the peer directly nor any relay yet — typically because
-    /// arti's Tor circuits were still cold when the user hit send. Re-queued on every relay poll
-    /// (which also warms arti) until a relay accepts the copy, so a message composed during Tor
-    /// warm-up still gets delivered instead of silently failing. In-memory only; a restart drops
-    /// the retry (the message stays "queued" in history), and the common case — app kept open
-    /// through the ~warm-up window — recovers on its own.
-    pending_relay: Vec<PendingRelaySend>,
+    /// The **held queue** (`optional-relay.md` §4): frames that reached neither the peer nor any
+    /// relay, in the order they were sent. Messages, and control frames to a contact with no relay
+    /// route (an edit, a rename, an approval), which would otherwise be lost. A contact with relays
+    /// gets a relay copy on each relay tick, as before (arti still cold); one without is retried
+    /// directly, oldest first and one at a time, on [`held_backoff`](Self::held_backoff), and at once
+    /// when it is heard from. **Persisted**: for a direct-only pair this is the only copy, and it is
+    /// kept until delivered or the chat is deleted. Only frames explicitly held are here, never
+    /// everything in the "sent" state (see [`awaiting_receipt`](Self::awaiting_receipt)).
+    held: Vec<HeldSend>,
+    /// When each contact with no relay route is next tried directly: `(delay, next_at)` in seconds,
+    /// see [`HELD_RETRY_FIRST_SECS`]. Absent = due now. In memory: after a restart everything is
+    /// due once, which is one dial per held contact.
+    held_backoff: HashMap<String, (u64, u64)>,
+    /// Whether the app is in the background, for the retry cap. Set by the app.
+    background: bool,
     /// Messages composed while a **non-synchronous** transport (Tor) is in use: [`Node::send`]
     /// seals + stores them "queued" and defers the network here so composing never blocks the UI
     /// on a dial. The poller drains this via [`plan_pending_sends`](Self::plan_pending_sends),
@@ -1152,8 +1181,9 @@ pub(crate) enum OutboundDone {
     /// A `pending_control` entry, identified by its sealed bytes (unique: each is a fresh ratchet
     /// message). Dropped on success; otherwise left for the next poll.
     PendingControl(Vec<u8>),
-    /// A [`PendingRelaySend`] retry: its receipts recorded on success, put back otherwise.
-    PendingRelay(PendingRelaySend),
+    /// A [`HeldSend`] retry, named by its sealed bytes (unique: each is a fresh ratchet message).
+    /// Removed once delivered; otherwise left for the next retry.
+    Held(Vec<u8>),
     /// A relay copy behind an unreceipted message ([`Node::sweep_unconfirmed`]).
     Unconfirmed(AwaitingReceipt),
     /// Cover traffic: logged either way, never retried.
@@ -1177,6 +1207,13 @@ pub(crate) struct Outbound {
 pub(crate) struct Finished {
     pub(crate) done: OutboundDone,
     pub(crate) delivery: Delivery,
+    /// Who it was for, and the frame, so a failed frame to a contact with no relay route can be
+    /// held rather than lost.
+    pub(crate) recipient: String,
+    pub(crate) bytes: Vec<u8>,
+    /// The send had no relay to fall back on: a failure means the peer was offline, and the frame
+    /// is held for direct delivery.
+    pub(crate) relayless: bool,
 }
 
 impl Outbound {
@@ -1185,6 +1222,9 @@ impl Outbound {
         Finished {
             done: self.done,
             delivery,
+            recipient: self.send.recipient_ik,
+            relayless: self.send.primary.is_none() && self.send.peer_relays.is_empty(),
+            bytes: self.send.bytes,
         }
     }
 
@@ -1194,6 +1234,9 @@ impl Outbound {
         Finished {
             done: self.done,
             delivery: Delivery::Failed,
+            recipient: self.send.recipient_ik,
+            relayless: self.send.primary.is_none() && self.send.peer_relays.is_empty(),
+            bytes: self.send.bytes,
         }
     }
 
@@ -1203,9 +1246,13 @@ impl Outbound {
 }
 
 impl Finished {
-    /// A caller's entry that reached neither the peer nor any relay.
+    /// A caller's entry that reached neither the peer nor any relay, and is not held for direct
+    /// delivery either: a contact with no relay route being offline is not an error, it is what
+    /// holding is for.
     pub(crate) fn caller_failed(&self) -> bool {
-        matches!(self.done, OutboundDone::Caller(_)) && matches!(self.delivery, Delivery::Failed)
+        matches!(self.done, OutboundDone::Caller(_))
+            && matches!(self.delivery, Delivery::Failed)
+            && !self.relayless
     }
 }
 
@@ -1230,6 +1277,17 @@ pub(crate) struct AwaitingReceipt {
 }
 
 /// A sent message awaiting a relay to accept its store-and-forward copy (see [`Node::pending_relay`]).
+/// One frame in the held queue ([`Node::held`]).
+pub(crate) struct HeldSend {
+    contact_id: String,
+    /// The message it carries, or empty for a control frame.
+    msg_id: String,
+    /// The sealed frame, re-sent verbatim so the ratchet is not advanced again.
+    bytes: Vec<u8>,
+    /// Queued in the outbox right now. Not persisted.
+    in_flight: bool,
+}
+
 pub(crate) struct PendingRelaySend {
     contact_id: String,
     msg_id: String,
@@ -1353,7 +1411,9 @@ impl Node {
             restored_address: String::new(),
             seen_frames: std::collections::HashSet::new(),
             relay_reachable: std::collections::HashMap::new(),
-            pending_relay: Vec::new(),
+            held: Vec::new(),
+            held_backoff: HashMap::new(),
+            background: false,
             pending_sends: Vec::new(),
             pending_control: Vec::new(),
             detached_sends: Vec::new(),
@@ -1628,6 +1688,7 @@ impl Node {
     /// the current value: the retry, run on the relay tick. Silent until the app has told us the
     /// value — guessing would be the false reassurance the whole signal exists to remove.
     pub fn reannounce_captures(&mut self) {
+        let now = crate::api::now_secs();
         let Some(visible) = self.captures_visible else {
             return;
         };
@@ -1638,6 +1699,7 @@ impl Node {
                 !c.closed
                     && !self.captures_announced.contains_key(id.as_str())
                     && (self.announce_online || c.told_captures != Some(visible))
+                    && self.may_retry(id, now)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -1655,6 +1717,7 @@ impl Node {
     /// chats that have not confirmed it ([`Chat::told_burns`]), so a launch re-announces to
     /// nobody ([`ANNOUNCE_ONLINE_ON_START`]).
     pub fn announce_burns(&mut self) {
+        let now = crate::api::now_secs();
         if !self.announce_ready() {
             return;
         }
@@ -1665,6 +1728,7 @@ impl Node {
                 !c.closed
                     && !self.burns_announced.contains(id.as_str())
                     && (self.announce_online || !c.told_burns)
+                    && self.may_retry(id, now)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -1713,6 +1777,7 @@ impl Node {
     /// Same shape as [`announce_burns`](Self::announce_burns): to each chat whose confirmed
     /// version differs ([`Chat::told_version`]), retried while undelivered, and quiet. An older peer cannot decode the frame and skips it.
     pub fn announce_version(&mut self) {
+        let now = crate::api::now_secs();
         if self.app_version.is_none() || !self.announce_ready() {
             return;
         }
@@ -1723,6 +1788,7 @@ impl Node {
                 !c.closed
                     && !self.version_announced.contains_key(id.as_str())
                     && (self.announce_online || c.told_version != self.app_version)
+                    && self.may_retry(id, now)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -1940,7 +2006,7 @@ impl Node {
             // Stamped here rather than per-branch so no authenticated frame is missed, and never
             // for a frame that failed to verify — otherwise a stranger could fake liveness for
             // someone whose phone has been taken.
-            chat.last_seen = Some(crate::api::now_secs());
+            chat.mark_alive();
         }
         ok
     }
@@ -2044,8 +2110,42 @@ impl Node {
     /// (a retry that queued), for the UI to re-pull.
     pub(crate) fn apply_outbound(&mut self, finished: Vec<Finished>) -> Vec<String> {
         let mut affected: Vec<String> = Vec::new();
-        for Finished { done, delivery } in finished {
+        let me = self.identity_key();
+        let now = crate::api::now_secs();
+        for Finished {
+            done,
+            delivery,
+            recipient,
+            bytes,
+            relayless,
+        } in finished
+        {
             let delivered = !matches!(delivery, Delivery::Failed);
+            // Reaching the peer's device directly proves it online; a direct-only send failing
+            // proves the opposite. Either moves its retry clock (`held_backoff`).
+            if !recipient.is_empty() && recipient != me {
+                if matches!(delivery, Delivery::Direct) {
+                    self.held_backoff.remove(&recipient);
+                } else if !delivered && relayless {
+                    self.held_retry_failed(&recipient, now);
+                }
+            }
+            // A one-off control frame (a rename, a timer, an approval, an edit) to a contact with
+            // no relay route has no other retry: hold it, in order with their messages, rather
+            // than lose it (`optional-relay.md` §4).
+            if !delivered
+                && relayless
+                && matches!(done, OutboundDone::Nothing | OutboundDone::Caller(_))
+                && self.chats.get(&recipient).is_some_and(|c| !c.closed)
+            {
+                self.held.push(HeldSend {
+                    contact_id: recipient.clone(),
+                    msg_id: String::new(),
+                    bytes: bytes.clone(),
+                    in_flight: false,
+                });
+                self.dirty = true;
+            }
             match done {
                 OutboundDone::Nothing => {}
                 OutboundDone::Caller(record) => {
@@ -2071,18 +2171,51 @@ impl Node {
                         p.in_flight = false; // still unreachable — the next poll tries again
                     }
                 }
-                OutboundDone::PendingRelay(p) => match delivery {
-                    Delivery::Relay(copies) => {
-                        if let Some(chat) = self.chats.get_mut(&p.contact_id) {
-                            chat.relay_receipts.insert(p.msg_id.clone(), copies);
+                OutboundDone::Held(bytes) => {
+                    let Some(i) = self.held.iter().position(|h| h.bytes == bytes) else {
+                        continue; // its chat was deleted meanwhile
+                    };
+                    if !delivered {
+                        self.held[i].in_flight = false; // the next retry tries again
+                        continue;
+                    }
+                    let h = self.held.remove(i);
+                    let direct = matches!(delivery, Delivery::Direct);
+                    self.dirty = true;
+                    if let Some(chat) = self.chats.get_mut(&h.contact_id) {
+                        if let Some(m) = chat
+                            .history
+                            .iter_mut()
+                            .find(|m| m.from_me && !h.msg_id.is_empty() && m.msg_id == h.msg_id)
+                        {
+                            m.delivery = if direct { "sent" } else { "queued" }.to_string();
                         }
-                        if !affected.contains(&p.contact_id) {
-                            affected.push(p.contact_id);
+                        if let Delivery::Relay(copies) = delivery {
+                            if !h.msg_id.is_empty() {
+                                chat.relay_receipts.insert(h.msg_id.clone(), copies);
+                            }
                         }
                     }
-                    // Still can't reach a relay — keep it for the next poll.
-                    _ => self.pending_relay.push(p),
-                },
+                    if !h.msg_id.is_empty() && !affected.contains(&h.contact_id) {
+                        affected.push(h.contact_id.clone());
+                    }
+                    if direct {
+                        if !h.msg_id.is_empty() {
+                            // Handed over, not confirmed: the receipt clock starts now.
+                            self.awaiting_receipt.push(AwaitingReceipt {
+                                contact_id: h.contact_id.clone(),
+                                msg_id: h.msg_id.clone(),
+                                since: now,
+                            });
+                        }
+                        // They are online: the next one goes now, in order.
+                        for id in self.flush_held_for(Some(&h.contact_id), true) {
+                            if !affected.contains(&id) {
+                                affected.push(id);
+                            }
+                        }
+                    }
+                }
                 OutboundDone::Unconfirmed(a) => {
                     match delivery {
                         Delivery::Relay(copies) => {
@@ -2104,9 +2237,14 @@ impl Node {
                                 crate::node::messaging::RECEIPT_TIMEOUT.as_secs()
                             );
                         }
+                        // Re-sent directly (a contact with no relay route): wait for its receipt
+                        // again from now.
+                        Delivery::Direct => self
+                            .awaiting_receipt
+                            .push(AwaitingReceipt { since: now, ..a }),
                         // No relay took it. Keep waiting rather than dropping the retry: the next sweep
                         // tries again, and a receipt may still arrive in the meantime.
-                        _ => self.awaiting_receipt.push(a),
+                        Delivery::Failed => self.awaiting_receipt.push(a),
                     }
                 }
                 OutboundDone::Cover => match delivery {
@@ -2368,6 +2506,172 @@ impl Node {
             Some(set) => self.post_route(&set),
             None => (None, Vec::new()),
         }
+    }
+
+    /// Whether a `pending_control` entry has a relay to go to (it carries its own set, since its
+    /// chat may be gone).
+    pub(crate) fn relay_route_for_pending(&self, p: &PendingControl) -> bool {
+        let send = self.detach_pending(p);
+        send.primary.is_some() || !send.peer_relays.is_empty()
+    }
+
+    /// Whether a frame to `contact_id` has any relay to go to; without one it goes direct or is
+    /// held (`optional-relay.md` §4).
+    pub(crate) fn has_relay_route(&self, contact_id: &str) -> bool {
+        let (primary, targets) = self.route_to(contact_id);
+        primary.is_some() || !targets.is_empty()
+    }
+
+    /// Whether a retry to `contact_id` may go out now: always for a contact with a relay route
+    /// (a relay post is how those retry), otherwise when its backoff has run out.
+    pub(crate) fn may_retry(&self, contact_id: &str, now: u64) -> bool {
+        self.has_relay_route(contact_id)
+            || self
+                .held_backoff
+                .get(contact_id)
+                .is_none_or(|(_, next)| now >= *next)
+    }
+
+    /// A direct attempt to a contact with no relay route failed: wait longer before the next.
+    fn held_retry_failed(&mut self, contact_id: &str, now: u64) {
+        let cap = if self.background {
+            HELD_RETRY_CAP_BACKGROUND_SECS
+        } else {
+            HELD_RETRY_CAP_OPEN_SECS
+        };
+        let delay = match self.held_backoff.get(contact_id) {
+            Some((delay, _)) => (delay * 2).min(cap),
+            None => HELD_RETRY_FIRST_SECS,
+        };
+        self.held_backoff
+            .insert(contact_id.to_string(), (delay, now + delay));
+    }
+
+    /// `contact_id` was just heard from directly, so it is online: reset its retry clock and send
+    /// what we hold for it now (`optional-relay.md` §4).
+    pub(crate) fn heard_from(&mut self, contact_id: &str) {
+        let waited = self.held_backoff.remove(contact_id).is_some();
+        let holding = self.held.iter().any(|h| h.contact_id == contact_id)
+            || self
+                .pending_control
+                .iter()
+                .any(|p| p.recipient_ik == contact_id);
+        if waited || holding {
+            self.flush_held_for(Some(contact_id), true);
+            self.flush_pending_control_for(Some(contact_id));
+        }
+    }
+
+    /// Tests only: how many frames are held.
+    #[cfg(test)]
+    pub(crate) fn held_count(&self) -> usize {
+        self.held.len()
+    }
+
+    /// Tests only: let every contact's retry backoff run out, as a minute or more passing would.
+    #[cfg(test)]
+    pub(crate) fn let_backoff_elapse(&mut self) {
+        self.held_backoff.clear();
+    }
+
+    /// Whether the app is in the background, which lengthens the retry cap.
+    pub fn set_background(&mut self, background: bool) {
+        self.background = background;
+    }
+
+    /// Hold a message that reached neither the peer nor a relay. With no relay route it is
+    /// **"waiting"** for the peer to come online; otherwise "queued" until a relay takes it.
+    pub(crate) fn hold_message(&mut self, contact_id: &str, msg_id: &str, bytes: Vec<u8>) {
+        let waiting = !self.has_relay_route(contact_id);
+        if let Some(m) = self.chats.get_mut(contact_id).and_then(|c| {
+            c.history
+                .iter_mut()
+                .find(|m| m.from_me && m.msg_id == msg_id)
+        }) {
+            m.delivery = if waiting { "waiting" } else { "queued" }.to_string();
+        }
+        self.held.push(HeldSend {
+            contact_id: contact_id.to_string(),
+            msg_id: msg_id.to_string(),
+            bytes,
+            in_flight: false,
+        });
+        self.dirty = true;
+    }
+
+    /// The held-queue index of message `msg_id` to `contact_id`, if it is held and not on its way
+    /// right now: one in flight may land, so it is edited or unsent the ordinary way instead.
+    pub(crate) fn held_unsent(&self, contact_id: &str, msg_id: &str) -> Option<usize> {
+        self.held.iter().position(|h| {
+            !h.in_flight && !msg_id.is_empty() && h.contact_id == contact_id && h.msg_id == msg_id
+        })
+    }
+
+    /// Retry the held queue (`optional-relay.md` §4). Returns the contacts whose messages
+    /// changed (synchronous transports; otherwise the poller reports them).
+    pub(crate) fn flush_held(&mut self) -> Vec<String> {
+        self.flush_held_for(None, false)
+    }
+
+    /// [`flush_held`](Self::flush_held), for one contact when `only` is set. A contact with a relay
+    /// route gets a relay copy of every entry (`direct_first` tries their device first, for a
+    /// contact just heard from). One without gets its **oldest** entry only, directly, when its
+    /// backoff allows: held frames go out in send order, and the rest follow as soon as that one
+    /// lands, so an offline contact costs one dial per retry, not one per message.
+    pub(crate) fn flush_held_for(&mut self, only: Option<&str>, direct_first: bool) -> Vec<String> {
+        let now = crate::api::now_secs();
+        // A deleted or closed chat's held frames go with it.
+        let chats = &self.chats;
+        let before = self.held.len();
+        self.held
+            .retain(|h| chats.get(&h.contact_id).is_some_and(|c| !c.closed));
+        if self.held.len() != before {
+            self.dirty = true;
+        }
+        let mut sends: Vec<(usize, Route)> = Vec::new();
+        let mut busy: Vec<String> = Vec::new(); // relay-less contacts with one already going
+        for (i, h) in self.held.iter().enumerate() {
+            if only.is_some_and(|c| c != h.contact_id) {
+                continue;
+            }
+            if self.has_relay_route(&h.contact_id) {
+                if !h.in_flight {
+                    let route = if direct_first {
+                        Route::DirectThenRelay
+                    } else {
+                        Route::RelayOnly
+                    };
+                    sends.push((i, route));
+                }
+                continue;
+            }
+            if busy.contains(&h.contact_id) {
+                continue;
+            }
+            busy.push(h.contact_id.clone());
+            if !h.in_flight && self.may_retry(&h.contact_id, now) {
+                sends.push((i, Route::DirectThenRelay));
+            }
+        }
+        let mut affected = Vec::new();
+        for (i, route) in sends {
+            let (contact_id, bytes) = (self.held[i].contact_id.clone(), self.held[i].bytes.clone());
+            self.held[i].in_flight = true;
+            let peer_address = self
+                .chats
+                .get(&contact_id)
+                .map(|c| c.peer_address.clone())
+                .unwrap_or_default();
+            // A fresh connection: a frame that nothing confirms must not vanish into a dead
+            // kept-open one (`Transport::send_fresh`).
+            let send = self.detach(&peer_address, &contact_id, bytes.clone(), true);
+            if self.send_or_queue(send, route, OutboundDone::Held(bytes)) == Some(true)
+                && !affected.contains(&contact_id)
+            {
+                affected.push(contact_id);
+            }
+        }
+        affected
     }
 
     /// Where a relay copy for someone with relay set `set` goes: the Night Drop relay's client and
@@ -2967,6 +3271,8 @@ mod tests_announce;
 mod tests_b;
 #[cfg(test)]
 mod tests_directory;
+#[cfg(test)]
+mod tests_held;
 #[cfg(test)]
 mod tests_mailbox;
 #[cfg(test)]

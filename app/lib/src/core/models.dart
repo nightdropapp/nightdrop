@@ -210,8 +210,8 @@ class Message {
   final bool edited;
 
   /// Whether this message can still be edited: our own delivered/sent text within the
-  /// 15-minute window, or at any age while still queued on the relay (the peer hasn't
-  /// seen it). Mirrors the rule enforced by the Rust core.
+  /// 15-minute window, or at any age while still queued on the relay or waiting on this device
+  /// (the peer hasn't seen it). Mirrors the rule enforced by the Rust core.
   bool get canEdit =>
       fromMe &&
       isText &&
@@ -219,6 +219,7 @@ class Message {
       !sending &&
       msgId.isNotEmpty &&
       (delivery == 'queued' ||
+          delivery == 'waiting' ||
           DateTime.now().difference(at) < const Duration(minutes: 15));
 
   /// Burn timer in seconds (`docs/design/burn-messages.md`); 0 = an ordinary message.
@@ -300,6 +301,8 @@ class Message {
   ///   clock, never a tick, and it does not last — the core puts a relay copy behind an
   ///   unacknowledged message, which moves it to `"queued"`.
   /// * `"queued"` — held on a relay for a peer who has not collected it.
+  /// * `"waiting"` — held on this device: no relay connects us, and the peer was offline. Sent
+  ///   directly when they come online (`docs/design/optional-relay.md` §4); never expires.
   /// * `"delivered"` — their device sent a receipt naming *this* message (`Frame::Delivered`).
   ///   The only state that means arrival.
   /// * `"expired"` — reaped from the relay uncollected.

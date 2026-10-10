@@ -144,6 +144,7 @@ fn a_capture_change_reaches_a_contact_who_was_offline_for_it() {
     );
 
     net.reconnect("bob");
+    alice.let_backoff_elapse(); // no relay: the retry waits out its backoff
     alice.reannounce_captures(); // the next relay tick
     bob.pump().unwrap();
     let alice_id = alice.identity_key();

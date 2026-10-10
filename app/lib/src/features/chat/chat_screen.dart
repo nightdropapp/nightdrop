@@ -911,6 +911,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                                   senderName: m.fromMe
                                       ? contact.myName
                                       : contact.theirName,
+                                  peerName: contact.displayName,
                                   // Right-click (desktop) or long-press (mobile) own recent/
                                   // queued text to edit or unsend it.
                                   onLongPress: m.canEdit
@@ -1272,11 +1273,15 @@ class _Bubble extends StatelessWidget {
   const _Bubble(
       {required this.message,
       required this.senderName,
+      required this.peerName,
       this.onLongPress,
       this.onReveal});
 
   final Message message;
   final String senderName;
+
+  /// The contact, as the user knows them: named in "Waiting for … to come online".
+  final String peerName;
 
   /// Called when the recipient taps a blurred burn message to reveal it. Starts the countdown.
   final VoidCallback? onReveal;
@@ -1396,6 +1401,7 @@ class _Bubble extends StatelessWidget {
                 if (mine &&
                     !message.sending &&
                     (message.delivery == 'queued' ||
+                        message.delivery == 'waiting' ||
                         message.delivery == 'sent' ||
                         message.delivery == 'delivered' ||
                         message.delivery == 'expired')) ...[
@@ -1406,6 +1412,7 @@ class _Bubble extends StatelessWidget {
                       Icon(
                         switch (message.delivery) {
                           'queued' => Icons.cloud_upload_outlined,
+                          'waiting' => Icons.hourglass_empty,
                           'expired' => Icons.error_outline,
                           // Deliberately not a tick. A tick reads as "done", and this state means
                           // only that the peer's onion answered — the message can still be lost
@@ -1419,9 +1426,13 @@ class _Bubble extends StatelessWidget {
                         color: scheme.onPrimary.withValues(alpha: 0.75),
                       ),
                       const SizedBox(width: 4),
-                      Text(
+                      // Flexible: "Waiting for {name} to come online" is often wider than a short
+                      // message, and must wrap rather than overflow the bubble.
+                      Flexible(
+                          child: Text(
                         switch (message.delivery) {
                           'queued' => l10n.deliveryHeld,
+                          'waiting' => l10n.deliveryWaiting(peerName),
                           'expired' => l10n.deliveryExpired,
                           'sent' => l10n.deliverySent,
                           _ => l10n.deliveryDelivered,
@@ -1429,7 +1440,7 @@ class _Bubble extends StatelessWidget {
                         style: TextStyle(
                             fontSize: 10.5,
                             color: scheme.onPrimary.withValues(alpha: 0.75)),
-                      ),
+                      )),
                     ],
                   ),
                 ],

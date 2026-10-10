@@ -211,12 +211,13 @@ impl Node {
                 since: crate::api::now_secs(),
             });
         }
+        if delivered {
+            self.held_backoff.remove(contact_id);
+        } else if !self.has_relay_route(contact_id) {
+            self.held_retry_failed(contact_id, crate::api::now_secs());
+        }
         if needs_relay_retry {
-            self.pending_relay.push(PendingRelaySend {
-                contact_id: contact_id.to_string(),
-                msg_id: msg_id.to_string(),
-                bytes: bytes.to_vec(),
-            });
+            self.hold_message(contact_id, msg_id, bytes.to_vec());
         }
     }
 
@@ -289,13 +290,25 @@ impl Node {
                 message: WireOlm::from_olm(&message),
             };
             let bytes = wire::encode(&frame);
-            let mut send = self.detach("", &a.contact_id, bytes, false);
+            let peer_address = chat.peer_address.clone();
+            // A contact with no relay route gets the copy directly instead, on a fresh
+            // connection, when its backoff allows (`optional-relay.md` §4).
+            let relayless = !self.has_relay_route(&a.contact_id);
+            if relayless && !self.may_retry(&a.contact_id, crate::api::now_secs()) {
+                still_waiting.push(a);
+                continue;
+            }
+            let (route, peer_address) = if relayless {
+                (Route::DirectThenRelay, peer_address)
+            } else {
+                (Route::RelayOnly, String::new())
+            };
+            let mut send = self.detach(&peer_address, &a.contact_id, bytes, relayless);
             send.handle = handle;
             let contact_id = a.contact_id.clone();
             // Off the lock on Tor: `apply_outbound` flips the message to "queued" and records the
             // copies, or puts the entry back to wait for the next sweep.
-            if self.send_or_queue(send, Route::RelayOnly, OutboundDone::Unconfirmed(a))
-                == Some(true)
+            if self.send_or_queue(send, route, OutboundDone::Unconfirmed(a)) == Some(true)
                 && !affected.contains(&contact_id)
             {
                 affected.push(contact_id);
@@ -445,41 +458,17 @@ impl Node {
                     since: crate::api::now_secs(),
                 });
             } else if o.relay_failed {
-                // Reached neither the peer nor any relay: keep the sealed bytes for the poller's
-                // slower retry rather than dropping the message.
-                self.pending_relay.push(PendingRelaySend {
-                    contact_id: o.contact_id.clone(),
-                    msg_id: o.msg_id.clone(),
-                    bytes: o.bytes,
-                });
+                // Reached neither the peer nor any relay: hold it (`optional-relay.md` §4).
+                if !self.has_relay_route(&o.contact_id) {
+                    self.held_retry_failed(&o.contact_id, crate::api::now_secs());
+                }
+                self.hold_message(&o.contact_id, &o.msg_id, o.bytes);
+            }
+            if o.delivered {
+                self.held_backoff.remove(&o.contact_id);
             }
             if !affected.contains(&o.contact_id) {
                 affected.push(o.contact_id);
-            }
-        }
-        affected
-    }
-
-    /// Retry queuing messages that reached neither the peer nor any relay when first sent (arti's
-    /// circuits were cold). Called on the relay-poll cadence; each attempt also warms arti. On
-    /// success the relay receipts are recorded (so edit/unsend can still recall the copy) and the
-    /// message stops being pending. Returns the contact ids whose messages just got queued — on a
-    /// synchronous transport; otherwise the posts run off the lock and the poller reports them.
-    pub(crate) fn flush_pending_relay(&mut self) -> Vec<String> {
-        let mut affected = Vec::new();
-        for p in std::mem::take(&mut self.pending_relay) {
-            // Drop the retry if the chat was deleted/closed in the meantime.
-            if self.chats.get(&p.contact_id).is_none_or(|c| c.closed) {
-                continue;
-            }
-            let send = self.detach("", &p.contact_id, p.bytes.clone(), false);
-            let contact_id = p.contact_id.clone();
-            // Off the lock on Tor: `apply_outbound` records the receipts, or puts it back.
-            if self.send_or_queue(send, Route::RelayOnly, OutboundDone::PendingRelay(p))
-                == Some(true)
-                && !affected.contains(&contact_id)
-            {
-                affected.push(contact_id);
             }
         }
         affected
@@ -494,10 +483,29 @@ impl Node {
     /// fallback) off the lock, and drops it once a copy lands (`apply_outbound`).
     /// Chat-independent, and persisted with the state until then.
     pub(crate) fn flush_pending_control(&mut self) {
+        self.flush_pending_control_for(None);
+    }
+
+    /// [`flush_pending_control`](Self::flush_pending_control), for one contact when `only` is set
+    /// (one just heard from). A contact with no relay route is retried on its backoff, as the held
+    /// queue is (`optional-relay.md` §4).
+    pub(crate) fn flush_pending_control_for(&mut self, only: Option<&str>) {
+        let now = crate::api::now_secs();
+        let allowed: Vec<bool> = self
+            .pending_control
+            .iter()
+            .map(|p| {
+                !p.in_flight
+                    && only.is_none_or(|c| c == p.recipient_ik)
+                    && (self.relay_route_for_pending(p) || self.may_retry(&p.recipient_ik, now))
+            })
+            .collect();
         let mut due = Vec::new();
-        for p in self.pending_control.iter_mut().filter(|p| !p.in_flight) {
-            p.in_flight = true; // one copy at a time: the next poll skips it until it comes back
-            due.push(p.bytes.clone());
+        for (p, ok) in self.pending_control.iter_mut().zip(allowed) {
+            if ok {
+                p.in_flight = true; // one copy at a time: the next poll skips it until it comes back
+                due.push(p.bytes.clone());
+            }
         }
         for bytes in due {
             let Some(send) = self
@@ -732,8 +740,12 @@ impl Node {
             .find(|m| m.from_me && !m.system && m.kind == "text" && m.msg_id == msg_id)
             .ok_or_else(|| anyhow::anyhow!("message not found or not editable"))?;
         let queued = msg.delivery == "queued";
+        // Held on this device for a contact who was offline (`optional-relay.md` §4): they have
+        // not seen it, so like a queued one it stays editable, and `finish_edit` re-seals the
+        // held copy instead of recalling anything.
+        let waiting = msg.delivery == "waiting";
         let in_window = msg.at != 0 && now.saturating_sub(msg.at) <= EDIT_WINDOW.as_secs();
-        if !queued && !in_window {
+        if !queued && !waiting && !in_window {
             anyhow::bail!("messages can only be edited within 15 minutes of sending");
         }
         msg.text = new_text.to_string();
@@ -764,6 +776,34 @@ impl Node {
         recalled: Option<bool>,
     ) -> Result<()> {
         let from = self.identity_key();
+        // Still held here and not on its way: the contact never had it, so the held copy itself
+        // becomes the new text, in the same place in the queue. Nothing is sent.
+        if let Some(i) = self.held_unsent(contact_id, msg_id) {
+            let chat = self
+                .chats
+                .get_mut(contact_id)
+                .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
+            let burn_secs = chat
+                .history
+                .iter()
+                .find(|m| m.from_me && m.msg_id == msg_id)
+                .map_or(0, |m| m.burn_secs);
+            let plaintext = if burn_secs == 0 {
+                new_text.as_bytes().to_vec()
+            } else {
+                pack_burn(burn_secs, new_text)
+            };
+            let message = WireOlm::from_olm(&crypto::encrypt(&mut chat.session, &plaintext)?);
+            let (from, id) = (from, msg_id.to_string());
+            let frame = if burn_secs == 0 {
+                Frame::Message { from, id, message }
+            } else {
+                Frame::Burn { from, id, message }
+            };
+            self.held[i].bytes = wire::encode(&frame);
+            self.dirty = true;
+            return Ok(());
+        }
         let chat = self
             .chats
             .get_mut(contact_id)
@@ -839,8 +879,9 @@ impl Node {
             .find(|m| m.from_me && !m.system && m.kind == "text" && m.msg_id == msg_id)
             .ok_or_else(|| anyhow::anyhow!("message not found or not deletable"))?;
         let queued = msg.delivery == "queued";
+        let waiting = msg.delivery == "waiting"; // held here, as in `begin_edit`
         let in_window = msg.at != 0 && now.saturating_sub(msg.at) <= EDIT_WINDOW.as_secs();
-        if !queued && !in_window {
+        if !queued && !waiting && !in_window {
             anyhow::bail!("messages can only be unsent within 15 minutes of sending");
         }
         if !queued {
@@ -860,6 +901,16 @@ impl Node {
         recalled: Option<bool>,
     ) -> Result<()> {
         let from = self.identity_key();
+        // Still held here and not on its way: the contact never had it. Drop it from the queue
+        // and from the chat, as a fully recalled message is.
+        if let Some(i) = self.held_unsent(contact_id, msg_id) {
+            self.held.remove(i);
+            self.dirty = true;
+            if let Some(chat) = self.chats.get_mut(contact_id) {
+                chat.history.retain(|m| !(m.from_me && m.msg_id == msg_id));
+            }
+            return Ok(());
+        }
         let chat = self
             .chats
             .get_mut(contact_id)
@@ -1201,6 +1252,13 @@ impl Node {
     /// for each received user message (the empty handshake is consumed silently).
     pub fn pump(&mut self) -> Result<Vec<(String, String)>> {
         let mut received = Vec::new();
+        // Who we hear from directly this round: an authenticated frame stamps `last_seen`, and one
+        // that arrived here, not from a relay, proves they are online right now.
+        let seen_before: HashMap<String, u64> = self
+            .chats
+            .iter()
+            .map(|(id, c)| (id.clone(), c.alive_count))
+            .collect();
         while let Some((from_address, bytes)) = self.transport.try_recv() {
             // Skip what we cannot parse, exactly as the relay drain does. This used to be `?`,
             // which aborted the whole pump — and with it that tick's relay harvest and send
@@ -1230,6 +1288,16 @@ impl Node {
                     "pump: a frame from a peer could not be processed — skipped, the rest go on"
                 ),
             }
+        }
+        // Flush what we hold for anyone just heard from, at once (`optional-relay.md` §4).
+        let heard: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(id, c)| c.alive_count > seen_before.get(*id).copied().unwrap_or(0))
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in heard {
+            self.heard_from(&id);
         }
         // Per-message delivery receipts for anything that arrived over the DIRECT path. Without
         // these a directly-sent message reached "sent" and stopped there forever — no frame ever
@@ -1607,6 +1675,7 @@ impl Node {
             return;
         }
         let address = self.address();
+        let now = crate::api::now_secs();
         let pending: Vec<String> = self
             .address_targets()
             .into_iter()
@@ -1614,6 +1683,7 @@ impl Node {
                 !self.address_announced.contains_key(id)
                     && (self.announce_online
                         || self.chats[id].told_address.as_deref() != Some(address.as_str()))
+                    && self.may_retry(id, now)
             })
             .collect();
         for contact_id in pending {
@@ -1729,6 +1799,7 @@ impl Node {
     /// land. One in flight per chat.
     pub fn announce_relay_set(&mut self) {
         let mine = self.my_relay_set();
+        let now = crate::api::now_secs();
         let ids: Vec<String> = self
             .chats
             .iter()
@@ -1737,6 +1808,7 @@ impl Node {
                     && !c.closed
                     && c.relays_told.as_ref() != Some(&mine)
                     && !self.relay_set_in_flight.contains_key(id.as_str())
+                    && self.may_retry(id, now)
             })
             .map(|(id, _)| id.clone())
             .collect();

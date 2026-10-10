@@ -427,6 +427,8 @@ impl Node {
                     && !c.closed
                     && !c.mailbox.as_ref().is_some_and(|p| p.peer_confirmed)
                     && !self.mailbox_announced.contains(id.as_str())
+                    // Mailboxes live on relays: with no relay route there is nothing to agree.
+                    && self.has_relay_route(id)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -520,7 +522,7 @@ impl Node {
             let Some((theirs, their_confirm)) = decode_payload(&pt) else {
                 return;
             };
-            chat.last_seen = Some(crate::api::now_secs());
+            chat.mark_alive();
             let pair = chat.mailbox.get_or_insert_with(MailboxPair::fresh);
             if pair.peer != Some(theirs) {
                 // New or changed: a changed contribution means they lost the old secret (a restore),
