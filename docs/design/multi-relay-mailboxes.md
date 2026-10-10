@@ -1,8 +1,11 @@
 # Design — Self-hostable & multi-relay mailboxes
 
-**Status:** ✅ **implemented** (`core/src/node.rs`: `my_relays`/`set_my_relays`,
-`queue_on_relays`, `announce_relays`, `Frame::Relays`, `seen_frames` dedup; UI: "My relays…"
-on the home menu). This document is retained as the design rationale.
+**Status:** ✅ **implemented** in 0.1.x, and **superseded where it differs by
+`optional-relay.md` (0.2)**: the baked-in default is no longer implicit but an ordinary entry
+("Night Drop") in a list of up to 4, an empty list is direct only, and contacts are told the
+complete set (`Frame::RelaySet`, also inside pairing) instead of extras on top of a default
+(`Frame::Relays`, removed). The fan-out, de-duplication and receipts below are unchanged. Kept as
+the design rationale; each section that 0.2 changed says so.
 **Relates to:** `ARCHITECTURE.md` §5–§6 (transport/relay), the non-negotiable invariants in
 `CLAUDE.md` (no server-side keys/logs; Tor by default; local-first).
 
@@ -44,13 +47,17 @@ So "add a relay" reduces to "post/poll the same handle on more than one endpoint
   - per-contact `peer_relays: Vec<RelayAddr>` — where *their* mailbox lives (learned during
     pairing / via in-band update).
   - a **baked-in default relay** stays as the bootstrap/fallback so first-contact pairing works
-    out of the box and `my_relays` defaults to `[default]`.
+    out of the box and `my_relays` defaults to `[default]`. *(0.2: no implicit default. The list
+    starts as `[Night Drop]`, which can be removed; pairing uses passes instead of a relay;
+    `optional-relay.md` §2, §5.)*
 - **No gossip.** Redundancy is pure **client-side fan-out**: sender posts each sealed blob to
   every relay in `peer_relays`; recipient polls every relay in `my_relays` and de-dups.
 
 ## 4. Wire / API changes
 
 ### 4.1 Advertising a relay set
+*(0.2: replaced by `Frame::RelaySet`, carrying the complete set, sent in the pairing `Hello` and
+the short-code response, and re-sent until each contact confirms it; `optional-relay.md` §3.)*
 - **As built, only in-band** (mirrors onion rotation #11 / `Frame::Address`): `Frame::Relays { from,
   message }`, where `message` is the E2E-encrypted, comma-joined relay list. The receiver replaces
   `peer_relays` silently (no system notice), and only for an approved chat. Sent by
@@ -129,7 +136,8 @@ travel only in QR or **E2E** frames — never in rendezvous/relay cleartext.
    `BUILD_AND_DEPLOY.md`, which already covers running `relay/`).
 
 ## 9. Open questions
-- Cap on relay-set size (bound fan-out cost; suggest ≤ 4).
+- Cap on relay-set size (bound fan-out cost; suggest ≤ 4). *(Settled in 0.2: 4, for our own list
+  and for any set a contact announces; `optional-relay.md` §2.)*
 - Should a sender post to **all** peer relays every time, or the first that ACKs plus one spare?
   (All = strongest availability; spare-only = less load. Start with all, revisit.)
 - Health/backoff policy for a persistently-down relay (don't wedge the poll cadence).

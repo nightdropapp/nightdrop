@@ -427,6 +427,9 @@ base jumped 16 → 402 when the scheme was adopted and must never go back below 
    the AppImage it is uploaded with; it is not part of `SHA256SUMS` and not on the onion site.
 10. **Publish the website** — `scripts/deploy-website.sh <files>` on the live tree, then
     `make update-manifest`, commit `website/update.json`, then `scripts/deploy-clearnet.sh`.
+    Page text describing the new release is prepared as `docs/release/<version>-website.patch`
+    (writing into `website/` early would publish it to users of the old release, §12): apply it
+    here with `git apply`, before `deploy-clearnet.sh`, and commit it with `update.json`.
 11. **Verify**: `/releases/latest/download/` resolves to the new files; `curl` the onion
     (`http://127.0.0.1:8787/update.json`) and clearnet `update.json`; a day later, fdroiddata
     `master`'s `CurrentVersion` has moved (if not, suspect `UpdateCheckData` or

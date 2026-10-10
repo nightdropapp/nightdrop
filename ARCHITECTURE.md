@@ -137,12 +137,26 @@ crosses the boundary only at the UI edge.
 Two strangers must establish a chat before any message or ratchet keys finalize.
 There are two entry paths; **both result in a mutually authorized, E2E session.**
 
+**No relay takes part in first contact (0.2, `docs/design/optional-relay.md` §5).** The joiner's
+`Hello` goes to the inviter's onion directly, held and retried until it lands. It gets through an
+onion that admits only contacts because the invite carries a **pairing pass**: the inviter mints a
+client key, authorizes it on its own onion as `pass:<one-time key>`, and puts the secret in the
+QR or short-code response (`ck=`). The pass is single-use (revoked when a `Hello` uses that
+one-time key) and lapses after 24 h. Its holder can reach the inviter and nothing more: the
+`Hello` still lands as a request. The `Hello` itself (E2E as the pre-key message) carries the
+joiner's relay set, its client key for the inviter's onion, and a **reply pass** for its own onion.
+The inviter holds both keys unused, and tells the request nothing about itself (version, burn
+support, relays), until the user taps **Accept**; Decline leaves it nothing.
+
 ### 5a. QR code — pre-authorized
 - The QR encodes a **one-time pre-key bundle + capability token** (and the onion
   address / rendezvous pointer).
 - Scanning it is an explicit act of authorization, so the session can begin
   encrypting immediately — no extra secret needed.
 - Pre-key bundles are one-time use; scanning consumes the token.
+- From 0.2 it also carries the inviter's single-use **pairing pass** (`ck=`, above). It does
+  not carry the inviter's relay set: the joiner holds its messages until the inviter's first
+  `RelaySet`, which goes out on Accept.
 
 ### 5b. Short code — rendezvous mailbox + PAKE "bouncer"
 The short code resolves to the peer via a **minimal, untrusted rendezvous mailbox**
@@ -239,7 +253,11 @@ on a re-pair (new session) exactly like `verified`.
   onion address directly and never touches the rendezvous. After pairing, peers
   exchange any **updated onion addresses in-band** over the E2E channel (or via the
   §6 relay under an unlinkable derived handle), so the rendezvous is never needed
-  again. **Implemented** (#11): on startup the node compares its live onion to the
+  again.
+- **Codes meet only on relays both people's lists share** (0.2, `optional-relay.md` §5): each side
+  posts and looks on its own list. A direct-only device can neither create nor join a code, and
+  a join that finds nobody says the two may share no relay and points to the QR. The sealed
+  response carries the inviter's relay set (`rs=`) and pairing pass (`ck=`). **Implemented** (#11): on startup the node compares its live onion to the
   last-persisted one and, if it changed (e.g. a rebuilt keystore), sends each contact an
   E2E `Address` frame (`node::announce_address`); the peer updates where it routes replies.
 
@@ -296,7 +314,8 @@ on a re-pair (new session) exactly like `verified`.
   non-synchronous transport (`Transport::is_synchronous()` — false for Tor, true for the in-memory
   transport) it **defers the opaque-byte delivery** to the background poller instead of dialing
   inline. Composing a message returns instantly with the message stored "queued"; the poller
-  attempts direct-peer delivery (relay fallback) on its next tick and flips the status. Only the
+  attempts direct-peer delivery (with a relay fallback when the recipient has relays, otherwise
+  the held queue below) on its next tick and flips the status. Only the
   transport delivery moves off the hot path — the crypto boundary is unchanged. Attachments take
   the same path from 0.1.29 (the video pre-signal first, then the payload, matched back to the
   message by its `transfer_id`); before that a media send uploaded inline, holding the core lock
@@ -587,7 +606,9 @@ on a re-pair (new session) exactly like `verified`.
     `nightdrop-relay gen-directory-key` (mint the key, paste the public half into the app, rebuild)
     → `relay/deploy/sign-directory.sh` (wraps `nightdrop-relay sign-directory`), which writes
     `website/relays.json` (the copy apps fetch) and `<state>/relay-list.json` for each relay. `discovered_relays` + `directory_version` persist in
-    the encrypted store and travel in backups.
+    the encrypted store and travel in backups. **From 0.2** the directory's relays are what the
+    **Night Drop** entry of the relay list stands for: used only while a list (ours, or the
+    recipient's we post to) includes it, and a direct-only device does not fetch the list at all.
   - **Private (restricted) relays — self-host for just your circle (§3.2).** A relay can gate its
     onion to **authorized clients only** using the same Tor **restricted discovery** as onion client
     authorization (#22), applied to the relay's onion instead of a chat onion. When
@@ -652,8 +673,9 @@ on a re-pair (new session) exactly like `verified`.
   `delete_chat`/`logout` revoke them. This is **defense-in-depth**, not a new secrecy boundary (the
   ratchet already provides that): it raises the cost of frame injection, address scanning, and presence
   probing by stopping the *connection*, not just the payload. It stays **off until the first contact is
-  authorized** (empty set ⇒ normal public onion — no lockout), latches on the next launch, and first
-  contact under restriction rides the relay fallback. **Live-validated over real Tor**
+  authorized** (empty set ⇒ normal public onion — no lockout), latches on the next launch. First
+  contact under restriction rode the relay fallback until 0.2; from 0.2 it uses **pairing passes**
+  (§5), and a request's key is authorized only when the user accepts it, not on arrival. **Live-validated over real Tor**
   (`tor_smoke::restricted_onion_admits_authorized_client_and_refuses_unauthorized`, `#[ignore]`d): an
   authorized client is admitted to a restricted onion and an unauthorized one is refused. The client
   half rides arti's **experimental** restricted-discovery API, so that test is the upgrade canary and
@@ -670,7 +692,8 @@ on a re-pair (new session) exactly like `verified`.
 is **opt-in**, time-boxed to 24h, and always surfaced to both users.
 
 > **Build plan:** the relay store-and-forward, 24h time-bomb, delivery acks, and
-> offline notifications are specced in **§11** (single relay; distributed deferred).
+> offline notifications are specced in **§11** (written for a single relay; the relay list,
+> direct only and the held queue are in `docs/design/optional-relay.md`; distributed deferred).
 
 ---
 
@@ -728,6 +751,10 @@ Not built yet: today a device moves by file backup (7a) or server backup (7c).
   Wired into onboarding as "Restore from server backup". Caveat: the relay copy is drained on
   fetch, so a wrong-password attempt consumes it — same "lose the password, lose the backup"
   contract as create.
+- **Which relay (0.2):** the **Night Drop relay**, and only while it is in the user's relay list
+  (`relay_features().server_backup`): a fresh device restoring the backup knows no other relay to
+  look on. Direct only has no server backup; the file export (7a) and device transfer (7b) are
+  unaffected (`optional-relay.md` §6).
 
 All backup files/blobs are encrypted at rest; the password is the only thing that can
 open them, and only the user (7a) or the paired device (7b) ever holds it.
@@ -831,6 +858,13 @@ E2E blobs — but observation ≠ decryption):
   for **up to 24h** (§6, §11), during which the relay knows a slot has pending data of
   the fixed size. Local-first delivery avoids the relay entirely when both peers are
   online.
+- **Direct only trades relay metadata for presence (0.2).** With no relay between two people
+  there is no relay to observe anything, but messages wait on the sender and are retried
+  directly, so they arrive **the moment the recipient comes online**: a direct-only user's
+  contacts learn when they are online, more precisely than a relay user's do
+  (`optional-relay.md` §8). A message is also held until both are online at once, with no 24 h
+  expiry. Launching the app does not by itself tell contacts anything (standing announcements go
+  out on change only, §6).
 - **Disappearing messages** are cooperative: they delete on both cooperating clients
   on schedule, but cannot claw back a copy from a peer that has been modified to
   retain it. This is a UX/hygiene feature, not an exfiltration defense.
@@ -1032,7 +1066,9 @@ must stay byte-identical for every install.
 ## 11. Relay store-and-forward & backup evolution — implementation plan
 
 Status: **built** — the phases in §11.7 are done, and later work extended it (multi-relay fan-out
-and the signed directory in §6, rotating mailbox handles in §11.2). Kept as the record of the
+and the signed directory in §6, rotating mailbox handles in §11.2). It was written for one relay
+that every install used; from 0.2 the relay is optional, each user keeps a list of up to 4, and
+an empty list is direct only (`docs/design/optional-relay.md`, which wins where they differ). Kept as the record of the
 decisions. Distributed/federated relays and erasure-coded blob splitting remain **explicitly
 deferred**. Brute-force of E2E content is **not a threat** and is
 **not** a design driver (X25519 + AES-256/ChaCha20 are not brute-forceable); the rationale for

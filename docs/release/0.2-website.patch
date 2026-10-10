@@ -1,0 +1,46 @@
+--- a/website/limits.html	2026-10-10 09:58:42.621975129 -0400
++++ b/website/limits.html	2026-10-10 09:58:42.641592730 -0400
+@@ -246,6 +246,25 @@
+            unread after 24 hours. Messages delivered directly are unaffected.</p>
+       </div>
+       <div class="callout warn" style="margin-top: 20px;">
++        <h3>&ldquo;Direct only&rdquo; tells your contacts when you come online.</h3>
++        <p>From 0.2 you can use Night Drop with no relay at all. Then nothing about your messages
++           ever touches a server &mdash; but messages to you wait on your contacts' phones and are
++           sent the moment your app is online, so each contact can tell, roughly, when you come
++           online. With a relay, messages wait there instead. Opening the app does not announce
++           anything by itself.</p>
++        <p>It also means two people on direct only must be online at the same time for a message to
++           arrive. It waits on the sender's phone until then, with no 24-hour limit.</p>
++      </div>
++      <div class="callout warn" style="margin-top: 20px;">
++        <h3>Your QR code lets one person knock, for one day.</h3>
++        <p>So that pairing needs no server, your invite carries a key that lets whoever has it reach
++           your phone even once it only accepts your contacts. That gets their chat request to you,
++           and nothing else: you still decide whether to accept it, and until you do they learn
++           nothing about you. The key stops working once one request has used it, or after a day. So
++           a photo of your QR code posted online lets at most one stranger send you a request you can
++           decline.</p>
++      </div>
++      <div class="callout warn" style="margin-top: 20px;">
+         <h3>Bridges beat a blocked relay list. Traffic inspection is tested, not proven.</h3>
+         <p>If your network blocks Tor by blocking the public list of relays, a bridge is an
+            unlisted way in. If it instead inspects traffic and blocks Tor by how it <em>looks</em>,
+@@ -282,11 +301,12 @@
+              networks, and conditions is still underway. Expect rough edges on flaky connections.</p>
+         </article>
+         <article class="card">
+-          <h3>🛰️ Relay availability <span class="pill">in progress</span></h3>
+-          <p>When both people are online, messages go directly, device to device. Offline delivery
+-             and first-contact short codes lean on a relay that holds only sealed, unreadable blobs.
+-             You can add extra relays or run your own, so no single one is a choke point — and
+-             we're expanding the default set for resilience.</p>
++          <h3>🛰️ Relays are optional <span class="pill">0.2</span></h3>
++          <p>When both people are online, messages go directly, device to device. A relay holds
++             sealed, unreadable messages for up to 24 hours while you are offline, and makes short
++             codes possible. The Night Drop relay is the default; you can add your own (up to four),
++             remove ours, or use <strong>direct only</strong> with no relay at all &mdash; then you
++             receive messages only while the app is online, and add contacts by QR code only.</p>
+         </article>
+         <article class="card">
+           <h3>🎞️ Opening an attachment in another app <span class="pill">in progress</span></h3>

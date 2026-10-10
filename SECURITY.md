@@ -145,6 +145,23 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   clock is wrong by more than **3 hours** posts under a day's handle the recipient no longer polls,
   and that message expires unread after 24 hours. Timezone settings do not matter, only a clock
   that is actually wrong; messages delivered directly are unaffected.
+- **Direct only tells your contacts when you come online.** *(Known limit, by design; from 0.2.)*
+  With no relay in your list (or in theirs), nothing about your messages ever touches a server, but
+  messages to you wait on your contacts' devices and are retried directly, so they arrive the moment
+  your app is online. Each contact therefore learns, from their own retries succeeding, roughly when
+  you are online, more precisely than with a relay, where the mail waits on the relay instead.
+  Launching the app sends nothing by itself: what it announces (version, address, capabilities)
+  goes out only when it changes. Two direct-only people must be online at the same time for a
+  message to arrive; it waits on the sender, with no 24-hour expiry, until then or until the chat
+  is deleted (`docs/design/optional-relay.md` §4, §8).
+- **A QR code lets whoever holds it reach your device, once, for a day.** *(Known limit, by
+  design; from 0.2.)* So that pairing needs no relay, an invite (QR or short-code response) carries
+  a pairing pass: a key your device accepts for reaching its onion even once it admits only your
+  contacts. It gets the holder's pairing request delivered and nothing else: the request still waits
+  for you to accept it, and until you do it learns nothing about you and gets no further access.
+  The pass is revoked as soon as one request uses it, and after 24 hours if none does. A screenshot
+  of your QR posted online therefore lets at most one stranger knock, within a day, as a request you
+  can decline (`docs/design/optional-relay.md` §5).
 - **Bridges get past a blocked relay list; getting past traffic inspection is tested but not
   proven.** *(Known limit.)* Where a network blocks the public list of Tor relays, a bridge is an
   unlisted way in. Where a network instead inspects traffic and blocks Tor by how it *looks*, the

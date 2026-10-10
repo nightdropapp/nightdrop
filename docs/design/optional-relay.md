@@ -1,7 +1,8 @@
 # Design — Optional relay, and "direct only"
 
-**Status:** design agreed 2026-10-05, for 0.2 (the protocol release). Not implemented. Decisions
-marked **(decided)** were made by the maintainer on 2026-10-03 or 2026-10-05.
+**Status:** design agreed 2026-10-05, for 0.2 (the protocol release). **Built 2026-10-09/10**
+(§9, each step says what and where); not yet tested on two devices or released. Decisions marked
+**(decided)** were made by the maintainer on 2026-10-03, 2026-10-05, 2026-10-09 or 2026-10-10.
 **Relates to:** `multi-relay-mailboxes.md` (#17, the relay set this generalises),
 `mailbox-handles.md`, `onion-client-auth.md` (§5 below depends on it), `cover-traffic.md`,
 `ARCHITECTURE.md` §5c, §6, §7c and §11. Prompted by issue #16 ("How is this app secured compared
@@ -343,6 +344,9 @@ a direct-only user's contacts see their messages arrive the moment that user com
      rather than vanishing: a missing option reads as broken, an explained one does not.
 7. **Docs:** `ARCHITECTURE.md` (§5c, §6, §7c, §11.1's "single relay"), `SECURITY.md`,
    `website/limits.html`, and `multi-relay-mailboxes.md` marked as superseded where it differs.
+   **Done 2026-10-10**, except that the `limits.html` change waits in
+   `docs/release/0.2-website.patch`: the onion site serves `website/` live, so it is applied at
+   publish time (`MAINTENANCE.md` §11 step 10).
 
 **Tests:**
 * Two in-process nodes, both direct only. A message sent while the peer is down is held and

@@ -82,12 +82,13 @@ clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
 - **Messaging extras**: **unsend / delete-for-everyone** + edit, per-chat **disappearing
   messages** (shared, synced), in-band **onion-address rotation** (§5c), **safety-number
   verification** (compare a Signal-style number out-of-band, or scan the QR).
-- **Multi-relay mailboxes** (#17): advertise an **extra relay set** on top of the shared
-  default; senders seal once and **fan the same blob out to every relay**, the receiver
-  drains all and **de-duplicates by hash**, and edits/unsends **recall every copy**. Buys
-  availability + censorship-resistance (a down/blocked relay doesn't drop mail) without adding
-  trust or metadata — relays still see only opaque, recipient-sealed blobs, and anonymity stays
-  with Tor. Edit your set from the home menu → **"My relays…"**.
+- **Your choice of relays, or none** (#17, 0.2): a list of up to four relays where offline mail
+  waits for you. The Night Drop relay is the default and can be removed; you can add your own.
+  Contacts are told your list end to end; senders seal once and **fan the same blob out to every
+  relay** on it, the receiver **de-duplicates by hash**, and edits/unsends **recall every copy**.
+  An empty list is **direct only**: no server at all, messages wait on the sender's device until
+  you're both online, and contacts are added by QR code (`docs/design/optional-relay.md`). Chosen
+  at setup, changed under **"My relays…"** in the home menu.
 - **Cover traffic** (opt-in): decoy posts that blur per-mailbox volume and timing from the
   relay. Off by default and measured before shipping — ~78 mAh a night
   ([`docs/design/cover-traffic.md`](docs/design/cover-traffic.md) §6).
