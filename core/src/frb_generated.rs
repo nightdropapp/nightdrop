@@ -4141,6 +4141,7 @@ impl SseDecode for crate::api::Contact {
         let mut var_peerRelays = <Vec<String>>::sse_decode(deserializer);
         let mut var_peerRelayState = <String>::sse_decode(deserializer);
         let mut var_serverStorageAvailable = <bool>::sse_decode(deserializer);
+        let mut var_peerOutdated = <bool>::sse_decode(deserializer);
         let mut var_peerSupportsBurn = <Option<bool>>::sse_decode(deserializer);
         let mut var_peerAppVersion = <Option<String>>::sse_decode(deserializer);
         let mut var_remoteStorageHealthy = <bool>::sse_decode(deserializer);
@@ -4162,6 +4163,7 @@ impl SseDecode for crate::api::Contact {
             peer_relays: var_peerRelays,
             peer_relay_state: var_peerRelayState,
             server_storage_available: var_serverStorageAvailable,
+            peer_outdated: var_peerOutdated,
             peer_supports_burn: var_peerSupportsBurn,
             peer_app_version: var_peerAppVersion,
             remote_storage_healthy: var_remoteStorageHealthy,
@@ -4817,6 +4819,7 @@ impl flutter_rust_bridge::IntoDart for crate::api::Contact {
             self.peer_relays.into_into_dart().into_dart(),
             self.peer_relay_state.into_into_dart().into_dart(),
             self.server_storage_available.into_into_dart().into_dart(),
+            self.peer_outdated.into_into_dart().into_dart(),
             self.peer_supports_burn.into_into_dart().into_dart(),
             self.peer_app_version.into_into_dart().into_dart(),
             self.remote_storage_healthy.into_into_dart().into_dart(),
@@ -5108,6 +5111,7 @@ impl SseEncode for crate::api::Contact {
         <Vec<String>>::sse_encode(self.peer_relays, serializer);
         <String>::sse_encode(self.peer_relay_state, serializer);
         <bool>::sse_encode(self.server_storage_available, serializer);
+        <bool>::sse_encode(self.peer_outdated, serializer);
         <Option<bool>>::sse_encode(self.peer_supports_burn, serializer);
         <Option<String>>::sse_encode(self.peer_app_version, serializer);
         <bool>::sse_encode(self.remote_storage_healthy, serializer);

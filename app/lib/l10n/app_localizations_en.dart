@@ -1465,4 +1465,19 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get chatSelfDirectOnlySummary => 'You\'re on direct only';
+
+  @override
+  String chatPeerOutdatedSummary(String name) {
+    return '$name needs to update Night Drop';
+  }
+
+  @override
+  String chatPeerOutdated(String name) {
+    return '$name is on an older version of Night Drop (0.1), which can\'t talk to yours. Your messages wait on this device and go out by themselves once they update. Ask them to update.';
+  }
+
+  @override
+  String deliveryUpdate(String name) {
+    return 'Waiting for $name to update';
+  }
 }

@@ -152,6 +152,12 @@ impl Node {
     /// [`apply_send_outcomes`](Self::apply_send_outcomes)), because dialling here holds the core
     /// lock. No-op if the chat was deleted before delivery ran.
     pub(crate) fn attempt_delivery(&mut self, contact_id: &str, msg_id: &str, bytes: &[u8]) {
+        // Their app is too old to read it (0.1.x): hold it until they update, rather than hand it
+        // over to be discarded.
+        if self.peer_outdated(contact_id) {
+            self.hold_message(contact_id, msg_id, bytes.to_vec());
+            return;
+        }
         let handle = self.post_handle(contact_id);
         let (primary, targets) = self.route_to(contact_id);
         let Some(chat) = self.chats.get_mut(contact_id) else {
@@ -399,6 +405,11 @@ impl Node {
             let Some(chat) = self.chats.get(&p.contact_id) else {
                 continue;
             };
+            // Held until they update, as in `attempt_delivery`.
+            if chat.outdated() {
+                self.hold_message(&p.contact_id, &p.msg_id, p.bytes);
+                continue;
+            }
             let (primary, relay_targets) = self.route_to(&p.contact_id);
             items.push(PlannedSend {
                 handle: self.post_handle(&p.contact_id),
@@ -472,6 +483,54 @@ impl Node {
             }
         }
         affected
+    }
+
+    /// First load of a 0.1.x state (an upgrade to 0.2): hold again every text message of ours that
+    /// no receipt confirmed. Between two releases that cannot talk, anything sent after one side
+    /// updated never arrived, and its retry was in memory and its relay copy unreadable to the
+    /// other version. Re-sealed under the same id, so a copy that did arrive after all is dropped
+    /// as a duplicate (and receipted) by the peer. Burn messages are not resent, for the reason
+    /// in [`sweep_unconfirmed`](Self::sweep_unconfirmed). Returns how many were held.
+    pub(crate) fn resend_after_upgrade(&mut self) -> usize {
+        let from = self.identity_key();
+        let mut resend: Vec<(String, String, Vec<u8>)> = Vec::new();
+        for (contact_id, chat) in self.chats.iter_mut() {
+            if !chat.authorized || chat.closed {
+                continue;
+            }
+            let texts: Vec<(String, String)> = chat
+                .history
+                .iter()
+                .filter(|m| {
+                    m.from_me
+                        && !m.system
+                        && m.kind == "text"
+                        && m.burn_secs == 0
+                        && !m.msg_id.is_empty()
+                        && (m.delivery == "sent" || m.delivery == "queued")
+                })
+                .map(|m| (m.msg_id.clone(), m.text.clone()))
+                .collect();
+            for (id, text) in texts {
+                let Ok(message) = crypto::encrypt(&mut chat.session, text.as_bytes()) else {
+                    break; // an unusable session gets no retry
+                };
+                let frame = Frame::Message {
+                    from: from.clone(),
+                    id: id.clone(),
+                    message: WireOlm::from_olm(&message),
+                };
+                resend.push((contact_id.clone(), id, wire::encode(&frame)));
+            }
+        }
+        let n = resend.len();
+        for (contact_id, id, bytes) in resend {
+            self.hold_message(&contact_id, &id, bytes);
+        }
+        if n > 0 {
+            crate::diag!("upgrade: holding {n} unconfirmed message(s) to send again in 0.2");
+        }
+        n
     }
 
     /// Retry authenticated control signals that reached neither the peer nor any relay when they
@@ -1270,6 +1329,12 @@ impl Node {
             // nothing else. (`Frame::Captures` shipped after 0.1.19 and is announced to every open
             // chat at launch, so 0.1.19 peers meet one on the direct path routinely.)
             let Ok(frame) = wire::decode(&bytes) else {
+                // From a contact still on 0.1 (an older wire version): say so in that chat, and
+                // hold what we send them until they update.
+                if let Some(from) = wire::legacy_sender(&bytes) {
+                    self.note_legacy_frame(&from);
+                    continue;
+                }
                 crate::diag!("pump: undecodable frame from a peer — skipped (newer build?)");
                 continue;
             };
@@ -1428,6 +1493,9 @@ impl Node {
                 continue;
             };
             let Ok(frame) = wire::decode(&bytes) else {
+                if let Some(from) = wire::legacy_sender(&bytes) {
+                    self.note_legacy_frame(&from);
+                }
                 continue;
             };
             // Dedup on the frame within, not the envelope, so a copy we already took *directly*

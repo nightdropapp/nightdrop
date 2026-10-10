@@ -309,6 +309,18 @@ on a re-pair (new session) exactly like `verified`.
   version is never sent to a relay in the clear or to anyone outside the chat. Older builds cannot
   decode the variant and skip it (`an_unknown_frame_variant_fails_to_decode_rather_than_degrading`),
   without affecting other frames on the direct path or the relay drain.
+- **Contacts still on 0.1.x (0.2).** A contact is **outdated** when the version it last announced
+  predates `MIN_PEER_VERSION` (0.2), or when a frame of theirs arrives in the older wire format
+  (`wire::legacy_sender` reads the sender from a v2 envelope without decoding it; unauthenticated,
+  so it can only make us *hold*). Anything we would send an outdated contact waits in the held
+  queue instead (`"update"`: "Waiting for {name} to update"), because a 0.1 app would take it off
+  the relay or its onion and discard it; control frames wait in order with the messages, and
+  standing announcements are retried once it updates. Their first readable frame, or a `Version`
+  of 0.2 or later, clears the flag and the queue goes out. The chat shows "{name} needs to update
+  Night Drop". And the first load of a 0.1.x state re-holds every text message of ours that no
+  receipt confirmed (`resend_after_upgrade`, same ids, so the peer drops what it already has):
+  what a 0.1 app sent after the other side updated never arrived. Tested on Linux + Windows,
+  2026-10-10 (`node/tests_outdated.rs`; the upgrade run in `TODO.txt`).
 - **Sending never blocks on the network.** `send` advances the ratchet and stores the message
   under the core lock (the ordered, security-critical step stays synchronous), but on a
   non-synchronous transport (`Transport::is_synchronous()` — false for Tor, true for the in-memory

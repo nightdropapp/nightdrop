@@ -75,6 +75,7 @@ impl Node {
                     told_address: chat.told_address.clone(),
                     told_captures: chat.told_captures,
                     own_key_pending: chat.own_key_pending.as_ref().map(super::encode_secret),
+                    peer_wire_old: chat.peer_wire_old,
                     peer_key_pending: chat.peer_key_pending.clone(),
                     pass_pending: chat.pass_pending.as_ref().map(super::encode_secret),
                     peer_supports_burn: chat.contact.peer_supports_burn,
@@ -371,6 +372,8 @@ impl Node {
         let (relays, overflow) = super::restored_relays(state);
         node.relays = relays;
         node.relays_draining = state.relays_draining.clone();
+        // A state from before 0.2 (it has no relay list) is loading in 0.2 for the first time.
+        let upgrading = state.relays.is_none();
         node.passes = state
             .passes
             .iter()
@@ -446,6 +449,9 @@ impl Node {
                 chat.contact_id.clone(),
                 chat_from_persisted(chat, session, relay_receipts),
             );
+        }
+        if upgrading {
+            node.resend_after_upgrade();
         }
         Ok(node)
     }
@@ -746,6 +752,7 @@ fn chat_from_persisted(
             identity_tag: String::new(),
             peer_on_old_version: false,
             peer_relay_state: String::new(), // filled in `contacts()`
+            peer_outdated: false,
             server_storage_available: false,
         },
         peer_address: chat.peer_address.clone(),
@@ -790,6 +797,7 @@ fn chat_from_persisted(
             .and_then(super::decode_secret),
         peer_key_pending: chat.peer_key_pending.clone(),
         pass_pending: chat.pass_pending.as_deref().and_then(super::decode_secret),
+        peer_wire_old: chat.peer_wire_old,
         alive_count: 0,
     }
 }

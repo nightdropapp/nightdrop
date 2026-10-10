@@ -371,6 +371,25 @@ struct Envelope {
     f: Frame,
 }
 
+/// Who sent a frame in an **older** wire version than ours, if its envelope says so: the `from`
+/// (or, for a `Hello`, the `identity_key`) of a frame we cannot decode because it predates
+/// [`WIRE_VERSION`]. Read without decoding the frame itself, and untrusted: it tells the app a
+/// contact is still on an older release (0.2 does not talk to 0.1.x), never what they sent.
+pub fn legacy_sender(bytes: &[u8]) -> Option<String> {
+    let len = u32::from_be_bytes(bytes.get(..4)?.try_into().ok()?) as usize;
+    let body = bytes.get(4..4usize.checked_add(len)?)?;
+    let env: serde_json::Value = serde_json::from_slice(body).ok()?;
+    let v = env.get("v")?.as_u64()?;
+    if v >= u64::from(WIRE_VERSION) {
+        return None;
+    }
+    let f = env.get("f")?;
+    f.get("from")
+        .or_else(|| f.get("identity_key"))?
+        .as_str()
+        .map(str::to_string)
+}
+
 /// Encode a frame for the wire: a 4-byte big-endian length prefix, the versioned
 /// [`Envelope`] JSON, then zero padding up to the next [`padded_len`] size bucket. The padding
 /// hides the true frame length from anyone watching the transport (metadata protection); the

@@ -2876,8 +2876,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Contact dco_decode_contact(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 20)
-      throw Exception('unexpected arr length: expect 20 but see ${arr.length}');
+    if (arr.length != 21)
+      throw Exception('unexpected arr length: expect 21 but see ${arr.length}');
     return Contact(
       id: dco_decode_String(arr[0]),
       theirName: dco_decode_String(arr[1]),
@@ -2892,13 +2892,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       peerRelays: dco_decode_list_String(arr[10]),
       peerRelayState: dco_decode_String(arr[11]),
       serverStorageAvailable: dco_decode_bool(arr[12]),
-      peerSupportsBurn: dco_decode_opt_box_autoadd_bool(arr[13]),
-      peerAppVersion: dco_decode_opt_String(arr[14]),
-      remoteStorageHealthy: dco_decode_bool(arr[15]),
-      localName: dco_decode_String(arr[16]),
-      identityTag: dco_decode_String(arr[17]),
-      lastSeenSecs: dco_decode_u_64(arr[18]),
-      peerOnOldVersion: dco_decode_bool(arr[19]),
+      peerOutdated: dco_decode_bool(arr[13]),
+      peerSupportsBurn: dco_decode_opt_box_autoadd_bool(arr[14]),
+      peerAppVersion: dco_decode_opt_String(arr[15]),
+      remoteStorageHealthy: dco_decode_bool(arr[16]),
+      localName: dco_decode_String(arr[17]),
+      identityTag: dco_decode_String(arr[18]),
+      lastSeenSecs: dco_decode_u_64(arr[19]),
+      peerOnOldVersion: dco_decode_bool(arr[20]),
     );
   }
 
@@ -3308,6 +3309,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_peerRelays = sse_decode_list_String(deserializer);
     final var_peerRelayState = sse_decode_String(deserializer);
     final var_serverStorageAvailable = sse_decode_bool(deserializer);
+    final var_peerOutdated = sse_decode_bool(deserializer);
     final var_peerSupportsBurn = sse_decode_opt_box_autoadd_bool(deserializer);
     final var_peerAppVersion = sse_decode_opt_String(deserializer);
     final var_remoteStorageHealthy = sse_decode_bool(deserializer);
@@ -3329,6 +3331,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         peerRelays: var_peerRelays,
         peerRelayState: var_peerRelayState,
         serverStorageAvailable: var_serverStorageAvailable,
+        peerOutdated: var_peerOutdated,
         peerSupportsBurn: var_peerSupportsBurn,
         peerAppVersion: var_peerAppVersion,
         remoteStorageHealthy: var_remoteStorageHealthy,
@@ -3774,6 +3777,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_list_String(self.peerRelays, serializer);
     sse_encode_String(self.peerRelayState, serializer);
     sse_encode_bool(self.serverStorageAvailable, serializer);
+    sse_encode_bool(self.peerOutdated, serializer);
     sse_encode_opt_box_autoadd_bool(self.peerSupportsBurn, serializer);
     sse_encode_opt_String(self.peerAppVersion, serializer);
     sse_encode_bool(self.remoteStorageHealthy, serializer);

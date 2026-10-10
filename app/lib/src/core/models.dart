@@ -62,6 +62,7 @@ class Contact {
     this.peerRelays = const [],
     this.peerRelayState = 'relays',
     this.serverStorageAvailable = true,
+    this.peerOutdated = false,
     this.remoteStorageHealthy = true,
     this.lastSeenSecs = 0,
     this.peerOnOldVersion = false,
@@ -129,6 +130,10 @@ class Contact {
 
   /// Whether opt-in server storage can be turned on: it needs relays on both sides (§6).
   bool serverStorageAvailable;
+
+  /// The contact runs a release this one cannot talk to (0.1.x). What we send waits on this device
+  /// (delivery `"update"`) and goes out once they update; the chat says so.
+  bool peerOutdated;
 
   /// The peer receives messages only while their app is online.
   bool get peerDirectOnly => peerRelayState == 'direct';
@@ -280,6 +285,7 @@ class Message {
       msgId.isNotEmpty &&
       (delivery == 'queued' ||
           delivery == 'waiting' ||
+          delivery == 'update' ||
           DateTime.now().difference(at) < const Duration(minutes: 15));
 
   /// Burn timer in seconds (`docs/design/burn-messages.md`); 0 = an ordinary message.
@@ -361,6 +367,8 @@ class Message {
   ///   clock, never a tick, and it does not last — the core puts a relay copy behind an
   ///   unacknowledged message, which moves it to `"queued"`.
   /// * `"queued"` — held on a relay for a peer who has not collected it.
+  /// * `"update"` — held on this device because their app (0.1) can't read it; sent once they
+  ///   update.
   /// * `"waiting"` — held on this device: no relay connects us, and the peer was offline. Sent
   ///   directly when they come online (`docs/design/optional-relay.md` §4); never expires.
   /// * `"delivered"` — their device sent a receipt naming *this* message (`Frame::Delivered`).

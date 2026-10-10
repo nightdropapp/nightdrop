@@ -68,4 +68,34 @@ void main() {
     expect(msg('queued').canEdit, isTrue);
     expect(msg('delivered').canEdit, isFalse);
   });
+
+  // A contact still on 0.1 cannot read what 0.2 sends: the chat says so by name, and each message
+  // waiting for them says what it is waiting for.
+  testWidgets('a contact on 0.1 is named in the chat, and messages wait for their update',
+      (tester) async {
+    final core = _OneMessageCore('update', DateTime.now());
+    late final String contactId;
+    await tester.runAsync(() async {
+      await core.createIdentity();
+      contactId = (await core.joinWithShortCode('4-cedar-lantern-river')).id;
+    });
+    final contact = core.contacts.single..peerOutdated = true;
+    final name = contact.displayName;
+    await tester.pumpWidget(
+      NightdropScope(
+        core: core,
+        child: MaterialApp(
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: ChatScreen(contactId: contactId),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('$name needs to update Night Drop'), findsOneWidget);
+    expect(find.text('Waiting for $name to update'), findsOneWidget);
+    await tester.tap(find.text('$name needs to update Night Drop'));
+    await tester.pump();
+    expect(find.textContaining('go out by themselves once they update'), findsOneWidget);
+  });
 }

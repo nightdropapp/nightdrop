@@ -923,6 +923,9 @@ class RustNightdropCore extends NightdropCore {
 
   @override
   Future<bool> shouldShowProtocolBreakNotice() async =>
+      // A warning to 0.1.x users that 0.2 is coming. From 0.2 it has arrived, and each chat with
+      // a contact still on 0.1 says so instead (`Contact.peerOutdated`).
+      kAppVersion.startsWith('0.1.') &&
       await _secure.read(key: _kProtocolNoticeDismissed) != kAppVersion;
 
   @override
@@ -1930,6 +1933,7 @@ class RustNightdropCore extends NightdropCore {
         peerRelays: c.peerRelays,
         peerRelayState: c.peerRelayState,
         serverStorageAvailable: c.serverStorageAvailable,
+        peerOutdated: c.peerOutdated,
         remoteStorageHealthy: c.remoteStorageHealthy,
         lastSeenSecs: c.lastSeenSecs.toInt(),
         peerOnOldVersion: c.peerOnOldVersion,

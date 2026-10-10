@@ -917,7 +917,15 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               // means "they have not told us" and deliberately shows nothing — claiming either
               // answer without evidence is worse than staying quiet.
               if (contact.peerCapturesSilent == true) const _PeerCapturesSilentBanner(),
-              if (contact.peerOnOldVersion) const _PeerOnOldVersionBanner(),
+              // 0.2 cannot talk to 0.1 at all; that notice replaces the older mailbox one.
+              if (contact.peerOutdated)
+                _CompactNotice(
+                  icon: Icons.system_update_outlined,
+                  summary: l10n.chatPeerOutdatedSummary(contact.displayName),
+                  detail: l10n.chatPeerOutdated(contact.displayName),
+                )
+              else if (contact.peerOnOldVersion)
+                const _PeerOnOldVersionBanner(),
               // Where messages to them go, when it is not a relay (`optional-relay.md` §3).
               // Unknown is ordinary while a request awaits approval, so said only after.
               if (contact.peerDirectOnly)
@@ -1446,6 +1454,7 @@ class _Bubble extends StatelessWidget {
                     !message.sending &&
                     (message.delivery == 'queued' ||
                         message.delivery == 'waiting' ||
+                        message.delivery == 'update' ||
                         message.delivery == 'sent' ||
                         message.delivery == 'delivered' ||
                         message.delivery == 'expired')) ...[
@@ -1457,6 +1466,7 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => Icons.cloud_upload_outlined,
                           'waiting' => Icons.hourglass_empty,
+                          'update' => Icons.system_update_outlined,
                           'expired' => Icons.error_outline,
                           // Deliberately not a tick. A tick reads as "done", and this state means
                           // only that the peer's onion answered — the message can still be lost
@@ -1477,6 +1487,7 @@ class _Bubble extends StatelessWidget {
                         switch (message.delivery) {
                           'queued' => l10n.deliveryHeld,
                           'waiting' => l10n.deliveryWaiting(peerName),
+                          'update' => l10n.deliveryUpdate(peerName),
                           'expired' => l10n.deliveryExpired,
                           'sent' => l10n.deliverySent,
                           _ => l10n.deliveryDelivered,

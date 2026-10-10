@@ -1523,5 +1523,11 @@
   "chatPeerRelaysUnknownSummary": "Messages to {name} wait on this device",
   "@chatPeerRelaysUnknownSummary": {"description": "One-line summary while the contact's relay set is unknown; tap for more.", "placeholders": {"name": {"type": "String"}}},
   "chatSelfDirectOnlySummary": "You're on direct only",
-  "@chatSelfDirectOnlySummary": {"description": "One-line summary of the chat banner while we are direct only; tap for more."}
+  "@chatSelfDirectOnlySummary": {"description": "One-line summary of the chat banner while we are direct only; tap for more."},
+  "chatPeerOutdatedSummary": "{name} needs to update Night Drop",
+  "@chatPeerOutdatedSummary": {"description": "One-line summary of the chat notice for a contact still on 0.1; tap for more.", "placeholders": {"name": {"type": "String"}}},
+  "chatPeerOutdated": "{name} is on an older version of Night Drop (0.1), which can't talk to yours. Your messages wait on this device and go out by themselves once they update. Ask them to update.",
+  "@chatPeerOutdated": {"description": "Chat notice for a contact still on 0.1.x, which cannot exchange messages with 0.2.", "placeholders": {"name": {"type": "String"}}},
+  "deliveryUpdate": "Waiting for {name} to update",
+  "@deliveryUpdate": {"description": "Delivery status: held on this device because the contact's app (0.1) can't read it; sent once they update.", "placeholders": {"name": {"type": "String"}}}
 }

@@ -2499,6 +2499,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'You\'re on direct only'**
   String get chatSelfDirectOnlySummary;
+
+  /// One-line summary of the chat notice for a contact still on 0.1; tap for more.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} needs to update Night Drop'**
+  String chatPeerOutdatedSummary(String name);
+
+  /// Chat notice for a contact still on 0.1.x, which cannot exchange messages with 0.2.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} is on an older version of Night Drop (0.1), which can\'t talk to yours. Your messages wait on this device and go out by themselves once they update. Ask them to update.'**
+  String chatPeerOutdated(String name);
+
+  /// Delivery status: held on this device because the contact's app (0.1) can't read it; sent once they update.
+  ///
+  /// In en, this message translates to:
+  /// **'Waiting for {name} to update'**
+  String deliveryUpdate(String name);
 }
 
 class _AppLocalizationsDelegate

@@ -961,6 +961,11 @@ class Contact {
   /// sides (§6). The UI hides the switch otherwise, and says why.
   final bool serverStorageAvailable;
 
+  /// The peer runs a release this one cannot talk to (0.1.x): known from the version they
+  /// announced, or from a frame of theirs in the older wire format. Messages to them wait on
+  /// this device ("update") until they update; the chat says so.
+  final bool peerOutdated;
+
   /// Whether the peer's build understands burn messages. `None` = they have not said (an older
   /// build, or a chat predating the signal), and the UI must treat that as **unsupported**:
   /// offering a burn that silently lands as a permanent message is the one failure this
@@ -1018,6 +1023,7 @@ class Contact {
     required this.peerRelays,
     required this.peerRelayState,
     required this.serverStorageAvailable,
+    required this.peerOutdated,
     this.peerSupportsBurn,
     this.peerAppVersion,
     required this.remoteStorageHealthy,
@@ -1042,6 +1048,7 @@ class Contact {
       peerRelays.hashCode ^
       peerRelayState.hashCode ^
       serverStorageAvailable.hashCode ^
+      peerOutdated.hashCode ^
       peerSupportsBurn.hashCode ^
       peerAppVersion.hashCode ^
       remoteStorageHealthy.hashCode ^
@@ -1068,6 +1075,7 @@ class Contact {
           peerRelays == other.peerRelays &&
           peerRelayState == other.peerRelayState &&
           serverStorageAvailable == other.serverStorageAvailable &&
+          peerOutdated == other.peerOutdated &&
           peerSupportsBurn == other.peerSupportsBurn &&
           peerAppVersion == other.peerAppVersion &&
           remoteStorageHealthy == other.remoteStorageHealthy &&

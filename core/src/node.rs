@@ -42,6 +42,19 @@ const HELD_RETRY_FIRST_SECS: u64 = 60;
 const HELD_RETRY_CAP_OPEN_SECS: u64 = 5 * 60;
 const HELD_RETRY_CAP_BACKGROUND_SECS: u64 = 15 * 60;
 
+/// The oldest app version that speaks our protocol: 0.2 does not talk to 0.1.x (wire v3 against
+/// v2). A contact known to run anything older is **outdated**: what we send it is held, not sent
+/// for its app to take and discard, until it announces a version at least this.
+const MIN_PEER_VERSION: (u32, u32) = (0, 2);
+
+/// Whether an announced app version predates [`MIN_PEER_VERSION`].
+pub(crate) fn version_outdated(version: &str) -> bool {
+    let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
+    let major = parts.next().unwrap_or(0);
+    let minor = parts.next().unwrap_or(0);
+    (major, minor) < MIN_PEER_VERSION
+}
+
 /// The most entries our own relay list holds (`optional-relay.md` §2). Everyone writing to us
 /// posts each offline message to every entry, so this bounds the copies one message makes. A
 /// contact's announced set is held to the same cap, so nobody can make us post a message a
@@ -694,6 +707,9 @@ struct Chat {
     own_key_pending: Option<[u8; 32]>,
     peer_key_pending: Option<String>,
     pass_pending: Option<[u8; 32]>,
+    /// The peer last reached us in an older wire version (`wire::legacy_sender`): it runs 0.1.x
+    /// and cannot read what we send. Cleared by any frame from them we can read. Persisted.
+    peer_wire_old: bool,
     /// Bumped by every authenticated frame from the peer ([`Chat::mark_alive`]), so a caller can
     /// tell which chats it heard from in one round even within the same second, which `last_seen`
     /// cannot. In memory only.
@@ -705,6 +721,19 @@ impl Chat {
     fn mark_alive(&mut self) {
         self.last_seen = Some(crate::api::now_secs());
         self.alive_count += 1;
+        // Only a frame in our own wire version gets this far: they are no longer on 0.1.
+        self.peer_wire_old = false;
+    }
+
+    /// The peer runs a release older than ours can talk to (0.1.x): known from the version they
+    /// last announced, or from a frame of theirs in the older wire format.
+    fn outdated(&self) -> bool {
+        self.peer_wire_old
+            || self
+                .contact
+                .peer_app_version
+                .as_deref()
+                .is_some_and(version_outdated)
     }
 }
 
@@ -742,6 +771,7 @@ impl Chat {
                 peer_on_old_version: false,
                 peer_relay_state: String::new(),
                 server_storage_available: false,
+                peer_outdated: false,
             },
             peer_address: peer_address.to_string(),
             session,
@@ -764,6 +794,7 @@ impl Chat {
             own_key_pending: None,
             peer_key_pending: None,
             pass_pending: None,
+            peer_wire_old: false,
             alive_count: 0,
         }
     }
@@ -2097,6 +2128,25 @@ impl Node {
         fresh: bool,
         done: OutboundDone,
     ) -> Result<()> {
+        // An outdated contact's app (0.1.x) would take the frame and discard it, so it waits
+        // instead: a one-off frame in the held queue, in order with their messages; a standing
+        // announcement as not sent, which is retried once they have updated.
+        if self.peer_outdated(recipient_ik) {
+            match done {
+                OutboundDone::Announced(kind, id) => self.apply_announced(kind, &id, false),
+                OutboundDone::Nothing | OutboundDone::Caller(_) => {
+                    self.held.push(HeldSend {
+                        contact_id: recipient_ik.to_string(),
+                        msg_id: String::new(),
+                        bytes: wire::encode(frame),
+                        in_flight: false,
+                    });
+                    self.dirty = true;
+                }
+                _ => {}
+            }
+            return Ok(());
+        }
         let send = self.detach(peer_address, recipient_ik, wire::encode(frame), fresh);
         match self.send_or_queue(send, Route::DirectThenRelay, done) {
             Some(false) => anyhow::bail!("peer offline and no relay accepted the message"),
@@ -2605,6 +2655,25 @@ impl Node {
         send.primary.is_some() || !send.peer_relays.is_empty()
     }
 
+    /// Whether `contact_id` runs a release too old to read what we send (0.1.x): see
+    /// [`MIN_PEER_VERSION`]. Messages and control frames to it are held until it updates.
+    pub fn peer_outdated(&self, contact_id: &str) -> bool {
+        self.chats.get(contact_id).is_some_and(Chat::outdated)
+    }
+
+    /// A frame in an older wire version arrived from `contact_id` (`wire::legacy_sender`): it runs
+    /// 0.1.x. Unauthenticated, so it can only ever *hold* our messages to that contact, which any
+    /// frame from them that we can read undoes.
+    pub(crate) fn note_legacy_frame(&mut self, contact_id: &str) {
+        if let Some(chat) = self.chats.get_mut(contact_id) {
+            if !chat.peer_wire_old {
+                crate::diag!("version: a contact sent an older-format frame — they are on 0.1");
+                chat.peer_wire_old = true;
+                self.dirty = true;
+            }
+        }
+    }
+
     /// Whether a frame to `contact_id` has any relay to go to; without one it goes direct or is
     /// held (`optional-relay.md` §4).
     pub(crate) fn has_relay_route(&self, contact_id: &str) -> bool {
@@ -2615,6 +2684,10 @@ impl Node {
     /// Whether a retry to `contact_id` may go out now: always for a contact with a relay route
     /// (a relay post is how those retry), otherwise when its backoff has run out.
     pub(crate) fn may_retry(&self, contact_id: &str, now: u64) -> bool {
+        // An outdated contact's app discards anything we send: nothing is retried until it updates.
+        if self.peer_outdated(contact_id) {
+            return false;
+        }
         self.has_relay_route(contact_id)
             || self
                 .held_backoff
@@ -2746,13 +2819,21 @@ impl Node {
     /// Hold a message that reached neither the peer nor a relay. With no relay route it is
     /// **"waiting"** for the peer to come online; otherwise "queued" until a relay takes it.
     pub(crate) fn hold_message(&mut self, contact_id: &str, msg_id: &str, bytes: Vec<u8>) {
+        let outdated = self.peer_outdated(contact_id);
         let waiting = !self.has_relay_route(contact_id);
         if let Some(m) = self.chats.get_mut(contact_id).and_then(|c| {
             c.history
                 .iter_mut()
                 .find(|m| m.from_me && m.msg_id == msg_id)
         }) {
-            m.delivery = if waiting { "waiting" } else { "queued" }.to_string();
+            m.delivery = if outdated {
+                "update"
+            } else if waiting {
+                "waiting"
+            } else {
+                "queued"
+            }
+            .to_string();
         }
         self.held.push(HeldSend {
             contact_id: contact_id.to_string(),
@@ -2796,6 +2877,10 @@ impl Node {
         let mut busy: Vec<String> = Vec::new(); // relay-less contacts with one already going
         for (i, h) in self.held.iter().enumerate() {
             if only.is_some_and(|c| c != h.contact_id) {
+                continue;
+            }
+            // Held until they update: their app would take it and discard it.
+            if self.peer_outdated(&h.contact_id) {
                 continue;
             }
             if self.has_relay_route(&h.contact_id) {
@@ -2951,6 +3036,7 @@ impl Node {
                     Some(_) => "relays",
                 }
                 .to_string();
+                dto.peer_outdated = c.outdated();
                 dto.server_storage_available =
                     !self.relays.is_empty() && c.relay_set.as_ref().is_some_and(|s| !s.is_empty());
                 dto
@@ -3454,6 +3540,8 @@ mod tests_held;
 mod tests_mailbox;
 #[cfg(test)]
 mod tests_outbox;
+#[cfg(test)]
+mod tests_outdated;
 #[cfg(test)]
 mod tests_pass;
 #[cfg(test)]

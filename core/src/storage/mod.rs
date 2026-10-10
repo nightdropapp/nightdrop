@@ -94,6 +94,10 @@ pub struct PersistedChat {
     /// joiner's client key for our onion and their reply pass, both unused until Accept.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub own_key_pending: Option<String>,
+    /// The peer last reached us in an older wire version (0.1.x), so it cannot read what we send;
+    /// cleared by any frame we can read from them.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub peer_wire_old: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_key_pending: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
