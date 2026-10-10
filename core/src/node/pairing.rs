@@ -281,7 +281,7 @@ impl Node {
         ttl: Duration,
     ) -> Result<()> {
         if self.rendezvous_relays().is_empty() {
-            anyhow::bail!("no relay configured");
+            anyhow::bail!("short codes need a relay; with direct only, add contacts by QR code");
         }
         let bundle = self.publish_bundle();
         // Our relay set rides in the sealed response, so the joiner knows where our mail goes

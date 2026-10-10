@@ -96,7 +96,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     setState(() => _busy = true);
     _startProgress();
     try {
-      await core.createIdentity();
+      await core.createIdentity(relays: choices.relays);
       // _Root rebuilds to HomeScreen once an identity exists.
     } catch (e) {
       if (!mounted) return;

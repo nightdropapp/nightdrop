@@ -50,8 +50,13 @@ class MockNightdropCore extends NightdropCore {
   void markRead(String contactId) {}
 
   @override
-  Future<void> createIdentity() async {
+  Future<void> createIdentity({List<RelayEntry>? relays}) async {
     await _fakeWork();
+    if (relays != null) {
+      _relays
+        ..clear()
+        ..addAll(relays);
+    }
     _identity = Identity(id: 'nightdrop:${_token(10)}');
     notifyListeners();
   }
@@ -65,8 +70,10 @@ class MockNightdropCore extends NightdropCore {
     // Simulate a peer joining via this invite -> a pending request to approve.
     _requests.add(Contact(id: 'nightdrop:${_token(10)}'));
     notifyListeners();
+    // As the real core: no relay, no rendezvous, so no short code (`optional-relay.md` §5).
     return PairingInvite(
-        shortCode: code, qrPayload: 'nightdrop://pair?b=${_token(24)}');
+        shortCode: _relays.isEmpty ? '' : code,
+        qrPayload: 'nightdrop://pair?b=${_token(24)}');
   }
 
   @override
@@ -110,23 +117,41 @@ class MockNightdropCore extends NightdropCore {
     notifyListeners();
   }
 
-  final List<String> _myRelays = [];
+  final List<RelayEntry> _relays = [const RelayEntry.nightDrop()];
 
   @override
-  Future<List<String>> myRelays() async => List.of(_myRelays);
+  Future<List<RelayEntry>> relayList() async => List.of(_relays);
 
   @override
-  Future<void> setMyRelays(List<String> relays) async {
-    _myRelays
+  Future<void> setRelayList(List<RelayEntry> relays) async {
+    final cleaned = <RelayEntry>[];
+    for (final r in relays) {
+      final e = r.nightDrop ? r : RelayEntry.onion(r.onion.trim());
+      if (!e.nightDrop && e.onion.isEmpty) continue;
+      if (!cleaned.contains(e)) cleaned.add(e);
+    }
+    if (cleaned.length > 4) throw Exception('at most 4 relays');
+    _relays
       ..clear()
-      ..addAll(relays.where((r) => r.trim().isNotEmpty).map((r) => r.trim()));
+      ..addAll(cleaned);
     notifyListeners();
   }
 
   @override
+  Future<RelayFeatures> relayFeatures() async => RelayFeatures(
+        directOnly: _relays.isEmpty,
+        shortCodes: _relays.isNotEmpty,
+        serverBackup: _relays.contains(const RelayEntry.nightDrop()),
+        coverTraffic: _relays.isNotEmpty,
+      );
+
+  @override
   Future<List<RelayHealth>> relayHealth() async =>
-      // Mock: pretend every advertised relay is reachable.
-      _myRelays.map((a) => RelayHealth(address: a, reachable: true)).toList();
+      // Mock: pretend every relay we added is reachable.
+      [
+        for (final r in _relays)
+          if (!r.nightDrop) RelayHealth(address: r.onion, reachable: true),
+      ];
 
   @override
   Future<String> createRelayAccessKey(String relayOnion) async =>
@@ -375,6 +400,9 @@ class MockNightdropCore extends NightdropCore {
   Future<void> setRemoteStorage(String contactId, bool enabled) async {
     await _fakeWork();
     final c = _contacts.firstWhere((c) => c.id == contactId);
+    if (enabled && (_relays.isEmpty || !c.serverStorageAvailable)) {
+      throw Exception('server storage needs a relay on both sides');
+    }
     c.remoteStorage = enabled;
     c.remoteStorageExpiresAt =
         enabled ? DateTime.now().add(const Duration(hours: 24)) : null;

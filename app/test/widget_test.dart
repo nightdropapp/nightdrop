@@ -15,6 +15,7 @@ void main() {
 
     // The setup step comes first; its button creates the identity.
     expect(find.text('Before you start'), findsOneWidget);
+    await tester.scrollUntilVisible(find.byKey(const Key('setup-create')), 200);
     await tester.tap(find.byKey(const Key('setup-create')));
     await tester.pumpAndSettle();
 

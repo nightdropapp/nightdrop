@@ -174,6 +174,33 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       if (!mounted) return;
       NightdropScope.of(context).reportScreenshot(widget.contactId);
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final features = await NightdropScope.of(context).relayFeatures();
+      if (mounted) setState(() => _directOnly = features.directOnly);
+    });
+  }
+
+  /// We are on direct only (`optional-relay.md` §3): said once in each chat.
+  bool _directOnly = false;
+
+  /// Server storage needs relays on both sides (§6). Turning it off always works; turning it on
+  /// where it cannot says why instead.
+  Future<void> _toggleRemoteStorage(Contact contact) async {
+    final core = NightdropScope.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    if (!contact.remoteStorage && !contact.serverStorageAvailable) {
+      final reason = switch (contact.peerRelayState) {
+        'direct' => l10n.serverStorageNeedsRelayPeer(contact.displayName),
+        'unknown' => l10n.chatPeerRelaysUnknown(contact.displayName),
+        _ => l10n.serverStorageNeedsRelaySelf,
+      };
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(content: Text(reason)));
+      return;
+    }
+    await core.setRemoteStorage(widget.contactId, !contact.remoteStorage);
   }
 
   /// Pending auto-scroll callbacks, cancelled on dispose (see [_scrollToEnd]).
@@ -812,10 +839,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                 icon: Icon(
                   contact.remoteStorage ? Icons.cloud : Icons.cloud_off,
                 ),
-                onPressed: () => core.setRemoteStorage(
-                  widget.contactId,
-                  !contact.remoteStorage,
-                ),
+                onPressed: () => _toggleRemoteStorage(contact),
               ),
               IconButton(
                 tooltip: contact.disappearingSecs > 0
@@ -894,6 +918,26 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               // answer without evidence is worse than staying quiet.
               if (contact.peerCapturesSilent == true) const _PeerCapturesSilentBanner(),
               if (contact.peerOnOldVersion) const _PeerOnOldVersionBanner(),
+              // Where messages to them go, when it is not a relay (`optional-relay.md` §3).
+              // Unknown is ordinary while a request awaits approval, so said only after.
+              if (contact.peerDirectOnly)
+                _CompactNotice(
+                  icon: Icons.wifi_tethering_off,
+                  summary: l10n.chatPeerDirectOnlySummary(contact.displayName),
+                  detail: l10n.chatPeerDirectOnly(contact.displayName),
+                )
+              else if (contact.peerRelayState == 'unknown' && !awaitingApproval)
+                _CompactNotice(
+                  icon: Icons.hourglass_empty,
+                  summary: l10n.chatPeerRelaysUnknownSummary(contact.displayName),
+                  detail: l10n.chatPeerRelaysUnknown(contact.displayName),
+                ),
+              if (_directOnly)
+                _CompactNotice(
+                  icon: Icons.wifi_tethering_off,
+                  summary: l10n.chatSelfDirectOnlySummary,
+                  detail: l10n.chatSelfDirectOnly,
+                ),
               _SilenceBanner(lastSeenSecs: contact.lastSeenSecs),
               Expanded(
                 child: visibleMessages.isEmpty

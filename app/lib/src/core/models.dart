@@ -60,6 +60,8 @@ class Contact {
     this.peerCapturesSilent,
     this.peerSupportsBurn,
     this.peerRelays = const [],
+    this.peerRelayState = 'relays',
+    this.serverStorageAvailable = true,
     this.remoteStorageHealthy = true,
     this.lastSeenSecs = 0,
     this.peerOnOldVersion = false,
@@ -116,10 +118,20 @@ class Contact {
   /// that silently lands as a permanent message is the one failure this feature cannot have.
   bool? peerSupportsBurn;
 
-  /// The peer's advertised **extra** relay addresses (#17). We fan offline mail out to these
-  /// in addition to the shared primary relay, so a message reaches them even if one relay is
-  /// down or censored. Synced in-band via the peer's relay-set announcement.
+  /// The onions in the peer's relay set, synced in-band (`Frame::RelaySet`). Whether they also use
+  /// the Night Drop relay is part of [peerRelayState].
   List<String> peerRelays;
+
+  /// Where the peer receives offline mail (`docs/design/optional-relay.md` §3): `'relays'`,
+  /// `'direct'` (no relay: they receive only while their app is online, and our messages wait on
+  /// this device until then), or `'unknown'` (not told yet; messages wait too).
+  String peerRelayState;
+
+  /// Whether opt-in server storage can be turned on: it needs relays on both sides (§6).
+  bool serverStorageAvailable;
+
+  /// The peer receives messages only while their app is online.
+  bool get peerDirectOnly => peerRelayState == 'direct';
 
   /// Whether opt-in server storage is currently working. `false` when it's on but the last send
   /// couldn't reach any relay to store the copy (the message still reached the peer directly), so
@@ -162,6 +174,54 @@ class Contact {
 }
 
 /// Reachability of one of *our* advertised extra relays (#17), for the relay-status surface.
+/// One entry of our relay list (`docs/design/optional-relay.md` §2): the Night Drop relay, or an
+/// onion the user added. An empty list means direct only.
+class RelayEntry {
+  const RelayEntry.nightDrop()
+      : nightDrop = true,
+        onion = '';
+  const RelayEntry.onion(this.onion) : nightDrop = false;
+
+  final bool nightDrop;
+
+  /// The onion address, when this is not the Night Drop entry.
+  final String onion;
+
+  @override
+  bool operator ==(Object other) =>
+      other is RelayEntry && other.nightDrop == nightDrop && other.onion == onion;
+
+  @override
+  int get hashCode => Object.hash(nightDrop, onion);
+}
+
+/// What our relay list allows (`docs/design/optional-relay.md` §6), to show or hide each feature
+/// with its reason.
+class RelayFeatures {
+  const RelayFeatures({
+    this.directOnly = false,
+    this.shortCodes = true,
+    this.serverBackup = true,
+    this.coverTraffic = true,
+    this.maxRelays = 4,
+  });
+
+  /// No relay at all: messages reach us only while the app is online.
+  final bool directOnly;
+
+  /// Short-code pairing (needs a relay; QR always works).
+  final bool shortCodes;
+
+  /// Server backup (lives on the Night Drop relay).
+  final bool serverBackup;
+
+  /// Cover traffic (covers a relay mailbox; none without a relay).
+  final bool coverTraffic;
+
+  /// How many entries the list may hold.
+  final int maxRelays;
+}
+
 class RelayHealth {
   const RelayHealth({required this.address, required this.reachable});
 

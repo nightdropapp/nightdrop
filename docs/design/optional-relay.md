@@ -320,9 +320,27 @@ a direct-only user's contacts see their messages arrive the moment that user com
      capability and the relay set all wait for it, rather than telling whoever scanned a QR.
    * The `Hello` goes directly only, for everyone, held and retried like any relay-less frame.
    * A transport without `mint_pass` (none ship) falls back to the 0.1 `ClientKey` exchange.
-5. **Gate the features in §6** in the core, with the UI showing the reasons.
+5. **Gate the features in §6** in the core, with the UI showing the reasons. **Built 2026-10-10**
+   (`api::relay_features`, `Contact::peer_relay_state` / `server_storage_available`; tests in
+   `node/tests_relay_list.rs` and `api.rs`). Short codes refuse with a pointer to the QR code, and
+   a join that finds nobody now says the two may share no relay. Server storage turns on only
+   with relays on both sides. A direct-only device skips the relay-list fetch. **Server backup
+   needs the Night Drop relay in the list** (decided while building, 2026-10-10): a new device
+   restoring one knows no other relay to look on, so a list without Night Drop cannot offer it.
 6. **UI:** the onboarding step, "My relays" with the Night Drop entry, chat banners, and the
-   "Waiting for … to come online" status.
+   "Waiting for … to come online" status. **Built 2026-10-10** (`app/test/optional_relay_test.dart`):
+   * Setup: Night Drop (recommended) / my own relay / direct only, before `createIdentity`;
+     `new_tor(initial_relays)` puts the list in place before the new identity's first poll. Cover
+     traffic is offered only with a relay.
+   * "My relays" (`features/relays/my_relays_screen.dart`): the Night Drop entry can be removed and
+     added back, the cap is shown, each added relay has its access key, and removing the last one
+     first lists what turns off. Only `.onion` addresses are accepted (the old editor's `host:port`
+     would bypass Tor). The design's **[Check]** button is not built: there is no reachability
+     probe yet, and a relay that does not answer shows as "Not answering" after the next poll.
+   * Home: a direct-only note. Chat: one-line notices for a direct-only contact, an unknown set
+     (after approval only), and our own direct only; the storage switch explains why it is off.
+   * Unavailable features stay in the menus and explain themselves, with a way to "My relays",
+     rather than vanishing: a missing option reads as broken, an explained one does not.
 7. **Docs:** `ARCHITECTURE.md` (§5c, §6, §7c, §11.1's "single relay"), `SECURITY.md`,
    `website/limits.html`, and `multi-relay-mailboxes.md` marked as superseded where it differs.
 

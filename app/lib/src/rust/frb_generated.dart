@@ -68,7 +68,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.12.0';
 
   @override
-  int get rustContentHash => -439402157;
+  int get rustContentHash => 1253086703;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -173,9 +173,6 @@ abstract class RustLibApi extends BaseApi {
   Future<List<ChatMessage>> crateApiNightdropCoreMessages(
       {required NightdropCore that, required String contactId});
 
-  Future<List<String>> crateApiNightdropCoreMyRelays(
-      {required NightdropCore that});
-
   Future<NightdropCore> crateApiNightdropCoreNew();
 
   Future<NightdropCore> crateApiNightdropCoreNewLan(
@@ -191,14 +188,21 @@ abstract class RustLibApi extends BaseApi {
       {String? stateDir,
       String? relayAddr,
       String? persistPath,
-      String? persistKey});
+      String? persistKey,
+      List<RelayListEntry>? initialRelays});
 
   Future<bool> crateApiNightdropCoreOnionReady({required NightdropCore that});
 
   Future<Contact> crateApiNightdropCoreOpenChat(
       {required NightdropCore that, String? code});
 
+  Future<RelayFeatures> crateApiNightdropCoreRelayFeatures(
+      {required NightdropCore that});
+
   Future<List<RelayHealth>> crateApiNightdropCoreRelayHealth(
+      {required NightdropCore that});
+
+  Future<List<RelayListEntry>> crateApiNightdropCoreRelayList(
       {required NightdropCore that});
 
   Future<void> crateApiNightdropCoreReportScreenshot(
@@ -288,8 +292,8 @@ abstract class RustLibApi extends BaseApi {
       required String contactId,
       required String name});
 
-  Future<void> crateApiNightdropCoreSetMyRelays(
-      {required NightdropCore that, required List<String> relays});
+  Future<void> crateApiNightdropCoreSetRelayList(
+      {required NightdropCore that, required List<RelayListEntry> entries});
 
   Future<void> crateApiNightdropCoreSetRemoteStorage(
       {required NightdropCore that,
@@ -1154,39 +1158,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<List<String>> crateApiNightdropCoreMyRelays(
-      {required NightdropCore that}) {
-    return handler.executeNormal(NormalTask(
-      callFfi: (port_) {
-        final serializer = SseSerializer(generalizedFrbRustBinding);
-        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
-            that, serializer);
-        pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 28, port: port_);
-      },
-      codec: SseCodec(
-        decodeSuccessData: sse_decode_list_String,
-        decodeErrorData: null,
-      ),
-      constMeta: kCrateApiNightdropCoreMyRelaysConstMeta,
-      argValues: [that],
-      apiImpl: this,
-    ));
-  }
-
-  TaskConstMeta get kCrateApiNightdropCoreMyRelaysConstMeta =>
-      const TaskConstMeta(
-        debugName: "NightdropCore_my_relays",
-        argNames: ["that"],
-      );
-
-  @override
   Future<NightdropCore> crateApiNightdropCoreNew() {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 29, port: port_);
+            funcId: 28, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1218,7 +1195,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(persistPath, serializer);
         sse_encode_opt_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 30, port: port_);
+            funcId: 29, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1246,7 +1223,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(listenAddr, serializer);
         sse_encode_String(relayAddr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 31, port: port_);
+            funcId: 30, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1270,7 +1247,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       {String? stateDir,
       String? relayAddr,
       String? persistPath,
-      String? persistKey}) {
+      String? persistKey,
+      List<RelayListEntry>? initialRelays}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
@@ -1278,8 +1256,9 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(relayAddr, serializer);
         sse_encode_opt_String(persistPath, serializer);
         sse_encode_opt_String(persistKey, serializer);
+        sse_encode_opt_list_relay_list_entry(initialRelays, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 32, port: port_);
+            funcId: 31, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1287,7 +1266,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         decodeErrorData: sse_decode_AnyhowException,
       ),
       constMeta: kCrateApiNightdropCoreNewTorConstMeta,
-      argValues: [stateDir, relayAddr, persistPath, persistKey],
+      argValues: [stateDir, relayAddr, persistPath, persistKey, initialRelays],
       apiImpl: this,
     ));
   }
@@ -1295,7 +1274,13 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiNightdropCoreNewTorConstMeta =>
       const TaskConstMeta(
         debugName: "NightdropCore_new_tor",
-        argNames: ["stateDir", "relayAddr", "persistPath", "persistKey"],
+        argNames: [
+          "stateDir",
+          "relayAddr",
+          "persistPath",
+          "persistKey",
+          "initialRelays"
+        ],
       );
 
   @override
@@ -1306,7 +1291,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 33, port: port_);
+            funcId: 32, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -1334,7 +1319,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_opt_String(code, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 34, port: port_);
+            funcId: 33, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_contact,
@@ -1350,6 +1335,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       const TaskConstMeta(
         debugName: "NightdropCore_open_chat",
         argNames: ["that", "code"],
+      );
+
+  @override
+  Future<RelayFeatures> crateApiNightdropCoreRelayFeatures(
+      {required NightdropCore that}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 34, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_relay_features,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiNightdropCoreRelayFeaturesConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiNightdropCoreRelayFeaturesConstMeta =>
+      const TaskConstMeta(
+        debugName: "NightdropCore_relay_features",
+        argNames: ["that"],
       );
 
   @override
@@ -1380,6 +1392,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  Future<List<RelayListEntry>> crateApiNightdropCoreRelayList(
+      {required NightdropCore that}) {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
+            that, serializer);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 36, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_list_relay_list_entry,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiNightdropCoreRelayListConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiNightdropCoreRelayListConstMeta =>
+      const TaskConstMeta(
+        debugName: "NightdropCore_relay_list",
+        argNames: ["that"],
+      );
+
+  @override
   Future<void> crateApiNightdropCoreReportScreenshot(
       {required NightdropCore that, required String contactId}) {
     return handler.executeNormal(NormalTask(
@@ -1389,7 +1428,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 36, port: port_);
+            funcId: 37, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1421,7 +1460,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_opt_String(listenAddr, serializer);
         sse_encode_opt_String(relayAddr, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 37, port: port_);
+            funcId: 38, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1458,7 +1497,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(persistPath, serializer);
         sse_encode_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 38, port: port_);
+            funcId: 39, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1507,7 +1546,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(persistPath, serializer);
         sse_encode_String(persistKey, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 39, port: port_);
+            funcId: 40, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1542,7 +1581,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 40, port: port_);
+            funcId: 41, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1570,7 +1609,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(contactId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 41, port: port_);
+            funcId: 42, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -1598,7 +1637,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 42, port: port_);
+            funcId: 43, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1635,7 +1674,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(kind, serializer);
         sse_encode_u_64(burnSecs, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 43, port: port_);
+            funcId: 44, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_chat_message,
@@ -1668,7 +1707,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(text, serializer);
         sse_encode_u_64(burnSecs, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 44, port: port_);
+            funcId: 45, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_chat_message,
@@ -1705,7 +1744,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(kind, serializer);
         sse_encode_list_prim_u_8_loose(thumb, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 45, port: port_);
+            funcId: 46, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1736,7 +1775,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(text, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 46, port: port_);
+            funcId: 47, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_chat_message,
@@ -1764,7 +1803,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_String(version, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 47, port: port_);
+            funcId: 48, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1792,7 +1831,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_bool(background, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 48, port: port_);
+            funcId: 49, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1820,7 +1859,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_bool(enabled, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 49, port: port_);
+            funcId: 50, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1848,7 +1887,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
             that, serializer);
         sse_encode_bool(visible, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 50, port: port_);
+            funcId: 51, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1879,7 +1918,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_u_64(secs, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 51, port: port_);
+            funcId: 52, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1910,7 +1949,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 52, port: port_);
+            funcId: 53, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1941,7 +1980,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(name, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 53, port: port_);
+            funcId: 54, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -1960,31 +1999,31 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  Future<void> crateApiNightdropCoreSetMyRelays(
-      {required NightdropCore that, required List<String> relays}) {
+  Future<void> crateApiNightdropCoreSetRelayList(
+      {required NightdropCore that, required List<RelayListEntry> entries}) {
     return handler.executeNormal(NormalTask(
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
-        sse_encode_list_String(relays, serializer);
+        sse_encode_list_relay_list_entry(entries, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 54, port: port_);
+            funcId: 55, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
-        decodeErrorData: null,
+        decodeErrorData: sse_decode_AnyhowException,
       ),
-      constMeta: kCrateApiNightdropCoreSetMyRelaysConstMeta,
-      argValues: [that, relays],
+      constMeta: kCrateApiNightdropCoreSetRelayListConstMeta,
+      argValues: [that, entries],
       apiImpl: this,
     ));
   }
 
-  TaskConstMeta get kCrateApiNightdropCoreSetMyRelaysConstMeta =>
+  TaskConstMeta get kCrateApiNightdropCoreSetRelayListConstMeta =>
       const TaskConstMeta(
-        debugName: "NightdropCore_set_my_relays",
-        argNames: ["that", "relays"],
+        debugName: "NightdropCore_set_relay_list",
+        argNames: ["that", "entries"],
       );
 
   @override
@@ -2000,7 +2039,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_bool(enabled, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 55, port: port_);
+            funcId: 56, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2031,7 +2070,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_bool(verified, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 56, port: port_);
+            funcId: 57, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2057,7 +2096,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerNightdropCore(
             that, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 57, port: port_);
+            funcId: 58, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2088,7 +2127,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(msgId, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 58, port: port_);
+            funcId: 59, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2119,7 +2158,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(contactId, serializer);
         sse_encode_String(scanned, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 59, port: port_);
+            funcId: 60, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2144,7 +2183,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(line, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 60, port: port_);
+            funcId: 61, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_String,
@@ -2170,7 +2209,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dir, serializer);
         sse_encode_String(passphrase, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 61, port: port_);
+            funcId: 62, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2196,7 +2235,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dir, serializer);
         sse_encode_String(passphrase, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 62, port: port_);
+            funcId: 63, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2220,7 +2259,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 63, port: port_);
+            funcId: 64, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2245,7 +2284,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(dir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 64, port: port_);
+            funcId: 65, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2269,7 +2308,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(line, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 65, port: port_);
+            funcId: 66, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2295,7 +2334,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dir, serializer);
         sse_encode_String(keyB64, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 66, port: port_);
+            funcId: 67, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2319,7 +2358,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_opt_String(country, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 67, port: port_);
+            funcId: 68, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_fetched_bridges,
@@ -2342,7 +2381,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 68, port: port_);
+            funcId: 69, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2366,7 +2405,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(dir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 69, port: port_);
+            funcId: 70, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -2390,7 +2429,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(stateDir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 70, port: port_);
+            funcId: 71, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2414,7 +2453,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_bool(enabled, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 71, port: port_);
+            funcId: 72, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2438,7 +2477,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_bool(enabled, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 72, port: port_);
+            funcId: 73, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2462,7 +2501,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(path, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 73, port: port_);
+            funcId: 74, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2492,7 +2531,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(passphrase, serializer);
         sse_encode_String(duress, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 74, port: port_);
+            funcId: 75, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2521,7 +2560,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(keyB64, serializer);
         sse_encode_String(passphrase, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 75, port: port_);
+            funcId: 76, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2545,7 +2584,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(dir, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 76, port: port_);
+            funcId: 77, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2571,7 +2610,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dir, serializer);
         sse_encode_String(secret, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 77, port: port_);
+            funcId: 78, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bool,
@@ -2597,7 +2636,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_StreamSink_app_event_Sse(sink, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 78, port: port_);
+            funcId: 79, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2624,7 +2663,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dir, serializer);
         sse_encode_String(secret, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 79, port: port_);
+            funcId: 80, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_store_unlock,
@@ -2647,7 +2686,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 80, port: port_);
+            funcId: 81, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -2673,7 +2712,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_String(dir, serializer);
         sse_encode_String(text, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 81, port: port_);
+            funcId: 82, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_bridge_save_result,
@@ -2837,8 +2876,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   Contact dco_decode_contact(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
-    if (arr.length != 18)
-      throw Exception('unexpected arr length: expect 18 but see ${arr.length}');
+    if (arr.length != 20)
+      throw Exception('unexpected arr length: expect 20 but see ${arr.length}');
     return Contact(
       id: dco_decode_String(arr[0]),
       theirName: dco_decode_String(arr[1]),
@@ -2851,13 +2890,15 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       peerVerified: dco_decode_bool(arr[8]),
       peerCapturesSilent: dco_decode_opt_box_autoadd_bool(arr[9]),
       peerRelays: dco_decode_list_String(arr[10]),
-      peerSupportsBurn: dco_decode_opt_box_autoadd_bool(arr[11]),
-      peerAppVersion: dco_decode_opt_String(arr[12]),
-      remoteStorageHealthy: dco_decode_bool(arr[13]),
-      localName: dco_decode_String(arr[14]),
-      identityTag: dco_decode_String(arr[15]),
-      lastSeenSecs: dco_decode_u_64(arr[16]),
-      peerOnOldVersion: dco_decode_bool(arr[17]),
+      peerRelayState: dco_decode_String(arr[11]),
+      serverStorageAvailable: dco_decode_bool(arr[12]),
+      peerSupportsBurn: dco_decode_opt_box_autoadd_bool(arr[13]),
+      peerAppVersion: dco_decode_opt_String(arr[14]),
+      remoteStorageHealthy: dco_decode_bool(arr[15]),
+      localName: dco_decode_String(arr[16]),
+      identityTag: dco_decode_String(arr[17]),
+      lastSeenSecs: dco_decode_u_64(arr[18]),
+      peerOnOldVersion: dco_decode_bool(arr[19]),
     );
   }
 
@@ -2928,6 +2969,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RelayListEntry> dco_decode_list_relay_list_entry(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return (raw as List<dynamic>).map(dco_decode_relay_list_entry).toList();
+  }
+
+  @protected
   String? dco_decode_opt_String(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     return raw == null ? null : dco_decode_String(raw);
@@ -2958,6 +3005,12 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RelayListEntry>? dco_decode_opt_list_relay_list_entry(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    return raw == null ? null : dco_decode_list_relay_list_entry(raw);
+  }
+
+  @protected
   PairingInvite dco_decode_pairing_invite(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2982,6 +3035,21 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RelayFeatures dco_decode_relay_features(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 5)
+      throw Exception('unexpected arr length: expect 5 but see ${arr.length}');
+    return RelayFeatures(
+      directOnly: dco_decode_bool(arr[0]),
+      shortCodes: dco_decode_bool(arr[1]),
+      serverBackup: dco_decode_bool(arr[2]),
+      coverTraffic: dco_decode_bool(arr[3]),
+      maxRelays: dco_decode_u_32(arr[4]),
+    );
+  }
+
+  @protected
   RelayHealth dco_decode_relay_health(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2990,6 +3058,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     return RelayHealth(
       address: dco_decode_String(arr[0]),
       reachable: dco_decode_bool(arr[1]),
+    );
+  }
+
+  @protected
+  RelayListEntry dco_decode_relay_list_entry(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 2)
+      throw Exception('unexpected arr length: expect 2 but see ${arr.length}');
+    return RelayListEntry(
+      nightdrop: dco_decode_bool(arr[0]),
+      onion: dco_decode_String(arr[1]),
     );
   }
 
@@ -3226,6 +3306,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     final var_peerCapturesSilent =
         sse_decode_opt_box_autoadd_bool(deserializer);
     final var_peerRelays = sse_decode_list_String(deserializer);
+    final var_peerRelayState = sse_decode_String(deserializer);
+    final var_serverStorageAvailable = sse_decode_bool(deserializer);
     final var_peerSupportsBurn = sse_decode_opt_box_autoadd_bool(deserializer);
     final var_peerAppVersion = sse_decode_opt_String(deserializer);
     final var_remoteStorageHealthy = sse_decode_bool(deserializer);
@@ -3245,6 +3327,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         peerVerified: var_peerVerified,
         peerCapturesSilent: var_peerCapturesSilent,
         peerRelays: var_peerRelays,
+        peerRelayState: var_peerRelayState,
+        serverStorageAvailable: var_serverStorageAvailable,
         peerSupportsBurn: var_peerSupportsBurn,
         peerAppVersion: var_peerAppVersion,
         remoteStorageHealthy: var_remoteStorageHealthy,
@@ -3347,6 +3431,19 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RelayListEntry> sse_decode_list_relay_list_entry(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    final len_ = sse_decode_i_32(deserializer);
+    final ans_ = <RelayListEntry>[];
+    for (var idx_ = 0; idx_ < len_; ++idx_) {
+      ans_.add(sse_decode_relay_list_entry(deserializer));
+    }
+    return ans_;
+  }
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3404,6 +3501,18 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  List<RelayListEntry>? sse_decode_opt_list_relay_list_entry(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    if (sse_decode_bool(deserializer)) {
+      return (sse_decode_list_relay_list_entry(deserializer));
+    } else {
+      return null;
+    }
+  }
+
+  @protected
   PairingInvite sse_decode_pairing_invite(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     final var_shortCode = sse_decode_String(deserializer);
@@ -3420,11 +3529,35 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RelayFeatures sse_decode_relay_features(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    final var_directOnly = sse_decode_bool(deserializer);
+    final var_shortCodes = sse_decode_bool(deserializer);
+    final var_serverBackup = sse_decode_bool(deserializer);
+    final var_coverTraffic = sse_decode_bool(deserializer);
+    final var_maxRelays = sse_decode_u_32(deserializer);
+    return RelayFeatures(
+        directOnly: var_directOnly,
+        shortCodes: var_shortCodes,
+        serverBackup: var_serverBackup,
+        coverTraffic: var_coverTraffic,
+        maxRelays: var_maxRelays);
+  }
+
+  @protected
   RelayHealth sse_decode_relay_health(SseDeserializer deserializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     final var_address = sse_decode_String(deserializer);
     final var_reachable = sse_decode_bool(deserializer);
     return RelayHealth(address: var_address, reachable: var_reachable);
+  }
+
+  @protected
+  RelayListEntry sse_decode_relay_list_entry(SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    final var_nightdrop = sse_decode_bool(deserializer);
+    final var_onion = sse_decode_String(deserializer);
+    return RelayListEntry(nightdrop: var_nightdrop, onion: var_onion);
   }
 
   @protected
@@ -3639,6 +3772,8 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
     sse_encode_bool(self.peerVerified, serializer);
     sse_encode_opt_box_autoadd_bool(self.peerCapturesSilent, serializer);
     sse_encode_list_String(self.peerRelays, serializer);
+    sse_encode_String(self.peerRelayState, serializer);
+    sse_encode_bool(self.serverStorageAvailable, serializer);
     sse_encode_opt_box_autoadd_bool(self.peerSupportsBurn, serializer);
     sse_encode_opt_String(self.peerAppVersion, serializer);
     sse_encode_bool(self.remoteStorageHealthy, serializer);
@@ -3729,6 +3864,16 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_list_relay_list_entry(
+      List<RelayListEntry> self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_i_32(self.length, serializer);
+    for (final item in self) {
+      sse_encode_relay_list_entry(item, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
 
@@ -3781,6 +3926,17 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_opt_list_relay_list_entry(
+      List<RelayListEntry>? self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+
+    sse_encode_bool(self != null, serializer);
+    if (self != null) {
+      sse_encode_list_relay_list_entry(self, serializer);
+    }
+  }
+
+  @protected
   void sse_encode_pairing_invite(PairingInvite self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.shortCode, serializer);
@@ -3796,10 +3952,28 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_relay_features(RelayFeatures self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.directOnly, serializer);
+    sse_encode_bool(self.shortCodes, serializer);
+    sse_encode_bool(self.serverBackup, serializer);
+    sse_encode_bool(self.coverTraffic, serializer);
+    sse_encode_u_32(self.maxRelays, serializer);
+  }
+
+  @protected
   void sse_encode_relay_health(RelayHealth self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
     sse_encode_String(self.address, serializer);
     sse_encode_bool(self.reachable, serializer);
+  }
+
+  @protected
+  void sse_encode_relay_list_entry(
+      RelayListEntry self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_bool(self.nightdrop, serializer);
+    sse_encode_String(self.onion, serializer);
   }
 
   @protected
@@ -4116,13 +4290,6 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       RustLib.instance.api
           .crateApiNightdropCoreMessages(that: this, contactId: contactId);
 
-  /// Our advertised **extra** relay addresses (#17) — relays that also host our mailbox, on top
-  /// of the built-in default. Empty by default.
-  Future<List<String>> myRelays() =>
-      RustLib.instance.api.crateApiNightdropCoreMyRelays(
-        that: this,
-      );
-
   /// Whether this device's address is published/reachable yet. On Tor it is `false` for the
   /// ~1–3 min after launch while the onion descriptor (re)publishes — the UI shows a "still
   /// publishing, others can't pair yet" banner until this is `true`.
@@ -4137,12 +4304,25 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   Future<Contact> openChat({String? code}) => RustLib.instance.api
       .crateApiNightdropCoreOpenChat(that: this, code: code);
 
+  /// What our relay list allows (`docs/design/optional-relay.md` §6).
+  Future<RelayFeatures> relayFeatures() =>
+      RustLib.instance.api.crateApiNightdropCoreRelayFeatures(
+        that: this,
+      );
+
   /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
   /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
   /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
   /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   Future<List<RelayHealth>> relayHealth() =>
       RustLib.instance.api.crateApiNightdropCoreRelayHealth(
+        that: this,
+      );
+
+  /// Our relay list, in order (`docs/design/optional-relay.md` §2): where we receive offline
+  /// mail. Empty = direct only.
+  Future<List<RelayListEntry>> relayList() =>
+      RustLib.instance.api.crateApiNightdropCoreRelayList(
         that: this,
       );
 
@@ -4289,12 +4469,13 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       RustLib.instance.api.crateApiNightdropCoreSetMyName(
           that: this, contactId: contactId, name: name);
 
-  /// Replace our advertised extra relay set (#17): peers will fan out our offline mail to these
-  /// too, and we poll them alongside the default. Announces the change to existing contacts
-  /// (E2E) and persists. Addresses are validated as non-empty; reachability is the user's call.
-  Future<void> setMyRelays({required List<String> relays}) =>
+  /// Replace our relay list. At most [`RelayFeatures::max_relays`] entries; blank and repeated
+  /// onions are dropped. Contacts are told the new set (E2E), a removed relay is still drained
+  /// for 24 h, and an empty list makes this device direct only. Persists at once; the frames go
+  /// out through the outbox, so this never waits on Tor.
+  Future<void> setRelayList({required List<RelayListEntry> entries}) =>
       RustLib.instance.api
-          .crateApiNightdropCoreSetMyRelays(that: this, relays: relays);
+          .crateApiNightdropCoreSetRelayList(that: this, entries: entries);
 
   /// Toggle opt-in 24h server storage for a chat (§6).
   Future<void> setRemoteStorage(

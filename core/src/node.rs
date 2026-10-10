@@ -740,6 +740,8 @@ impl Chat {
                 local_name: String::new(),
                 identity_tag: String::new(),
                 peer_on_old_version: false,
+                peer_relay_state: String::new(),
+                server_storage_available: false,
             },
             peer_address: peer_address.to_string(),
             session,
@@ -2484,8 +2486,8 @@ impl Node {
         self.relay = None;
     }
 
-    /// Replace the onions in our relay list, keeping the Night Drop entry as it is. The 0.1.x
-    /// "My relays" screen edits only these.
+    /// Tests only: replace the onions in our relay list, keeping the Night Drop entry as it is.
+    #[cfg(test)]
     pub fn set_my_relays(&mut self, relays: Vec<String>) {
         let mut list: Vec<RelayEntry> = self
             .relays
@@ -2502,6 +2504,31 @@ impl Node {
         self.my_relay_set().relays
     }
 
+    /// No relay at all: this device never talks to one (`optional-relay.md` §1).
+    pub fn direct_only(&self) -> bool {
+        self.relays.is_empty()
+    }
+
+    /// Whether our list holds the Night Drop relay, which the server backup lives on: a fresh
+    /// device restoring one looks there, knowing nothing else yet.
+    pub fn uses_nightdrop_relay(&self) -> bool {
+        self.relays.contains(&RelayEntry::NightDrop) && self.relay.is_some()
+    }
+
+    /// Whether opt-in server storage can work in this chat: it posts to the *recipient's* relays
+    /// and is sent by the *sender*, so it needs relays on **both** sides (`optional-relay.md` §6).
+    pub(crate) fn server_storage_available(&self, contact_id: &str) -> bool {
+        !self.direct_only()
+            && self
+                .peer_relay_set(contact_id)
+                .is_some_and(|set| !set.is_empty())
+    }
+
+    /// Our relay list, in order (`optional-relay.md` §2). Empty = direct only.
+    pub fn relay_list(&self) -> Vec<RelayEntry> {
+        self.relays.clone()
+    }
+
     /// The set our relay list stands for: what contacts are told and post to.
     pub fn my_relay_set(&self) -> RelaySet {
         RelaySet::of(&self.relays)
@@ -2513,6 +2540,15 @@ impl Node {
     /// queued there for us is still on its way; one that comes back stops draining.
     pub fn set_relay_list(&mut self, list: Vec<RelayEntry>) {
         self.set_relay_list_at(list, crate::api::now_secs());
+    }
+
+    /// A **new** identity's list, from the setup page (`optional-relay.md` §7): taken as it is,
+    /// with nothing to drain, since nothing was ever queued for this identity anywhere.
+    pub fn start_with_relay_list(&mut self, list: Vec<RelayEntry>) {
+        let (list, _) = normalize_relays(list);
+        self.relays = list;
+        self.relays_draining.clear();
+        self.dirty = true;
     }
 
     pub(crate) fn set_relay_list_at(&mut self, list: Vec<RelayEntry>, now: u64) {
@@ -2682,6 +2718,12 @@ impl Node {
             chat.client_key = Some(pass);
         }
         self.dirty = true;
+    }
+
+    /// Tests only: whether no removed relay is still being drained.
+    #[cfg(test)]
+    pub(crate) fn relays_draining_is_empty(&self) -> bool {
+        self.relays_draining.is_empty()
     }
 
     /// Tests only: how many frames are held.
@@ -2903,6 +2945,14 @@ impl Node {
                     .as_ref()
                     .map(|s| s.relays.clone())
                     .unwrap_or_default();
+                dto.peer_relay_state = match &c.relay_set {
+                    None => "unknown",
+                    Some(set) if set.is_empty() => "direct",
+                    Some(_) => "relays",
+                }
+                .to_string();
+                dto.server_storage_available =
+                    !self.relays.is_empty() && c.relay_set.as_ref().is_some_and(|s| !s.is_empty());
                 dto
             })
             .collect()
@@ -3251,7 +3301,7 @@ pub fn run_join_handshake(
     timeout: Duration,
 ) -> Result<String> {
     if relays.is_empty() {
-        anyhow::bail!("no relay configured");
+        anyhow::bail!("short codes need a relay; with direct only, add contacts by QR code");
     }
     let (bouncer, msg_j) = crate::pake::start(secret.as_bytes());
     // §4.1: also ship a one-time ML-KEM-768 public key so the inviter can encapsulate a PQ secret;
@@ -3314,7 +3364,12 @@ pub fn run_join_handshake(
                  never answered our opener",
                 timeout.as_secs()
             );
-            anyhow::bail!("timed out waiting for the other device — ask for a fresh code");
+            // Codes meet only on relays both lists share (`optional-relay.md` §5), so "nobody
+            // answered" can also mean "we share none": say so, and point to the QR.
+            anyhow::bail!(
+                "timed out waiting for the other device — ask for a fresh code, or, if you \
+                 don't share a relay with them, use the QR code instead"
+            );
         }
         std::thread::sleep(RENDEZVOUS_POLL);
         // Keep an opener available to the inviter for as long as we're waiting (see

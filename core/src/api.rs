@@ -309,9 +309,16 @@ pub struct Contact {
     /// must render that as unknown and NOT as "captures are visible": inferring the reassuring
     /// answer from silence is precisely the false guarantee this exists to remove.
     pub peer_captures_silent: Option<bool>,
-    /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
-    /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
+    /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
+    /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
     pub peer_relays: Vec<String>,
+    /// Where the peer receives offline mail (`docs/design/optional-relay.md` §3): `"relays"`,
+    /// `"direct"` (no relay: they receive only while their app is online, and our messages wait on
+    /// this device until then), or `"unknown"` (not told yet: messages wait too).
+    pub peer_relay_state: String,
+    /// Whether opt-in server storage can be turned on for this chat: it needs relays on both
+    /// sides (§6). The UI hides the switch otherwise, and says why.
+    pub server_storage_available: bool,
     /// Whether the peer's build understands burn messages. `None` = they have not said (an older
     /// build, or a chat predating the signal), and the UI must treat that as **unsupported**:
     /// offering a burn that silently lands as a permanent message is the one failure this
@@ -350,7 +357,32 @@ pub struct Contact {
     pub peer_on_old_version: bool,
 }
 
-/// Reachability of one of our advertised extra relays (#17), for the UI's relay-status surface.
+/// One entry of our relay list (`docs/design/optional-relay.md` §2).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RelayListEntry {
+    /// The Night Drop relay (the baked-in one plus the signed directory's); `onion` is then empty.
+    pub nightdrop: bool,
+    /// An onion address the user added, when `nightdrop` is false.
+    pub onion: String,
+}
+
+/// What this device's relay list allows (`docs/design/optional-relay.md` §6), for the UI to show
+/// or hide each feature with its reason.
+#[derive(Clone, Debug)]
+pub struct RelayFeatures {
+    /// No relay at all: messages wait on the sender until both apps are online.
+    pub direct_only: bool,
+    /// Short-code pairing (needs a relay for the rendezvous; QR always works).
+    pub short_codes: bool,
+    /// Server backup (lives on the Night Drop relay, where a new device looks for it).
+    pub server_backup: bool,
+    /// Cover traffic (covers a relay mailbox; there is none without a relay).
+    pub cover_traffic: bool,
+    /// How many entries the list may hold.
+    pub max_relays: u32,
+}
+
+/// Reachability of one of our relays (#17), for the UI's relay-status surface.
 #[derive(Clone, Debug)]
 pub struct RelayHealth {
     /// The relay address we advertise (as entered by the user; `.onion` or host:port).
@@ -996,7 +1028,7 @@ impl NightdropCore {
                 let state = crate::storage::load_from_file(path, key)?;
                 Node::restore(&state, Box::new(transport), key)?
             }
-            None => Node::with_identity(LocalIdentity::generate(), Box::new(transport)),
+            None => fresh_identity(Box::new(transport), None),
         };
         me.set_require_authorization(true);
         if let Some(relay) = relay {
@@ -1028,11 +1060,15 @@ impl NightdropCore {
     /// (same identity + chats survive a restart); otherwise a fresh identity is created and
     /// saved. The key is held by the OS secure store on the Dart side. The Tor onion address
     /// itself persists separately via arti's `state_dir`.
+    ///
+    /// `initial_relays` is the relay list chosen on the setup page (`optional-relay.md` §7), used
+    /// only when this creates a **new** identity; a restored one keeps its own.
     pub fn new_tor(
         state_dir: Option<String>,
         relay_addr: Option<String>,
         persist_path: Option<String>,
         persist_key: Option<String>,
+        initial_relays: Option<Vec<RelayListEntry>>,
     ) -> Result<NightdropCore> {
         #[cfg(feature = "tor")]
         {
@@ -1097,7 +1133,7 @@ impl NightdropCore {
                     let state = crate::storage::load_from_file(path, key)?;
                     Node::restore(&state, Box::new(transport), key)?
                 }
-                None => Node::with_identity(LocalIdentity::generate(), Box::new(transport)),
+                None => fresh_identity(Box::new(transport), initial_relays),
             };
             me.set_require_authorization(true);
             if let Some(sd) = &state_dir {
@@ -1125,7 +1161,13 @@ impl NightdropCore {
         }
         #[cfg(not(feature = "tor"))]
         {
-            let _ = (state_dir, relay_addr, persist_path, persist_key);
+            let _ = (
+                state_dir,
+                relay_addr,
+                persist_path,
+                persist_key,
+                initial_relays,
+            );
             anyhow::bail!(
                 "this build was compiled without Tor support (rebuild with --features tor)"
             )
@@ -1434,34 +1476,62 @@ impl NightdropCore {
         emit("contacts");
     }
 
-    /// Our advertised **extra** relay addresses (#17) — relays that also host our mailbox, on top
-    /// of the built-in default. Empty by default.
-    pub fn my_relays(&self) -> Vec<String> {
-        self.lock().me.my_relays()
+    /// Our relay list, in order (`docs/design/optional-relay.md` §2): where we receive offline
+    /// mail. Empty = direct only.
+    pub fn relay_list(&self) -> Vec<RelayListEntry> {
+        self.lock()
+            .me
+            .relay_list()
+            .into_iter()
+            .map(|e| match e {
+                crate::node::RelayEntry::NightDrop => RelayListEntry {
+                    nightdrop: true,
+                    onion: String::new(),
+                },
+                crate::node::RelayEntry::Onion(onion) => RelayListEntry {
+                    nightdrop: false,
+                    onion,
+                },
+            })
+            .collect()
     }
 
-    /// Replace our advertised extra relay set (#17): peers will fan out our offline mail to these
-    /// too, and we poll them alongside the default. Announces the change to existing contacts
-    /// (E2E) and persists. Addresses are validated as non-empty; reachability is the user's call.
-    pub fn set_my_relays(&self, relays: Vec<String>) {
-        let cleaned: Vec<String> = relays
-            .into_iter()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty())
-            .collect();
-        // Persist the user's intent synchronously so the edit is durable immediately and the
-        // Save button returns at once. Empty set = advertise nothing extra → fall back to the
-        // baked-in default relay only.
+    /// Replace our relay list. At most [`RelayFeatures::max_relays`] entries; blank and repeated
+    /// onions are dropped. Contacts are told the new set (E2E), a removed relay is still drained
+    /// for 24 h, and an empty list makes this device direct only. Persists at once; the frames go
+    /// out through the outbox, so this never waits on Tor.
+    pub fn set_relay_list(&self, entries: Vec<RelayListEntry>) -> Result<()> {
+        let list = relay_entries(entries);
+        let mut distinct: Vec<&crate::node::RelayEntry> = Vec::new();
+        for e in &list {
+            if !distinct.contains(&e) {
+                distinct.push(e);
+            }
+        }
+        if distinct.len() > crate::node::MAX_RELAYS {
+            anyhow::bail!("at most {} relays", crate::node::MAX_RELAYS);
+        }
         {
             let mut g = self.lock();
-            g.me.set_my_relays(cleaned);
+            g.me.set_relay_list(list);
             g.save();
         }
-        // Notify existing contacts (E2E `Relays` frame). Sealing is instant; the dials go through
-        // the outbox, which the poller sends without the lock — so neither this call nor anything
-        // else waits on a cold Tor.
         self.lock().me.announce_relay_set();
         emit("contacts");
+        Ok(())
+    }
+
+    /// What our relay list allows (`docs/design/optional-relay.md` §6).
+    pub fn relay_features(&self) -> RelayFeatures {
+        let g = self.lock();
+        let direct_only = g.me.direct_only();
+        RelayFeatures {
+            direct_only,
+            short_codes: !g.me.rendezvous_relays().is_empty(),
+            server_backup: g.me.uses_nightdrop_relay(),
+            cover_traffic: !direct_only,
+            max_relays: crate::node::MAX_RELAYS as u32,
+        }
     }
 
     /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
@@ -1670,7 +1740,7 @@ impl NightdropCore {
         // release it for the blocking handshake, which broadcasts across the whole set.
         let relays = self.lock().me.rendezvous_relays();
         if relays.is_empty() {
-            anyhow::bail!("no relay configured");
+            anyhow::bail!("short codes need a relay; with direct only, add contacts by QR code");
         }
         let payload =
             crate::node::run_join_handshake(&relays, slot, secret, SHORT_CODE_JOIN_TIMEOUT)?;
@@ -1976,6 +2046,10 @@ impl NightdropCore {
         // Build under the lock, post without it: the post is a Tor round trip (§6).
         let (relay, (handle, blob, ttl)) = {
             let g = self.lock();
+            // On the Night Drop relay, where a new device looks for it (`optional-relay.md` §6).
+            if !g.me.uses_nightdrop_relay() {
+                anyhow::bail!("server backup uses the Night Drop relay, which is not in your list");
+            }
             let relay =
                 g.me.relay_client()
                     .ok_or_else(|| anyhow::anyhow!("server backup needs a relay (Tor mode)"))?;
@@ -2359,6 +2433,32 @@ pub fn check_bridge(line: String) -> Option<String> {
 /// analysis; it does not end it. See `docs/design/cover-traffic.md` §4.
 pub fn set_cover_traffic(enabled: bool) {
     COVER_TRAFFIC.store(enabled, Ordering::Relaxed);
+}
+
+/// A brand-new identity on `transport`, starting with `relays` when the setup page chose a list
+/// (`optional-relay.md` §7): in place before its poller first runs. `None` = the default, the
+/// Night Drop relay.
+fn fresh_identity(transport: Box<dyn Transport>, relays: Option<Vec<RelayListEntry>>) -> Node {
+    let mut node = Node::with_identity(LocalIdentity::generate(), transport);
+    if let Some(entries) = relays {
+        node.start_with_relay_list(relay_entries(entries));
+    }
+    node
+}
+
+/// The core's form of a list from the app: blank onions dropped.
+fn relay_entries(entries: Vec<RelayListEntry>) -> Vec<crate::node::RelayEntry> {
+    entries
+        .into_iter()
+        .filter_map(|e| {
+            if e.nightdrop {
+                Some(crate::node::RelayEntry::NightDrop)
+            } else {
+                let onion = e.onion.trim().to_string();
+                (!onion.is_empty()).then_some(crate::node::RelayEntry::Onion(onion))
+            }
+        })
+        .collect()
 }
 
 /// Whether cover traffic is currently on.
@@ -3987,6 +4087,65 @@ mod tests {
         core.authorize(&request_id, false).unwrap();
         assert!(core.incoming_requests().is_empty());
         assert!(core.contacts().is_empty());
+    }
+
+    #[test]
+    fn the_relay_list_round_trips_and_reports_what_it_allows() {
+        let net = MemoryNetwork::new();
+        let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+        let core = NightdropCore::new_with_transport(
+            Box::new(net.endpoint("me.onion")),
+            Some(relay),
+            false,
+        );
+        let nightdrop = RelayListEntry {
+            nightdrop: true,
+            onion: String::new(),
+        };
+        let onion = |o: &str| RelayListEntry {
+            nightdrop: false,
+            onion: o.to_string(),
+        };
+        assert_eq!(core.relay_list(), vec![nightdrop.clone()], "a new identity");
+        let f = core.relay_features();
+        assert!(!f.direct_only && f.short_codes && f.server_backup && f.cover_traffic);
+        assert_eq!(f.max_relays, 4);
+
+        core.set_relay_list(vec![onion("mine.onion"), onion(" mine.onion ")])
+            .unwrap();
+        assert_eq!(core.relay_list(), vec![onion("mine.onion")]);
+        let f = core.relay_features();
+        assert!(
+            f.short_codes && !f.server_backup,
+            "no Night Drop, no server backup"
+        );
+
+        assert!(core
+            .set_relay_list((0..5).map(|i| onion(&format!("{i}.onion"))).collect())
+            .is_err());
+        // Repeats are not entries, wherever they are in the list.
+        let repeats = ["a", "b", "a", "c", "d"].map(|o| onion(&format!("{o}.onion")));
+        core.set_relay_list(repeats.to_vec()).unwrap();
+        assert_eq!(core.relay_list().len(), 4);
+        core.set_relay_list(Vec::new()).unwrap();
+        let f = core.relay_features();
+        assert!(f.direct_only && !f.short_codes && !f.server_backup && !f.cover_traffic);
+    }
+
+    #[test]
+    fn a_new_identity_starts_with_the_relay_choice_made_at_setup() {
+        let net = MemoryNetwork::new();
+        let me = fresh_identity(Box::new(net.endpoint("me")), Some(Vec::new()));
+        assert!(me.direct_only(), "direct only, from the first poll");
+        assert!(
+            me.relays_draining_is_empty(),
+            "nothing to drain for a new identity"
+        );
+        let default = fresh_identity(Box::new(net.endpoint("default")), None);
+        assert_eq!(
+            default.relay_list(),
+            vec![crate::node::RelayEntry::NightDrop]
+        );
     }
 
     #[test]

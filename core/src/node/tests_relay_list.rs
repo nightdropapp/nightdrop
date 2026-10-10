@@ -254,3 +254,61 @@ fn a_contact_set_past_the_cap_is_cut_to_it() {
     assert!(primary.is_none(), "no Night Drop copy for a set without it");
     assert_eq!(targets.len(), MAX_RELAYS);
 }
+
+/// What direct only turns off (`optional-relay.md` §6), and what needs relays on both sides.
+#[test]
+fn direct_only_turns_off_what_needs_a_relay() {
+    let net = MemoryNetwork::new();
+    let relay = spawn_relay();
+    let (mut alice, mut bob, bob_id) = pair(&net, &relay);
+    let alice_id = alice.identity_key();
+    assert!(alice.server_storage_available(&bob_id));
+    assert!(alice.uses_nightdrop_relay());
+    assert!(alice.directory_fetch_due(u64::MAX));
+
+    // Bob goes direct only: Alice can no longer store server copies for him.
+    bob.set_relay_list(Vec::new());
+    bob.announce_relay_set();
+    alice.pump().unwrap();
+    assert!(!alice.server_storage_available(&bob_id));
+    assert_eq!(alice.contacts()[0].peer_relay_state, "direct");
+    assert!(!alice.contacts()[0].server_storage_available);
+    let err = alice.set_remote_storage(&bob_id, true).unwrap_err();
+    assert!(err.to_string().contains("this contact has none"), "{err}");
+    alice.set_remote_storage(&bob_id, false).unwrap();
+
+    // Bob himself: no short codes, no server backup, no relay list to fetch.
+    assert!(bob.direct_only());
+    assert!(!bob.uses_nightdrop_relay());
+    assert!(!bob.directory_fetch_due(u64::MAX));
+    let err = bob
+        .stage_short_code_invite("slot", "secret words", Duration::from_secs(600))
+        .unwrap_err();
+    assert!(err.to_string().contains("QR"), "{err}");
+    let err = bob.set_remote_storage(&alice_id, true).unwrap_err();
+    assert!(err.to_string().contains("direct only"), "{err}");
+}
+
+#[test]
+fn a_contacts_relay_state_reads_unknown_until_told() {
+    let net = MemoryNetwork::new();
+    let relay = spawn_relay();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay);
+    let alice_id = bob
+        .connect_with_bundle("alice", &alice.publish_bundle())
+        .unwrap();
+    let state = |n: &Node| {
+        n.contacts()
+            .into_iter()
+            .find(|c| c.id == alice_id)
+            .unwrap()
+            .peer_relay_state
+    };
+    assert_eq!(state(&bob), "unknown");
+    alice.pump().unwrap();
+    bob.pump().unwrap();
+    assert_eq!(state(&bob), "relays");
+}

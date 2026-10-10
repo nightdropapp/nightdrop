@@ -696,6 +696,7 @@ fn a_file_backup_restore_keeps_the_onion_across_the_next_restart() {
         None,
         Some(format!("{a}/state.bin")),
         Some(key.clone()),
+        None,
     )
     .expect("first start");
     let onion = original.address();
@@ -731,6 +732,7 @@ fn a_file_backup_restore_keeps_the_onion_across_the_next_restart() {
         None,
         Some(format!("{b}/state.bin")),
         Some(key),
+        None,
     )
     .expect("start after restore");
     assert_eq!(

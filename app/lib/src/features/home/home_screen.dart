@@ -16,6 +16,7 @@ import '../chat/chat_screen.dart';
 import '../donations/donations_screen.dart';
 import '../lock/app_lock_settings.dart';
 import '../pairing/pairing_screen.dart';
+import '../relays/my_relays_screen.dart';
 
 /// The conversation list. Empty until the user pairs with someone.
 class HomeScreen extends StatelessWidget {
@@ -41,7 +42,7 @@ class HomeScreen extends StatelessWidget {
             icon: const Icon(Icons.backup_outlined),
             onSelected: (value) {
               if (value == 'file') createAndSaveBackup(context, core);
-              if (value == 'server') _createServerBackup(context, core);
+              if (value == 'server') _serverBackupIfAvailable(context, core);
               if (value == 'merge') mergeChatBackup(context, core);
             },
             itemBuilder: (context) => [
@@ -63,7 +64,7 @@ class HomeScreen extends StatelessWidget {
                 Navigator.of(context).push(MaterialPageRoute<void>(
                     builder: (_) => const BridgesScreen()));
               }
-              if (value == 'cover') _coverTrafficSettings(context, core);
+              if (value == 'cover') _coverTrafficIfAvailable(context, core);
               if (value == 'burnreceipts') _burnReceiptSettings(context, core);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'resettor') _confirmResetTor(context, core);
@@ -113,6 +114,7 @@ class HomeScreen extends StatelessWidget {
           _OnionBanner(core: core),
           const _BackgroundStoppedBanner(),
           _RelayHealthBanner(core: core),
+          _DirectOnlyNote(core: core),
           _ProtocolBreakBanner(core: core),
           _BackupReminderBanner(core: core),
           _UpdateBanner(core: core),
@@ -313,6 +315,28 @@ class _DesktopRunDialogState extends State<_DesktopRunDialog> {
 /// this is chaff, not constant-rate transmission, so it raises the cost of traffic analysis
 /// without ending it. A user who believes it makes them untrackable is worse off than one who
 /// knows what it actually buys. See `docs/design/cover-traffic.md` §4.
+/// Cover traffic covers a relay mailbox; direct only has none (`optional-relay.md` §6).
+Future<void> _coverTrafficIfAvailable(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final features = await core.relayFeatures();
+  if (!context.mounted) return;
+  if (!features.coverTraffic) {
+    return _explainUnavailable(context, core, l10n.coverTrafficUnavailable);
+  }
+  return _coverTrafficSettings(context, core);
+}
+
+/// The server backup lives on the Night Drop relay (`optional-relay.md` §6).
+Future<void> _serverBackupIfAvailable(BuildContext context, NightdropCore core) async {
+  final l10n = AppLocalizations.of(context)!;
+  final features = await core.relayFeatures();
+  if (!context.mounted) return;
+  if (!features.serverBackup) {
+    return _explainUnavailable(context, core, l10n.serverBackupUnavailable);
+  }
+  return _createServerBackup(context, core);
+}
+
 Future<void> _coverTrafficSettings(BuildContext context, NightdropCore core) async {
   final l10n = AppLocalizations.of(context)!;
   final on = await core.coverTrafficEnabled();
@@ -533,6 +557,53 @@ class _BackgroundStoppedBannerState extends State<_BackgroundStoppedBanner> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// "You receive messages only while Night Drop is online", while the relay list is empty
+/// (`optional-relay.md` §3: a home-screen note under "My relays"). Re-read whenever the core
+/// changes, which includes saving the list.
+class _DirectOnlyNote extends StatelessWidget {
+  const _DirectOnlyNote({required this.core});
+
+  final NightdropCore core;
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final scheme = Theme.of(context).colorScheme;
+    return ListenableBuilder(
+      listenable: core,
+      builder: (context, _) => FutureBuilder<RelayFeatures>(
+        future: core.relayFeatures(),
+        builder: (context, snap) {
+          if (!(snap.data?.directOnly ?? false)) return const SizedBox.shrink();
+          return Material(
+            color: scheme.secondaryContainer,
+            child: InkWell(
+              onTap: () => _editRelays(context, core),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.wifi_tethering_off,
+                        size: 18, color: scheme.onSecondaryContainer),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        l10n.homeDirectOnlyNote,
+                        style: TextStyle(
+                            color: scheme.onSecondaryContainer, fontSize: 12.5),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
       ),
     );
   }
@@ -980,71 +1051,34 @@ Future<void> _backgroundDeliverySettings(BuildContext context) async {
   ));
 }
 
-/// Edit our advertised **extra** relay set (#17). These are announced to contacts so their
-/// offline mail is fanned out to them in addition to the shared primary relay — more paths to
-/// reach us if one relay is down or censored. One relay address per line.
-Future<void> _editRelays(BuildContext context, NightdropCore core) async {
+/// Open "My relays" (`docs/design/optional-relay.md` §2).
+Future<void> _editRelays(BuildContext context, NightdropCore core) =>
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const MyRelaysScreen()),
+    );
+
+/// A feature the relay list rules out (`optional-relay.md` §6): say why, and offer "My relays",
+/// where the user can change it. Kept in the menu rather than hidden, so the reason is findable.
+Future<void> _explainUnavailable(
+    BuildContext context, NightdropCore core, String reason) async {
   final l10n = AppLocalizations.of(context)!;
-  final messenger = ScaffoldMessenger.of(context);
-  final current = await core.myRelays();
-  if (!context.mounted) return;
-  final controller = TextEditingController(text: current.join('\n'));
-  final saved = await showDialog<bool>(
+  final open = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      // scrollable keeps the description + text field in a scroll view and the Cancel/Save
-      // actions fixed below, so on mobile the keyboard can't push the field under the buttons
-      // or overflow the dialog.
-      scrollable: true,
-      title: Text(l10n.myRelays),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(l10n.editRelaysBody),
-          const SizedBox(height: 12),
-          TextField(
-            controller: controller,
-            minLines: 2,
-            maxLines: 5,
-            autocorrect: false,
-            enableSuggestions: false,
-            decoration: const InputDecoration(
-              border: OutlineInputBorder(),
-              hintText: 'abcd…xyz.onion\n10.0.0.5:9080',
-            ),
-          ),
-        ],
-      ),
+      content: Text(reason),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: Text(l10n.cancel),
+          child: Text(l10n.close),
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context, true),
-          child: Text(l10n.save),
+          child: Text(l10n.openMyRelays),
         ),
       ],
     ),
   );
-  if (saved != true) return;
-  final relays = controller.text
-      .split('\n')
-      .map((l) => l.trim())
-      .where((l) => l.isNotEmpty)
-      .toList();
-  try {
-    await core.setMyRelays(relays);
-  } catch (e) {
-    messenger.showSnackBar(SnackBar(content: Text(l10n.couldNotSaveRelays(e.toString()))));
-    return;
-  }
-  messenger.showSnackBar(SnackBar(
-    content: Text(relays.isEmpty
-        ? l10n.usingDefaultRelayOnly
-        : l10n.advertisingExtraRelays(relays.length)),
-  ));
+  if (open == true && context.mounted) await _editRelays(context, core);
 }
 
 /// Enable an opt-in server backup (§7c): store an encrypted copy on the relay and force the

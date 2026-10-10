@@ -588,7 +588,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get setupIntro =>
-      'These change what Night Drop does on the network. All are off unless you turn them on.';
+      'These change what Night Drop does on the network. Each option says what it costs.';
 
   @override
   String get setupCoverTitle => 'Cover traffic';
@@ -623,26 +623,8 @@ class AppLocalizationsEn extends AppLocalizations {
   String get myRelays => 'My relays';
 
   @override
-  String get editRelaysBody =>
-      'Extra relays that also hold your mailbox. Contacts fan your offline mail out to these in addition to the shared default, so a message still reaches you if one relay is down or blocked. Relays only ever see opaque, end-to-end-encrypted blobs. One address per line.';
-
-  @override
   String couldNotSaveRelays(String error) {
     return 'Could not save relays: $error';
-  }
-
-  @override
-  String get usingDefaultRelayOnly => 'Using the default relay only';
-
-  @override
-  String advertisingExtraRelays(int count) {
-    String _temp0 = intl.Intl.pluralLogic(
-      count,
-      locale: localeName,
-      other: '$count extra relays',
-      one: '1 extra relay',
-    );
-    return 'Advertising $_temp0';
   }
 
   @override
@@ -1325,4 +1307,162 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get burnReceiptsOff =>
       'Senders are no longer told when you open a burn message.';
+
+  @override
+  String get relaysIntro =>
+      'Where messages wait for you while you\'re offline. Your contacts are told this list automatically, end-to-end encrypted. Relays can\'t read your messages.';
+
+  @override
+  String get relayNightDropName => 'Night Drop relay';
+
+  @override
+  String get relayNightDropBody =>
+      'Run by the Night Drop project. Encrypted messages wait up to 24 hours.';
+
+  @override
+  String get relayOwnBody => 'A relay you added';
+
+  @override
+  String get relayAddHint => 'Relay address (…onion)';
+
+  @override
+  String get relayAdd => 'Add';
+
+  @override
+  String get relayAddNightDrop => 'Add the Night Drop relay';
+
+  @override
+  String get relayRemove => 'Remove';
+
+  @override
+  String get relayAccessKey => 'Access key';
+
+  @override
+  String get relayAccessKeyBody =>
+      'If this relay is private, give its operator this key. They allow it with \"nightdrop-relay authorize-client\". A public relay doesn\'t need it.';
+
+  @override
+  String get relayAccessKeyCopied => 'Access key copied';
+
+  @override
+  String get copy => 'Copy';
+
+  @override
+  String relayLimitReached(String max) {
+    return 'You can have up to $max relays.';
+  }
+
+  @override
+  String get relayInvalidOnion =>
+      'That isn\'t an onion address. It should be 56 letters and digits ending in .onion.';
+
+  @override
+  String get relayRemovedStillChecked =>
+      'A relay you remove is still checked for messages for 24 hours.';
+
+  @override
+  String get relaysSaved => 'Saved. Your contacts are being told.';
+
+  @override
+  String get directOnlyName => 'Direct only';
+
+  @override
+  String get directOnlyListEmpty =>
+      'No relays: direct only. You receive messages only while Night Drop is online.';
+
+  @override
+  String get directOnlyConfirmTitle => 'Remove your last relay?';
+
+  @override
+  String get directOnlyConfirmBody =>
+      'With no relay, this device never talks to a server:\n• messages reach you only while your app is online, and wait on your contacts\' devices until then\n• new contacts can be added by QR code only\n• no server backup and no server storage\n• no cover traffic\n\nYou can add a relay again at any time.';
+
+  @override
+  String get directOnlyConfirm => 'Use direct only';
+
+  @override
+  String get homeDirectOnlyNote =>
+      'Direct only: you receive messages only while Night Drop is online.';
+
+  @override
+  String chatPeerDirectOnly(String name) {
+    return '$name receives messages only while their app is online. Messages wait on this device until you\'re both online.';
+  }
+
+  @override
+  String chatPeerRelaysUnknown(String name) {
+    return '$name hasn\'t shared where they receive messages yet. Messages wait on this device until they do.';
+  }
+
+  @override
+  String get chatSelfDirectOnly =>
+      'You\'re on direct only: messages reach you only while your app is online.';
+
+  @override
+  String get serverStorageNeedsRelaySelf =>
+      'Server storage needs a relay, and you\'re on direct only.';
+
+  @override
+  String serverStorageNeedsRelayPeer(String name) {
+    return 'Server storage needs a relay on both sides, and $name doesn\'t use one.';
+  }
+
+  @override
+  String get serverBackupUnavailable =>
+      'Server backup is kept on the Night Drop relay, which isn\'t in your list. Save a backup file instead, or add the Night Drop relay in My relays.';
+
+  @override
+  String get coverTrafficUnavailable =>
+      'Cover traffic hides your activity on a relay. You\'re on direct only, so there\'s no relay to cover.';
+
+  @override
+  String get shortCodesUnavailable =>
+      'Short codes need a relay. On direct only, add contacts by QR code.';
+
+  @override
+  String get openMyRelays => 'My relays';
+
+  @override
+  String get setupRelayTitle =>
+      'How should messages reach you while you\'re offline?';
+
+  @override
+  String get setupRelayNightDrop => 'Night Drop relay';
+
+  @override
+  String get setupRecommended => 'Recommended';
+
+  @override
+  String get setupRelayNightDropBody =>
+      'Encrypted messages wait up to 24 hours on our relay. It can\'t read them.';
+
+  @override
+  String get setupRelayOwn => 'My own relay';
+
+  @override
+  String get setupRelayOwnBody => 'A relay you or someone you trust runs.';
+
+  @override
+  String get setupRelayDirect => 'Direct only';
+
+  @override
+  String get setupRelayDirectBody =>
+      'No server at all. You receive messages only while the app is online, and you can add contacts by QR code only.';
+
+  @override
+  String get relayNotAnswering =>
+      'Not answering. Messages to you may be delayed.';
+
+  @override
+  String chatPeerDirectOnlySummary(String name) {
+    return '$name receives only while online';
+  }
+
+  @override
+  String chatPeerRelaysUnknownSummary(String name) {
+    return 'Messages to $name wait on this device';
+  }
+
+  @override
+  String get chatSelfDirectOnlySummary => 'You\'re on direct only';
 }

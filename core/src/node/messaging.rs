@@ -608,7 +608,9 @@ impl Node {
     /// Whether to fetch the relay list from our onion site now (`directory::SITE_PATH`): once Tor
     /// is up (a fetch before that only fails), and on the persisted daily / retry schedule.
     pub(crate) fn directory_fetch_due(&self, now: u64) -> bool {
-        self.announce_ready() && now >= self.directory_next_check
+        // A direct-only device never posts to a relay, so it has no use for the list
+        // (`optional-relay.md` §2).
+        !self.direct_only() && self.announce_ready() && now >= self.directory_next_check
     }
 
     /// A fetch is starting: returns what it needs to run without the lock. The next fetch is pushed
@@ -1617,6 +1619,14 @@ impl Node {
     /// state is sent E2E to the peer so **both** parties see the warning (invariant) —
     /// best-effort with relay fallback, like a rename.
     pub fn set_remote_storage(&mut self, contact_id: &str, enabled: bool) -> Result<()> {
+        // Turning it off always works; turning it on needs relays on both sides (§6).
+        if enabled && !self.server_storage_available(contact_id) {
+            anyhow::bail!(if self.direct_only() {
+                "server storage needs a relay, and you are on direct only"
+            } else {
+                "server storage needs a relay on both sides, and this contact has none"
+            });
+        }
         let from = self.identity_key();
         let outgoing = {
             let chat = self

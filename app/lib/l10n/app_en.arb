@@ -770,7 +770,7 @@
   "@setupTitle": {
     "description": "Title of the one setup page shown before an identity is created."
   },
-  "setupIntro": "These change what Night Drop does on the network. All are off unless you turn them on.",
+  "setupIntro": "These change what Night Drop does on the network. Each option says what it costs.",
   "@setupIntro": {
     "description": "Intro text on the setup page."
   },
@@ -814,29 +814,12 @@
   "@myRelays": {
     "description": "Title of the relay editor dialog."
   },
-  "editRelaysBody": "Extra relays that also hold your mailbox. Contacts fan your offline mail out to these in addition to the shared default, so a message still reaches you if one relay is down or blocked. Relays only ever see opaque, end-to-end-encrypted blobs. One address per line.",
-  "@editRelaysBody": {
-    "description": "Explanation in the relay editor dialog."
-  },
   "couldNotSaveRelays": "Could not save relays: {error}",
   "@couldNotSaveRelays": {
     "description": "Snackbar when saving relays fails.",
     "placeholders": {
       "error": {
         "type": "String"
-      }
-    }
-  },
-  "usingDefaultRelayOnly": "Using the default relay only",
-  "@usingDefaultRelayOnly": {
-    "description": "Snackbar when the extra-relay list is cleared."
-  },
-  "advertisingExtraRelays": "Advertising {count, plural, =1{1 extra relay} other{{count} extra relays}}",
-  "@advertisingExtraRelays": {
-    "description": "Snackbar confirming how many extra relays are advertised.",
-    "placeholders": {
-      "count": {
-        "type": "int"
       }
     }
   },
@@ -1454,5 +1437,91 @@
   "burnReceiptsOff": "Senders are no longer told when you open a burn message.",
   "@burnReceiptsOff": {
     "description": "Confirmation snackbar when disabled."
-  }
+  },
+  "relaysIntro": "Where messages wait for you while you're offline. Your contacts are told this list automatically, end-to-end encrypted. Relays can't read your messages.",
+  "@relaysIntro": {"description": "Intro on the My relays screen."},
+  "relayNightDropName": "Night Drop relay",
+  "@relayNightDropName": {"description": "The Night Drop relay entry in the relay list."},
+  "relayNightDropBody": "Run by the Night Drop project. Encrypted messages wait up to 24 hours.",
+  "@relayNightDropBody": {"description": "Subtitle of the Night Drop relay entry."},
+  "relayOwnBody": "A relay you added",
+  "@relayOwnBody": {"description": "Subtitle of a user-added relay."},
+  "relayAddHint": "Relay address (…onion)",
+  "@relayAddHint": {"description": "Hint in the field for adding a relay."},
+  "relayAdd": "Add",
+  "@relayAdd": {"description": "Button: add the relay typed in the field."},
+  "relayAddNightDrop": "Add the Night Drop relay",
+  "@relayAddNightDrop": {"description": "Button: put the Night Drop relay back in the list."},
+  "relayRemove": "Remove",
+  "@relayRemove": {"description": "Action: remove a relay from the list."},
+  "relayAccessKey": "Access key",
+  "@relayAccessKey": {"description": "Action: show this device's access key for a private relay."},
+  "relayAccessKeyBody": "If this relay is private, give its operator this key. They allow it with \"nightdrop-relay authorize-client\". A public relay doesn't need it.",
+  "@relayAccessKeyBody": {"description": "Explains the private-relay access key."},
+  "relayAccessKeyCopied": "Access key copied",
+  "@relayAccessKeyCopied": {"description": "Snackbar after copying the access key."},
+  "copy": "Copy",
+  "@copy": {"description": "Button: copy to clipboard."},
+  "relayLimitReached": "You can have up to {max} relays.",
+  "@relayLimitReached": {"description": "Shown when the list is full.", "placeholders": {"max": {"type": "String"}}},
+  "relayInvalidOnion": "That isn't an onion address. It should be 56 letters and digits ending in .onion.",
+  "@relayInvalidOnion": {"description": "Validation error for a relay address."},
+  "relayRemovedStillChecked": "A relay you remove is still checked for messages for 24 hours.",
+  "@relayRemovedStillChecked": {"description": "Note on the My relays screen."},
+  "relaysSaved": "Saved. Your contacts are being told.",
+  "@relaysSaved": {"description": "Snackbar after saving the relay list."},
+  "directOnlyName": "Direct only",
+  "@directOnlyName": {"description": "Name of the no-relay mode."},
+  "directOnlyListEmpty": "No relays: direct only. You receive messages only while Night Drop is online.",
+  "@directOnlyListEmpty": {"description": "Shown on My relays when the list is empty."},
+  "directOnlyConfirmTitle": "Remove your last relay?",
+  "@directOnlyConfirmTitle": {"description": "Title of the confirmation before going direct only."},
+  "directOnlyConfirmBody": "With no relay, this device never talks to a server:\n• messages reach you only while your app is online, and wait on your contacts' devices until then\n• new contacts can be added by QR code only\n• no server backup and no server storage\n• no cover traffic\n\nYou can add a relay again at any time.",
+  "@directOnlyConfirmBody": {"description": "Lists what turns off without a relay."},
+  "directOnlyConfirm": "Use direct only",
+  "@directOnlyConfirm": {"description": "Button confirming direct only."},
+  "homeDirectOnlyNote": "Direct only: you receive messages only while Night Drop is online.",
+  "@homeDirectOnlyNote": {"description": "Home-screen note while the relay list is empty."},
+  "chatPeerDirectOnly": "{name} receives messages only while their app is online. Messages wait on this device until you're both online.",
+  "@chatPeerDirectOnly": {"description": "Chat banner when the contact uses no relay.", "placeholders": {"name": {"type": "String"}}},
+  "chatPeerRelaysUnknown": "{name} hasn't shared where they receive messages yet. Messages wait on this device until they do.",
+  "@chatPeerRelaysUnknown": {"description": "Chat banner while the contact's relay set is unknown.", "placeholders": {"name": {"type": "String"}}},
+  "chatSelfDirectOnly": "You're on direct only: messages reach you only while your app is online.",
+  "@chatSelfDirectOnly": {"description": "Chat banner while we are direct only."},
+  "serverStorageNeedsRelaySelf": "Server storage needs a relay, and you're on direct only.",
+  "@serverStorageNeedsRelaySelf": {"description": "Why server storage is unavailable."},
+  "serverStorageNeedsRelayPeer": "Server storage needs a relay on both sides, and {name} doesn't use one.",
+  "@serverStorageNeedsRelayPeer": {"description": "Why server storage is unavailable.", "placeholders": {"name": {"type": "String"}}},
+  "serverBackupUnavailable": "Server backup is kept on the Night Drop relay, which isn't in your list. Save a backup file instead, or add the Night Drop relay in My relays.",
+  "@serverBackupUnavailable": {"description": "Why server backup is unavailable."},
+  "coverTrafficUnavailable": "Cover traffic hides your activity on a relay. You're on direct only, so there's no relay to cover.",
+  "@coverTrafficUnavailable": {"description": "Why cover traffic is unavailable."},
+  "shortCodesUnavailable": "Short codes need a relay. On direct only, add contacts by QR code.",
+  "@shortCodesUnavailable": {"description": "Why short codes are unavailable."},
+  "openMyRelays": "My relays",
+  "@openMyRelays": {"description": "Button opening the My relays screen."},
+  "setupRelayTitle": "How should messages reach you while you're offline?",
+  "@setupRelayTitle": {"description": "Setup page: relay choice heading."},
+  "setupRelayNightDrop": "Night Drop relay",
+  "@setupRelayNightDrop": {"description": "Setup option."},
+  "setupRecommended": "Recommended",
+  "@setupRecommended": {"description": "Badge on the recommended option."},
+  "setupRelayNightDropBody": "Encrypted messages wait up to 24 hours on our relay. It can't read them.",
+  "@setupRelayNightDropBody": {"description": "Setup option body."},
+  "setupRelayOwn": "My own relay",
+  "@setupRelayOwn": {"description": "Setup option."},
+  "setupRelayOwnBody": "A relay you or someone you trust runs.",
+  "@setupRelayOwnBody": {"description": "Setup option body."},
+  "setupRelayDirect": "Direct only",
+  "@setupRelayDirect": {"description": "Setup option."},
+  "setupRelayDirectBody": "No server at all. You receive messages only while the app is online, and you can add contacts by QR code only.",
+  "@setupRelayDirectBody": {"description": "Setup option body."},
+  "relayNotAnswering": "Not answering. Messages to you may be delayed.",
+  "@relayNotAnswering": {"description": "Subtitle of a relay that did not answer our last check."},
+  "chatPeerDirectOnlySummary": "{name} receives only while online",
+  "@chatPeerDirectOnlySummary": {"description": "One-line summary of the chat banner for a contact with no relay; tap for more.", "placeholders": {"name": {"type": "String"}}},
+  "chatPeerRelaysUnknownSummary": "Messages to {name} wait on this device",
+  "@chatPeerRelaysUnknownSummary": {"description": "One-line summary while the contact's relay set is unknown; tap for more.", "placeholders": {"name": {"type": "String"}}},
+  "chatSelfDirectOnlySummary": "You're on direct only",
+  "@chatSelfDirectOnlySummary": {"description": "One-line summary of the chat banner while we are direct only; tap for more."}
 }

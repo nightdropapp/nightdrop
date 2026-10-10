@@ -106,6 +106,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RelayHealth> dco_decode_list_relay_health(dynamic raw);
 
   @protected
+  List<RelayListEntry> dco_decode_list_relay_list_entry(dynamic raw);
+
+  @protected
   String? dco_decode_opt_String(dynamic raw);
 
   @protected
@@ -121,13 +124,22 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? dco_decode_opt_box_autoadd_u_64(dynamic raw);
 
   @protected
+  List<RelayListEntry>? dco_decode_opt_list_relay_list_entry(dynamic raw);
+
+  @protected
   PairingInvite dco_decode_pairing_invite(dynamic raw);
 
   @protected
   RejectedBridge dco_decode_rejected_bridge(dynamic raw);
 
   @protected
+  RelayFeatures dco_decode_relay_features(dynamic raw);
+
+  @protected
   RelayHealth dco_decode_relay_health(dynamic raw);
+
+  @protected
+  RelayListEntry dco_decode_relay_list_entry(dynamic raw);
 
   @protected
   ServerBackupInfo dco_decode_server_backup_info(dynamic raw);
@@ -241,6 +253,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   List<RelayHealth> sse_decode_list_relay_health(SseDeserializer deserializer);
 
   @protected
+  List<RelayListEntry> sse_decode_list_relay_list_entry(
+      SseDeserializer deserializer);
+
+  @protected
   String? sse_decode_opt_String(SseDeserializer deserializer);
 
   @protected
@@ -258,13 +274,23 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   BigInt? sse_decode_opt_box_autoadd_u_64(SseDeserializer deserializer);
 
   @protected
+  List<RelayListEntry>? sse_decode_opt_list_relay_list_entry(
+      SseDeserializer deserializer);
+
+  @protected
   PairingInvite sse_decode_pairing_invite(SseDeserializer deserializer);
 
   @protected
   RejectedBridge sse_decode_rejected_bridge(SseDeserializer deserializer);
 
   @protected
+  RelayFeatures sse_decode_relay_features(SseDeserializer deserializer);
+
+  @protected
   RelayHealth sse_decode_relay_health(SseDeserializer deserializer);
+
+  @protected
+  RelayListEntry sse_decode_relay_list_entry(SseDeserializer deserializer);
 
   @protected
   ServerBackupInfo sse_decode_server_backup_info(SseDeserializer deserializer);
@@ -388,6 +414,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       List<RelayHealth> self, SseSerializer serializer);
 
   @protected
+  void sse_encode_list_relay_list_entry(
+      List<RelayListEntry> self, SseSerializer serializer);
+
+  @protected
   void sse_encode_opt_String(String? self, SseSerializer serializer);
 
   @protected
@@ -405,6 +435,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   void sse_encode_opt_box_autoadd_u_64(BigInt? self, SseSerializer serializer);
 
   @protected
+  void sse_encode_opt_list_relay_list_entry(
+      List<RelayListEntry>? self, SseSerializer serializer);
+
+  @protected
   void sse_encode_pairing_invite(PairingInvite self, SseSerializer serializer);
 
   @protected
@@ -412,7 +446,14 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
       RejectedBridge self, SseSerializer serializer);
 
   @protected
+  void sse_encode_relay_features(RelayFeatures self, SseSerializer serializer);
+
+  @protected
   void sse_encode_relay_health(RelayHealth self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_relay_list_entry(
+      RelayListEntry self, SseSerializer serializer);
 
   @protected
   void sse_encode_server_backup_info(

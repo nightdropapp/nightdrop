@@ -1075,7 +1075,7 @@ abstract class AppLocalizations {
   /// Intro text on the setup page.
   ///
   /// In en, this message translates to:
-  /// **'These change what Night Drop does on the network. All are off unless you turn them on.'**
+  /// **'These change what Night Drop does on the network. Each option says what it costs.'**
   String get setupIntro;
 
   /// Switch label on the setup page for cover traffic (dummy mail to yourself).
@@ -1138,29 +1138,11 @@ abstract class AppLocalizations {
   /// **'My relays'**
   String get myRelays;
 
-  /// Explanation in the relay editor dialog.
-  ///
-  /// In en, this message translates to:
-  /// **'Extra relays that also hold your mailbox. Contacts fan your offline mail out to these in addition to the shared default, so a message still reaches you if one relay is down or blocked. Relays only ever see opaque, end-to-end-encrypted blobs. One address per line.'**
-  String get editRelaysBody;
-
   /// Snackbar when saving relays fails.
   ///
   /// In en, this message translates to:
   /// **'Could not save relays: {error}'**
   String couldNotSaveRelays(String error);
-
-  /// Snackbar when the extra-relay list is cleared.
-  ///
-  /// In en, this message translates to:
-  /// **'Using the default relay only'**
-  String get usingDefaultRelayOnly;
-
-  /// Snackbar confirming how many extra relays are advertised.
-  ///
-  /// In en, this message translates to:
-  /// **'Advertising {count, plural, =1{1 extra relay} other{{count} extra relays}}'**
-  String advertisingExtraRelays(int count);
 
   /// Loader while uploading a server backup.
   ///
@@ -2259,6 +2241,264 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'Senders are no longer told when you open a burn message.'**
   String get burnReceiptsOff;
+
+  /// Intro on the My relays screen.
+  ///
+  /// In en, this message translates to:
+  /// **'Where messages wait for you while you\'re offline. Your contacts are told this list automatically, end-to-end encrypted. Relays can\'t read your messages.'**
+  String get relaysIntro;
+
+  /// The Night Drop relay entry in the relay list.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop relay'**
+  String get relayNightDropName;
+
+  /// Subtitle of the Night Drop relay entry.
+  ///
+  /// In en, this message translates to:
+  /// **'Run by the Night Drop project. Encrypted messages wait up to 24 hours.'**
+  String get relayNightDropBody;
+
+  /// Subtitle of a user-added relay.
+  ///
+  /// In en, this message translates to:
+  /// **'A relay you added'**
+  String get relayOwnBody;
+
+  /// Hint in the field for adding a relay.
+  ///
+  /// In en, this message translates to:
+  /// **'Relay address (…onion)'**
+  String get relayAddHint;
+
+  /// Button: add the relay typed in the field.
+  ///
+  /// In en, this message translates to:
+  /// **'Add'**
+  String get relayAdd;
+
+  /// Button: put the Night Drop relay back in the list.
+  ///
+  /// In en, this message translates to:
+  /// **'Add the Night Drop relay'**
+  String get relayAddNightDrop;
+
+  /// Action: remove a relay from the list.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove'**
+  String get relayRemove;
+
+  /// Action: show this device's access key for a private relay.
+  ///
+  /// In en, this message translates to:
+  /// **'Access key'**
+  String get relayAccessKey;
+
+  /// Explains the private-relay access key.
+  ///
+  /// In en, this message translates to:
+  /// **'If this relay is private, give its operator this key. They allow it with \"nightdrop-relay authorize-client\". A public relay doesn\'t need it.'**
+  String get relayAccessKeyBody;
+
+  /// Snackbar after copying the access key.
+  ///
+  /// In en, this message translates to:
+  /// **'Access key copied'**
+  String get relayAccessKeyCopied;
+
+  /// Button: copy to clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Copy'**
+  String get copy;
+
+  /// Shown when the list is full.
+  ///
+  /// In en, this message translates to:
+  /// **'You can have up to {max} relays.'**
+  String relayLimitReached(String max);
+
+  /// Validation error for a relay address.
+  ///
+  /// In en, this message translates to:
+  /// **'That isn\'t an onion address. It should be 56 letters and digits ending in .onion.'**
+  String get relayInvalidOnion;
+
+  /// Note on the My relays screen.
+  ///
+  /// In en, this message translates to:
+  /// **'A relay you remove is still checked for messages for 24 hours.'**
+  String get relayRemovedStillChecked;
+
+  /// Snackbar after saving the relay list.
+  ///
+  /// In en, this message translates to:
+  /// **'Saved. Your contacts are being told.'**
+  String get relaysSaved;
+
+  /// Name of the no-relay mode.
+  ///
+  /// In en, this message translates to:
+  /// **'Direct only'**
+  String get directOnlyName;
+
+  /// Shown on My relays when the list is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'No relays: direct only. You receive messages only while Night Drop is online.'**
+  String get directOnlyListEmpty;
+
+  /// Title of the confirmation before going direct only.
+  ///
+  /// In en, this message translates to:
+  /// **'Remove your last relay?'**
+  String get directOnlyConfirmTitle;
+
+  /// Lists what turns off without a relay.
+  ///
+  /// In en, this message translates to:
+  /// **'With no relay, this device never talks to a server:\n• messages reach you only while your app is online, and wait on your contacts\' devices until then\n• new contacts can be added by QR code only\n• no server backup and no server storage\n• no cover traffic\n\nYou can add a relay again at any time.'**
+  String get directOnlyConfirmBody;
+
+  /// Button confirming direct only.
+  ///
+  /// In en, this message translates to:
+  /// **'Use direct only'**
+  String get directOnlyConfirm;
+
+  /// Home-screen note while the relay list is empty.
+  ///
+  /// In en, this message translates to:
+  /// **'Direct only: you receive messages only while Night Drop is online.'**
+  String get homeDirectOnlyNote;
+
+  /// Chat banner when the contact uses no relay.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} receives messages only while their app is online. Messages wait on this device until you\'re both online.'**
+  String chatPeerDirectOnly(String name);
+
+  /// Chat banner while the contact's relay set is unknown.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} hasn\'t shared where they receive messages yet. Messages wait on this device until they do.'**
+  String chatPeerRelaysUnknown(String name);
+
+  /// Chat banner while we are direct only.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'re on direct only: messages reach you only while your app is online.'**
+  String get chatSelfDirectOnly;
+
+  /// Why server storage is unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Server storage needs a relay, and you\'re on direct only.'**
+  String get serverStorageNeedsRelaySelf;
+
+  /// Why server storage is unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Server storage needs a relay on both sides, and {name} doesn\'t use one.'**
+  String serverStorageNeedsRelayPeer(String name);
+
+  /// Why server backup is unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Server backup is kept on the Night Drop relay, which isn\'t in your list. Save a backup file instead, or add the Night Drop relay in My relays.'**
+  String get serverBackupUnavailable;
+
+  /// Why cover traffic is unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Cover traffic hides your activity on a relay. You\'re on direct only, so there\'s no relay to cover.'**
+  String get coverTrafficUnavailable;
+
+  /// Why short codes are unavailable.
+  ///
+  /// In en, this message translates to:
+  /// **'Short codes need a relay. On direct only, add contacts by QR code.'**
+  String get shortCodesUnavailable;
+
+  /// Button opening the My relays screen.
+  ///
+  /// In en, this message translates to:
+  /// **'My relays'**
+  String get openMyRelays;
+
+  /// Setup page: relay choice heading.
+  ///
+  /// In en, this message translates to:
+  /// **'How should messages reach you while you\'re offline?'**
+  String get setupRelayTitle;
+
+  /// Setup option.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop relay'**
+  String get setupRelayNightDrop;
+
+  /// Badge on the recommended option.
+  ///
+  /// In en, this message translates to:
+  /// **'Recommended'**
+  String get setupRecommended;
+
+  /// Setup option body.
+  ///
+  /// In en, this message translates to:
+  /// **'Encrypted messages wait up to 24 hours on our relay. It can\'t read them.'**
+  String get setupRelayNightDropBody;
+
+  /// Setup option.
+  ///
+  /// In en, this message translates to:
+  /// **'My own relay'**
+  String get setupRelayOwn;
+
+  /// Setup option body.
+  ///
+  /// In en, this message translates to:
+  /// **'A relay you or someone you trust runs.'**
+  String get setupRelayOwnBody;
+
+  /// Setup option.
+  ///
+  /// In en, this message translates to:
+  /// **'Direct only'**
+  String get setupRelayDirect;
+
+  /// Setup option body.
+  ///
+  /// In en, this message translates to:
+  /// **'No server at all. You receive messages only while the app is online, and you can add contacts by QR code only.'**
+  String get setupRelayDirectBody;
+
+  /// Subtitle of a relay that did not answer our last check.
+  ///
+  /// In en, this message translates to:
+  /// **'Not answering. Messages to you may be delayed.'**
+  String get relayNotAnswering;
+
+  /// One-line summary of the chat banner for a contact with no relay; tap for more.
+  ///
+  /// In en, this message translates to:
+  /// **'{name} receives only while online'**
+  String chatPeerDirectOnlySummary(String name);
+
+  /// One-line summary while the contact's relay set is unknown; tap for more.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages to {name} wait on this device'**
+  String chatPeerRelaysUnknownSummary(String name);
+
+  /// One-line summary of the chat banner while we are direct only; tap for more.
+  ///
+  /// In en, this message translates to:
+  /// **'You\'re on direct only'**
+  String get chatSelfDirectOnlySummary;
 }
 
 class _AppLocalizationsDelegate

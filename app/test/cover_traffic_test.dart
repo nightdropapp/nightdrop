@@ -69,9 +69,10 @@ void main() {
     expect(find.textContaining('does not stop it'), findsOneWidget);
     expect(core.identity, isNull, reason: 'nothing is created until the user continues');
 
+    await tester.scrollUntilVisible(find.byKey(const Key('setup-cover')), 200);
     await tester.tap(find.byKey(const Key('setup-cover')));
     await tester.pump();
-    await tester.ensureVisible(find.byKey(const Key('setup-create')));
+    await tester.scrollUntilVisible(find.byKey(const Key('setup-create')), 200);
     await tester.tap(find.byKey(const Key('setup-create')));
     await tester.pumpAndSettle();
 
@@ -85,7 +86,7 @@ void main() {
     await tester.pumpWidget(NightdropApp(core: core));
     await tester.tap(find.text('Create my identity'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.byKey(const Key('setup-create')));
+    await tester.scrollUntilVisible(find.byKey(const Key('setup-create')), 200);
     await tester.tap(find.byKey(const Key('setup-create')));
     await tester.pumpAndSettle();
 

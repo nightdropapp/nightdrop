@@ -745,6 +745,8 @@ fn chat_from_persisted(
             local_name: String::new(),
             identity_tag: String::new(),
             peer_on_old_version: false,
+            peer_relay_state: String::new(), // filled in `contacts()`
+            server_storage_available: false,
         },
         peer_address: chat.peer_address.clone(),
         session,

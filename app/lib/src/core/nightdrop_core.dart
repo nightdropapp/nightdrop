@@ -185,8 +185,10 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Mark a chat as read (clears its unread badge). Called when the chat is opened/viewed.
   void markRead(String contactId);
 
-  /// Generate a fresh anonymous identity (onboarding).
-  Future<void> createIdentity();
+  /// Generate a fresh anonymous identity (onboarding). [relays] is the relay list chosen on the
+  /// setup page (`docs/design/optional-relay.md` §7), in place before the identity first touches
+  /// the network; `null` = the Night Drop relay.
+  Future<void> createIdentity({List<RelayEntry>? relays});
 
   /// Create a pairing invite: QR pre-auth bundle + short code with PAKE secret words.
   Future<PairingInvite> createInvite();
@@ -234,13 +236,16 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Set the contact's verified flag after comparing the safety number by hand.
   Future<void> setVerified(String contactId, bool verified);
 
-  /// Our advertised **extra** relay addresses (#17) — the ones peers fan our offline mail out
-  /// to, in addition to the shared primary. Does not include the implicit primary relay.
-  Future<List<String>> myRelays();
+  /// Our relay list, in order (`docs/design/optional-relay.md` §2): where we receive offline
+  /// mail. The Night Drop relay is an ordinary entry. Empty = direct only.
+  Future<List<RelayEntry>> relayList();
 
-  /// Replace our advertised extra relay set (#17) and announce it to contacts so their offline
-  /// mail is redundantly delivered. Blank/duplicate entries are dropped by the core.
-  Future<void> setMyRelays(List<String> relays);
+  /// Replace our relay list and tell contacts (E2E). At most [RelayFeatures.maxRelays] entries;
+  /// blank and repeated onions are dropped. A removed relay is still checked for 24 h.
+  Future<void> setRelayList(List<RelayEntry> relays);
+
+  /// What our relay list allows: short codes, server backup, cover traffic (§6).
+  Future<RelayFeatures> relayFeatures();
 
   /// Reachability of each of our advertised extra relays (#17) as of the last poll. A relay we
   /// self-host that stops answering reports `reachable == false`, so the UI can warn the user and

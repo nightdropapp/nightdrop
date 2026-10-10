@@ -44,6 +44,7 @@ class _InviteTab extends StatefulWidget {
 
 class _InviteTabState extends State<_InviteTab> {
   PairingInvite? _invite;
+  RelayFeatures _features = const RelayFeatures();
   bool _requested = false;
 
   @override
@@ -51,7 +52,11 @@ class _InviteTabState extends State<_InviteTab> {
     super.didChangeDependencies();
     if (_requested) return;
     _requested = true;
-    NightdropScope.of(context).createInvite().then((inv) {
+    final core = NightdropScope.of(context);
+    core.relayFeatures().then((f) {
+      if (mounted) setState(() => _features = f);
+    });
+    core.createInvite().then((inv) {
       if (mounted) setState(() => _invite = inv);
     });
   }
@@ -132,6 +137,16 @@ class _InviteTabState extends State<_InviteTab> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
+          // No code because there is no relay for it to meet on (`optional-relay.md` §5): say so,
+          // rather than leaving a missing feature to look like a broken one.
+          if (invite.shortCode.isEmpty && !_features.shortCodes) ...[
+            const SizedBox(height: 24),
+            Text(
+              l10n.shortCodesUnavailable,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
         ],
       ),
     );
@@ -149,6 +164,18 @@ class _JoinTabState extends State<_JoinTab> {
   final _controller = TextEditingController();
   bool _busy = false;
   String? _error;
+  RelayFeatures _features = const RelayFeatures();
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      NightdropScope.of(context).relayFeatures().then((f) {
+        if (mounted) setState(() => _features = f);
+      });
+    });
+  }
 
   @override
   void dispose() {
@@ -224,6 +251,11 @@ class _JoinTabState extends State<_JoinTab> {
                     hintText: '4-cedar-lantern-river  or  nightdrop://pair?…',
                     border: const OutlineInputBorder(),
                     errorText: _error,
+                    errorMaxLines: 4,
+                    // Invite links and QR codes still work on direct only; codes do not (§5).
+                    helperText:
+                        _features.shortCodes ? null : l10n.shortCodesUnavailable,
+                    helperMaxLines: 3,
                   ),
                 ),
                 const SizedBox(height: 16),

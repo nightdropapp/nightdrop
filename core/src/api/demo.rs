@@ -61,6 +61,8 @@ impl Demo {
         let bundle = peer.publish_bundle();
         let contact_id = me.connect_with_bundle(&peer_address, &bundle)?;
         peer.pump()?;
+        // Its first reply, as a real inviter's: its relay set (`optional-relay.md` §3).
+        me.pump()?;
         self.peers.insert(contact_id.clone(), peer);
         Ok(contact_id)
     }

@@ -473,6 +473,7 @@ class RustNightdropCore extends NightdropCore {
       relayAddr: _relayAddr,
       persistPath: statePath,
       persistKey: key,
+      initialRelays: null, // an existing identity keeps its own list
     );
     _tor = true;
     _events = rust.subscribe().listen(_onEvent);
@@ -1018,6 +1019,7 @@ class RustNightdropCore extends NightdropCore {
               relayAddr: _relayAddr,
               persistPath: statePath,
               persistKey: key,
+              initialRelays: null, // an existing identity keeps its own list
             );
             _tor = true;
             _events = rust.subscribe().listen(_onEvent);
@@ -1159,7 +1161,7 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
-  Future<void> createIdentity() async {
+  Future<void> createIdentity({List<RelayEntry>? relays}) async {
     // Reachable from the load-error screen ("set up new identity"), where a failed start may
     // have left a core holding the Tor state lock.
     await _closeCore();
@@ -1178,6 +1180,8 @@ class RustNightdropCore extends NightdropCore {
         relayAddr: relay,
         persistPath: statePath,
         persistKey: key,
+        // The setup page's choice, in place before the new identity's first poll.
+        initialRelays: relays == null ? null : _toRust(relays),
       );
       _tor = true;
       unawaited(_scheduleGuardHeal(statePath, key));
@@ -1186,6 +1190,10 @@ class RustNightdropCore extends NightdropCore {
       _networked = true;
     } else {
       _core = await rust.NightdropCore.newInstance();
+    }
+    // Development transports take the choice once built; only Tor has it from the first poll.
+    if (relays != null && !_tor) {
+      await _core!.setRelayList(entries: _toRust(relays));
     }
     // Subscribe to push events from Rust; refresh our view whenever state changes.
     _events = rust.subscribe().listen(_onEvent);
@@ -1288,12 +1296,38 @@ class RustNightdropCore extends NightdropCore {
       _core!.setVerified(contactId: contactId, verified: verified);
 
   @override
-  Future<List<String>> myRelays() => _core!.myRelays();
+  Future<List<RelayEntry>> relayList() async {
+    final list = await _core!.relayList();
+    return [
+      for (final e in list)
+        e.nightdrop ? const RelayEntry.nightDrop() : RelayEntry.onion(e.onion),
+    ];
+  }
 
   @override
-  Future<void> setMyRelays(List<String> relays) async {
-    await _core!.setMyRelays(relays: relays);
+  Future<void> setRelayList(List<RelayEntry> relays) async {
+    await _core!.setRelayList(entries: _toRust(relays));
     await _refresh();
+  }
+
+  static List<rust.RelayListEntry> _toRust(List<RelayEntry> relays) => [
+        for (final r in relays)
+          rust.RelayListEntry(nightdrop: r.nightDrop, onion: r.onion),
+      ];
+
+  @override
+  Future<RelayFeatures> relayFeatures() async {
+    // Asked from screens that may open before `start()` has built the core: assume the default
+    // (Night Drop, everything available) until it exists.
+    if (_core == null) return const RelayFeatures();
+    final f = await _core!.relayFeatures();
+    return RelayFeatures(
+      directOnly: f.directOnly,
+      shortCodes: f.shortCodes,
+      serverBackup: f.serverBackup,
+      coverTraffic: f.coverTraffic,
+      maxRelays: f.maxRelays,
+    );
   }
 
   @override
@@ -1894,6 +1928,8 @@ class RustNightdropCore extends NightdropCore {
         peerCapturesSilent: c.peerCapturesSilent,
         peerSupportsBurn: c.peerSupportsBurn,
         peerRelays: c.peerRelays,
+        peerRelayState: c.peerRelayState,
+        serverStorageAvailable: c.serverStorageAvailable,
         remoteStorageHealthy: c.remoteStorageHealthy,
         lastSeenSecs: c.lastSeenSecs.toInt(),
         peerOnOldVersion: c.peerOnOldVersion,

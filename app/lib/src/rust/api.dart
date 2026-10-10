@@ -6,9 +6,9 @@
 import 'frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `apply_outbox_round`, `apply_tick`, `check_bridge_line`, `decode_onion_identity`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `encode_relay_set`, `flush_pending`, `invite_param`, `lock`, `maybe_flush`, `media_store_dir`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite_extras`, `parse_invite_relay_set`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `save_soon`, `save`, `send_for_caller`, `shutdown_core`, `spawn_poller`, `start`, `system_tagged`, `system`, `text`, `try_close_transport`
+// These functions are ignored because they are not marked as `pub`: `apply_outbox_round`, `apply_tick`, `check_bridge_line`, `decode_onion_identity`, `decode_store_key`, `drive`, `drop_superseded_keystore`, `emit_chats`, `emit_progress`, `emit`, `encode_relay_set`, `flush_pending`, `fresh_identity`, `invite_param`, `lock`, `maybe_flush`, `media_store_dir`, `media`, `new`, `next_cover_delay`, `now_secs_ceil`, `now_secs`, `onion_key_for_start`, `parse_invite_extras`, `parse_invite_relay_set`, `parse_invite`, `random_secret_words`, `random_short_code`, `random_slot`, `read_onion_key`, `relay_entries`, `save_soon`, `save`, `send_for_caller`, `shutdown_core`, `spawn_poller`, `start`, `system_tagged`, `system`, `text`, `try_close_transport`
 // These types are ignored because they are neither used by any `pub` functions nor (for structs and enums) marked `#[frb(unignore)]`: `Inner`, `Persist`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `assert_fields_are_eq`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `clone`, `drop`, `drop`, `eq`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`
 // These functions are ignored (category: IgnoreBecauseExplicitAttribute): `address`, `new_with_transport`, `poll_once`
 
 /// Subscribe to push events from the core (flutter_rust_bridge stream). Call once at
@@ -380,10 +380,6 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Messages for a contact, oldest first.
   Future<List<ChatMessage>> messages({required String contactId});
 
-  /// Our advertised **extra** relay addresses (#17) — relays that also host our mailbox, on top
-  /// of the built-in default. Empty by default.
-  Future<List<String>> myRelays();
-
   // HINT: Make it `#[frb(sync)]` to let it become the default constructor of Dart class.
   /// Demo core: a fresh identity on an in-memory network with auto-replying peers and
   /// **no** background poller (so messaging is synchronous and flutter_rust_bridge
@@ -441,16 +437,21 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// (same identity + chats survive a restart); otherwise a fresh identity is created and
   /// saved. The key is held by the OS secure store on the Dart side. The Tor onion address
   /// itself persists separately via arti's `state_dir`.
+  ///
+  /// `initial_relays` is the relay list chosen on the setup page (`optional-relay.md` §7), used
+  /// only when this creates a **new** identity; a restored one keeps its own.
   static Future<NightdropCore> newTor(
           {String? stateDir,
           String? relayAddr,
           String? persistPath,
-          String? persistKey}) =>
+          String? persistKey,
+          List<RelayListEntry>? initialRelays}) =>
       RustLib.instance.api.crateApiNightdropCoreNewTor(
           stateDir: stateDir,
           relayAddr: relayAddr,
           persistPath: persistPath,
-          persistKey: persistKey);
+          persistKey: persistKey,
+          initialRelays: initialRelays);
 
   /// Whether this device's address is published/reachable yet. On Tor it is `false` for the
   /// ~1–3 min after launch while the onion descriptor (re)publishes — the UI shows a "still
@@ -462,11 +463,18 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// core, which has no demo harness — real chats are opened by pairing (QR / short code).
   Future<Contact> openChat({String? code});
 
+  /// What our relay list allows (`docs/design/optional-relay.md` §6).
+  Future<RelayFeatures> relayFeatures();
+
   /// Health of each of our advertised extra relays (#17), as of the last relay poll: `(address,
   /// reachable)`. A relay that stops answering our mailbox drain (e.g. a self-hosted one that
   /// went down) reports `reachable = false`, so the UI can warn the user and suggest adding a
   /// backup relay. A not-yet-polled relay reports `true` (optimistic).
   Future<List<RelayHealth>> relayHealth();
+
+  /// Our relay list, in order (`docs/design/optional-relay.md` §2): where we receive offline
+  /// mail. Empty = direct only.
+  Future<List<RelayListEntry>> relayList();
 
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
   ///
@@ -631,10 +639,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Set the local user's display name within one chat (§4).
   Future<void> setMyName({required String contactId, required String name});
 
-  /// Replace our advertised extra relay set (#17): peers will fan out our offline mail to these
-  /// too, and we poll them alongside the default. Announces the change to existing contacts
-  /// (E2E) and persists. Addresses are validated as non-empty; reachability is the user's call.
-  Future<void> setMyRelays({required List<String> relays});
+  /// Replace our relay list. At most [`RelayFeatures::max_relays`] entries; blank and repeated
+  /// onions are dropped. Contacts are told the new set (E2E), a removed relay is still drained
+  /// for 24 h, and an empty list makes this device direct only. Persists at once; the frames go
+  /// out through the outbox, so this never waits on Tor.
+  Future<void> setRelayList({required List<RelayListEntry> entries});
 
   /// Toggle opt-in 24h server storage for a chat (§6).
   Future<void> setRemoteStorage(
@@ -939,9 +948,18 @@ class Contact {
   /// answer from silence is precisely the false guarantee this exists to remove.
   final bool? peerCapturesSilent;
 
-  /// The peer's advertised **extra** relay addresses (#17): where their mailbox also lives, so
-  /// our offline mail to them is fanned out redundantly. The shared primary relay is implicit.
+  /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
+  /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
   final List<String> peerRelays;
+
+  /// Where the peer receives offline mail (`docs/design/optional-relay.md` §3): `"relays"`,
+  /// `"direct"` (no relay: they receive only while their app is online, and our messages wait on
+  /// this device until then), or `"unknown"` (not told yet: messages wait too).
+  final String peerRelayState;
+
+  /// Whether opt-in server storage can be turned on for this chat: it needs relays on both
+  /// sides (§6). The UI hides the switch otherwise, and says why.
+  final bool serverStorageAvailable;
 
   /// Whether the peer's build understands burn messages. `None` = they have not said (an older
   /// build, or a chat predating the signal), and the UI must treat that as **unsupported**:
@@ -998,6 +1016,8 @@ class Contact {
     required this.peerVerified,
     this.peerCapturesSilent,
     required this.peerRelays,
+    required this.peerRelayState,
+    required this.serverStorageAvailable,
     this.peerSupportsBurn,
     this.peerAppVersion,
     required this.remoteStorageHealthy,
@@ -1020,6 +1040,8 @@ class Contact {
       peerVerified.hashCode ^
       peerCapturesSilent.hashCode ^
       peerRelays.hashCode ^
+      peerRelayState.hashCode ^
+      serverStorageAvailable.hashCode ^
       peerSupportsBurn.hashCode ^
       peerAppVersion.hashCode ^
       remoteStorageHealthy.hashCode ^
@@ -1044,6 +1066,8 @@ class Contact {
           peerVerified == other.peerVerified &&
           peerCapturesSilent == other.peerCapturesSilent &&
           peerRelays == other.peerRelays &&
+          peerRelayState == other.peerRelayState &&
+          serverStorageAvailable == other.serverStorageAvailable &&
           peerSupportsBurn == other.peerSupportsBurn &&
           peerAppVersion == other.peerAppVersion &&
           remoteStorageHealthy == other.remoteStorageHealthy &&
@@ -1146,7 +1170,53 @@ class RejectedBridge {
           reason == other.reason;
 }
 
-/// Reachability of one of our advertised extra relays (#17), for the UI's relay-status surface.
+/// What this device's relay list allows (`docs/design/optional-relay.md` §6), for the UI to show
+/// or hide each feature with its reason.
+class RelayFeatures {
+  /// No relay at all: messages wait on the sender until both apps are online.
+  final bool directOnly;
+
+  /// Short-code pairing (needs a relay for the rendezvous; QR always works).
+  final bool shortCodes;
+
+  /// Server backup (lives on the Night Drop relay, where a new device looks for it).
+  final bool serverBackup;
+
+  /// Cover traffic (covers a relay mailbox; there is none without a relay).
+  final bool coverTraffic;
+
+  /// How many entries the list may hold.
+  final int maxRelays;
+
+  const RelayFeatures({
+    required this.directOnly,
+    required this.shortCodes,
+    required this.serverBackup,
+    required this.coverTraffic,
+    required this.maxRelays,
+  });
+
+  @override
+  int get hashCode =>
+      directOnly.hashCode ^
+      shortCodes.hashCode ^
+      serverBackup.hashCode ^
+      coverTraffic.hashCode ^
+      maxRelays.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RelayFeatures &&
+          runtimeType == other.runtimeType &&
+          directOnly == other.directOnly &&
+          shortCodes == other.shortCodes &&
+          serverBackup == other.serverBackup &&
+          coverTraffic == other.coverTraffic &&
+          maxRelays == other.maxRelays;
+}
+
+/// Reachability of one of our relays (#17), for the UI's relay-status surface.
 class RelayHealth {
   /// The relay address we advertise (as entered by the user; `.onion` or host:port).
   final String address;
@@ -1169,6 +1239,31 @@ class RelayHealth {
           runtimeType == other.runtimeType &&
           address == other.address &&
           reachable == other.reachable;
+}
+
+/// One entry of our relay list (`docs/design/optional-relay.md` §2).
+class RelayListEntry {
+  /// The Night Drop relay (the baked-in one plus the signed directory's); `onion` is then empty.
+  final bool nightdrop;
+
+  /// An onion address the user added, when `nightdrop` is false.
+  final String onion;
+
+  const RelayListEntry({
+    required this.nightdrop,
+    required this.onion,
+  });
+
+  @override
+  int get hashCode => nightdrop.hashCode ^ onion.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RelayListEntry &&
+          runtimeType == other.runtimeType &&
+          nightdrop == other.nightdrop &&
+          onion == other.onion;
 }
 
 /// The result of enabling an opt-in server backup (§7c). `password` is the randomly generated
