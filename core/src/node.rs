@@ -2713,9 +2713,20 @@ impl Node {
     /// A frame in an older wire version arrived from `contact_id` (`wire::legacy_sender`): it runs
     /// 0.1.x. Unauthenticated, so it can only ever *hold* our messages to that contact, which any
     /// frame from them that we can read undoes.
+    ///
+    /// Not from a contact whose last version, read from a frame of theirs, is 0.2 or later: a 0.2
+    /// app sends the older format only for its upgrade notice ([`Node::send_upgrade_notices`]),
+    /// which it sends us when it still holds *our* 0.1 version. Arriving after their version
+    /// announcement, that notice would mark them as 0.1 again, and neither side announces twice in
+    /// a run, so both would hold everything for the other until a restart.
     pub(crate) fn note_legacy_frame(&mut self, contact_id: &str) {
         if let Some(chat) = self.chats.get_mut(contact_id) {
-            if !chat.peer_wire_old {
+            let announced_new = chat
+                .contact
+                .peer_app_version
+                .as_deref()
+                .is_some_and(|v| !version_outdated(v));
+            if !chat.peer_wire_old && !announced_new {
                 crate::diag!("version: a contact sent an older-format frame — they are on 0.1");
                 chat.peer_wire_old = true;
                 self.dirty = true;

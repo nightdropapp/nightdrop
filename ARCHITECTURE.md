@@ -324,7 +324,12 @@ on a re-pair (new session) exactly like `verified`.
   and they need to; our chat notes it was sent (`send_upgrade_notices`; remove after 0.4,
   `SEND_UPGRADE_NOTICE`). Our `Version` always goes out, even to a contact thought outdated, and
   any readable frame forgets a stale 0.1 version: otherwise two contacts who both updated while
-  holding each other's old version would hold everything for each other forever. Tested on Linux + Windows,
+  holding each other's old version would hold everything for each other forever. For the same
+  reason an older-format frame does not mark a contact whose last readable `Version` is 0.2 or
+  later: a 0.2 app sends that format only for its upgrade notice, which it sends us while still
+  holding *our* old version, and arriving after its `Version` it re-marked it as 0.1 (seen on the
+  VMs, 2026-10-10; `an_upgrade_notice_from_a_contact_who_announced_0_2_does_not_mark_them_old_again`).
+  A contact who goes back to 0.1 after announcing 0.2 is therefore not noticed. Tested on Linux + Windows,
   2026-10-10 (`node/tests_outdated.rs`; the upgrade run in `TODO.txt`).
 - **Sending never blocks on the network.** `send` advances the ratchet and stores the message
   under the core lock (the ordered, security-critical step stays synchronous), but on a

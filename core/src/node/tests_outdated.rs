@@ -246,3 +246,35 @@ fn two_contacts_who_both_updated_find_out_from_each_other() {
     bob.pump().unwrap();
     assert_eq!(received(&bob, &alice_id), vec!["after both updated"]);
 }
+
+/// Seen on the VMs: Bob updated while Alice (already on 0.2) still held his 0.1 version, and he
+/// still held hers. His version announcement told her he updated; the upgrade notice he then sent
+/// her — old-format on purpose, since he thought *she* was on 0.1 — arrived after it and marked
+/// him as 0.1 again. Neither announces twice in a run, so both held everything until a restart.
+#[test]
+fn an_upgrade_notice_from_a_contact_who_announced_0_2_does_not_mark_them_old_again() {
+    let net = MemoryNetwork::new();
+    let (mut alice, mut bob, alice_id, bob_id) = paired(&net, "0.2.0", "0.2.0");
+    as_if_on_0_1(&mut alice, &bob_id);
+    as_if_on_0_1(&mut bob, &alice_id);
+    alice.chats.get_mut(&bob_id).unwrap().told_version = Some("0.1.29".into());
+    bob.chats.get_mut(&alice_id).unwrap().told_version = Some("0.1.29".into());
+    alice.send(&bob_id, "held while you were old").unwrap();
+
+    // Bob's first 0.2 run: his version, then the notice, in that order.
+    bob.version_announced.clear();
+    bob.announce_version();
+    bob.send_upgrade_notices();
+    alice.pump().unwrap();
+    assert!(
+        !alice.peer_outdated(&bob_id),
+        "his own announcement said 0.2; the notice after it is not news"
+    );
+    alice.flush_held();
+    bob.pump().unwrap();
+    assert_eq!(received(&bob, &alice_id), vec!["held while you were old"]);
+    assert!(
+        !bob.peer_outdated(&alice_id),
+        "and what she sent tells him she updated"
+    );
+}

@@ -321,13 +321,13 @@ impl Node {
                 else {
                     return Ok(None);
                 };
+                if !version_outdated(version) {
+                    chat.peer_wire_old = false; // updated: what we hold for them can go now
+                }
                 if chat.contact.peer_app_version.as_deref() == Some(version) {
                     return Ok(None);
                 }
                 chat.contact.peer_app_version = Some(version.to_string());
-                if !version_outdated(version) {
-                    chat.peer_wire_old = false; // updated: what we hold for them can go now
-                }
                 crate::diag!("version: a contact runs {version}");
                 Ok(Some((from, String::new())))
             }
