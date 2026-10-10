@@ -781,6 +781,8 @@ impl Inner {
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
             self.me.announce_mailbox();
+            // Contacts still on 0.1.x: tell each, once and in its own format, that we updated.
+            self.me.send_upgrade_notices();
             // Our relay set to any chat that has not confirmed the current one (`optional-relay.md`
             // §3 rule 4): the retry for a change that did not land, and the first 0.2 launch.
             self.me.announce_relay_set();

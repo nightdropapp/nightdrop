@@ -1932,14 +1932,11 @@ fn the_app_version_is_announced_at_pairing_and_stored_on_the_contact() {
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
     // The pubspec form; the build number is not announced.
-    alice.set_app_version("0.1.27+412");
+    alice.set_app_version("0.2.7+412");
     let bundle = bob.publish_bundle();
     alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
-    assert_eq!(
-        bob.contacts()[0].peer_app_version.as_deref(),
-        Some("0.1.27")
-    );
+    assert_eq!(bob.contacts()[0].peer_app_version.as_deref(), Some("0.2.7"));
     // Bob never set a version, so he announces nothing and Alice knows nothing: no guessing.
     alice.pump().unwrap();
     assert_eq!(alice.contacts()[0].peer_app_version, None);
@@ -1948,7 +1945,7 @@ fn the_app_version_is_announced_at_pairing_and_stored_on_the_contact() {
     assert!(bob
         .messages(&bob_side)
         .iter()
-        .all(|m| !m.text.contains("0.1.27")));
+        .all(|m| !m.text.contains("0.2.7")));
 }
 
 #[test]
@@ -1959,8 +1956,8 @@ fn a_version_announce_is_retried_until_it_lands_and_resent_on_a_new_version() {
     let bundle = bob.publish_bundle();
     alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
-    // A chat from before 0.1.27: nothing announced at pairing. The version arrives with the update.
-    alice.set_app_version("0.1.27");
+    // A chat from before 0.2.7: nothing announced at pairing. The version arrives with the update.
+    alice.set_app_version("0.2.7");
 
     net.disconnect("bob");
     alice.announce_version();
@@ -1971,10 +1968,7 @@ fn a_version_announce_is_retried_until_it_lands_and_resent_on_a_new_version() {
     alice.let_backoff_elapse(); // no relay: the retry waits out its backoff
     alice.announce_version();
     bob.pump().unwrap();
-    assert_eq!(
-        bob.contacts()[0].peer_app_version.as_deref(),
-        Some("0.1.27")
-    );
+    assert_eq!(bob.contacts()[0].peer_app_version.as_deref(), Some("0.2.7"));
 
     // Delivered: not re-sent every tick.
     alice.announce_version();
@@ -1984,25 +1978,22 @@ fn a_version_announce_is_retried_until_it_lands_and_resent_on_a_new_version() {
     );
 
     // An update re-announces.
-    alice.set_app_version("0.1.28+422");
+    alice.set_app_version("0.2.8+422");
     alice.announce_version();
     bob.pump().unwrap();
-    assert_eq!(
-        bob.contacts()[0].peer_app_version.as_deref(),
-        Some("0.1.28")
-    );
+    assert_eq!(bob.contacts()[0].peer_app_version.as_deref(), Some("0.2.8"));
 }
 
 #[test]
 fn a_malformed_or_forged_version_changes_nothing() {
-    assert!(is_plausible_version("0.1.27"));
+    assert!(is_plausible_version("0.2.7"));
     assert!(is_plausible_version("10.20.300"));
     for bad in [
         "",
         "0.1",
-        "0.1.27.1",
+        "0.2.7.1",
         "0.1.x",
-        "0.1.27 ",
+        "0.2.7 ",
         "<b>0</b>.1.2",
         "00000.1.2",
         "1..2",
@@ -2013,23 +2004,17 @@ fn a_malformed_or_forged_version_changes_nothing() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
-    alice.set_app_version("0.1.27");
+    alice.set_app_version("0.2.7");
     let bundle = bob.publish_bundle();
     alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
-    assert_eq!(
-        bob.contacts()[0].peer_app_version.as_deref(),
-        Some("0.1.27")
-    );
+    assert_eq!(bob.contacts()[0].peer_app_version.as_deref(), Some("0.2.7"));
 
     // A garbage version can't be set locally...
     alice.set_app_version("not a version");
     alice.announce_version();
     bob.pump().unwrap();
-    assert_eq!(
-        bob.contacts()[0].peer_app_version.as_deref(),
-        Some("0.1.27")
-    );
+    assert_eq!(bob.contacts()[0].peer_app_version.as_deref(), Some("0.2.7"));
 
     // ...and a peer that sends one anyway (a modified client) is ignored, as is another frame's
     // marker spliced into a Version frame.
@@ -2046,10 +2031,7 @@ fn a_malformed_or_forged_version_changes_nothing() {
             .unwrap();
         alice.deliver(&addr, &bob_id, &frame).unwrap();
         bob.pump().unwrap();
-        assert_eq!(
-            bob.contacts()[0].peer_app_version.as_deref(),
-            Some("0.1.27")
-        );
+        assert_eq!(bob.contacts()[0].peer_app_version.as_deref(), Some("0.2.7"));
     }
 }
 
@@ -2060,7 +2042,7 @@ fn the_peer_version_survives_a_restart() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
-    alice.set_app_version("0.1.27");
+    alice.set_app_version("0.2.7");
     let bundle = bob.publish_bundle();
     alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
@@ -2069,7 +2051,7 @@ fn the_peer_version_survives_a_restart() {
     let bob2 = Node::restore(&state, Box::new(net.endpoint("bob")), &key).unwrap();
     assert_eq!(
         bob2.contacts()[0].peer_app_version.as_deref(),
-        Some("0.1.27")
+        Some("0.2.7")
     );
 }
 

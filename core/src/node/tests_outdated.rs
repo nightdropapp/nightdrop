@@ -56,7 +56,17 @@ fn which_versions_are_too_old() {
 #[test]
 fn messages_to_a_contact_on_0_1_wait_until_they_update() {
     let net = MemoryNetwork::new();
-    let (mut alice, mut bob, alice_id, bob_id) = paired(&net, "0.2.0", "0.1.29");
+    let (mut alice, mut bob, alice_id, bob_id) = paired(&net, "0.2.0", "0.2.0");
+    // What Alice holds for a contact on 0.1: the version it announced, and nothing readable from
+    // it since (an in-memory Bob is really 0.2, and anything of his she could read would prove it).
+    alice
+        .chats
+        .get_mut(&bob_id)
+        .unwrap()
+        .contact
+        .peer_app_version = Some("0.1.29".into());
+    bob.set_app_version("0.1.29");
+    bob.chats.get_mut(&alice_id).unwrap().told_version = Some("0.1.29".into());
     assert!(alice.peer_outdated(&bob_id));
     assert!(alice.contacts()[0].peer_outdated, "the chat says so");
 
@@ -161,4 +171,78 @@ fn the_first_0_2_launch_sends_again_what_was_never_confirmed() {
     alice.flush_held();
     bob.pump().unwrap();
     assert_eq!(received(&bob, &alice_id).len(), 1);
+}
+
+/// Make `n` hold `contact` as a 0.1 contact: the version they last announced, nothing since.
+fn as_if_on_0_1(n: &mut Node, contact: &str) {
+    n.chats.get_mut(contact).unwrap().contact.peer_app_version = Some("0.1.29".into());
+}
+
+#[test]
+fn a_contact_on_0_1_is_told_once_in_a_format_its_app_can_read() {
+    let net = MemoryNetwork::new();
+    let (mut alice, mut bob, alice_id, bob_id) = paired(&net, "0.2.0", "0.2.0");
+    as_if_on_0_1(&mut alice, &bob_id);
+    alice.send_upgrade_notices();
+
+    // What reaches Bob's onion is a v2 Message: what a 0.1 app reads and shows.
+    let (_, bytes) = bob.transport.try_recv().expect("the notice went out");
+    assert_eq!(
+        wire::legacy_sender(&bytes).as_deref(),
+        Some(alice_id.as_str())
+    );
+    let mut as_v3 = bytes.clone();
+    let at = as_v3.windows(5).position(|w| w == b"\"v\":2").unwrap();
+    as_v3[at + 4] = b'3';
+    let Ok(Frame::Message { message, .. }) = wire::decode(&as_v3) else {
+        panic!("a plain Message, the one frame 0.1 and 0.2 share");
+    };
+    let text = crypto::decrypt(
+        &mut bob.chats.get_mut(&alice_id).unwrap().session,
+        &message.to_olm().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(text, UPGRADE_NOTICE_TEXT.as_bytes());
+
+    // Our own chat says what was sent on our behalf, and it is sent once, across restarts too.
+    assert!(alice
+        .messages(&bob_id)
+        .iter()
+        .any(|m| m.system && m.text.contains("asking them to update")));
+    alice.send_upgrade_notices();
+    assert!(bob.transport.try_recv().is_none(), "once");
+    let key = [5u8; 32];
+    let mut alice =
+        Node::restore(&alice.export(&key), Box::new(net.endpoint("alice2")), &key).unwrap();
+    alice.send_upgrade_notices();
+    assert!(
+        !alice.upgrade_notice_in_flight.contains(&bob_id),
+        "not again after a restart"
+    );
+}
+
+/// Both upgraded while each still held the other's 0.1 version. Each would hold everything for
+/// the other, and with it the version announcement that would tell them otherwise, forever.
+#[test]
+fn two_contacts_who_both_updated_find_out_from_each_other() {
+    let net = MemoryNetwork::new();
+    let (mut alice, mut bob, alice_id, bob_id) = paired(&net, "0.2.0", "0.2.0");
+    as_if_on_0_1(&mut alice, &bob_id);
+    as_if_on_0_1(&mut bob, &alice_id);
+    alice.chats.get_mut(&bob_id).unwrap().told_version = Some("0.1.29".into());
+    bob.chats.get_mut(&alice_id).unwrap().told_version = Some("0.1.29".into());
+    alice.send(&bob_id, "after both updated").unwrap();
+    assert_eq!(status(&alice, &bob_id, "after both updated"), "update");
+
+    // The relay tick: versions go out even to a contact thought to be on 0.1.
+    alice.version_announced.clear();
+    bob.version_announced.clear();
+    alice.announce_version();
+    bob.announce_version();
+    alice.pump().unwrap();
+    bob.pump().unwrap();
+    assert!(!alice.peer_outdated(&bob_id) && !bob.peer_outdated(&alice_id));
+    alice.flush_held();
+    bob.pump().unwrap();
+    assert_eq!(received(&bob, &alice_id), vec!["after both updated"]);
 }

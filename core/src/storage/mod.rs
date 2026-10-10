@@ -98,6 +98,9 @@ pub struct PersistedChat {
     /// cleared by any frame we can read from them.
     #[serde(default, skip_serializing_if = "is_false")]
     pub peer_wire_old: bool,
+    /// We told this contact's 0.1.x app, in its own format, that we updated and they need to.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub told_upgrade: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub peer_key_pending: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

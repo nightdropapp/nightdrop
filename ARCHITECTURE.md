@@ -319,7 +319,12 @@ on a re-pair (new session) exactly like `verified`.
   of 0.2 or later, clears the flag and the queue goes out. The chat shows "{name} needs to update
   Night Drop". And the first load of a 0.1.x state re-holds every text message of ours that no
   receipt confirmed (`resend_after_upgrade`, same ids, so the peer drops what it already has):
-  what a 0.1 app sent after the other side updated never arrived. Tested on Linux + Windows,
+  what a 0.1 app sent after the other side updated never arrived. Each outdated contact is also
+  told **once, in its own format** (a wire-v2 `Message`, `wire::encode_legacy`), that we updated
+  and they need to; our chat notes it was sent (`send_upgrade_notices`; remove after 0.4,
+  `SEND_UPGRADE_NOTICE`). Our `Version` always goes out, even to a contact thought outdated, and
+  any readable frame forgets a stale 0.1 version: otherwise two contacts who both updated while
+  holding each other's old version would hold everything for each other forever. Tested on Linux + Windows,
   2026-10-10 (`node/tests_outdated.rs`; the upgrade run in `TODO.txt`).
 - **Sending never blocks on the network.** `send` advances the ratchet and stores the message
   under the core lock (the ordered, security-critical step stays synchronous), but on a

@@ -47,6 +47,19 @@ const HELD_RETRY_CAP_BACKGROUND_SECS: u64 = 15 * 60;
 /// for its app to take and discard, until it announces a version at least this.
 const MIN_PEER_VERSION: (u32, u32) = (0, 2);
 
+/// Whether to tell a contact still on 0.1.x, once, in the format its app can read, that we have
+/// updated and they need to (the maintainer, 2026-10-10: "keep that safeguard for a few versions").
+/// **Remove after 0.4**, with [`wire::encode_legacy`]: by then a contact still on 0.1 has been
+/// unreachable for several releases.
+const SEND_UPGRADE_NOTICE: bool = true;
+
+/// The message a 0.1.x contact's app shows (`send_upgrade_notices`). Plain text in a `Message`, so
+/// it reads as from the user, which is why it says it is automatic. English: the sender cannot
+/// know the reader's language, and their old app cannot translate it.
+const UPGRADE_NOTICE_TEXT: &str = "🔄 Automatic message from Night Drop: I've updated to Night \
+     Drop 0.2, which can't exchange messages with the version you're using. Please update Night \
+     Drop to keep talking — my messages to you will arrive once you do.";
+
 /// Whether an announced app version predates [`MIN_PEER_VERSION`].
 pub(crate) fn version_outdated(version: &str) -> bool {
     let mut parts = version.split('.').map(|p| p.parse::<u32>().unwrap_or(0));
@@ -710,6 +723,9 @@ struct Chat {
     /// The peer last reached us in an older wire version (`wire::legacy_sender`): it runs 0.1.x
     /// and cannot read what we send. Cleared by any frame from them we can read. Persisted.
     peer_wire_old: bool,
+    /// We sent this contact's 0.1.x app the upgrade notice ([`Node::send_upgrade_notices`]).
+    /// Persisted, so it is sent once, not on every launch.
+    told_upgrade: bool,
     /// Bumped by every authenticated frame from the peer ([`Chat::mark_alive`]), so a caller can
     /// tell which chats it heard from in one round even within the same second, which `last_seen`
     /// cannot. In memory only.
@@ -721,8 +737,18 @@ impl Chat {
     fn mark_alive(&mut self) {
         self.last_seen = Some(crate::api::now_secs());
         self.alive_count += 1;
-        // Only a frame in our own wire version gets this far: they are no longer on 0.1.
+        // Only a frame in our own wire version gets this far: they are no longer on 0.1, whatever
+        // version we last heard. Forgetting a stale one matters: if both sides upgraded while each
+        // still held the other's 0.1 version, each would hold everything for the other forever.
         self.peer_wire_old = false;
+        if self
+            .contact
+            .peer_app_version
+            .as_deref()
+            .is_some_and(version_outdated)
+        {
+            self.contact.peer_app_version = None;
+        }
     }
 
     /// The peer runs a release older than ours can talk to (0.1.x): known from the version they
@@ -795,6 +821,7 @@ impl Chat {
             peer_key_pending: None,
             pass_pending: None,
             peer_wire_old: false,
+            told_upgrade: false,
             alive_count: 0,
         }
     }
@@ -844,6 +871,8 @@ pub struct Node {
     burns_announced: std::collections::HashSet<String>,
     /// [`ANNOUNCE_ONLINE_ON_START`]; a field so tests can run both settings.
     announce_online: bool,
+    /// Contacts whose upgrade notice is on its way ([`Node::send_upgrade_notices`]). In memory.
+    upgrade_notice_in_flight: std::collections::HashSet<String>,
     /// Contacts told our screenshot capability this run, or being told, with the value that went
     /// out (see [`Node::announce_captures`]). Like [`burns_announced`](Self::burns_announced).
     captures_announced: HashMap<String, bool>,
@@ -1240,6 +1269,7 @@ pub(crate) enum Announce {
     Address,
     RelaySet,
     Captures,
+    UpgradeNotice,
 }
 
 /// What a finished [`Outbound`] changes in the core, applied under the lock by
@@ -1465,6 +1495,7 @@ impl Node {
             burns_announced: std::collections::HashSet::new(),
             announce_online: ANNOUNCE_ONLINE_ON_START,
             captures_announced: HashMap::new(),
+            upgrade_notice_in_flight: std::collections::HashSet::new(),
             app_version: None,
             version_announced: HashMap::new(),
             mailbox_announced: std::collections::HashSet::new(),
@@ -1875,7 +1906,9 @@ impl Node {
                     && !c.closed
                     && !self.version_announced.contains_key(id.as_str())
                     && (self.announce_online || c.told_version != self.app_version)
-                    && self.may_retry(id, now)
+                    // Even to a contact we think is on 0.1: it is how one that has updated learns
+                    // that we have too (see `deliver_with`).
+                    && self.retry_due_even_if_outdated(id, now)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -2130,8 +2163,11 @@ impl Node {
     ) -> Result<()> {
         // An outdated contact's app (0.1.x) would take the frame and discard it, so it waits
         // instead: a one-off frame in the held queue, in order with their messages; a standing
-        // announcement as not sent, which is retried once they have updated.
-        if self.peer_outdated(recipient_ik) {
+        // announcement as not sent, which is retried once they have updated. Except our
+        // **version**: it is how a contact who has in fact updated learns that we have too, so it
+        // always goes out (an app that really is on 0.1 discards it, harmlessly).
+        let version = matches!(done, OutboundDone::Announced(Announce::Version, _));
+        if !version && self.peer_outdated(recipient_ik) {
             match done {
                 OutboundDone::Announced(kind, id) => self.apply_announced(kind, &id, false),
                 OutboundDone::Nothing | OutboundDone::Caller(_) => {
@@ -2411,7 +2447,19 @@ impl Node {
                 match kind {
                     Announce::Burns => chat.told_burns = true,
                     Announce::Captures if captures.is_some() => chat.told_captures = captures,
-                    Announce::Version if version.is_some() => chat.told_version = version,
+                    // Not while they are outdated: their old app discarded it, so they are told
+                    // again once they update.
+                    Announce::Version if version.is_some() && !chat.outdated() => {
+                        chat.told_version = version
+                    }
+                    Announce::UpgradeNotice => {
+                        chat.told_upgrade = true;
+                        chat.history.push(ChatMessage::system(
+                            "🔄 Their app is too old to read your messages, so Night Drop sent \
+                             them a message saying you've updated and asking them to update too."
+                                .to_string(),
+                        ));
+                    }
                     Announce::Address if address.is_some() => chat.told_address = address,
                     _ => {}
                 }
@@ -2421,6 +2469,7 @@ impl Node {
         }
         match kind {
             Announce::RelaySet => false,
+            Announce::UpgradeNotice => self.upgrade_notice_in_flight.remove(contact_id),
             Announce::Burns => self.burns_announced.remove(contact_id),
             Announce::Version => self.version_announced.remove(contact_id).is_some(),
             Announce::Mailbox => self.mailbox_announced.remove(contact_id),
@@ -2693,6 +2742,62 @@ impl Node {
                 .held_backoff
                 .get(contact_id)
                 .is_none_or(|(_, next)| now >= *next)
+    }
+
+    /// [`may_retry`](Self::may_retry) without its outdated rule: for the frames that go to an
+    /// outdated contact on purpose (our version, the upgrade notice).
+    pub(crate) fn retry_due_even_if_outdated(&self, contact_id: &str, now: u64) -> bool {
+        self.has_relay_route(contact_id)
+            || self
+                .held_backoff
+                .get(contact_id)
+                .is_none_or(|(_, next)| now >= *next)
+    }
+
+    /// Tell each contact still on 0.1.x, once, that we have updated and they need to: a plain
+    /// `Message` in their own wire format (v2), which their app shows like any other
+    /// ([`UPGRADE_NOTICE_TEXT`]). It is the only way they hear it, since nothing else 0.2 sends
+    /// can be read by 0.1. Retried until it goes out; recorded per chat, with a note in our own
+    /// chat saying what was sent on our behalf ([`SEND_UPGRADE_NOTICE`]).
+    pub fn send_upgrade_notices(&mut self) {
+        if !SEND_UPGRADE_NOTICE || !self.announce_ready() {
+            return;
+        }
+        let now = crate::api::now_secs();
+        let from = self.identity_key();
+        let ids: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(id, c)| {
+                c.authorized
+                    && !c.closed
+                    && !c.told_upgrade
+                    && c.outdated()
+                    && !self.upgrade_notice_in_flight.contains(id.as_str())
+                    && self.retry_due_even_if_outdated(id, now)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            let Some(chat) = self.chats.get_mut(&id) else {
+                continue;
+            };
+            let Ok(message) = crypto::encrypt(&mut chat.session, UPGRADE_NOTICE_TEXT.as_bytes())
+            else {
+                continue;
+            };
+            let frame = Frame::Message {
+                from: from.clone(),
+                id: random_msg_id(),
+                message: WireOlm::from_olm(&message),
+            };
+            let peer_address = chat.peer_address.clone();
+            self.upgrade_notice_in_flight.insert(id.clone());
+            let send = self.detach(&peer_address, &id, wire::encode_legacy(&frame), true);
+            let done = OutboundDone::Announced(Announce::UpgradeNotice, id.clone());
+            self.send_or_queue(send, Route::DirectThenRelay, done);
+            crate::diag!("version: told a contact on 0.1 that we updated");
+        }
     }
 
     /// A direct attempt to a contact with no relay route failed: wait longer before the next.

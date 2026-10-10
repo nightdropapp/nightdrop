@@ -395,11 +395,22 @@ pub fn legacy_sender(bytes: &[u8]) -> Option<String> {
 /// hides the true frame length from anyone watching the transport (metadata protection); the
 /// prefix lets [`decode`] recover the real bytes and ignore the trailing zeros.
 pub fn encode(frame: &Frame) -> Vec<u8> {
-    let json = serde_json::to_vec(&EnvelopeRef {
-        v: WIRE_VERSION,
-        f: frame,
-    })
-    .expect("Frame is always serializable");
+    encode_at(frame, WIRE_VERSION)
+}
+
+/// The version 0.1.x speaks (wire v2). Only [`encode_legacy`] uses it.
+pub const LEGACY_WIRE_VERSION: u8 = 2;
+
+/// Encode a frame the way 0.1.x does (wire v2), for the one message 0.2 sends a contact still on
+/// 0.1: that it updated, and they need to (`node::send_upgrade_notices`). Only `Message`, whose
+/// shape did not change between the two versions, is ever sent this way.
+pub fn encode_legacy(frame: &Frame) -> Vec<u8> {
+    encode_at(frame, LEGACY_WIRE_VERSION)
+}
+
+fn encode_at(frame: &Frame, v: u8) -> Vec<u8> {
+    let json =
+        serde_json::to_vec(&EnvelopeRef { v, f: frame }).expect("Frame is always serializable");
     let total = padded_len(4 + json.len());
     let mut out = Vec::with_capacity(total);
     out.extend_from_slice(&(json.len() as u32).to_be_bytes());
