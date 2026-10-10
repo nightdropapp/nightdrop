@@ -323,6 +323,7 @@ impl Node {
                 };
                 if !version_outdated(version) {
                     chat.peer_wire_old = false; // updated: what we hold for them can go now
+                    chat.forget_upgrade_notice();
                 }
                 if chat.contact.peer_app_version.as_deref() == Some(version) {
                     return Ok(None);

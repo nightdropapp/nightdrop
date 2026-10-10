@@ -322,7 +322,8 @@ on a re-pair (new session) exactly like `verified`.
   what a 0.1 app sent after the other side updated never arrived. Each outdated contact is also
   told **once, in its own format** (a wire-v2 `Message`, `wire::encode_legacy`), that we updated
   and they need to; our chat notes it was sent (`send_upgrade_notices`; remove after 0.4,
-  `SEND_UPGRADE_NOTICE`). Our `Version` always goes out, even to a contact thought outdated, and
+  `SEND_UPGRADE_NOTICE`), and the note goes once they are seen on 0.2 (`forget_upgrade_notice`):
+  the second of two contacts to update sends one too, not yet knowing the other updated first. Our `Version` always goes out, even to a contact thought outdated, and
   any readable frame forgets a stale 0.1 version: otherwise two contacts who both updated while
   holding each other's old version would hold everything for each other forever. For the same
   reason an older-format frame does not mark a contact whose last readable `Version` is 0.2 or

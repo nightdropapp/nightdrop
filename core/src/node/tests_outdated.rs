@@ -265,6 +265,12 @@ fn an_upgrade_notice_from_a_contact_who_announced_0_2_does_not_mark_them_old_aga
     bob.version_announced.clear();
     bob.announce_version();
     bob.send_upgrade_notices();
+    let note = |n: &Node, c: &str| {
+        n.messages(c)
+            .iter()
+            .any(|m| m.system && m.text == UPGRADE_NOTE_TEXT)
+    };
+    assert!(note(&bob, &alice_id), "he still thinks she is on 0.1");
     alice.pump().unwrap();
     assert!(
         !alice.peer_outdated(&bob_id),
@@ -277,4 +283,9 @@ fn an_upgrade_notice_from_a_contact_who_announced_0_2_does_not_mark_them_old_aga
         !bob.peer_outdated(&alice_id),
         "and what she sent tells him she updated"
     );
+    assert!(
+        !note(&bob, &alice_id),
+        "so his chat no longer says her app is too old"
+    );
+    assert!(!bob.chats[&alice_id].told_upgrade);
 }

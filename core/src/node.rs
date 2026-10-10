@@ -53,6 +53,12 @@ const MIN_PEER_VERSION: (u32, u32) = (0, 2);
 /// unreachable for several releases.
 const SEND_UPGRADE_NOTICE: bool = true;
 
+/// The note in our own chat after the upgrade notice went out ([`Node::send_upgrade_notices`]),
+/// removed once the contact is seen on 0.2 ([`Chat::forget_upgrade_notice`]).
+const UPGRADE_NOTE_TEXT: &str = "🔄 Their app is too old to read your messages, so Night Drop \
+                                 sent them a message saying you've updated and asking them to \
+                                 update too.";
+
 /// The message a 0.1.x contact's app shows (`send_upgrade_notices`). Plain text in a `Message`, so
 /// it reads as from the user, which is why it says it is automatic. English: the sender cannot
 /// know the reader's language, and their old app cannot translate it.
@@ -748,6 +754,20 @@ impl Chat {
             .is_some_and(version_outdated)
         {
             self.contact.peer_app_version = None;
+        }
+        self.forget_upgrade_notice();
+    }
+
+    /// The peer is on 0.2 or later now: the note saying we sent their old app the upgrade notice
+    /// ([`UPGRADE_NOTE_TEXT`]) no longer holds, so it goes. The second of two contacts to update
+    /// sends one too, since it cannot yet know the other updated first, and without this its chat
+    /// would keep saying "their app is too old" about someone already on 0.2. `told_upgrade` goes
+    /// with it: should they ever be found on 0.1 again, they are told again.
+    fn forget_upgrade_notice(&mut self) {
+        if self.told_upgrade {
+            self.told_upgrade = false;
+            self.history
+                .retain(|m| !(m.system && m.text == UPGRADE_NOTE_TEXT));
         }
     }
 
@@ -2452,13 +2472,12 @@ impl Node {
                     Announce::Version if version.is_some() && !chat.outdated() => {
                         chat.told_version = version
                     }
-                    Announce::UpgradeNotice => {
+                    // Unless they turned out to be on 0.2 while it was on its way: then there is
+                    // nothing to say ([`Chat::forget_upgrade_notice`]).
+                    Announce::UpgradeNotice if chat.outdated() => {
                         chat.told_upgrade = true;
-                        chat.history.push(ChatMessage::system(
-                            "🔄 Their app is too old to read your messages, so Night Drop sent \
-                             them a message saying you've updated and asking them to update too."
-                                .to_string(),
-                        ));
+                        chat.history
+                            .push(ChatMessage::system(UPGRADE_NOTE_TEXT.to_string()));
                     }
                     Announce::Address if address.is_some() => chat.told_address = address,
                     _ => {}
