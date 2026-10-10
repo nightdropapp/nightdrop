@@ -201,7 +201,9 @@ alongside the old one (no upgrade, no data migration) — uninstall the old id m
 That is also the way to put a **test build beside a real install**, e.g.
 `NIGHTDROP_APP_ID=app.nightdrop.wttest NIGHTDROP_APP_NAME="ND WT Test"`. On Linux the test id gets
 its own data folder (`~/.local/share/<id>`) and its own keyring entry (`<id>.secureStorage`);
-remove both when done (`secret-tool clear account <id>.secureStorage`).
+remove both when done (`secret-tool clear account <id>.secureStorage`). `install-desktop-app.sh`
+also gives it its own bundle (`~/.local/lib/<id>`) and launcher (`~/.local/bin/<id>`); until
+2026-10-10 those were fixed paths, and a test install replaced the real install's bundle.
 
 ---
 

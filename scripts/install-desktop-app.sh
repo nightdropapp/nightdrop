@@ -38,7 +38,16 @@ PKG_DIR="$APP_DIR/linux/packaging"            # holds the icon master ($APP_ID.p
 
 # Per-user install locations (no sudo). XDG-correct.
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
-INSTALL_DIR="$HOME/.local/lib/nightdrop"           # the bundle (binary + lib/ + data/)
+# The bundle (binary + lib/ + data/) and the terminal launcher. A test app id gets its own of each:
+# both used to be fixed paths, so installing a test build replaced the real install's bundle
+# (2026-10-10). The default id keeps the original paths, which existing desktop entries point at.
+if [ "$APP_ID" = app.nightdrop ]; then
+  INSTALL_DIR="$HOME/.local/lib/nightdrop"
+  LAUNCHER="$HOME/.local/bin/nightdrop"
+else
+  INSTALL_DIR="$HOME/.local/lib/$APP_ID"
+  LAUNCHER="$HOME/.local/bin/$APP_ID"
+fi
 APPS_DIR="$DATA_HOME/applications"
 ICONS_DIR="$DATA_HOME/icons/hicolor"
 DESKTOP_FILE="$APPS_DIR/$APP_ID.desktop"
@@ -70,7 +79,7 @@ refresh_caches() {
 
 uninstall() {
   rm -rf "$INSTALL_DIR"
-  rm -f "$DESKTOP_FILE" "$HOME/.local/bin/nightdrop"
+  rm -f "$DESKTOP_FILE" "$LAUNCHER"
   for s in 16 32 48 64 128 256 512; do rm -f "$ICONS_DIR/${s}x${s}/apps/$APP_ID.png"; done
   refresh_caches
   ok "Uninstalled Night Drop desktop entry, icons, and bundle."
@@ -121,6 +130,8 @@ ok "bundle installed"
 
 # 3. Install themed icons at standard hicolor sizes (downscaled from the 512 master).
 MASTER="$PKG_DIR/$APP_ID.png"
+# A test id with no icon of its own uses the app's, installed under the test id's name.
+[ -f "$MASTER" ] || [ "$APP_ID" = app.nightdrop ] || MASTER="$PKG_DIR/app.nightdrop.png"
 [ -f "$MASTER" ] || { err "master icon missing: $MASTER"; exit 1; }
 CONVERT="$(command -v magick || command -v convert || true)"
 for s in 16 32 48 64 128 256 512; do
@@ -131,12 +142,12 @@ ok "icons → $ICONS_DIR/*/apps/$APP_ID.png (16–512)"
 
 # 4a. Drop a `nightdrop` launcher on PATH so the app can be started by name from a terminal.
 mkdir -p "$HOME/.local/bin"
-cat > "$HOME/.local/bin/nightdrop" <<EOF
+cat > "$LAUNCHER" <<EOF
 #!/bin/sh
 exec "$INSTALL_DIR/night_drop" "\$@"
 EOF
-chmod 755 "$HOME/.local/bin/nightdrop"
-ok "launcher → ~/.local/bin/nightdrop"
+chmod 755 "$LAUNCHER"
+ok "launcher → $LAUNCHER"
 case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "~/.local/bin is not on PATH — add it so 'nightdrop' works from a terminal";; esac
 
 # 4b. Generate the .desktop menu entry (self-contained — no separate template file to
