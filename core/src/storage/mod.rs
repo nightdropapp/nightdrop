@@ -34,6 +34,13 @@ pub struct PersistedChat {
     /// older state files loadable (they simply have the timer off).
     #[serde(default)]
     pub disappearing_secs: u64,
+    /// When the disappearing timer changed and to what, as `(unix secs, timer secs)`, oldest
+    /// first. A message expires by the timer in effect at its own timestamp, so turning a timer
+    /// on never reaches back into the history (forward-only). `None` in a state from before 0.2,
+    /// where the chat's current timer applied to every message: restored as one entry from the
+    /// beginning, so those messages keep expiring as they did.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub disappearing_timeline: Option<Vec<(u64, u64)>>,
     pub session_pickle: String,
     pub history: Vec<PersistedMessage>,
     /// Whether the chat was torn down (peer deleted / code re-used). Persisted so a deleted

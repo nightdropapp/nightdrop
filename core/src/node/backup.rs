@@ -34,6 +34,7 @@ impl Node {
                     my_name: chat.contact.my_name.clone(),
                     remote_storage: chat.contact.remote_storage,
                     disappearing_secs: chat.contact.disappearing_secs,
+                    disappearing_timeline: Some(chat.disappearing_timeline.clone()),
                     session_pickle: chat.session.pickle().encrypt(key),
                     history: chat
                         .history
@@ -773,6 +774,13 @@ fn chat_from_persisted(
         code: None,
         closed: chat.closed,
         relay_receipts,
+        disappearing_timeline: match &chat.disappearing_timeline {
+            Some(timeline) => timeline.clone(),
+            // From before 0.2, when the timer applied to the whole chat: keep it applying to
+            // what is already there.
+            None if chat.disappearing_secs > 0 => vec![(0, chat.disappearing_secs)],
+            None => Vec::new(),
+        },
         remote_storage_healthy: true,
         mailbox: super::mailbox::from_persisted(chat),
         relay_set: match (&chat.relay_set, chat.relay_set_unknown) {

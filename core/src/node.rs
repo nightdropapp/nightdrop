@@ -700,6 +700,9 @@ struct Chat {
     /// recall still works after an app restart — otherwise an unsent-but-undelivered message would
     /// reach the peer and only then be tombstoned (§11.3).
     relay_receipts: HashMap<String, Vec<QueuedReceipt>>,
+    /// Every change of the disappearing timer, `(unix secs, timer secs)`, oldest first: what
+    /// [`timer_at`] reads to give each message the timer in effect when it was sent or received.
+    disappearing_timeline: Vec<(u64, u64)>,
     /// Whether the **last** opt-in-server-storage attempt for this chat reached a relay while the
     /// peer was already online (§6). Goes false when server storage is on but no relay accepted a
     /// copy — the message still reached the peer directly, but was **not** stored server-side, so
@@ -834,6 +837,7 @@ impl Chat {
             code,
             closed: false,
             relay_receipts: HashMap::new(),
+            disappearing_timeline: Vec::new(),
             remote_storage_healthy: true,
             mailbox: None,
             relay_set: None,
@@ -3330,6 +3334,18 @@ fn unpack_unsend(buf: &[u8]) -> Result<String> {
 /// How long after start the optional announcements go out even if the transport never reports
 /// itself published ([`Node::announce_ready`]). Tor publishes in ~1–3 minutes.
 const ANNOUNCE_FALLBACK: Duration = Duration::from_secs(3 * 60);
+
+/// The disappearing timer that applies to a message stamped `at`: the last change made at or
+/// before it, 0 if none (`Chat::disappearing_timeline`). Forward-only: a timer turned on later
+/// never reaches back to older messages, and one turned off later still expires what was sent
+/// while it was on.
+fn timer_at(timeline: &[(u64, u64)], at: u64) -> u64 {
+    timeline
+        .iter()
+        .rev()
+        .find(|(changed, _)| *changed <= at)
+        .map_or(0, |(_, secs)| *secs)
+}
 
 /// A human label for a disappearing-messages timer value (for the in-chat system notice).
 fn disappearing_label(secs: u64) -> String {

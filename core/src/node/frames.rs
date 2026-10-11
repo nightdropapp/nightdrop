@@ -450,6 +450,8 @@ impl Node {
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
                 chat.contact.disappearing_secs = secs;
+                chat.disappearing_timeline
+                    .push((crate::api::now_secs(), secs));
                 chat.history.push(ChatMessage::system(format!(
                     "⏱️ The other person set disappearing messages to {}.",
                     disappearing_label(secs)

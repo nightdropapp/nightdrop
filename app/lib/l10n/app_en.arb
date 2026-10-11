@@ -1037,7 +1037,7 @@
   "@disappearingMessages": {
     "description": "Header of the disappearing-messages chooser."
   },
-  "disappearingSubtitle": "Delete messages on both devices after a set time.",
+  "disappearingSubtitle": "New messages are deleted on both devices after this long. Messages already here stay.",
   "@disappearingSubtitle": {
     "description": "Subtitle of the disappearing-messages chooser."
   },

@@ -783,7 +783,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get disappearingSubtitle =>
-      'Delete messages on both devices after a set time.';
+      'New messages are deleted on both devices after this long. Messages already here stay.';
 
   @override
   String couldNotSetTimer(String error) {

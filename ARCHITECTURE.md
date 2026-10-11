@@ -1265,8 +1265,16 @@ relay harvest it was holding, which lost that harvest.
 - **User-set disappearing timer** (shipped, #10): an independent per-chat timer
   (`disappearing_secs`, 0 = off) that does **not** require server storage. It is a **shared**
   setting — changing it sends an E2E `Disappearing` frame so both devices mirror the value and a
-  notice records the change — and `sweep_time` deletes messages older than the **shorter** of this
-  timer and the 24h ephemeral bomb. Same honest limits apply (age is measured from send/receipt).
+  notice records the change. **Forward-only** (decided 2026-10-11): each message expires by the timer
+  in effect when it was sent or received (`Chat::disappearing_timeline`, the dated list of changes,
+  read by `timer_at`), so turning a timer on never deletes the history before it, and turning it off
+  still expires what was sent while it was on. The notices themselves are never swept by it. It
+  used to apply to the whole chat: setting 1 hour deleted everything older on both devices, notices
+  included, which let either person wipe the other's copy and left no trace why (seen on devices,
+  2026-10-11). A state saved before the timeline gets one entry from the beginning, so a chat that
+  already had a timer keeps expiring its existing messages. `sweep_time` also applies the 24h
+  ephemeral bomb, which still covers the whole chat. Same honest limits apply (age is measured from
+  send/receipt).
 
 ### 11.5 Backup content matrix
 | Item | Lite (default) | Full | Single-chat (Lite/Full) |

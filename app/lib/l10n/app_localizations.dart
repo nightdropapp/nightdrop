@@ -1381,7 +1381,7 @@ abstract class AppLocalizations {
   /// Subtitle of the disappearing-messages chooser.
   ///
   /// In en, this message translates to:
-  /// **'Delete messages on both devices after a set time.'**
+  /// **'New messages are deleted on both devices after this long. Messages already here stay.'**
   String get disappearingSubtitle;
 
   /// Snackbar when setting the disappearing timer fails.

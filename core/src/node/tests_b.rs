@@ -464,9 +464,13 @@ fn disappearing_timer_syncs_and_sweeps_both_sides() {
     alice.send(&bob_contact, "recent").unwrap();
     bob.pump().unwrap();
 
-    // Backdate the "old secret" copy past the 1h horizon on each device.
+    // Backdate the "old secret" copy past the 1h horizon on each device, and the timer change
+    // before it: the timer applies to messages from its change on (forward-only).
     let backdate = |node: &mut Node, cid: &str| {
         let chat = node.chats.get_mut(cid).unwrap();
+        for (changed, _) in chat.disappearing_timeline.iter_mut() {
+            *changed -= 3800;
+        }
         for m in chat.history.iter_mut() {
             if m.text == "old secret" {
                 m.at -= 3700;
@@ -2228,4 +2232,127 @@ fn a_contact_paired_after_the_relays_were_set_learns_them_from_both_sides() {
         vec!["alice-extra.onion".to_string()],
         "the inviter's relays reach the joiner on approval"
     );
+}
+
+/// A pair with a backdated history, for the forward-only timer tests: Alice and Bob each hold "from
+/// before" (2 hours old) and their chat ids.
+fn pair_with_old_history() -> (MemoryNetwork, Node, Node, String, String) {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+    alice.send(&bob_contact, "from before").unwrap();
+    bob.pump().unwrap();
+    for (node, cid) in [(&mut alice, &bob_contact), (&mut bob, &alice_contact)] {
+        for m in node.chats.get_mut(cid).unwrap().history.iter_mut() {
+            m.at -= 2 * 3600;
+        }
+    }
+    (net, alice, bob, alice_contact, bob_contact)
+}
+
+fn texts(node: &Node, cid: &str) -> Vec<String> {
+    node.messages(cid).into_iter().map(|m| m.text).collect()
+}
+
+/// Forward-only (decided 2026-10-11): turning the timer on deletes nothing that was already there,
+/// on either device, whoever turned it on. It used to delete the whole history older than the
+/// timer on both sides, notices included, so either person could wipe the other's copy.
+#[test]
+fn turning_the_timer_on_never_deletes_the_history_before_it() {
+    let (_net, mut alice, mut bob, alice_contact, bob_contact) = pair_with_old_history();
+    bob.set_disappearing(&alice_contact, 3600).unwrap(); // the peer turns it on
+    alice.pump().unwrap();
+    alice.sweep_time();
+    bob.sweep_time();
+    for (node, cid) in [(&alice, &bob_contact), (&bob, &alice_contact)] {
+        let t = texts(node, cid);
+        assert!(t.contains(&"from before".to_string()), "kept: {t:?}");
+        assert!(
+            t.iter()
+                .any(|x| x.contains("disappearing messages to 1 hour")),
+            "and the notice says so: {t:?}"
+        );
+    }
+}
+
+#[test]
+fn a_message_sent_while_the_timer_was_on_still_expires_after_it_is_turned_off() {
+    let (_net, mut alice, mut bob, alice_contact, bob_contact) = pair_with_old_history();
+    alice.set_disappearing(&bob_contact, 3600).unwrap();
+    bob.pump().unwrap();
+    alice.send(&bob_contact, "while on").unwrap();
+    bob.pump().unwrap();
+    // Seconds pass before it is turned off (timestamps are whole seconds).
+    for (node, cid) in [(&mut alice, &bob_contact), (&mut bob, &alice_contact)] {
+        let chat = node.chats.get_mut(cid).unwrap();
+        for (changed, _) in chat.disappearing_timeline.iter_mut() {
+            *changed -= 10;
+        }
+        for m in chat.history.iter_mut().filter(|m| m.text != "from before") {
+            m.at -= 10;
+        }
+    }
+    alice.set_disappearing(&bob_contact, 0).unwrap();
+    bob.pump().unwrap();
+    alice.send(&bob_contact, "after off").unwrap();
+    bob.pump().unwrap();
+    // Two hours pass: shift every timestamp, the timer changes included, into the past.
+    for (node, cid) in [(&mut alice, &bob_contact), (&mut bob, &alice_contact)] {
+        let chat = node.chats.get_mut(cid).unwrap();
+        for (changed, _) in chat.disappearing_timeline.iter_mut() {
+            *changed -= 2 * 3600;
+        }
+        for m in chat.history.iter_mut().filter(|m| m.text != "from before") {
+            m.at -= 2 * 3600;
+        }
+        node.sweep_time();
+    }
+    for (node, cid) in [(&alice, &bob_contact), (&bob, &alice_contact)] {
+        let t = texts(node, cid);
+        assert!(!t.contains(&"while on".to_string()), "expired: {t:?}");
+        assert!(t.contains(&"from before".to_string()), "kept: {t:?}");
+        assert!(t.contains(&"after off".to_string()), "kept: {t:?}");
+        assert_eq!(
+            t.iter()
+                .filter(|x| x.contains("disappearing messages"))
+                .count(),
+            2,
+            "both notices stay: {t:?}"
+        );
+    }
+}
+
+/// A chat saved before 0.2 has no timeline: its timer keeps applying to what it already holds,
+/// so an update does not quietly stop old messages from disappearing.
+#[test]
+fn a_chat_saved_before_the_timeline_keeps_expiring_its_messages() {
+    let (net, mut alice, _bob, _alice_contact, bob_contact) = pair_with_old_history();
+    alice
+        .chats
+        .get_mut(&bob_contact)
+        .unwrap()
+        .contact
+        .disappearing_secs = 3600;
+    let key = [7u8; 32];
+    let mut state = alice.export(&key);
+    for chat in state.chats.iter_mut() {
+        chat.disappearing_timeline = None; // as a 0.1.x state file has it
+    }
+    let mut restored = Node::restore(&state, Box::new(net.endpoint("alice2")), &key).unwrap();
+    restored.sweep_time();
+    assert!(!texts(&restored, &bob_contact).contains(&"from before".to_string()));
+}
+
+#[test]
+fn the_timer_in_effect_is_the_last_change_at_or_before_a_message() {
+    let timeline = [(100, 3600), (200, 0), (300, 60)];
+    assert_eq!(super::timer_at(&timeline, 50), 0, "before any change");
+    assert_eq!(super::timer_at(&timeline, 100), 3600);
+    assert_eq!(super::timer_at(&timeline, 250), 0, "turned off");
+    assert_eq!(super::timer_at(&timeline, 999), 60);
+    assert_eq!(super::timer_at(&[], 999), 0);
 }
