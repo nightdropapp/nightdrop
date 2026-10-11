@@ -59,13 +59,22 @@ make app-test         # builds the core, then all Flutter tests — includes
                       # rust_bridge_test.dart, which loads the real libnightdrop.so
 cd app && flutter analyze lib test integration_test    # must be "No issues found"
 flutter build linux --debug                            # catches CMake/plugin breakage
-xvfb-run -a flutter test integration_test -d linux     # full onboarding→pair→chat flow
+NIGHTDROP_APP_ID=app.nightdrop.integration XDG_DATA_HOME=$(mktemp -d) \
+  xvfb-run -a flutter test integration_test -d linux   # full onboarding→pair→chat flow
                                                        # against the REAL Rust core
 ```
 
 The integration test is the only thing that exercises the real widget tree against the
 real core — it has caught bugs the unit tests can't (e.g. a notify-during-first-build
 crash). Don't skip it because it needs a display; that's what xvfb is for.
+
+**Never run it under the default app id on a machine with Night Drop installed.** The data folder
+(`~/.local/share/<app id>`) and the keyring entry holding the state key (`<app id>/FlutterSecureStorage`)
+are both keyed by the app id, so the test would onboard into the real install's place. Today the
+onboarding guard refuses ("There is already a saved identity on this device") and the test fails,
+which is how this was found (2026-10-11); onboarding reuses an existing keyring key rather than
+replacing it. The test id keeps the two apart instead of relying on that guard; it leaves one
+`app.nightdrop.integration` entry in the keyring, which nothing else reads.
 
 Single tests: `cargo test -p nightdrop <name>` / `cd app && flutter test --plain-name "<name>"`.
 

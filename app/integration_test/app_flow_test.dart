@@ -3,6 +3,8 @@
 //
 // Run on a device/emulator, or on Linux desktop:
 //   flutter test integration_test -d linux        # needs a display, or `xvfb-run`
+// On a machine with Night Drop installed, use the test app id from MAINTENANCE.md §3: the data
+// folder and the keyring entry are keyed by the app id, so the default one is the real install's.
 // On a packaged build cargokit bundles libnightdrop; here we fall back to the dev build.
 
 import 'dart:io';
@@ -31,8 +33,13 @@ void main() {
     await tester.pumpWidget(NightdropApp(core: RustNightdropCore()));
     await tester.pumpAndSettle();
 
-    // Onboarding -> create the anonymous identity.
+    // Onboarding -> the setup step (relay, background delivery, cover traffic), left at its
+    // defaults -> create the anonymous identity.
     await tester.tap(find.text('Create my identity'));
+    await tester.pumpAndSettle();
+    final create = find.byKey(const Key('setup-create'));
+    await tester.ensureVisible(create);
+    await tester.tap(create);
     await tester.pumpAndSettle();
     expect(find.text('Chats'), findsOneWidget);
 
