@@ -351,6 +351,18 @@ After editing a script, at minimum run `bash -n <script>`; use shellcheck if ava
   (`ARCHITECTURE.md` §6).
 - **The demo core** (`NightdropCore::new()`, in-process echo peer) is what a bare `flutter run`
   uses. Every real build passes `--dart-define=NIGHTDROP_TOR=1` (the scripts and the recipe do).
+- **CodeQL (GitHub default setup) skips Swift, Ruby and Java/Kotlin.** It scans actions, C/C++,
+  JS/TS, Python and Rust (narrowed 2026-10-07; check with
+  `gh api repos/nightdropapp/nightdrop/code-scanning/default-setup`). The three it skips failed on
+  every run: default setup cannot build them (Swift needs a macOS runner; Kotlin needs a full
+  Flutter/Gradle build; the Ruby is CocoaPods files). The cost is that the Android Kotlin glue
+  (`MainActivity.kt`, `BootReceiver.kt`, `Downloads.kt`, ~430 lines) goes unscanned; the
+  security-critical code is Rust and is scanned. Covering Kotlin would need an advanced-setup
+  workflow that installs Flutter and builds the APK. **A dropped language's last analysis stays on
+  the tool-status page as a "configuration error" forever**, because no newer run replaces it.
+  Delete it: list with `gh api "repos/nightdropapp/nightdrop/code-scanning/analyses?per_page=100"`,
+  then `gh api -X DELETE ".../code-scanning/analyses/<id>?confirm_delete=true"` (done for these
+  three on 2026-10-11).
 
 ---
 
