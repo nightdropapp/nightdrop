@@ -326,12 +326,39 @@ mod test {
         at_start: bool,
     }
 
+    thread_local! {
+        /// While set, every HSDir's response stays pending, so a test can act while an upload is
+        /// in flight. Thread-local: the mock runtime runs a test on its own thread.
+        static HOLD_RESPONSES: std::cell::RefCell<(bool, Vec<std::task::Waker>)> =
+            const { std::cell::RefCell::new((false, Vec::new())) };
+    }
+
+    /// Start or stop holding HSDir responses (see [`HOLD_RESPONSES`]).
+    fn hold_responses(hold: bool) {
+        let wakers = HOLD_RESPONSES.with(|h| {
+            let mut h = h.borrow_mut();
+            h.0 = hold;
+            std::mem::take(&mut h.1)
+        });
+        wakers.into_iter().for_each(std::task::Waker::wake);
+    }
+
     impl<I: PollReadIter> AsyncRead for MockDataStream<I> {
         fn poll_read(
             mut self: Pin<&mut Self>,
-            _cx: &mut Context<'_>,
+            cx: &mut Context<'_>,
             buf: &mut [u8],
         ) -> Poll<io::Result<usize>> {
+            let held = HOLD_RESPONSES.with(|h| {
+                let mut h = h.borrow_mut();
+                if h.0 {
+                    h.1.push(cx.waker().clone());
+                }
+                h.0
+            });
+            if held {
+                return Poll::Pending;
+            }
             match self.as_mut().poll_read_responses.next() {
                 Some(res) => {
                     match res {
@@ -814,6 +841,125 @@ mod test {
                 assert!(
                     (12..=25).contains(&rounds),
                     "{rounds} reupload rounds in 24h, expected 12-25"
+                );
+            });
+        });
+    }
+
+    /// A change that dirties the descriptor while an upload is in flight must still be published.
+    /// The in-flight upload carries the older descriptor, so its success may not mark the HSDirs
+    /// clean: arti did, and the newer descriptor was never uploaded (no rate-limited round picked it
+    /// up afterwards, because nothing was dirty any more). Seen as a restricted discovery client
+    /// added within milliseconds of another never reaching the published descriptor.
+    #[test]
+    fn a_change_during_an_upload_is_published_after_it() {
+        test_temp_dir!().used_by(|temp_dir| {
+            let runtime = MockRuntime::new();
+            let nickname = HsNickname::try_from(TEST_SVC_NICKNAME.to_string()).unwrap();
+            let config = build_test_config(nickname.clone());
+            let (_config_tx, config_rx) = watch::channel_with(Arc::new(config));
+            let (mut mv, pv) = ipts_channel(&runtime, create_storage_handles(temp_dir).1).unwrap();
+            let ipt_runtime = runtime.clone();
+            let mut update_ipts = move |round: u8| {
+                let ipts: Vec<IptInSet> = test_data::test_parsed_hsdesc()
+                    .unwrap()
+                    .intro_points()
+                    .iter()
+                    .enumerate()
+                    .map(|(i, ipt)| IptInSet {
+                        ipt: ipt.clone(),
+                        lid: [u8::try_from(i)
+                            .unwrap()
+                            .wrapping_add(round.wrapping_mul(16)); 32]
+                            .into(),
+                    })
+                    .collect();
+                mv.borrow_for_update(ipt_runtime.clone()).ipts = Some(IptSet {
+                    ipts,
+                    lifetime: Duration::from_secs(20),
+                });
+            };
+
+            let netdir = testnet::construct_netdir().unwrap_if_sufficient().unwrap();
+            let keystore_dir = tempdir().unwrap();
+            let (_hsid, blind_id, keymgr) = init_keymgr(&keystore_dir, &nickname, &netdir);
+            let hsdir_count = netdir
+                .hs_dirs_upload(blind_id, netdir.hs_time_period())
+                .unwrap()
+                .count();
+            assert!(hsdir_count > 0);
+            let status_tx = StatusSender::new(OnionServiceStatus::new_shutdown());
+
+            runtime.clone().block_on(async move {
+                let netdir_provider: Arc<dyn NetDirProvider> =
+                    Arc::new(TestNetDirProvider::from(netdir));
+                let publish_count: Arc<AtomicUsize> = Default::default();
+                let circpool = MockReactorState {
+                    publish_count: Arc::clone(&publish_count),
+                    poll_read_responses: [Ok(OK_RESPONSE.into())].into_iter(),
+                    responses_for_hsdir: Arc::new(Mutex::new(Default::default())),
+                };
+                let temp_dir = test_temp_dir!();
+                let state_dir = temp_dir.subdir_untracked("state_dir");
+                let mistrust = fs_mistrust::Mistrust::new_dangerously_trust_everyone();
+                let state_dir = StateDirectory::new(state_dir, &mistrust).unwrap();
+                let state_handle = state_dir.acquire_instance(&nickname).unwrap();
+                let NewPowManager {
+                    pow_manager,
+                    rend_req_tx: _,
+                    rend_req_rx: _,
+                    publisher_update_rx: update_from_pow_manager_rx,
+                } = PowManager::new(
+                    runtime.clone(),
+                    nickname.clone(),
+                    state_handle.raw_subdir("pow_nonces").unwrap(),
+                    keymgr.clone(),
+                    state_handle.storage_handle("pow_manager").unwrap(),
+                    netdir_provider.clone(),
+                    status_tx.clone().into(),
+                    config_rx.clone(),
+                )
+                .unwrap();
+                let publisher: Publisher<MockRuntime, MockReactorState<_>> = Publisher::new(
+                    runtime.clone(),
+                    nickname,
+                    netdir_provider,
+                    circpool,
+                    pv,
+                    config_rx,
+                    status_tx.into(),
+                    keymgr,
+                    Arc::new(CfgPathResolver::default()),
+                    pow_manager,
+                    update_from_pow_manager_rx,
+                );
+                publisher.launch().unwrap();
+                runtime.progress_until_stalled().await;
+
+                // Round 1: published normally.
+                update_ipts(0);
+                runtime.progress_until_stalled().await;
+                assert_eq!(publish_count.load(Ordering::SeqCst), hsdir_count);
+                runtime.advance_by(Duration::from_secs(2 * 60)).await;
+                runtime.progress_until_stalled().await;
+
+                // Round 2 starts and stays in flight; meanwhile a newer change dirties it again.
+                hold_responses(true);
+                update_ipts(1);
+                runtime.progress_until_stalled().await;
+                assert_eq!(publish_count.load(Ordering::SeqCst), 2 * hsdir_count);
+                update_ipts(2);
+                runtime.progress_until_stalled().await;
+
+                // Round 2 completes; once any rate limit is over, the newer descriptor goes out.
+                hold_responses(false);
+                runtime.progress_until_stalled().await;
+                runtime.advance_by(Duration::from_secs(2 * 60)).await;
+                runtime.progress_until_stalled().await;
+                assert_eq!(
+                    publish_count.load(Ordering::SeqCst),
+                    3 * hsdir_count,
+                    "the change made during round 2 was uploaded after it"
                 );
             });
         });

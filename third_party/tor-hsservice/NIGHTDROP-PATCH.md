@@ -25,5 +25,35 @@ submitted 2026-10-03 via anonticket, approved and public by 2026-10-09).
 - `publish.rs`: test `reupload_rate_does_not_grow_with_extra_uploads` - six upload rounds, then
   24 h of mock time; expects 12-25 reupload rounds. Unpatched it fails with 51.
 
-**Remove this directory and the `[patch.crates-io]` entry** once arti ships the fix and Night Drop
-moves to that arti.
+## Second fix: a change made during an upload was never published (2026-10-11)
+
+**Why:** an upload's success marked every HSDir it reached **clean**, even when the descriptor had
+been marked dirty again while that upload was in flight (arti's own `TODO (#1098)` above the line
+describes the race). The newer descriptor was then never uploaded: the round that would have
+carried it found nothing dirty. In Night Drop this lost **restricted discovery clients**. Two
+`.auth` files written milliseconds apart (an invite's QR pass and its short-code pass, both issued
+when the invite screen opens) gave two change events; the first started an upload, the second
+dirtied it mid-flight, and the upload then rate-limited further publishing for a minute and marked
+everything clean. The published descriptor never included the second key until a restart, so a
+joiner holding that pass got "Decryption failure on onion service descriptor: incorrect decryption
+key" on every fetch and its `Hello` could not land (S25 joining a Linux test device, 2026-10-11;
+reproduced on demand by writing two valid keys 5 ms apart: 4 -> 5 clients published, not 6).
+Probably also the cause of the two open device bugs in `TODO.txt` where a client key added while
+the app ran was not honoured until a restart.
+
+**What changed:**
+
+- `publish/reactor.rs`: `TimePeriodContext::dirty_generation`, bumped by `mark_all_dirty` and kept
+  across a rebuild of the context; an upload records it when it starts
+  (`TimePeriodUploadResult::dirty_generation`), and its results mark an HSDir clean only if it has
+  not moved since.
+- `publish.rs`: test `a_change_during_an_upload_is_published_after_it`, with a thread-local switch
+  that holds the mock HSDirs' responses so a change can be made mid-upload. Unpatched it uploads 16
+  times, not 24: the third round never happens.
+
+Testing this crate needs its dev-dependencies, which the Night Drop workspace does not resolve:
+copy the directory elsewhere, append `[workspace]` to its `Cargo.toml`, and run
+`cargo test --all-features --lib` there (51 pass, 2 ignored, on 2026-10-11).
+
+**Remove this directory and the `[patch.crates-io]` entry** once arti ships both fixes and Night
+Drop moves to that arti.
