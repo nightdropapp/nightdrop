@@ -363,6 +363,11 @@ fn queue_on_relays(
     handle: &str,
     bytes: &[u8],
 ) -> Result<Vec<QueuedReceipt>> {
+    if primary.is_none() && peer_relays.is_empty() {
+        // Nowhere to post (we or they are direct only, or their set is unknown): no relay is
+        // contacted, so nothing is sealed and no post is logged.
+        anyhow::bail!("peer offline and no relay accepted the message");
+    }
     let sealed = relay_wrap(contact_id, bytes)?;
     crate::diag!(
         "relay: queueing a copy under a {} handle",
@@ -1217,6 +1222,10 @@ impl DetachedSend {
             Route::DirectThenRelay => {
                 if direct() {
                     return Delivery::Direct;
+                }
+                if self.primary.is_none() && self.peer_relays.is_empty() {
+                    crate::diag!("detached send: direct dial failed — no relay route, so it waits");
+                    return Delivery::Failed;
                 }
                 crate::diag!("detached send: direct dial failed — falling back to the relay");
                 match relay() {

@@ -46,7 +46,8 @@ use crate::Result;
 /// Install a tracing subscriber that forwards arti's own logs to the diagnostics channel
 /// (`nd-tor` on Android / stderr on desktop). Guarded by a `Once` and only ever called when
 /// diagnostics are enabled, so a normal release never installs it and stays silent. Filters to the
-/// bootstrap-relevant targets (guards, circuits, directory download, channels) at debug.
+/// bootstrap-relevant targets (guards, circuits, directory download, channels) and both
+/// onion-service sides (`tor_hsservice` publishing ours, `tor_hsclient` dialling a peer's) at debug.
 fn install_arti_tracing() {
     use std::sync::Once;
     static ONCE: Once = Once::new();
@@ -55,7 +56,8 @@ fn install_arti_tracing() {
         use tracing_subscriber::EnvFilter;
         let filter = EnvFilter::try_new(
             "info,arti_client=debug,tor_guardmgr=debug,tor_circmgr=debug,tor_dirmgr=debug,\
-             tor_chanmgr=debug,tor_netdir=info,tor_proto=info,tor_hsservice=debug",
+             tor_chanmgr=debug,tor_netdir=info,tor_proto=info,tor_hsservice=debug,\
+             tor_hsclient=debug",
         )
         .unwrap_or_else(|_| EnvFilter::new("info"));
         let _ = fmt()
