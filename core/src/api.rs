@@ -2183,10 +2183,17 @@ impl NightdropCore {
     /// older than the timer are deleted on both devices, and the new value is synced to the
     /// peer. Common values: 3600 (1h), 86400 (1d), 604800 (1w).
     pub fn set_disappearing(&self, contact_id: &str, secs: u64) -> Result<()> {
-        let mut g = self.lock();
-        g.me.set_disappearing(contact_id, secs)?;
-        g.save();
+        let sends = {
+            let mut g = self.lock();
+            g.me.set_disappearing(contact_id, secs)?;
+            g.save();
+            g.me.take_caller_outbox()
+        };
         emit_chats("message", vec![contact_id.to_string()]);
+        // Sent before returning, so a message typed next cannot overtake it (`Node::set_disappearing`).
+        // Best-effort, as before: the change is already made locally, and a contact with no relay
+        // route has it held for them.
+        let _ = self.send_for_caller(sends);
         Ok(())
     }
 

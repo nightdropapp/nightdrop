@@ -3333,13 +3333,14 @@ const ANNOUNCE_FALLBACK: Duration = Duration::from_secs(3 * 60);
 
 /// A human label for a disappearing-messages timer value (for the in-chat system notice).
 fn disappearing_label(secs: u64) -> String {
+    let unit = |n: u64, one: &str| format!("{n} {one}{}", if n == 1 { "" } else { "s" });
     match secs {
         0 => "off".to_string(),
-        s if s % 604800 == 0 => format!("{} week(s)", s / 604800),
-        s if s % 86400 == 0 => format!("{} day(s)", s / 86400),
-        s if s % 3600 == 0 => format!("{} hour(s)", s / 3600),
-        s if s % 60 == 0 => format!("{} minute(s)", s / 60),
-        s => format!("{s} second(s)"),
+        s if s % 604800 == 0 => unit(s / 604800, "week"),
+        s if s % 86400 == 0 => unit(s / 86400, "day"),
+        s if s % 3600 == 0 => unit(s / 3600, "hour"),
+        s if s % 60 == 0 => unit(s / 60, "minute"),
+        s => unit(s, "second"),
     }
 }
 

@@ -1952,7 +1952,16 @@ impl Node {
             }
         };
         if let Some((peer_address, frame)) = outgoing {
-            let _ = self.deliver(&peer_address, contact_id, &frame);
+            // For the caller to send before it returns (`api::set_disappearing`), not for the
+            // poller: a message typed right after would otherwise go out first and land above the
+            // notice on the peer's side (seen 2026-10-11).
+            let _ = self.deliver_with(
+                &peer_address,
+                contact_id,
+                &frame,
+                false,
+                OutboundDone::Caller(None),
+            );
         }
         Ok(())
     }

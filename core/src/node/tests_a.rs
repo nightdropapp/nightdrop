@@ -2496,3 +2496,40 @@ fn edit_and_unsend_of_a_message_also_handed_directly_reach_the_peer_despite_a_fu
         "the unsend reached Bob: {texts:?}"
     );
 }
+
+/// Seen 2026-10-11: a message typed right after changing the timer landed above the timer notice
+/// on the peer's side, because the poller sends queued control frames on another thread than
+/// messages. The timer frame now goes to the caller, which sends it before returning.
+#[test]
+fn a_timer_change_is_sent_by_the_caller_not_left_for_the_poller() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(AsyncMem(net.endpoint("alice"))));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+    let _ = alice.take_outbox(); // whatever pairing queued
+
+    alice.set_disappearing(&bob_contact, 3600).unwrap();
+    let sends = alice.take_caller_outbox();
+    assert_eq!(sends.len(), 1, "the timer frame is the caller's to send");
+    alice.apply_outbound(crate::node::run_outbox(sends));
+    bob.pump().unwrap();
+    assert!(
+        bob.messages(&alice_contact)
+            .iter()
+            .any(|m| m.system && m.text.contains("set disappearing messages to 1 hour.")),
+        "and it arrives, worded properly"
+    );
+}
+
+#[test]
+fn timer_labels_are_singular_or_plural() {
+    assert_eq!(super::disappearing_label(3600), "1 hour");
+    assert_eq!(super::disappearing_label(7200), "2 hours");
+    assert_eq!(super::disappearing_label(86400), "1 day");
+    assert_eq!(super::disappearing_label(604800), "1 week");
+    assert_eq!(super::disappearing_label(90), "90 seconds");
+    assert_eq!(super::disappearing_label(0), "off");
+}
