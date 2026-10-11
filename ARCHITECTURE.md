@@ -594,7 +594,7 @@ on a re-pair (new session) exactly like `verified`.
   (`Frame::RelaySet`, also inside the pairing `Hello` and the short-code response), and a sender
   posts to exactly that set: no implicit relay, nothing while the recipient's set is unknown or
   empty, and nothing at all while the sender is direct only (`Node::post_route`). A relay removed
-  from the list is still drained for 24 h. Because a mailbox handle (v1 or v2) is
+  from the list is still drained for 24 h. Because a mailbox handle is
   **relay-agnostic** (the same handle works on every relay) and every queued blob is already
   sealed under a recipient-derived key, a sender simply seals **once** and posts the identical
   blob to every relay in the recipient's set (`queue_on_relays`); the recipient drains all
@@ -1135,16 +1135,18 @@ Windows builds; desktop also reads it from the environment). Ships externally un
 same onion via its state dir).
 
 All payloads are opaque E2E blobs; the relay learns no keys, no plaintext, no identity. Mailbox
-handle = a derived key both peers can compute, never the identity/onion. Two exist
-(`docs/design/mailbox-handles.md`). **v2** (`node::mailbox`, from 0.1.26): HKDF over a per-chat
-secret agreed in-band (`Frame::MailboxKey`), the recipient's key and the UTC day — different per
-sender and per day, so a relay cannot link two senders' deposits for one person or one day's to
-the next; it can still link one pair's deposits within a day. A side posts v2 only once the peer
-has proven it holds the secret; readers poll v1 plus d-1/d/d+1 of every pair, in fragments fixed
-for the epoch, each on its own Tor isolation group, padded with dummy handles (§5c); the 50-contact
-cap bounds that work (§8). **v1** (`node::mailbox_handle`), still posted to peers on older builds
-and still polled: a truncated, domain-separated SHA-256 of the recipient's long-term identity key
-— static, so linkable for the life of the identity. Either way, every queued frame is additionally
+handle = a derived key both peers can compute, never the identity/onion
+(`docs/design/mailbox-handles.md`). **v2** (`node::mailbox`, from 0.1.26): HKDF over a per-pair
+secret, the recipient's key and the UTC day — different per sender and per day, so a relay cannot
+link two senders' deposits for one person or one day's to the next; it can still link one pair's
+deposits within a day. From 0.2 a new pair gets its secret from a seed in the joiner's `Hello`
+(direct only, E2E); a pair from 0.1.x agreed it in-band (`Frame::MailboxKey`). A side posts to a
+pair only once the peer has proven it holds the secret, and **a pair without one has no relay
+route**: its frames go directly or wait. Readers poll d-1/d/d+1 of every pair plus their own cover
+handle, in fragments fixed for the epoch, each on its own Tor isolation group, padded with dummy
+handles (§5c); the 50-contact cap bounds that work (§8). The static **v1** handle of 0.1.x (a hash
+of the recipient's identity key, linkable for the life of the identity) is neither posted nor
+polled from 0.2 (`mailbox-handles.md` §10). Every queued frame is additionally
 **sealed** (ChaCha20-Poly1305 under a key derived from the recipient's identity key) before
 posting — wire frames carry routing metadata (sender identity keys; the sender's onion in
 `Hello`) that is fine peer-to-peer but must not sit readable on the relay. Only the recipient

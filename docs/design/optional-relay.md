@@ -218,7 +218,8 @@ needs relays on both sides. Its persistent in-chat warning is unchanged where it
 mailbox. 0.2 drops v1, and real mail already goes to per-pair handles, so chaff on a mailbox
 nobody else posts to would cover nothing. In 0.2 each cover post goes to the current inbound
 handle of one contact picked at random, on our own relays, so it lands in the mailboxes real mail
-uses. With no contacts yet it goes to a self handle derived the same way.
+uses. With no contacts yet it goes to a self handle derived the same way. **Built 2026-10-11**
+with the v1 removal (`Node::cover_handle`; `mailbox-handles.md` §10).
 
 ## 7. Onboarding
 

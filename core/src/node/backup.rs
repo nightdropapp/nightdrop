@@ -252,11 +252,9 @@ impl Node {
                     relays: p.relays.clone(),
                     nightdrop: p.nightdrop,
                     bytes,
-                    handle: if p.handle.is_empty() {
-                        super::mailbox_handle(&p.recipient_ik)
-                    } else {
-                        p.handle.clone()
-                    },
+                    // Empty for one saved by 0.1.x for a v1 mailbox: no relay route, so it goes
+                    // directly or waits (`Node::detach_pending`).
+                    handle: p.handle.clone(),
                     in_flight: false,
                 })
             })

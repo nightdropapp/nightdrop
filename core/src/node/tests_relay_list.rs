@@ -191,7 +191,7 @@ fn removing_night_drop_takes_it_out_of_our_own_traffic() {
 
     // Cover traffic goes where contacts post to us, and nowhere else.
     n.send_cover_traffic();
-    let handle = mailbox_handle(&n.identity_key());
+    let handle = n.cover_handle(super::mailbox::current_epoch());
     assert_eq!(own.peek(&handle).unwrap(), 1);
     assert_eq!(nightdrop.peek(&handle).unwrap(), 0);
 
@@ -219,7 +219,7 @@ fn a_direct_only_device_posts_to_no_relay_even_for_a_contact_who_has_one() {
     net.disconnect("bob");
     let _ = alice.send(&bob_id, "held, not posted");
     assert_eq!(
-        relay.peek(&alice.post_handle(&bob_id)).unwrap(),
+        relay.peek(&alice.post_handle(&bob_id).unwrap()).unwrap(),
         0,
         "direct only is a property of this device's traffic, not only of its mailbox"
     );
@@ -233,7 +233,9 @@ fn a_direct_only_device_posts_to_no_relay_even_for_a_contact_who_has_one() {
 
     alice.send_cover_traffic();
     assert_eq!(
-        relay.peek(&mailbox_handle(&alice.identity_key())).unwrap(),
+        relay
+            .peek(&alice.cover_handle(super::mailbox::current_epoch()))
+            .unwrap(),
         0
     );
     assert!(alice.rendezvous_relays().is_empty(), "no short codes");

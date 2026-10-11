@@ -290,7 +290,7 @@ fn one_side_direct_only_means_nothing_is_posted_either_way() {
         let bob_id = bob.identity_key();
         net.disconnect("bob");
         alice.send(&bob_id, "held").unwrap();
-        assert_eq!(relay.peek(&alice.post_handle(&bob_id)).unwrap(), 0);
+        assert_eq!(relay.peek(&alice.post_handle(&bob_id).unwrap()).unwrap(), 0);
         assert_eq!(status(&alice, &bob_id, "held"), "waiting");
     }
 }
@@ -326,7 +326,8 @@ fn the_online_signal_decides_whether_a_launch_flushes_what_contacts_hold() {
 }
 
 /// Seen with a direct-only phone (2026-10-10): the joiner started the private-mailbox agreement at
-/// pairing, before any relay route existed. The direct-only side never answers one, so once it was
+/// pairing, before any relay route existed. (From 0.2 a pair's mailbox comes from the `Hello`
+/// instead, so no agreement runs at pairing at all.) The direct-only side never answers one, so once it was
 /// seen alive the joiner's chat said it was "on an older version". No agreement starts without a
 /// relay route, and an unanswered one left over from before says nothing about the contact's app.
 #[test]
@@ -353,12 +354,12 @@ fn a_direct_only_contact_gets_no_mailbox_agreement_and_is_never_called_old() {
         }
         let (alice_id, bob_id) = (alice.identity_key(), bob.identity_key());
         assert!(
-            alice.chats[&bob_id].mailbox.is_none(),
-            "inviter started none"
+            alice.mailbox_announced.is_empty() && bob.mailbox_announced.is_empty(),
+            "neither side sent an agreement"
         );
-        assert!(
-            bob.chats[&alice_id].mailbox.is_none(),
-            "joiner started none"
+        assert_eq!(
+            alice.chats[&bob_id].mailbox, bob.chats[&alice_id].mailbox,
+            "the Hello's seed is the pair's mailbox, ready if a relay is added later"
         );
 
         // One started before this fix, never answered, and the contact active long after.

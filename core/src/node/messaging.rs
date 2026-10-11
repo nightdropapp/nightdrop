@@ -158,7 +158,7 @@ impl Node {
             self.hold_message(contact_id, msg_id, bytes.to_vec());
             return;
         }
-        let handle = self.post_handle(contact_id);
+        let handle = self.post_handle(contact_id).unwrap_or_default();
         let (primary, targets) = self.route_to(contact_id);
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
@@ -258,7 +258,7 @@ impl Node {
                 still_waiting.push(a);
                 continue;
             }
-            let handle = self.post_handle(&a.contact_id);
+            let handle = self.post_handle(&a.contact_id).unwrap_or_default();
             let Some(chat) = self.chats.get_mut(&a.contact_id) else {
                 continue; // chat deleted while we waited
             };
@@ -412,7 +412,7 @@ impl Node {
             }
             let (primary, relay_targets) = self.route_to(&p.contact_id);
             items.push(PlannedSend {
-                handle: self.post_handle(&p.contact_id),
+                handle: self.post_handle(&p.contact_id).unwrap_or_default(),
                 contact_id: p.contact_id,
                 msg_id: p.msg_id,
                 bytes: p.bytes,
@@ -583,14 +583,15 @@ impl Node {
         }
     }
 
-    /// Post one piece of **cover traffic** (#4): a dummy blob to our *own* mailbox, so the relay
-    /// sees activity it cannot tell apart from real mail. Drained and dropped on our next poll like
-    /// anything else addressed to us.
+    /// Post one piece of **cover traffic** (#4): a dummy blob to one of *our own* mailboxes, so the
+    /// relay sees activity it cannot tell apart from real mail. Drained and dropped on our next poll
+    /// like anything else addressed to us.
     ///
-    /// Self-addressed on purpose. The relay's only per-identity signal is "mailbox X was posted to
-    /// at time T" — it never learns the sender (Tor) — so muddying *our own* mailbox is exactly the
-    /// observable, needs no cooperation from contacts, and works for an identity with no contacts
-    /// at all, whose otherwise-silent mailbox is itself informative.
+    /// Self-addressed on purpose. The relay's only per-mailbox signal is "mailbox X was posted to
+    /// at time T" — it never learns the sender (Tor) — so muddying *our own* mailboxes is exactly
+    /// the observable, and needs no cooperation from contacts. Which mailbox: the inbound handle of
+    /// a contact picked at random, the one their real mail to us uses, or our own cover handle
+    /// while we have no agreed contact (`Node::cover_handle`, `optional-relay.md` §6).
     ///
     /// Best-effort and silent: a failed cover post is not worth a retry, a log line, or a user's
     /// attention. See `docs/design/cover-traffic.md`.
@@ -613,13 +614,12 @@ impl Node {
         // indistinguishable from real traffic leaves nothing else to observe, so without the line
         // "cover traffic costs nothing measurable" and "cover traffic never ran" read the same —
         // exactly the trap the relay watchdog fell into.
-        // Our own v1 mailbox, which we poll throughout the transition (`mailbox-handles.md`).
         let send = DetachedSend {
             transport: Arc::clone(&self.transport),
             primary,
             peer_relays,
             recipient_ik: me.clone(),
-            handle: mailbox_handle(&me),
+            handle: self.cover_handle(super::mailbox::current_epoch()),
             peer_address: String::new(), // relay only
             bytes: blob,
             fresh: false,
@@ -1132,7 +1132,7 @@ impl Node {
                     &primary,
                     &targets,
                     contact_id,
-                    &self.post_handle(contact_id),
+                    &self.post_handle(contact_id).unwrap_or_default(),
                     &incoming,
                 );
             }
@@ -1212,7 +1212,7 @@ impl Node {
                 &primary,
                 &targets,
                 contact_id,
-                &self.post_handle(contact_id),
+                &self.post_handle(contact_id).unwrap_or_default(),
                 &media_bytes,
             );
             if !delivered {
@@ -1619,7 +1619,7 @@ impl Node {
             primary,
             peer_relays,
             recipient_ik: contact_id.to_string(),
-            handle: self.post_handle(contact_id),
+            handle: self.post_handle(contact_id).unwrap_or_default(),
             peer_address: peer_address.to_string(),
             bytes: wire::encode(frame),
             fresh,
@@ -2014,7 +2014,7 @@ impl Node {
     /// see [`Node::mark_burn_viewed`].
     pub(super) fn send_burn_receipt(&mut self, contact_id: &str, target_id: &str) {
         let from = self.identity_key();
-        let handle = self.post_handle(contact_id);
+        let handle = self.post_handle(contact_id).unwrap_or_default();
         let (primary, peer_relays) = self.route_to(contact_id);
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;

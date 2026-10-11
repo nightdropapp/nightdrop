@@ -44,6 +44,13 @@ impl Node {
                     .as_ref()
                     .and_then(|b| b.pass.as_deref())
                     .and_then(super::decode_secret);
+                // The pair's mailbox secret (`MailboxPair::seeded`). Absent only from a build that
+                // predates it, which then agrees one the old way once approved.
+                let mailbox = body
+                    .as_ref()
+                    .and_then(|b| b.mailbox.as_deref())
+                    .and_then(super::decode_secret)
+                    .map(super::mailbox::MailboxPair::seeded);
                 let contact_id = identity_key;
                 // Prefer the address the sender advertised (works over Tor/relay where the
                 // transport can't tell us who called); fall back to the transport's view.
@@ -82,6 +89,8 @@ impl Node {
                         chat.relays_told = None;
                         chat.peer_key_pending = joiner_key.clone();
                         chat.pass_pending = reply_pass;
+                        // The new session's pair secret; without one, the next agreement makes it.
+                        chat.mailbox = mailbox;
                         chat.contact.verified = false; // new session invalidates prior verification
                         chat.contact.peer_verified = false; // …as does the peer's prior signal
                         already_authorized = chat.authorized;
@@ -132,6 +141,7 @@ impl Node {
                     chat.relay_set = joiner_relays.clone();
                     chat.peer_key_pending = joiner_key.clone();
                     chat.pass_pending = reply_pass;
+                    chat.mailbox = mailbox;
                     self.chats.insert(contact_id.clone(), chat);
                 }
                 // Re-pair warning (§1.2): a known contact just re-established the chat with a new
@@ -172,9 +182,10 @@ impl Node {
                     self.announce_version_to(&contact_id);
                     // Our relay set: the joiner holds mail for us until it arrives.
                     self.announce_relay_set_to(&contact_id);
-                    // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
-                    // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
-                    self.send_mailbox_key(&contact_id);
+                    // A Hello without a mailbox seed: agree one now rather than at the next tick.
+                    if !self.mailbox_agreed(&contact_id) {
+                        self.send_mailbox_key(&contact_id);
+                    }
                 }
                 // The plaintext is the `HelloBody` (our relay set above), never a message: nothing
                 // is shown, and the first real message arrives as a `Message` once approved.

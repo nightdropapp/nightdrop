@@ -14,8 +14,9 @@ analysis is dead. Tor hides who is posting. What remains is **timing and volume,
 * mailbox `mbx:…` received a post at 21:04, and two more by 21:06;
 * mailbox `mbx:…` was drained at 07:12.
 
-The handle is `SHA-256("nightdrop/mailbox/v1" ‖ identity_key)` — **stable for the life of an
-identity**. So a relay operator (or anyone who seizes one) can accumulate a per-identity behavioural
+Until 0.1.26 the handle was `SHA-256("nightdrop/mailbox/v1" ‖ identity_key)` — **stable for the
+life of an identity**. (Since then each pair has its own handle, new every UTC day, and 0.2 drops the
+static one: `mailbox-handles.md` §10. A relay can still profile one pair's mailbox within a day.) So a relay operator (or anyone who seizes one) can accumulate a per-identity behavioural
 profile without breaking any crypto: waking hours, timezone, weekday rhythm, who is busy when.
 
 That is the signal this feature exists to muddy. Not content, not contacts — *activity*.
@@ -37,7 +38,9 @@ real threat — but they bound what may honestly be claimed.
 ## 3. Shape: self-addressed chaff
 
 The simplest design that covers exactly the observable: **post dummy mail to your own mailbox** on a
-randomised schedule, then drain it like any other mail.
+randomised schedule, then drain it like any other mail. **From 0.2** "your own mailbox" is one of
+the per-pair mailboxes your contacts' real mail to you lands in, picked at random each time, or your
+own cover handle while you have no contact (`optional-relay.md` §6, `mailbox-handles.md` §10).
 
 * **No peer cooperation.** Your contacts need not run it, need not support it, and never see it.
 * **Works with zero contacts**, which matters — a brand-new identity whose mailbox is silent until

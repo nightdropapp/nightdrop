@@ -127,27 +127,6 @@ macro_rules! devlog {
     };
 }
 
-/// Store-and-forward mailbox handle for a recipient (§6/§11.2): a truncated SHA-256 of their
-/// long-term identity key. The relay sees only this opaque token — never an onion address
-/// (which it could probe) or a raw identity key. Both ends can compute it: senders know their
-/// contact's identity key, receivers their own.
-///
-/// **This handle is STATIC, and that is a known leak.** It hides *who* a mailbox belongs to; it
-/// does not hide that two deposits are for the same person, so a relay can build a contact graph
-/// from co-occurrence and a per-mailbox behavioural profile over time. Do not describe it as
-/// unlinkable — it is unlinkable to the identity, not across messages.
-/// Since 0.1.26 a confirmed pair uses the v2 handle instead (`mailbox.rs`,
-/// `docs/design/mailbox-handles.md`): a per-pair secret combined with the UTC day, so two senders
-/// to one recipient produce different handles and nothing links across days. This v1 handle
-/// remains for peers on older builds, posted and polled until 0.2 drops it.
-fn mailbox_handle(recipient_identity_key: &str) -> String {
-    use sha2::{Digest, Sha256};
-    let mut h = Sha256::new();
-    h.update(b"nightdrop/mailbox/v1");
-    h.update(recipient_identity_key.as_bytes());
-    format!("mbx:{}", base64_handle(&h.finalize()[..15]))
-}
-
 /// Key for sealing relay-queued envelopes, derived from the recipient's identity key
 /// (domain-separated from the mailbox handle). Wire frames carry routing metadata in the
 /// clear — sender identity keys, and the sender's onion address in `Hello` — which is fine
@@ -352,9 +331,9 @@ pub(crate) fn drain_relay_mailboxes(plan: &RelayDrainPlan) -> RelayHarvest {
 /// edit/unsend can later recall every copy. Posting the identical sealed bytes to all relays
 /// lets the receiver de-duplicate by blob hash.
 ///
-/// `handle` is the mailbox to post under — [`Node::post_handle`] for a live chat (v2 once the pair
-/// is confirmed), v1 where there is no chat state to consult. It is recorded in each receipt, so a
-/// later recall targets the handle the copy actually went to.
+/// `handle` is the mailbox to post under — [`Node::post_handle`], the pair's v2 handle; empty when
+/// the pair has none, which posts nothing. It is recorded in each receipt, so a later recall
+/// targets the handle the copy actually went to.
 fn queue_on_relays(
     transport: &dyn Transport,
     primary: &Option<RelayClient>,
@@ -368,15 +347,13 @@ fn queue_on_relays(
         // contacted, so nothing is sealed and no post is logged.
         anyhow::bail!("peer offline and no relay accepted the message");
     }
+    if handle.is_empty() {
+        // No agreed handle means no relay route (`Node::route_to`), so a caller that got here
+        // anyway must not post to a mailbox nobody polls.
+        anyhow::bail!("peer offline and no relay accepted the message");
+    }
     let sealed = relay_wrap(contact_id, bytes)?;
-    crate::diag!(
-        "relay: queueing a copy under a {} handle",
-        if handle == mailbox_handle(contact_id) {
-            "v1"
-        } else {
-            "v2"
-        }
-    );
+    crate::diag!("relay: queueing a copy under the pair's handle");
     // Each recipient on its own circuits: posts for two people over one circuit would tell the
     // relay they share a correspondent — the contact graph per-pair handles exist to hide
     // (`mailbox.rs`, `post_group`). A no-op off Tor.
@@ -478,6 +455,12 @@ pub(crate) struct HelloBody {
     /// The secret of a key the joiner authorized on its own onion for the inviter, base64.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) pass: Option<String>,
+    /// The joiner's random seed for the pair's v2 mailbox secret, base64 (0.2,
+    /// `mailbox-handles.md` §10). The Hello goes only directly and is E2E-encrypted, so both sides
+    /// hold the secret before anything is posted to a relay, and no frame of a new pair ever needs
+    /// a handle derived from an identity key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) mailbox: Option<String>,
 }
 
 /// A `Hello` plaintext; `None` if we cannot read it.
@@ -570,12 +553,13 @@ fn recall_receipts(
             msg_id: r.msg_id.clone(),
             delete_token: r.delete_token.clone(),
         };
-        let handle = if r.handle.is_empty() {
-            mailbox_handle(contact_id)
-        } else {
-            r.handle.clone()
-        };
-        if !relay.recall(&handle, &receipt).unwrap_or(false) {
+        // A copy with no recorded handle went to a 0.1.x v1 mailbox, gone after its 24 h; the
+        // caller then sends the E2E edit or unsend instead.
+        if r.handle.is_empty() {
+            all_recalled = false;
+            continue;
+        }
+        if !relay.recall(&r.handle, &receipt).unwrap_or(false) {
             all_recalled = false;
         }
     }
@@ -929,9 +913,10 @@ pub struct Node {
     /// When this node started, for [`announce_ready`](Self::announce_ready)'s fallback.
     started: std::time::Instant,
     /// Tests only: behave like a build from before v2 mailboxes — never send a
-    /// [`Frame::MailboxKey`], and drop any that arrive undecoded, as an older build does.
+    /// [`Frame::MailboxKey`] or a mailbox seed in a `Hello`, and drop any `MailboxKey` that arrives
+    /// undecoded, as an older build does. A pair it makes has no mailbox until it stops.
     #[cfg(test)]
-    legacy_v1_only: bool,
+    legacy_no_mailbox: bool,
     /// Where media attachments are stored at rest: `(dir, key)`. Each attachment is sealed
     /// under `key` into its own file in `dir`, and the message only references its id — so
     /// large media never inflates the JSON state blob. `None` disables media (demo/tests).
@@ -1539,7 +1524,7 @@ impl Node {
             prev_epoch_drained: None,
             started: std::time::Instant::now(),
             #[cfg(test)]
-            legacy_v1_only: false,
+            legacy_no_mailbox: false,
             burn_receipts: false,
             media_store: None,
             pending_media: Vec::new(),
@@ -1754,7 +1739,7 @@ impl Node {
             // Held in `pending_control` from the start, not only after a failed first attempt: the
             // send now happens off the lock, after this call returns, and the chat is gone by then.
             // A copy landing removes it; until then it is saved with the state and retried.
-            let handle = self.post_handle(contact_id);
+            let handle = self.post_handle(contact_id).unwrap_or_default();
             self.queue_pending_control(
                 PendingControl {
                     recipient_ik: contact_id.to_string(),
@@ -2026,7 +2011,7 @@ impl Node {
             // may well be offline while screenshotting, and unlike a chat message there is nothing
             // the user can resend to make good on it. A copy landing removes it.
             let set = self.peer_relay_set(contact_id).unwrap_or_default();
-            let handle = self.post_handle(contact_id);
+            let handle = self.post_handle(contact_id).unwrap_or_default();
             self.queue_pending_control(
                 PendingControl {
                     recipient_ik: contact_id.to_string(),
@@ -2090,7 +2075,7 @@ impl Node {
                 &primary,
                 &targets,
                 id,
-                &self.post_handle(id),
+                &self.post_handle(id).unwrap_or_default(),
                 &bytes,
             )
             .is_ok();
@@ -2235,7 +2220,7 @@ impl Node {
             primary,
             peer_relays,
             recipient_ik: recipient_ik.to_string(),
-            handle: self.post_handle(recipient_ik),
+            handle: self.post_handle(recipient_ik).unwrap_or_default(),
             peer_address: peer_address.to_string(),
             bytes,
             fresh,
@@ -2520,10 +2505,16 @@ impl Node {
     /// A [`DetachedSend`] for a `pending_control` entry, which carries its own routing because its
     /// chat may be gone.
     pub(crate) fn detach_pending(&self, p: &PendingControl) -> DetachedSend {
-        let (primary, peer_relays) = self.post_route(&RelaySet {
-            nightdrop: p.nightdrop,
-            relays: p.relays.clone(),
-        });
+        // No handle (a pair with no agreed mailbox, or an entry saved by 0.1.x for a v1 one): no
+        // relay route, so it goes directly or waits.
+        let (primary, peer_relays) = if p.handle.is_empty() {
+            (None, Vec::new())
+        } else {
+            self.post_route(&RelaySet {
+                nightdrop: p.nightdrop,
+                relays: p.relays.clone(),
+            })
+        };
         DetachedSend {
             transport: Arc::clone(&self.transport),
             primary,
@@ -2719,10 +2710,27 @@ impl Node {
     /// while their set is unknown: unknown is held, never treated as "use Night Drop"
     /// (`optional-relay.md` §3 rule 3).
     pub(crate) fn route_to(&self, contact_id: &str) -> (Option<RelayClient>, Vec<String>) {
+        // A pair with no agreed mailbox has no handle its peer polls (`Node::post_handle`), so
+        // no relay route either: its frames go directly or wait, like a direct-only contact's.
+        if !self.mailbox_agreed(contact_id) {
+            return (None, Vec::new());
+        }
+        self.relays_between(contact_id)
+    }
+
+    /// The relays between us and `contact_id` whether or not the pair has a mailbox yet: what
+    /// the mailbox agreement itself needs ([`Node::relays_meet`]).
+    fn relays_between(&self, contact_id: &str) -> (Option<RelayClient>, Vec<String>) {
         match self.peer_relay_set(contact_id) {
             Some(set) => self.post_route(&set),
             None => (None, Vec::new()),
         }
+    }
+
+    /// Whether we and `contact_id` both have relays, so the pair has a mailbox worth agreeing.
+    pub(crate) fn relays_meet(&self, contact_id: &str) -> bool {
+        let (primary, targets) = self.relays_between(contact_id);
+        primary.is_some() || !targets.is_empty()
     }
 
     /// Whether a `pending_control` entry has a relay to go to (it carries its own set, since its
@@ -3171,7 +3179,7 @@ impl Node {
                 // Only where a mailbox could exist: a direct-only contact never answers the
                 // agreement, which is not evidence of an old app.
                 dto.peer_on_old_version =
-                    Self::peer_on_old_version(c) && self.has_relay_route(&c.contact.id);
+                    Self::peer_on_old_version(c) && self.relays_meet(&c.contact.id);
                 dto.peer_relays = c
                     .relay_set
                     .as_ref()

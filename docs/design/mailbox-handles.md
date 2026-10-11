@@ -1,7 +1,7 @@
 # Design — Per-pair, epoch-rotating mailbox handles
 
 **Status:** design agreed 2026-09-22; implemented on branch `mailbox-v2` 2026-09-26 and shipped in **0.1.26** (planned for 0.1.25). Where
-the build departs from or sharpens the text below, §9 says so.
+the build departs from or sharpens the text below, §9 says so. **0.2 drops v1** (§10).
 **Relates to:** `ARCHITECTURE.md` §6 (relay, store-and-forward) and §11.2, `multi-relay-mailboxes.md`
 (#17), `cover-traffic.md` (#4). Group chat (0.3) depends on this but does not block it.
 
@@ -301,3 +301,41 @@ confirmed agreement, with delivery receipts in 1–10 s. Offline mail under a v2
 queued a message "under a v2 handle" with the phone app closed, and the phone drained it on its
 first cold round (10/10 fragments answered). The receipt came back after 110 s, nearly all of it
 the time the phone app spent closed.
+
+## 10. 0.2: v1 dropped, and the pair's secret from the `Hello`
+
+Built 2026-10-11, for 0.2, the protocol release that does not talk to 0.1.x anyway (§5.5: v2 came in
+0.1.26, and 0.1.27–0.1.29 each said v1 would go).
+
+**Nothing posts or polls v1.** The static handle is gone from the code (`node::mailbox_handle` was
+deleted). A side posts only under a pair's v2 handle, and polls only v2 handles: its pairs', the
+dummies, and its own cover handle (below).
+
+**A new pair has its secret from the first frame.** Without v1, a pair that had not finished the
+§9 agreement would have had nowhere to post: the inviter's approval to a joiner who went offline
+right after pairing, or the first messages, went to v1. So the joiner puts 32 random bytes in its
+`Hello` (`HelloBody::mailbox`), and both sides take them as both contributions
+(`MailboxPair::seeded`): the same secret on both, confirmed from the start. The `Hello` goes only
+directly and is E2E-encrypted on the new session, so the seed is as private as a `MailboxKey`, and
+no relay copy of a new pair ever needs a handle the other side cannot compute. Re-pairing replaces
+the pair's secret with the new `Hello`'s. Every pair gets one, a direct-only one included (it costs
+nothing, and is ready if a relay is added later).
+
+**A pair without a confirmed secret has no relay route.** `Node::post_handle` is `None` for it, and
+`Node::route_to` then gives no relays, so its frames go directly or wait in the held queue
+(`optional-relay.md` §4), like a direct-only contact's. That covers a 0.1.x pair that never
+finished the agreement, a §9 re-agreement after a restore, and a frame 0.1.x saved for a v1 copy
+(`pending_control` with no handle). The agreement itself (`Frame::MailboxKey`) still runs for such
+pairs, now directly, when both sides have relays (`Node::relays_meet`). A recall of a copy with no
+recorded handle counts as not recalled, so the E2E edit or unsend goes instead.
+
+**Cover traffic posts to a v2 handle we poll** (`Node::cover_handle`, `optional-relay.md` §6): the
+inbound handle of one agreed contact picked at random each time, which is where that contact's real
+mail to us lands, or, with none, our own cover handle, derived from the persisted polling seed and
+the day. The cover handle is polled in every epoch like a contact's (it counts toward the padding),
+so it is drained, and a handle that receives cover is one that also looks polled for a reason.
+
+Tests: `node/tests_mailbox.rs` (`a_new_pair_has_its_mailbox_from_the_hello_…`,
+`the_seed_reaches_the_inviter_before_any_approval`, `a_pair_without_an_agreed_mailbox_has_no_relay_route`,
+`nothing_is_posted_to_or_polled_under_a_handle_from_the_identity_key_alone`, the two cover tests,
+and `a_pending_frame_saved_by_0_1_for_v1_goes_directly_or_waits`).

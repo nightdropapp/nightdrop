@@ -18,8 +18,9 @@ struct Pair {
     alice_id: String,
 }
 
-/// Pair Alice and Bob over one relay, then let their pumps run the agreement to completion.
-/// `legacy_bob` makes Bob a build from before v2 (he never sends or reads a `MailboxKey`).
+/// Pair Alice and Bob over one relay, then let their pumps run. `legacy_bob` makes Bob a build
+/// from before v2 (no seed in his `Hello`, and he never sends or reads a `MailboxKey`), so the
+/// pair has no mailbox, as a 0.1.x pair that never agreed one.
 fn pair(legacy_bob: bool) -> Pair {
     let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
     let net = MemoryNetwork::new();
@@ -27,7 +28,7 @@ fn pair(legacy_bob: bool) -> Pair {
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
     alice.set_relay(relay.clone());
     bob.set_relay(relay.clone());
-    bob.legacy_v1_only = legacy_bob;
+    bob.legacy_no_mailbox = legacy_bob;
     let bundle = alice.publish_bundle();
     let alice_id = bob.connect_with_bundle("alice", &bundle).unwrap();
     for _ in 0..3 {
@@ -61,31 +62,27 @@ fn received_texts(node: &Node, contact: &str) -> Vec<String> {
 }
 
 #[test]
-fn two_new_builds_agree_and_offline_mail_travels_under_a_v2_handle() {
+fn a_new_pair_has_its_mailbox_from_the_hello_and_offline_mail_travels_under_it() {
     let mut p = pair(false);
     assert!(
-        confirmed(&p.alice, &p.bob_id),
-        "Alice holds Bob's confirmation"
+        confirmed(&p.alice, &p.bob_id) && confirmed(&p.bob, &p.alice_id),
+        "the seed in Bob's Hello is the agreement: nothing else had to cross"
     );
-    assert!(
-        confirmed(&p.bob, &p.alice_id),
-        "Bob holds Alice's confirmation"
+    assert_eq!(
+        p.alice.chats[&p.bob_id].mailbox, p.bob.chats[&p.alice_id].mailbox,
+        "both sides hold the same secret"
     );
 
     p.net.disconnect("bob");
     p.alice.send(&p.bob_id, "under v2").unwrap();
-
-    let v2 = p.alice.post_handle(&p.bob_id);
-    assert_ne!(v2, mailbox_handle(&p.bob_id), "a confirmed pair posts v2");
+    let v2 = p
+        .alice
+        .post_handle(&p.bob_id)
+        .expect("a seeded pair has a handle");
     assert_eq!(
         p.relay.peek(&v2).unwrap(),
         1,
         "the copy sits under today's v2 handle"
-    );
-    assert_eq!(
-        p.relay.peek(&mailbox_handle(&p.bob_id)).unwrap(),
-        0,
-        "and nothing under Bob's static v1 handle"
     );
 
     p.net.reconnect("bob");
@@ -94,31 +91,60 @@ fn two_new_builds_agree_and_offline_mail_travels_under_a_v2_handle() {
 }
 
 #[test]
-fn a_new_build_keeps_an_old_peer_on_v1_in_both_directions() {
-    let mut p = pair(true);
+fn the_seed_reaches_the_inviter_before_any_approval() {
+    // The relay copy of an approval to an offline joiner needs the handle already: the Hello is
+    // the only frame that crosses before it, and it carries the seed.
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay);
+    alice.require_authorization = true;
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_id = bob.identity_key();
     assert!(
-        !confirmed(&p.alice, &p.bob_id),
-        "an old build never confirms, so Alice never switches"
+        !alice.chats[&bob_id].authorized,
+        "still a request awaiting approval"
     );
-    assert_eq!(p.alice.post_handle(&p.bob_id), mailbox_handle(&p.bob_id));
-
-    // New → old, offline.
-    p.net.disconnect("bob");
-    p.alice.send(&p.bob_id, "to the old build").unwrap();
-    p.net.reconnect("bob");
-    p.bob.poll_relay().unwrap();
-    assert!(received_texts(&p.bob, &p.alice_id).contains(&"to the old build".to_string()));
-
-    // Old → new, offline: the old build posts v1, which the new one still polls.
-    p.net.disconnect("alice");
-    p.bob.send(&p.alice_id, "from the old build").unwrap();
-    p.net.reconnect("alice");
-    p.alice.poll_relay().unwrap();
-    assert!(received_texts(&p.alice, &p.bob_id).contains(&"from the old build".to_string()));
+    assert!(
+        confirmed(&alice, &bob_id),
+        "and already holds the pair's secret"
+    );
 }
 
 #[test]
-fn half_an_agreement_never_posts_v2() {
+fn a_pair_without_an_agreed_mailbox_has_no_relay_route() {
+    let mut p = pair(true);
+    assert!(
+        !confirmed(&p.alice, &p.bob_id),
+        "an old build never confirms"
+    );
+    assert_eq!(p.alice.post_handle(&p.bob_id), None);
+    assert!(
+        !p.alice.has_relay_route(&p.bob_id),
+        "no handle he polls, so nothing to post to: direct only, like a contact with no relay"
+    );
+
+    // Offline: held for him, and nothing at all on the relay.
+    p.net.disconnect("bob");
+    p.alice.send(&p.bob_id, "held for the old build").unwrap();
+    assert_eq!(p.alice.held_count(), 1);
+    assert_eq!(
+        p.alice.messages(&p.bob_id).last().unwrap().delivery,
+        "waiting"
+    );
+    p.net.reconnect("bob");
+    p.alice.let_backoff_elapse();
+    p.alice.flush_held();
+    p.bob.pump().unwrap();
+    assert!(received_texts(&p.bob, &p.alice_id).contains(&"held for the old build".to_string()));
+}
+
+#[test]
+fn half_an_agreement_never_posts() {
     let mut p = pair(false);
     // Alice has Bob's contribution but not his confirmation — as if that frame were lost.
     let pair_state = p
@@ -132,8 +158,8 @@ fn half_an_agreement_never_posts_v2() {
     pair_state.peer_confirmed = false;
     assert_eq!(
         p.alice.post_handle(&p.bob_id),
-        mailbox_handle(&p.bob_id),
-        "without proof the peer holds the secret, mail goes to v1"
+        None,
+        "without proof the peer holds the secret, nothing goes to a relay"
     );
 }
 
@@ -148,18 +174,13 @@ fn a_peer_that_restores_an_old_backup_is_not_left_with_unreadable_mail() {
     p.bob.announce_mailbox();
     p.alice.pump().unwrap();
 
-    // Before anything else crosses, Alice must already be back on v1 for him.
+    // Before anything else crosses, Alice must already have stopped posting to the old handle.
     // (She has his new contribution and replied; his confirmation of the NEW secret is not in yet.)
     assert_eq!(
         p.alice.post_handle(&p.bob_id),
-        mailbox_handle(&p.bob_id),
-        "a changed contribution drops the pair to v1 at once"
+        None,
+        "a changed contribution takes the pair off the relay at once"
     );
-    p.net.disconnect("bob");
-    p.alice.send(&p.bob_id, "during the re-agreement").unwrap();
-    p.net.reconnect("bob");
-    p.bob.poll_relay().unwrap();
-    assert!(received_texts(&p.bob, &p.alice_id).contains(&"during the re-agreement".to_string()));
 
     // And they settle on the new secret.
     for _ in 0..3 {
@@ -167,6 +188,11 @@ fn a_peer_that_restores_an_old_backup_is_not_left_with_unreadable_mail() {
         p.alice.pump().unwrap();
     }
     assert!(confirmed(&p.alice, &p.bob_id) && confirmed(&p.bob, &p.alice_id));
+    p.net.disconnect("bob");
+    p.alice.send(&p.bob_id, "after the re-agreement").unwrap();
+    p.net.reconnect("bob");
+    p.bob.poll_relay().unwrap();
+    assert!(received_texts(&p.bob, &p.alice_id).contains(&"after the re-agreement".to_string()));
 }
 
 /// Times within today's UTC day, for tests that depend on where in the day they run.
@@ -197,10 +223,6 @@ fn near_midnight_readers_poll_both_neighbouring_days() {
             "Bob polls day {epoch} late in the day (today is {today})"
         );
     }
-    assert!(
-        polled.contains(&mailbox_handle(&p.bob.identity_key())),
-        "and v1, throughout the transition"
-    );
     let pair = p.bob.chats[&p.alice_id].mailbox.clone().unwrap();
     let secret = pair_secret(
         &p.bob.identity_key(),
@@ -276,7 +298,7 @@ fn an_edit_recalls_a_copy_posted_under_v2() {
     let mut p = pair(false);
     p.net.disconnect("bob");
     p.alice.send(&p.bob_id, "first draft").unwrap();
-    let v2 = p.alice.post_handle(&p.bob_id);
+    let v2 = p.alice.post_handle(&p.bob_id).unwrap();
     assert_eq!(p.relay.peek(&v2).unwrap(), 1);
     let msg_id = p.alice.messages(&p.bob_id).last().unwrap().msg_id.clone();
     p.alice.edit_message(&p.bob_id, &msg_id, "final").unwrap();
@@ -400,7 +422,7 @@ fn recorded(names: &[&str]) -> (Node, Log, Vec<(Node, String)>, MemoryNetwork) {
 }
 
 #[test]
-fn every_poll_rides_its_fragment_and_v1_rides_alone() {
+fn every_poll_rides_its_fragment() {
     let (alice, log, peers, _net) = recorded(&["bob", "carol"]);
     crate::node::drain_relay_mailboxes(&alice.relay_drain_plan_at(at(23)).unwrap());
     let takes: Vec<_> = log.lock().unwrap().clone();
@@ -408,16 +430,6 @@ fn every_poll_rides_its_fragment_and_v1_rides_alone() {
     assert!(
         takes.iter().all(|(g, _, _)| g.is_some()),
         "no poll uses the shared default circuits"
-    );
-
-    let v1 = mailbox_handle(&alice.identity_key());
-    let v1_group = takes.iter().find(|(_, _, h)| *h == v1).unwrap().0;
-    assert!(
-        takes
-            .iter()
-            .filter(|(g, _, _)| *g == v1_group)
-            .all(|(_, _, h)| *h == v1),
-        "the static v1 handle shares its circuits with nothing"
     );
 
     // One pair's handles for neighbouring days never share a fragment.
@@ -474,12 +486,10 @@ fn the_partition_is_fixed_for_the_epoch_and_survives_a_restart() {
 fn each_epoch_is_padded_so_one_round_does_not_count_contacts() {
     for names in [&[][..], &["bob"][..], &["bob", "carol", "dave"][..]] {
         let (alice, _log, _peers, _net) = recorded(names);
-        let v1 = mailbox_handle(&alice.identity_key());
         let polled: Vec<String> = alice
             .poll_fragments_at(at(23))
             .into_iter()
             .flat_map(|f| f.handles)
-            .filter(|h| *h != v1)
             .collect();
         assert_eq!(
             polled.len(),
@@ -518,8 +528,8 @@ fn posts_for_different_recipients_never_share_circuits() {
             .map(|(g, _, _)| *g)
             .collect()
     };
-    let to_bob = group_for(&alice.post_handle(bob));
-    let to_carol = group_for(&alice.post_handle(carol));
+    let to_bob = group_for(&alice.post_handle(bob).unwrap());
+    let to_carol = group_for(&alice.post_handle(carol).unwrap());
     assert_eq!(to_bob.len(), 2);
     assert_eq!(to_carol.len(), 1);
     assert!(
@@ -622,8 +632,9 @@ fn a_dead_relay_costs_two_attempts_per_round_not_one_per_fragment() {
 fn backdate_announce(node: &mut Node, contact: &str, secs: u64) {
     let chat = node.chats.get_mut(contact).unwrap();
     chat.last_seen = chat.last_seen.map(|t| t - secs);
+    // A pair seeded at pairing announced nothing, so there is nothing to move.
     let pair = chat.mailbox.as_mut().unwrap();
-    pair.announced_at = Some(pair.announced_at.expect("announced") - secs);
+    pair.announced_at = pair.announced_at.map(|t| t - secs);
 }
 
 fn flagged_old(node: &Node, contact: &str) -> bool {
@@ -685,7 +696,7 @@ fn the_notice_clears_when_the_old_peer_updates() {
     assert!(flagged_old(&p.alice, &p.bob_id));
 
     // Bob updates: his next launch announces his contribution, and the pair agrees.
-    p.bob.legacy_v1_only = false;
+    p.bob.legacy_no_mailbox = false;
     p.bob.announce_mailbox();
     for _ in 0..3 {
         p.alice.pump().unwrap();
@@ -745,7 +756,9 @@ fn the_primary_listed_again_by_the_directory_is_used_once() {
     p.net.disconnect("bob");
     p.alice.send(&p.bob_id, "once").unwrap();
     assert_eq!(
-        p.relay.peek(&p.alice.post_handle(&p.bob_id)).unwrap(),
+        p.relay
+            .peek(&p.alice.post_handle(&p.bob_id).unwrap())
+            .unwrap(),
         1,
         "one copy on the relay, not one per name"
     );
@@ -832,7 +845,7 @@ fn launch_announcements_wait_for_the_onion_or_the_fallback() {
         let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
         alice.set_relay(relay.clone());
         bob.set_relay(relay);
-        bob.legacy_v1_only = true; // never answers, so the pair stays open to announce
+        bob.legacy_no_mailbox = true; // never answers, so the pair stays open to announce
         let bundle = alice.publish_bundle();
         let bob_id = bob.connect_with_bundle("alice", &bundle).unwrap();
         let _ = bob_id;
@@ -962,4 +975,119 @@ fn receipt_survives_a_dead_connection(synchronous: bool) {
     net.reconnect("alice");
     alice.poll_relay().unwrap();
     assert_eq!(delivery(&alice), "delivered");
+}
+
+// ---- 0.2: no v1 handle, and where cover traffic goes (§10) ----
+
+/// The 0.1.x v1 handle, rebuilt here only to prove nothing uses it any more.
+fn old_v1_handle(identity_key: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new();
+    h.update(b"nightdrop/mailbox/v1");
+    h.update(identity_key.as_bytes());
+    format!("mbx:{}", base64_handle(&h.finalize()[..15]))
+}
+
+#[test]
+fn nothing_is_posted_to_or_polled_under_a_handle_from_the_identity_key_alone() {
+    let mut p = pair(false);
+    p.net.disconnect("bob");
+    p.alice.send(&p.bob_id, "offline mail").unwrap();
+    p.alice.send_cover_traffic();
+    for (node, me) in [(&p.alice, &p.alice_id), (&p.bob, &p.bob_id)] {
+        let v1 = old_v1_handle(me);
+        assert_eq!(p.relay.peek(&v1).unwrap(), 0, "nothing posted under v1");
+        assert!(
+            !node.drain_handles_at(at(23)).contains(&v1),
+            "and nobody polls it"
+        );
+    }
+    // A pair with no agreed mailbox gets no fallback to it either.
+    let mut old = pair(true);
+    old.net.disconnect("bob");
+    old.alice.send(&old.bob_id, "held").unwrap();
+    assert_eq!(old.relay.peek(&old_v1_handle(&old.bob_id)).unwrap(), 0);
+}
+
+#[test]
+fn cover_lands_in_a_contacts_mailbox_to_us_and_is_drained_unseen() {
+    let mut p = pair(false);
+    let epoch = current_epoch();
+    let cover = p.alice.cover_handle(epoch);
+    // With one contact the pick is Bob: the handle his real mail to Alice uses.
+    let pair = p.alice.chats[&p.bob_id].mailbox.clone().unwrap();
+    let secret = pair_secret(
+        &p.alice.identity_key(),
+        &p.bob_id,
+        &pair.own,
+        &pair.peer.unwrap(),
+    );
+    assert_eq!(cover, v2_handle(&secret, &p.alice.identity_key(), epoch));
+    assert!(
+        p.alice.drain_handles_at(at(12)).contains(&cover),
+        "a handle Alice polls"
+    );
+    assert!(
+        !p.bob.drain_handles_at(at(12)).contains(&cover),
+        "and not one Bob polls: cover never reaches a contact"
+    );
+
+    p.alice.send_cover_traffic();
+    assert_eq!(
+        p.relay.peek(&cover).unwrap(),
+        1,
+        "posted where real mail goes"
+    );
+    assert!(
+        p.alice.poll_relay().unwrap().is_empty(),
+        "and surfaces nothing"
+    );
+    assert_eq!(
+        p.relay.peek(&cover).unwrap(),
+        0,
+        "drained, not left to pile up"
+    );
+    assert!(received_texts(&p.alice, &p.bob_id).is_empty());
+}
+
+#[test]
+fn with_no_contact_cover_goes_to_our_own_cover_handle_which_we_poll() {
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_relay(relay.clone());
+    let cover = alice.cover_handle(current_epoch());
+    assert_eq!(
+        cover,
+        alice.cover_handle(current_epoch()),
+        "fixed for the day"
+    );
+    assert_ne!(
+        cover,
+        alice.cover_handle(current_epoch() + 1),
+        "and rotates like any handle"
+    );
+    assert!(alice.drain_handles_at(at(12)).contains(&cover));
+    alice.send_cover_traffic();
+    assert_eq!(relay.peek(&cover).unwrap(), 1);
+    assert!(alice.poll_relay().unwrap().is_empty());
+    assert_eq!(relay.peek(&cover).unwrap(), 0);
+}
+
+#[test]
+fn a_pending_frame_saved_by_0_1_for_v1_goes_directly_or_waits() {
+    let p = pair(false);
+    let entry = PendingControl {
+        recipient_ik: p.bob_id.clone(),
+        peer_address: "bob".to_string(),
+        relays: Vec::new(),
+        nightdrop: true,
+        bytes: b"x".to_vec(),
+        handle: String::new(), // what a 0.1.x state restores for a v1 copy
+        in_flight: false,
+    };
+    assert!(
+        !p.alice.relay_route_for_pending(&entry),
+        "no handle, no relay: never the static one"
+    );
 }

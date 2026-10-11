@@ -1,18 +1,22 @@
 //! Per-pair, epoch-rotating **v2 mailbox handles** (`docs/design/mailbox-handles.md`).
 //!
-//! A v1 handle is a static hash of the recipient's identity key, so a relay can link every deposit
-//! for one person, across senders and across days. A v2 handle is derived from a secret only the
-//! two people in a chat hold, the recipient's key, and the UTC day — different for every sender,
-//! and new every day. It is indistinguishable from a v1 handle on the wire (`mbx:` + 20 chars).
+//! A v2 handle is derived from a secret only the two people in a chat hold, the recipient's key,
+//! and the UTC day — different for every sender, and new every day — so a relay cannot link one
+//! person's deposits across senders or across days. 0.1.x also had a **v1** handle, a static hash
+//! of the recipient's identity key that linked all of them; 0.2 neither posts nor polls it (§10).
 //!
-//! **Losing a message is worse than the leak**, so the switch is gated (§5):
+//! **Losing a message is worse than the leak**, so a handle is used only where both sides can
+//! compute it:
 //!
-//! * The pair *agrees* the secret over the chat they already have: each side contributes 32
-//!   random bytes in a [`Frame::MailboxKey`], and the secret is derived from both.
-//! * A side **posts** v2 only once the peer has *proven* it holds the same secret (a confirmation
-//!   hash in its frame). Until then it posts v1.
-//! * A side **polls** v1 always, plus the v2 handles of every pair whose secret it holds — for
-//!   yesterday, today and tomorrow, so clock skew needs no negotiation.
+//! * A pair made by 0.2 gets its secret **at pairing**: the joiner puts a random seed in its
+//!   `Hello`, which goes only directly and is E2E-encrypted ([`MailboxPair::seeded`]).
+//! * A pair from 0.1.x that never finished the old agreement *agrees* one over the chat: each side
+//!   contributes 32 random bytes in a [`Frame::MailboxKey`], and the secret is derived from both.
+//!   A side **posts** to the pair's handle only once the peer has *proven* it holds the same
+//!   secret (a confirmation hash). Until then the pair has no relay route, and its frames go
+//!   directly or wait ([`Node::post_handle`]).
+//! * A side **polls** the handles of every pair whose secret it holds — for yesterday, today and
+//!   tomorrow, so clock skew needs no negotiation — plus its own cover-traffic handle.
 //! * A changed contribution (a peer restored an older backup) resets confirmation at once, so
 //!   nothing is posted to a handle the other side can no longer compute.
 
@@ -52,6 +56,19 @@ impl MailboxPair {
             peer: None,
             peer_confirmed: false,
             confirm_sent: false,
+            announced_at: None,
+        }
+    }
+
+    /// A pair agreed at pairing, from the seed the joiner put in its `Hello` (§10). Both sides
+    /// hold the same seed as both contributions, so the secret is the same on both and confirmed
+    /// from the start: the inviter read it from the joiner's Hello, and the joiner made it.
+    pub(super) fn seeded(seed: [u8; 32]) -> Self {
+        Self {
+            own: seed,
+            peer: Some(seed),
+            peer_confirmed: true,
+            confirm_sent: true,
             announced_at: None,
         }
     }
@@ -179,7 +196,7 @@ pub(super) const SKEW_MARGIN_SECS: u64 = 3 * 60 * 60;
 pub(crate) struct PollFragment {
     /// The isolation group ([`Transport::relay_dialer_isolated`]).
     pub(crate) group: u64,
-    /// The UTC day these v2 handles belong to; `None` for the static v1 handle.
+    /// The UTC day these v2 handles belong to.
     pub(crate) epoch: Option<u64>,
     pub(crate) handles: Vec<String>,
 }
@@ -299,16 +316,58 @@ impl Node {
             && seen > announced.saturating_add(OLD_VERSION_GRACE_SECS)
     }
 
-    /// The handle to post mail for `contact_id` under **right now**: v2 once the pair is
-    /// confirmed, v1 otherwise (and for any contact we no longer have a chat with).
-    pub(super) fn post_handle(&self, contact_id: &str) -> String {
-        if let Some(pair) = self.chats.get(contact_id).and_then(|c| c.mailbox.as_ref()) {
-            if let (true, Some(peer)) = (pair.peer_confirmed, pair.peer.as_ref()) {
+    /// The handle to post mail for `contact_id` under **right now**: the pair's v2 handle once the
+    /// pair is confirmed; `None` otherwise, which means **no relay route** to them
+    /// ([`Node::route_to`]): their frames go directly or wait, never to a handle they cannot poll.
+    pub(super) fn post_handle(&self, contact_id: &str) -> Option<String> {
+        let pair = self.chats.get(contact_id)?.mailbox.as_ref()?;
+        match (pair.peer_confirmed, pair.peer.as_ref()) {
+            (true, Some(peer)) => {
                 let secret = pair_secret(&self.identity_key(), contact_id, &pair.own, peer);
-                return v2_handle(&secret, contact_id, current_epoch());
+                Some(v2_handle(&secret, contact_id, current_epoch()))
             }
+            _ => None,
         }
-        mailbox_handle(contact_id)
+    }
+
+    /// Whether the pair with `contact_id` has a confirmed mailbox secret ([`post_handle`]).
+    ///
+    /// [`post_handle`]: Self::post_handle
+    pub(super) fn mailbox_agreed(&self, contact_id: &str) -> bool {
+        self.post_handle(contact_id).is_some()
+    }
+
+    /// The secret behind our **own** cover-traffic handle: derived from the persisted polling seed,
+    /// so it is known only to this device, fixed for the identity, and needs no contact.
+    fn cover_secret(&self) -> [u8; 32] {
+        let hk =
+            hkdf::Hkdf::<sha2::Sha256>::new(Some(b"nightdrop/mailbox/v2/cover"), &self.poll_seed);
+        let mut out = [0u8; 32];
+        hk.expand(b"self", &mut out)
+            .expect("32 bytes is a valid HKDF-SHA256 output length");
+        out
+    }
+
+    /// Where a cover post goes on UTC day `epoch` (`cover-traffic.md`, `optional-relay.md` §6):
+    /// the **inbound** handle of one agreed contact, picked at random each time — the mailbox that
+    /// contact's real mail to us lands in, on the relays it posts to (ours) — or, with no agreed
+    /// contact yet, our own cover handle. Either way a handle we poll, so the post is drained and
+    /// dropped like any cover frame, and the mailbox it pads is one real mail uses.
+    pub(super) fn cover_handle(&self, epoch: u64) -> String {
+        use rand::seq::IteratorRandom;
+        let me = self.identity_key();
+        let pick = self
+            .chats
+            .iter()
+            .filter(|(_, c)| c.authorized && !c.closed)
+            .filter_map(|(id, c)| {
+                let pair = c.mailbox.as_ref()?;
+                let peer = pair.peer.as_ref()?;
+                Some(pair_secret(&me, id, &pair.own, peer))
+            })
+            .choose(&mut rand::thread_rng());
+        let secret = pick.unwrap_or_else(|| self.cover_secret());
+        v2_handle(&secret, &me, epoch)
     }
 
     /// Every handle we poll at `now`, flattened (dummies included). Tests only — production drains
@@ -351,8 +410,6 @@ impl Node {
     /// Our mailboxes in polling fragments (§5c), fixed for each handle's epoch, for the days
     /// [`polled_epochs`](Self::polled_epochs) names at `now`.
     ///
-    /// * **v1 alone.** Our static handle is tied to our identity for good; polled beside anything,
-    ///   it would name the owner of that fragment's v2 handles.
     /// * **Each epoch in its own fragments.** Yesterday's, today's and tomorrow's handles for one
     ///   pair are polled in *their own day's* partition — together they would link the pair across
     ///   days, which is what rotation exists to prevent.
@@ -363,11 +420,8 @@ impl Node {
     /// * **Padded with dummies** per epoch, stable for that epoch like real handles.
     pub(crate) fn poll_fragments_at(&self, now: u64) -> Vec<PollFragment> {
         let me = self.identity_key();
-        let mut fragments = vec![PollFragment {
-            group: group_id(&[b"nightdrop/isolation/poll-v1", &self.poll_seed]),
-            epoch: None,
-            handles: vec![mailbox_handle(&me)],
-        }];
+        let cover = self.cover_secret();
+        let mut fragments = Vec::new();
         for epoch in self.polled_epochs(now) {
             let e = epoch.to_be_bytes();
             let mut buckets: Vec<Vec<String>> = vec![Vec::new(); POLL_FRAGMENTS as usize];
@@ -386,6 +440,10 @@ impl Node {
                 buckets[bucket_of(contact_id.as_bytes())].push(v2_handle(&secret, &me, epoch));
                 real += 1;
             }
+            // Our own cover handle (`cover_handle`), polled like a contact's: cover posts to it
+            // while we have no agreed contact, and are drained and dropped like any other.
+            buckets[bucket_of(b"cover")].push(v2_handle(&cover, &me, epoch));
+            real += 1;
             let padded = real.max(1).div_ceil(POLL_PAD) * POLL_PAD;
             for i in 0..(padded - real) as u64 {
                 let label = [b"dummy".as_slice(), &i.to_be_bytes()].concat();
@@ -427,8 +485,8 @@ impl Node {
                     && !c.closed
                     && !c.mailbox.as_ref().is_some_and(|p| p.peer_confirmed)
                     && !self.mailbox_announced.contains(id.as_str())
-                    // Mailboxes live on relays: with no relay route there is nothing to agree.
-                    && self.has_relay_route(id)
+                    // Mailboxes live on relays: with no relay on one side there is nothing to agree.
+                    && self.relays_meet(id)
             })
             .map(|(id, _)| id.clone())
             .collect();
@@ -446,14 +504,14 @@ impl Node {
     /// is recorded when it completes.
     pub(super) fn send_mailbox_key(&mut self, contact_id: &str) -> bool {
         #[cfg(test)]
-        if self.legacy_v1_only {
+        if self.legacy_no_mailbox {
             return false;
         }
-        // Mailboxes live on relays: with no relay route between us (either side direct only, or
+        // Mailboxes live on relays: with no relays between us (either side direct only, or
         // their set not known yet) there is nothing to agree, and an agreement they never answer
         // would later read as "they're on an older version" (`peer_on_old_version`). Checked here
         // rather than by each caller: the pairing paths start the agreement before any tick.
-        if !self.has_relay_route(contact_id) {
+        if !self.relays_meet(contact_id) {
             return false;
         }
         let me = self.identity_key();
@@ -506,7 +564,7 @@ impl Node {
     /// and replies with ours when the agreement still needs it. Silent: no history entry.
     pub(super) fn on_mailbox_key(&mut self, from: &str, message: &WireOlm) {
         #[cfg(test)]
-        if self.legacy_v1_only {
+        if self.legacy_no_mailbox {
             return;
         }
         let me = self.identity_key();
@@ -553,7 +611,9 @@ impl Node {
                 }
                 pair.peer_confirmed = true;
             } else if their_confirm.is_some() {
-                crate::diag!("mailbox: peer confirmation did not match — staying on v1");
+                crate::diag!(
+                    "mailbox: peer confirmation did not match — no relay route until it does"
+                );
             }
             // Reply when they have not confirmed (they need ours), or when we have not yet sent our
             // confirmation (they need that). A confirm-bearing frame after both sides confirmed
@@ -586,7 +646,7 @@ mod tests {
     }
 
     #[test]
-    fn handles_differ_by_direction_day_and_pair_and_look_like_v1() {
+    fn handles_differ_by_direction_day_and_pair() {
         let s = pair_secret("alice", "bob", &[1; 32], &[2; 32]);
         let to_bob = v2_handle(&s, "bob", 20_000);
         assert_ne!(
@@ -601,11 +661,10 @@ mod tests {
             v2_handle(&other, "bob", 20_000),
             "two senders to one recipient differ"
         );
-        let v1 = mailbox_handle("bob");
         assert_eq!(
             to_bob.len(),
-            v1.len(),
-            "a relay cannot tell v2 from v1 by shape"
+            "mbx:".len() + 20,
+            "the same shape as every other handle, dummies included"
         );
         assert!(to_bob.starts_with("mbx:"));
     }

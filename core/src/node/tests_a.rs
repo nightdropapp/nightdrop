@@ -371,7 +371,9 @@ fn remote_storage_keeps_an_encrypted_copy_on_the_relay() {
     bob.pump().unwrap();
     // ...AND a sealed copy is sitting in Bob's relay mailbox, addressed by the
     // unlinkable handle (NOT his transport address — the relay must not learn it).
-    let stored = relay.take(&mailbox_handle(&bob_contact)).unwrap();
+    let stored = relay
+        .take(&alice.post_handle(&bob_contact).unwrap())
+        .unwrap();
     assert_eq!(stored.len(), 1, "one sealed copy on the relay");
     assert!(
         !stored[0].windows(4).any(|w| w == b"keep"),
@@ -714,8 +716,18 @@ fn offline_mail_fans_out_across_the_recipients_relay_set_and_dedups() {
     );
     // The blob really landed on BOTH relays (non-draining peek — fetch/take would drain it).
     let relay2 = RelayClient::new(relay2_addr.to_string());
-    assert_eq!(relay1.peek(&mailbox_handle(&bob_contact)).unwrap(), 1);
-    assert_eq!(relay2.peek(&mailbox_handle(&bob_contact)).unwrap(), 1);
+    assert_eq!(
+        relay1
+            .peek(&alice.post_handle(&bob_contact).unwrap())
+            .unwrap(),
+        1
+    );
+    assert_eq!(
+        relay2
+            .peek(&alice.post_handle(&bob_contact).unwrap())
+            .unwrap(),
+        1
+    );
 
     // Bob polls primary + his extra relay and receives the message exactly ONCE (deduped).
     let received = bob.poll_relay().unwrap();
@@ -756,11 +768,11 @@ fn unsend_recalls_every_fanned_out_copy() {
 
     // Both relays' copies were recalled — bob, coming back, sees nothing.
     assert!(RelayClient::new(relay1_addr.to_string())
-        .fetch(&mailbox_handle(&bob_contact))
+        .fetch(&alice.post_handle(&bob_contact).unwrap())
         .unwrap()
         .is_empty());
     assert!(RelayClient::new(relay2_addr.to_string())
-        .fetch(&mailbox_handle(&bob_contact))
+        .fetch(&alice.post_handle(&bob_contact).unwrap())
         .unwrap()
         .is_empty());
     assert!(bob.poll_relay().unwrap().is_empty());

@@ -167,12 +167,19 @@ impl Node {
                     .authorize_client(&bundle.identity_key, public)
                     .is_ok()
             });
+        // The pair's mailbox secret, from the first frame (`mailbox.rs`, `MailboxPair::seeded`).
+        let mailbox_seed: [u8; 32] = rand::random();
+        #[cfg(not(test))]
+        let seeded = true;
+        #[cfg(test)]
+        let seeded = !self.legacy_no_mailbox;
         let body = serde_json::to_vec(&super::HelloBody {
             relays: mine.clone(),
             client_key: own_key.as_ref().map(|(public, _)| public.clone()),
             pass: reply_pass
                 .as_ref()
                 .map(|(_, secret)| super::encode_secret(secret)),
+            mailbox: seeded.then(|| super::encode_secret(&mailbox_seed)),
         })?;
         let hello = crypto::encrypt(&mut session, &body)?;
         let frame = Frame::Hello {
@@ -191,7 +198,7 @@ impl Node {
         // inviter's onion, so no relay is part of first contact, and one path is tested rather
         // than two.
         crate::diag!("pair: sending first-contact Hello to the peer");
-        let handle = self.post_handle(&bundle.identity_key);
+        let handle = self.post_handle(&bundle.identity_key).unwrap_or_default();
         self.queue_pending_control(
             super::PendingControl {
                 recipient_ik: bundle.identity_key.clone(),
@@ -223,6 +230,7 @@ impl Node {
                 chat.relay_set = inviter_relays;
             }
             chat.relays_told = Some(mine);
+            chat.mailbox = seeded.then(|| super::mailbox::MailboxPair::seeded(mailbox_seed));
             set_join_keys(chat, pass, own_key.map(|(_, secret)| secret));
             chat.history.push(ChatMessage::system(
                 "🔑 Re-paired with a new secure session. Compare the safety number again if you \
@@ -236,6 +244,7 @@ impl Node {
             chat.relay_set = inviter_relays;
             // The Hello carries it, and is held until it lands.
             chat.relays_told = Some(mine);
+            chat.mailbox = seeded.then(|| super::mailbox::MailboxPair::seeded(mailbox_seed));
             set_join_keys(&mut chat, pass, own_key.map(|(_, secret)| secret));
             self.chats.insert(contact_id.clone(), chat);
         }
@@ -250,9 +259,7 @@ impl Node {
         self.announce_captures_to(&contact_id);
         self.announce_burns_to(&contact_id);
         self.announce_version_to(&contact_id);
-        // Start the v2 mailbox agreement now rather than at the next relay tick (`mailbox.rs`).
-        // Refused for a chat still awaiting approval; the relay tick picks it up once approved.
-        self.send_mailbox_key(&contact_id);
+        // The Hello carried the pair's mailbox seed, so there is nothing to agree: `seeded` above.
         Ok(contact_id)
     }
 }

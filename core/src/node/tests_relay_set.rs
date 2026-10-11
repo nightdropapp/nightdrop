@@ -144,7 +144,7 @@ fn an_edited_list_reaches_contacts_and_moves_their_posts() {
 
     net.disconnect("bob");
     alice.send(&bob_id, "to his own relay").unwrap();
-    let handle = alice.post_handle(&bob_id);
+    let handle = alice.post_handle(&bob_id).unwrap();
     assert_eq!(own.peek(&handle).unwrap(), 1);
     assert_eq!(
         nightdrop.peek(&handle).unwrap(),
@@ -165,7 +165,7 @@ fn a_direct_only_contact_gets_nothing_posted() {
 
     net.disconnect("bob");
     let _ = alice.send(&bob_id, "held for direct delivery");
-    assert_eq!(relay.peek(&alice.post_handle(&bob_id)).unwrap(), 0);
+    assert_eq!(relay.peek(&alice.post_handle(&bob_id).unwrap()).unwrap(), 0);
 }
 
 #[test]

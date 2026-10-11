@@ -29,7 +29,8 @@ Two existing properties make federation nearly free:
 
 1. **Mailbox handles are relay-agnostic.** `mailbox_handle(recipient_ik) =
    sha256("nightdrop/mailbox/v1" ‖ recipient_ik)` (`core/src/node.rs`). The **same** handle
-   works on **every** relay — no per-relay addressing, no server-side account.
+   works on **every** relay — no per-relay addressing, no server-side account. (Still true of
+   the per-pair v2 handles that replaced it; v1 is gone in 0.2, `mailbox-handles.md` §10.)
 2. **Relays are already fully untrusted.** `relay_wrap(recipient_ik, frame)` seals every queued
    blob under a recipient-derived key; the relay sees only opaque bytes addressed by a hash. A
    new relay operator therefore learns nothing a sender didn't already accept the baked-in relay
