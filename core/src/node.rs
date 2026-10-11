@@ -1224,7 +1224,7 @@ impl DetachedSend {
                     return Delivery::Direct;
                 }
                 if self.primary.is_none() && self.peer_relays.is_empty() {
-                    crate::diag!("detached send: direct dial failed — no relay route, so it waits");
+                    crate::diag!("detached send: direct dial failed — no relay route, held for the next direct try");
                     return Delivery::Failed;
                 }
                 crate::diag!("detached send: direct dial failed — falling back to the relay");
