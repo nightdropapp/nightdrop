@@ -450,6 +450,11 @@ struct TimePeriodContext {
     last_successful: Option<RevisionCounter>,
     /// The outcome of the last upload, if any.
     upload_results: Vec<HsDirUploadStatus>,
+    /// Bumped every time the descriptor is marked dirty. An upload records the value it started
+    /// from, and its results may mark an HsDir clean only if nothing dirtied the descriptor while
+    /// it ran: otherwise the newer change (say, a restricted discovery client added mid-upload)
+    /// would be marked as published without ever being uploaded.
+    dirty_generation: u64,
 }
 
 impl TimePeriodContext {
@@ -463,6 +468,7 @@ impl TimePeriodContext {
         netdir: &Arc<NetDir>,
         old_hsdirs: impl Iterator<Item = &'r (RelayIds, DescriptorStatus)>,
         old_upload_results: Vec<HsDirUploadStatus>,
+        dirty_generation: u64,
     ) -> Result<Self, FatalError> {
         let period = params.time_period();
         let hs_dirs = Self::compute_hsdirs(period, blind_id, netdir, old_hsdirs)?;
@@ -480,6 +486,7 @@ impl TimePeriodContext {
             hs_dirs,
             last_successful: None,
             upload_results,
+            dirty_generation,
         })
     }
 
@@ -519,6 +526,7 @@ impl TimePeriodContext {
 
     /// Mark the descriptor dirty for all HSDirs of this time period.
     fn mark_all_dirty(&mut self) {
+        self.dirty_generation = self.dirty_generation.wrapping_add(1);
         self.hs_dirs
             .iter_mut()
             .for_each(|(_relay_id, status)| *status = DescriptorStatus::Dirty);
@@ -926,7 +934,12 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
                     // complete (updating the status involves locking the inner mutex, and I wanted
                     // to minimize the locking/unlocking overheads). I'm not sure handling the
                     // updates in batches was the correct decision here.
-                    *status = DescriptorStatus::Clean;
+                    //
+                    // Not when the descriptor was marked dirty after this upload started: what
+                    // this HsDir got is older than what we now want published.
+                    if results.dirty_generation == period.dirty_generation {
+                        *status = DescriptorStatus::Clean;
+                    }
                 }
             }
 
@@ -1016,6 +1029,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
                         netdir,
                         ctx.hs_dirs.iter(),
                         ctx.upload_results.clone(),
+                        ctx.dirty_generation,
                     )
                 } else {
                     // Passing an empty iterator here means all HsDirs in this TimePeriodContext
@@ -1026,6 +1040,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
                         netdir,
                         iter::empty(),
                         vec![],
+                        0,
                     )
                 }
             })
@@ -1415,6 +1430,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
             );
 
             let params = period_ctx.params.clone();
+            let dirty_generation = period_ctx.dirty_generation;
             let shutdown_rx = self.shutdown_tx.subscribe();
 
             // Spawn a task to upload the descriptor to all HsDirs of this time period.
@@ -1433,6 +1449,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
                         Arc::clone(&imm),
                         ipt_upload_view.clone(),
                         authorized_clients.clone(),
+                        dirty_generation,
                         upload_task_complete_tx,
                         shutdown_rx,
                     )
@@ -1465,6 +1482,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
         imm: Arc<Immutable<R, M>>,
         ipt_upload_view: IptsPublisherUploadView,
         authorized_clients: Option<Arc<RestrictedDiscoveryKeys>>,
+        dirty_generation: u64,
         mut upload_task_complete_tx: mpsc::Sender<TimePeriodUploadResult>,
         shutdown_rx: broadcast::Receiver<Void>,
     ) -> Result<(), FatalError> {
@@ -1707,6 +1725,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
             .send(TimePeriodUploadResult {
                 time_period,
                 hsdir_result: upload_results,
+                dirty_generation,
             })
             .await
             .is_err()
@@ -2154,6 +2173,8 @@ struct TimePeriodUploadResult {
     time_period: TimePeriod,
     /// The upload results.
     hsdir_result: Vec<HsDirUploadStatus>,
+    /// The period's `dirty_generation` when this upload started.
+    dirty_generation: u64,
 }
 
 /// The outcome of uploading a descriptor to a particular HsDir.
@@ -2216,6 +2237,7 @@ mod test {
             hs_dirs: vec![],
             last_successful: None,
             upload_results,
+            dirty_generation: 0,
         }
     }
 
