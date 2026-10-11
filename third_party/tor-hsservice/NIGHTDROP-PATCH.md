@@ -13,6 +13,10 @@ the field described the problem as a TODO; still unfixed in 0.47.0, the version 
 (re-applied 2026-10-05 for 0.1.28; the patch applied with line offsets only).
 Measurements: `docs/background-traffic.md`.
 
+Reported upstream as arti issue #2805, "tor-hsservice: duplicate reupload timers make descriptor
+republishing grow with uptime" (<https://gitlab.torproject.org/tpo/core/arti/-/issues/2805>,
+submitted 2026-10-03 via anonticket, approved and public by 2026-10-09).
+
 **What changed:**
 
 - `publish/reactor.rs`: before scheduling a period's reupload, drop any earlier timer for that
