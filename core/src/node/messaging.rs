@@ -40,7 +40,7 @@ fn sent_message_mut<'a>(history: &'a mut [ChatMessage], id: &str) -> Option<&'a 
 /// True from the moment a short-code join completes until the invitee approves (or their first
 /// message arrives). Sending in that window would queue a message the peer's core will drop as
 /// unauthorized, leaving it sitting in the sender's history looking delivered — so refuse it.
-fn awaiting_approval(chat: &super::Chat) -> bool {
+pub(super) fn awaiting_approval(chat: &super::Chat) -> bool {
     chat.history
         .iter()
         .any(|m| m.system && m.kind == "await_approval")

@@ -170,9 +170,11 @@ fn qr(inviter: &mut Node) -> String {
 
 fn join(joiner: &mut Node, payload: &str) -> String {
     let (addr, bundle) = crate::api::parse_invite(payload).unwrap();
-    joiner
+    let id = joiner
         .connect_with_invite(&addr, &bundle, crate::api::parse_invite_extras(payload))
-        .unwrap()
+        .unwrap();
+    joiner.note_awaiting_approval(&id); // as `connect_via_qr` does
+    id
 }
 
 /// Without this section a direct-only device could pair once and never again: its onion becomes

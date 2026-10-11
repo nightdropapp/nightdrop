@@ -460,9 +460,13 @@ impl Node {
                 // The inviter approved our request: drop the "waiting to be accepted" notice and
                 // surface an approval confirmation (itself cleared on the first received message).
                 devlog!("[nightdrop] received approval from {from} (code='{code}')");
-                if self.chats.contains_key(&from) {
+                if let Some(chat) = self.chats.get(&from) {
+                    // Only the approval that ends the wait is news. The frame can arrive twice (a
+                    // direct copy that looked lost, then the relay copy behind it: S23, 2026-10-11)
+                    // and is unauthenticated besides, so a repeat must change nothing on screen.
+                    let was_waiting = super::messaging::awaiting_approval(chat);
                     self.clear_system_notices(&from, &["await_approval"]);
-                    if let Some(chat) = self.chats.get_mut(&from) {
+                    if let Some(chat) = self.chats.get_mut(&from).filter(|_| was_waiting) {
                         chat.history.push(ChatMessage::system_tagged(
                             "✅ Your chat request was approved. You can start chatting."
                                 .to_string(),

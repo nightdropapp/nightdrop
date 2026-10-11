@@ -1032,6 +1032,7 @@ fn approval_signal_reaches_the_joiner() {
 
     let bundle = alice.publish_bundle();
     let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    bob.note_awaiting_approval(&alice_contact); // as the API's join paths do
     alice.pump().unwrap();
 
     // Alice approves -> an Approved signal goes back to Bob.
@@ -1056,6 +1057,7 @@ fn approving_twice_does_not_resend_approval() {
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
     let bundle = alice.publish_bundle();
     let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    bob.note_awaiting_approval(&alice_contact); // as the API's join paths do
     alice.pump().unwrap();
 
     let req = alice.pending_authorizations()[0].id.clone();
@@ -1070,6 +1072,35 @@ fn approving_twice_does_not_resend_approval() {
         .filter(|m| m.system && m.text.contains("approved"))
         .count();
     assert_eq!(approvals, 1, "second approval must not resend");
+}
+
+/// Seen on the S23, 2026-10-11: the approval came twice (a direct copy that looked lost, then the
+/// relay copy put behind it) and the joiner showed "Your chat request was approved" twice. Only
+/// the approval that ends the wait is shown; a repeat changes nothing.
+#[test]
+fn an_approval_that_arrives_twice_is_shown_once() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    alice.set_require_authorization(true);
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    bob.note_awaiting_approval(&alice_contact);
+    alice.pump().unwrap();
+
+    let approved = Frame::Approved {
+        from: alice_contact.clone(),
+        code: String::new(),
+    };
+    bob.process_frame(None, approved.clone()).unwrap();
+    bob.process_frame(None, approved).unwrap();
+
+    let approvals = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| m.system && m.text.contains("approved"))
+        .count();
+    assert_eq!(approvals, 1, "one approval notice for one approval");
 }
 
 /// A memory transport that reports itself asynchronous, as Tor does, so sends take the deferred,
