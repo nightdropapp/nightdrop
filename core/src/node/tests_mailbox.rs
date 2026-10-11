@@ -1091,3 +1091,36 @@ fn a_pending_frame_saved_by_0_1_for_v1_goes_directly_or_waits() {
         "no handle, no relay: never the static one"
     );
 }
+
+#[test]
+fn an_approval_and_first_message_to_a_joiner_who_went_offline_arrive_from_the_relay() {
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+    alice.require_authorization = true;
+    let bundle = alice.publish_bundle();
+    let alice_id = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_id = bob.identity_key();
+    assert!(!alice.chats[&bob_id].authorized);
+
+    net.disconnect("bob");
+    alice.authorize(&bob_id, true).unwrap();
+    alice.send(&bob_id, "first, while you were away").unwrap();
+    let handle = alice.post_handle(&bob_id).unwrap();
+    assert!(
+        relay.peek(&handle).unwrap() >= 2,
+        "the approval and the message wait on the relay"
+    );
+    assert!(
+        bob.drain_handles_at(at(12)).contains(&handle),
+        "under a handle Bob polls"
+    );
+
+    net.reconnect("bob");
+    bob.poll_relay().unwrap();
+    assert!(received_texts(&bob, &alice_id).contains(&"first, while you were away".to_string()));
+}

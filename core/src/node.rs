@@ -553,7 +553,7 @@ fn recall_receipts(
             msg_id: r.msg_id.clone(),
             delete_token: r.delete_token.clone(),
         };
-        // A copy with no recorded handle went to a 0.1.x v1 mailbox, gone after its 24 h; the
+        // A copy no recall can reach (`QueuedReceipt::handed_directly`, or a 0.1.x v1 copy): the
         // caller then sends the E2E edit or unsend instead.
         if r.handle.is_empty() {
             all_recalled = false;
@@ -638,13 +638,29 @@ pub(crate) enum DirectoryOutcome {
 pub(crate) struct QueuedReceipt {
     /// `None` = the primary (baked-in) relay; `Some(addr)` = an advertised extra relay.
     relay_addr: Option<String>,
-    /// The mailbox handle the copy was posted under (v1 or a v2 day handle), so a recall targets
-    /// it. Empty on receipts persisted before v2, which were all v1.
+    /// The mailbox handle the copy was posted under (a v2 day handle), so a recall targets it.
+    /// **Empty for a copy no recall can reach** ([`recall_receipts`] counts it as not recalled): one
+    /// persisted by 0.1.x under a v1 handle, or [`QueuedReceipt::handed_directly`].
     handle: String,
     /// The relay's own id for the queued blob.
     msg_id: String,
     /// The secret token that authorizes deleting (recalling) the blob.
     delete_token: String,
+}
+
+impl QueuedReceipt {
+    /// The copy handed straight to the peer before a relay copy was put behind it (no receipt in
+    /// time, [`Node::sweep_unconfirmed`]). It may still arrive, from a connection the peer has not
+    /// read yet (an app the OS froze), so recalling every relay copy does not make an edit or an
+    /// unsend invisible: this entry keeps the recall from claiming so, and the E2E frame goes too.
+    fn handed_directly() -> Self {
+        Self {
+            relay_addr: None,
+            handle: String::new(),
+            msg_id: String::new(),
+            delete_token: String::new(),
+        }
+    }
 }
 
 struct Chat {
@@ -2374,8 +2390,10 @@ impl Node {
                 }
                 OutboundDone::Unconfirmed(a) => {
                     match delivery {
-                        Delivery::Relay(copies) => {
+                        Delivery::Relay(mut copies) => {
                             if let Some(chat) = self.chats.get_mut(&a.contact_id) {
+                                // The direct copy went first and may still land.
+                                copies.push(QueuedReceipt::handed_directly());
                                 chat.relay_receipts.insert(a.msg_id.clone(), copies);
                                 // Only a message still waiting: a receipt that landed while the copy
                                 // was being posted has already moved it on.

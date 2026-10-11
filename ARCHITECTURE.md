@@ -1324,7 +1324,13 @@ mail queues on the relay until we restore within its 24h window.
    Delivered edits go as an E2E `Edit` frame naming the message's random `msg_id`; both sides
    show an **"edited"** tag. **Unsend ("delete for both")** — shipped — reuses this exactly: a
    queued message is `recall`ed to nothing (the peer never receives it); a delivered one gets an
-   E2E `Unsend` frame, and both sides replace it with a `kind == "deleted"` tombstone.
+   E2E `Unsend` frame, and both sides replace it with a `kind == "deleted"` tombstone. The quiet
+   path needs **every** copy recalled, and a message that was first handed straight to the peer
+   (queued only because no receipt came in time, `sweep_unconfirmed`) is never fully recalled: the
+   direct copy may still land from a connection the peer has not read yet, e.g. an app the OS
+   froze (`QueuedReceipt::handed_directly`). It is edited or unsent with the E2E frame. Found on
+   two Linux test devices with one frozen, 2026-10-11: the peer had shown the draft and the
+   unsent message (`edit_and_unsend_of_a_message_also_handed_directly_…` in `node/tests_a.rs`).
 3. **Backup modes** (Lite default / Full) + **backed-up flag** + **Closed-on-logout for un-backed
    chats** + **backup transparency signal** to peers.
 4. **Single-chat scoped backup**, then **import-into-existing-identity (merge)** restore.

@@ -2404,3 +2404,64 @@ fn a_private_relay_access_key_is_stable_and_survives_a_restart() {
         "nothing re-minted after the restart"
     );
 }
+
+/// Found on two Linux devices, 2026-10-11: a message handed to a peer whose app was frozen (the
+/// Android app freezer does the same) sat unread in its connection; with no receipt, the sweep put a
+/// relay copy behind it. Editing or unsending it then recalled every relay copy and called that
+/// invisible, but the direct copy was still on its way: the peer showed the draft and the unsent
+/// message. A message that was ever handed directly can only be edited or unsent out loud.
+#[test]
+fn edit_and_unsend_of_a_message_also_handed_directly_reach_the_peer_despite_a_full_recall() {
+    let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
+    let relay = RelayClient::new(relay_addr.to_string());
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    bob.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    // Bob's app is frozen: both frames sit unread in his transport.
+    alice.send(&bob_contact, "draft").unwrap();
+    alice.send(&bob_contact, "to be unsent").unwrap();
+    let ids: Vec<String> = alice
+        .messages(&bob_contact)
+        .into_iter()
+        .filter(|m| m.from_me && !m.system)
+        .map(|m| m.msg_id)
+        .collect();
+    let (draft, unsent) = (ids[ids.len() - 2].clone(), ids[ids.len() - 1].clone());
+    alice.backdate_unconfirmed(crate::node::messaging::RECEIPT_TIMEOUT.as_secs() + 1);
+    alice.sweep_unconfirmed();
+
+    alice.edit_message(&bob_contact, &draft, "final").unwrap();
+    alice.unsend_message(&bob_contact, &unsent).unwrap();
+
+    // Bob thaws: the direct frames first, then whatever the relay and the edit/unsend left.
+    bob.pump().unwrap();
+    bob.poll_relay().unwrap();
+    alice.pump().unwrap();
+    bob.pump().unwrap();
+    let texts: Vec<String> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.from_me && !m.system)
+        .map(|m| m.text)
+        .collect();
+    assert!(
+        texts.contains(&"final".to_string()),
+        "the edit reached Bob: {texts:?}"
+    );
+    assert!(
+        !texts.contains(&"draft".to_string()),
+        "no draft left: {texts:?}"
+    );
+    assert!(
+        !texts.contains(&"to be unsent".to_string()),
+        "the unsend reached Bob: {texts:?}"
+    );
+}
