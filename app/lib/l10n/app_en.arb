@@ -602,6 +602,10 @@
   "@noChatsYet": {
     "description": "Empty-state text on the conversation list."
   },
+  "noChatsYetQrOnly": "No chats yet.\nTap “New chat” to pair by QR code.",
+  "@noChatsYetQrOnly": {
+    "description": "Empty-state text on the conversation list on direct only, where short codes are unavailable (they need a relay)."
+  },
   "storedOnServer24h": "Stored on server (24h)",
   "@storedOnServer24h": {
     "description": "Chat subtitle when remote storage is on."

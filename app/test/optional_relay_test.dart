@@ -205,6 +205,9 @@ void main() {
       await tester.pump();
       expect(find.textContaining('Direct only: you receive messages only'),
           direct ? findsOneWidget : findsNothing);
+      // And the empty list offers only what works: no short codes without a relay.
+      expect(find.textContaining('or short code'), direct ? findsNothing : findsOneWidget);
+      expect(find.textContaining('to pair by QR code.'), direct ? findsOneWidget : findsNothing);
     }
   });
 }

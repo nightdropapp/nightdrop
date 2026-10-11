@@ -125,12 +125,18 @@ class HomeScreen extends StatelessWidget {
           final requests = core.incomingRequests;
           final contacts = core.contacts;
           if (requests.isEmpty && contacts.isEmpty) {
+            // Short codes need a relay (`optional-relay.md` §5): on direct only, QR alone.
             return Center(
               child: Padding(
                 padding: const EdgeInsets.all(32),
-                child: Text(
-                  l10n.noChatsYet,
-                  textAlign: TextAlign.center,
+                child: FutureBuilder<RelayFeatures>(
+                  future: core.relayFeatures(),
+                  builder: (context, snap) => Text(
+                    (snap.data?.shortCodes ?? true)
+                        ? l10n.noChatsYet
+                        : l10n.noChatsYetQrOnly,
+                    textAlign: TextAlign.center,
+                  ),
                 ),
               ),
             );

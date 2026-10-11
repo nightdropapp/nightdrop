@@ -461,6 +461,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'No chats yet.\nTap “New chat” to pair by QR or short code.';
 
   @override
+  String get noChatsYetQrOnly =>
+      'No chats yet.\nTap “New chat” to pair by QR code.';
+
+  @override
   String get storedOnServer24h => 'Stored on server (24h)';
 
   @override

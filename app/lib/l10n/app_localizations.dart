@@ -868,6 +868,12 @@ abstract class AppLocalizations {
   /// **'No chats yet.\nTap “New chat” to pair by QR or short code.'**
   String get noChatsYet;
 
+  /// Empty-state text on the conversation list on direct only, where short codes are unavailable (they need a relay).
+  ///
+  /// In en, this message translates to:
+  /// **'No chats yet.\nTap “New chat” to pair by QR code.'**
+  String get noChatsYetQrOnly;
+
   /// Chat subtitle when remote storage is on.
   ///
   /// In en, this message translates to:
