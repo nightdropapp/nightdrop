@@ -283,7 +283,13 @@ it costs a fresh consensus fetch on the next launch.
   is shown at arming and nowhere else (§6).
 * ✅ **`SECURITY.md`** — the inherited PIN limit, the no-rehearsal limit, the indistinguishability
   properties, and the server-backup residual risk.
-* ⬜ **Not yet tested on hardware.** Verified by `cargo test` (129), `flutter test` (33, one new
+* ✅ **Tested on hardware** (Galaxy S23, Android 14, 2026-10-11, on a throwaway app id
+  `app.nightdrop.uptest`, 0.2.0 from main 14223eb, after a 0.1.29 -> 0.2 upgrade): app lock set,
+  wipe code set (the warning shown once, nothing on the home menu says it is armed), app restarted
+  to its lock screen, wipe code entered: it opened onboarding at once, and a second restart still
+  came up as a fresh install, no lock screen, no identity. No `wipe: could not remove` line in the
+  diag log. The paired contact (a Linux device) was told nothing, as the arming warning says: at
+  the lock screen no core is running to send it. The diag build's own log file survives the wipe;
+  only opt-in diag builds write it. Before that: `cargo test` (129), `flutter test` (33, one
   covering that a duress unlock is indistinguishable from a successful one at the lock screen),
-  analyze and clippy. A device run needs care: arming and then entering the wipe code on the S25
-  **will** destroy that identity and its chats.
+  analyze and clippy.
