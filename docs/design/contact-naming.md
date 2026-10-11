@@ -1,6 +1,6 @@
 # Design draft — Telling your contacts apart
 
-**Status:** 🟢 implemented (2026-08-01). Exercised on a device (Galaxy S25, 2026-10-08): the tag shows beside an unnamed contact, a nickname replaces it and survives a restart, and the peer (Windows) still sees "Anon" and its own tag. Naming from the chat menu crashed the debug build until that day's fix.
+**Status:** 🟢 implemented (2026-08-01). Exercised on a device (Galaxy S25, 2026-10-08): the tag shows beside an unnamed contact, a nickname replaces it and survives a restart, and the peer (Windows) still sees "Anon" and its own tag. Naming from the chat menu crashed the debug build until that day's fix. Again on 0.2 (Galaxy S23, 2026-10-11): a nickname replaced the tag and survived a restart, a contact's own chosen name kept its tag beside it, and the peer (Windows) still showed "Anon" with its tag.
 **Relates to:** `ARCHITECTURE.md` §4 (per-chat names), the key-verification design (safety
 numbers), and `#5` multiple identities, which multiplies the problem.
 
