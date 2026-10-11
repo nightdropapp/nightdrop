@@ -382,6 +382,9 @@ fn recorded(names: &[&str]) -> (Node, Log, Vec<(Node, String)>, MemoryNetwork) {
     let mut peers = Vec::new();
     for name in names {
         let mut peer = Node::new(Box::new(net.endpoint(name)));
+        // A relay of their own, as every launch with a relay list sets: without a relay route
+        // there is no mailbox to agree on. Never dialled here (everything lands directly).
+        peer.set_relay(RelayClient::new("127.0.0.1:9".to_string()));
         let bundle = alice.publish_bundle();
         peer.connect_with_bundle("alice", &bundle).unwrap();
         for _ in 0..3 {
@@ -651,7 +654,8 @@ fn an_old_peer_is_flagged_once_it_is_active_and_still_silent() {
     // It survives a restart: the send time is persisted with the agreement.
     let key = [5u8; 32];
     let saved = p.alice.export(&key);
-    let restored = Node::restore(&saved, Box::new(p.net.endpoint("alice2")), &key).unwrap();
+    let mut restored = Node::restore(&saved, Box::new(p.net.endpoint("alice2")), &key).unwrap();
+    restored.set_relay(p.relay.clone()); // as every launch does
     assert!(flagged_old(&restored, &p.bob_id), "after a restart");
 }
 

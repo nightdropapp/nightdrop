@@ -3159,7 +3159,10 @@ impl Node {
                 dto.last_seen_secs = c.last_seen.unwrap_or(0);
                 dto.local_name = c.local_name.clone();
                 dto.identity_tag = identity_tag(&c.contact.id);
-                dto.peer_on_old_version = Self::peer_on_old_version(c);
+                // Only where a mailbox could exist: a direct-only contact never answers the
+                // agreement, which is not evidence of an old app.
+                dto.peer_on_old_version =
+                    Self::peer_on_old_version(c) && self.has_relay_route(&c.contact.id);
                 dto.peer_relays = c
                     .relay_set
                     .as_ref()

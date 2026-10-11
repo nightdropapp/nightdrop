@@ -576,7 +576,8 @@ Traps, each of which has happened:
   reported healthy for 90 minutes while every client timed out; the website onion had no check
   and went dark while systemd called it active. The fix each time was an **end-to-end self-dial**
   plus a heartbeat logged every cycle — counters are worthless without evidence the log is growing.
-- **The test phone** is a Galaxy S25 on wireless adb (serial and address: `MAINTENANCE.local.md`).
+- **The test phones** are a Galaxy S25 and a Wi-Fi-only Galaxy S23, both on wireless adb (serials and
+  addresses: `MAINTENANCE.local.md`).
 - **AppImage window icon**: GTK resolves it by theme name, so the AppDir ships
   `usr/share/icons/hicolor/*/apps/app.nightdrop.png` and `AppRun` prepends `$HERE/usr/share` to
   `XDG_DATA_DIRS` (`scripts/build-appimage.sh`). Checking it on the build machine is misleading,

@@ -297,7 +297,10 @@ a direct-only user's contacts see their messages arrive the moment that user com
    * Editing or unsending a message still held edits the held copy in place or drops it; nothing
      is sent. "waiting" never expires; deleting the chat drops its held frames.
    * The v2 mailbox agreement is skipped for a contact with no relay route (mailboxes live on
-     relays).
+     relays), at every entry point: `send_mailbox_key` checks it itself. Until 2026-10-10 only the
+     tick did, and pairing started one anyway; the direct-only side never answered, so once it
+     was seen alive the other side called it "on an older version" (S23 test). That notice now
+     also needs a relay route (`tests_held.rs`).
    * Not yet measured: the battery cost of the background retries on two phones (§9 tests).
 4. **Pairing credentials (§5)** for QR and `Hello`. **Built 2026-10-09** (tests in
    `node/tests_pass.rs`, which simulate restricted discovery, and on real Tor

@@ -449,6 +449,13 @@ impl Node {
         if self.legacy_v1_only {
             return false;
         }
+        // Mailboxes live on relays: with no relay route between us (either side direct only, or
+        // their set not known yet) there is nothing to agree, and an agreement they never answer
+        // would later read as "they're on an older version" (`peer_on_old_version`). Checked here
+        // rather than by each caller: the pairing paths start the agreement before any tick.
+        if !self.has_relay_route(contact_id) {
+            return false;
+        }
         let me = self.identity_key();
         let frame_confirms: bool;
         let (addr, frame) = {

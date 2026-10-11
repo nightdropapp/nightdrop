@@ -324,3 +324,56 @@ fn the_online_signal_decides_whether_a_launch_flushes_what_contacts_hold() {
         );
     }
 }
+
+/// Seen with a direct-only phone (2026-10-10): the joiner started the private-mailbox agreement at
+/// pairing, before any relay route existed. The direct-only side never answers one, so once it was
+/// seen alive the joiner's chat said it was "on an older version". No agreement starts without a
+/// relay route, and an unanswered one left over from before says nothing about the contact's app.
+#[test]
+fn a_direct_only_contact_gets_no_mailbox_agreement_and_is_never_called_old() {
+    for direct_only_inviter in [false, true] {
+        let net = MemoryNetwork::new();
+        let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+        let mut alice = Node::new(Box::new(net.endpoint("alice")));
+        let mut bob = Node::new(Box::new(net.endpoint("bob")));
+        alice.set_relay(relay.clone());
+        bob.set_relay(relay.clone());
+        if direct_only_inviter {
+            alice.set_relay_list(Vec::new());
+        } else {
+            bob.set_relay_list(Vec::new());
+        }
+        bob.connect_with_bundle("alice", &alice.publish_bundle())
+            .unwrap();
+        for _ in 0..3 {
+            alice.pump().unwrap();
+            bob.pump().unwrap();
+            alice.announce_mailbox();
+            bob.announce_mailbox();
+        }
+        let (alice_id, bob_id) = (alice.identity_key(), bob.identity_key());
+        assert!(
+            alice.chats[&bob_id].mailbox.is_none(),
+            "inviter started none"
+        );
+        assert!(
+            bob.chats[&alice_id].mailbox.is_none(),
+            "joiner started none"
+        );
+
+        // One started before this fix, never answered, and the contact active long after.
+        let chat = alice.chats.get_mut(&bob_id).unwrap();
+        let mut pair = super::mailbox::MailboxPair::fresh();
+        pair.announced_at = Some(1);
+        chat.mailbox = Some(pair);
+        chat.last_seen = Some(crate::api::now_secs());
+        assert!(
+            Node::peer_on_old_version(&alice.chats[&bob_id]),
+            "the evidence is there"
+        );
+        assert!(
+            !alice.contacts()[0].peer_on_old_version,
+            "but a direct-only contact never answers one"
+        );
+    }
+}
