@@ -44,3 +44,16 @@
          </article>
          <article class="card">
            <h3>🎞️ Opening an attachment in another app <span class="pill">in progress</span></h3>
+--- a/website/index.html	2026-10-11 20:26:17.158202649 -0400
++++ b/website/index.html	2026-10-11 20:26:17.174152163 -0400
+@@ -176,8 +176,8 @@
+         </article>
+         <article class="card">
+           <h3>⏱️ Disappearing messages</h3>
+-          <p>Set a per-chat timer — an hour, a day, a week — and older messages delete
+-             themselves on both devices. It’s a shared setting, so changing it keeps both
++          <p>Set a per-chat timer — an hour, a day, a week — and messages sent from then on
++             delete themselves on both devices once they are that old. It’s a shared setting, so changing it keeps both
+              sides in sync.</p>
+         </article>
+         <article class="card">
