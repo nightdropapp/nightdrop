@@ -737,6 +737,13 @@ fn server_storage_bomb_covers_only_messages_from_while_it_was_on() {
         assert!(!texts.iter().any(|t| t == "during"), "{texts:?}");
         assert!(texts.iter().any(|t| t == "after"), "{texts:?}");
     }
+    // The record of when survives a save and restore.
+    let key = [7u8; 32];
+    let restored = Node::restore(&bob.export(&key), Box::new(net.endpoint("bob2")), &key).unwrap();
+    assert_eq!(
+        restored.chats[&alice_id].storage_timeline,
+        bob.chats[&alice_id].storage_timeline
+    );
     // Only the peer gets notices for the switch (the switcher sees the banner); they stay.
     assert!(
         bob.messages(&alice_id).iter().filter(|m| m.system).count() >= 2,
