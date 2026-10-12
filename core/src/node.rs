@@ -353,21 +353,25 @@ fn queue_on_relays(
         anyhow::bail!("peer offline and no relay accepted the message");
     }
     let sealed = relay_wrap(contact_id, bytes)?;
-    crate::diag!("relay: queueing a copy under the pair's handle");
     // Each recipient on its own circuits: posts for two people over one circuit would tell the
     // relay they share a correspondent — the contact graph per-pair handles exist to hide
     // (`mailbox.rs`, `post_group`). A no-op off Tor.
     let group = mailbox::post_group(contact_id);
     let mut copies = Vec::new();
+    // Each refusal is logged: "at least one relay took it" hid a copy that missed the relay the
+    // recipient was actually polling (2026-10-11).
+    let mut tried = 0usize;
     if let Some(primary) = primary {
+        tried += 1;
         let primary = mailbox::isolated(transport, primary, group);
-        if let Ok(r) = primary.post(handle, &sealed, RELAY_TTL) {
-            copies.push(QueuedReceipt {
+        match primary.post(handle, &sealed, RELAY_TTL) {
+            Ok(r) => copies.push(QueuedReceipt {
                 relay_addr: None,
                 handle: handle.to_string(),
                 msg_id: r.msg_id,
                 delete_token: r.delete_token,
-            });
+            }),
+            Err(e) => crate::diag!("relay: copy not taken (primary): {e:#}"),
         }
     }
     // The primary under another name (the signed directory lists it) is the primary: posting there
@@ -379,16 +383,22 @@ fn queue_on_relays(
             continue;
         }
         posted.push(addr);
+        tried += 1;
         let relay = mailbox::isolated(transport, &build_relay(transport, addr), group);
-        if let Ok(r) = relay.post(handle, &sealed, RELAY_TTL) {
-            copies.push(QueuedReceipt {
+        match relay.post(handle, &sealed, RELAY_TTL) {
+            Ok(r) => copies.push(QueuedReceipt {
                 relay_addr: Some(addr.clone()),
                 handle: handle.to_string(),
                 msg_id: r.msg_id,
                 delete_token: r.delete_token,
-            });
+            }),
+            Err(e) => crate::diag!("relay: copy not taken (extra): {e:#}"),
         }
     }
+    crate::diag!(
+        "relay: queued a copy under the pair's handle on {}/{tried} relay(s)",
+        copies.len()
+    );
     if copies.is_empty() {
         anyhow::bail!("peer offline and no relay accepted the message");
     }
