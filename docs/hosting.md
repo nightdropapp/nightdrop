@@ -133,7 +133,7 @@ its own deliberate operation, never bundled with a clear-web change.
 - [x] `sitemap.xml` submitted to Google Search Console (2026-10-12, a Domain property verified by
   a DNS TXT record). A Domain property needs the sitemap's full address,
   `https://nightdrop.app/sitemap.xml`; `sitemap.xml` alone is refused as "not a valid path".
-- [ ] Bing Webmaster Tools: "Import from Google Search Console" brings the site and sitemap over.
+- [x] Sitemap added to Bing Webmaster Tools (2026-10-12).
 - [ ] Optional: a CAA record pinning `letsencrypt.org` (there is none today).
 
 Inbound mail to `security@nightdrop.app` (Proton Mail on the custom domain) is confirmed working:
