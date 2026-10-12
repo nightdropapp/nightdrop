@@ -401,6 +401,10 @@ build_apk() {
             APK_PATH="$dir/app-$BUILD_MODE.apk"
         elif [ -n "$abi" ] && [ -f "$dir/app-$abi-$BUILD_MODE.apk" ]; then
             APK_PATH="$dir/app-$abi-$BUILD_MODE.apk"
+        elif [ -z "$abi" ] && [ ${#split[@]} -gt 0 ] && [ -f "$dir/app-arm64-v8a-$BUILD_MODE.apk" ]; then
+            # No device to match (none attached, or several without --device, where adb refuses
+            # to pick one): check the arm64 split rather than fail a build that succeeded.
+            APK_PATH="$dir/app-arm64-v8a-$BUILD_MODE.apk"
         else
             APK_PATH="$dir/app-$BUILD_MODE.apk"
         fi
