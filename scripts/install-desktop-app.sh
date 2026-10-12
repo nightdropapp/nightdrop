@@ -148,7 +148,7 @@ exec "$INSTALL_DIR/night_drop" "\$@"
 EOF
 chmod 755 "$LAUNCHER"
 ok "launcher → $LAUNCHER"
-case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "~/.local/bin is not on PATH — add it so 'nightdrop' works from a terminal";; esac
+case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) warn "$HOME/.local/bin is not on PATH — add it so 'nightdrop' works from a terminal";; esac
 
 # 4b. Generate the .desktop menu entry (self-contained — no separate template file to
 #     accidentally launch). Exec is pinned to the absolute installed binary so the

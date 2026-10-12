@@ -87,6 +87,7 @@ pub fn revoke(dir: &Path, contact_id: &str) -> Result<()> {
 }
 
 /// Whether a contact currently holds an authorization file.
+#[cfg(test)]
 pub fn is_authorized(dir: &Path, contact_id: &str) -> bool {
     key_path(dir, contact_id).is_file()
 }

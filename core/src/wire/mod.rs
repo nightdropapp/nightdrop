@@ -302,6 +302,7 @@ impl Frame {
     }
 
     /// Extract raw PAKE bytes from a `Pake` frame.
+    #[cfg(test)]
     pub fn pake_bytes(&self) -> Result<Vec<u8>> {
         match self {
             Frame::Pake { data } => unb64(data),
