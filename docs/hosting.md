@@ -134,7 +134,8 @@ its own deliberate operation, never bundled with a clear-web change.
   a DNS TXT record). A Domain property needs the sitemap's full address,
   `https://nightdrop.app/sitemap.xml`; `sitemap.xml` alone is refused as "not a valid path".
 - [x] Sitemap added to Bing Webmaster Tools (2026-10-12).
-- [ ] Optional: a CAA record pinning `letsencrypt.org` (there is none today).
+- [x] CAA record `0 issue "letsencrypt.org"` on `nightdrop.app` (2026-10-12, Namecheap Advanced
+  DNS; it covers `www` too). Moving to another certificate authority means changing it first.
 
 Inbound mail to `security@nightdrop.app` (Proton Mail on the custom domain) is confirmed working:
 an outside sender's message arrived on 2026-10-06.
