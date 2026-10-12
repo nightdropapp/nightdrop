@@ -1,0 +1,5 @@
+Night Drop 0.2: the relay is optional. Remove it to chat directly, pairing by QR code; your messages then wait on your device until your contact is online. The relay can no longer link the messages different contacts send you.
+
+0.2 cannot message 0.1 apps: contacts still on 0.1 are told to update, and your messages wait until they do.
+
+Disappearing messages now apply only to new messages. Fixes: pairing could hang, an edit could miss its contact, receiving after a reboot.
