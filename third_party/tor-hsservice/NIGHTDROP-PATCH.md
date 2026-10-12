@@ -51,9 +51,31 @@ the app ran was not honoured until a restart.
   that holds the mock HSDirs' responses so a change can be made mid-upload. Unpatched it uploads 16
   times, not 24: the third round never happens.
 
+## Third fix: one failed upload to a new HSDir read as a whole ring missing (2026-10-11)
+
+**Why:** an upload round goes only to the HSDirs whose descriptor is dirty, but its results
+**replaced** the time period's whole result list. After a consensus change adds one HSDir to a
+ring, the round uploads to that HSDir alone; if it fails, the list holds one failure and nothing
+else, so `upload_result_state` reports `State::DegradedUnreachable` ("missing from one of the two
+HsDir rings") although the ring's other HSDirs hold the current descriptor. The failed HSDir stays
+dirty and is retried on the next trigger, so the reading can last long enough for the relay
+watchdog to restart the relay (`relay/src/main.rs`, 900 s), and a restart rotates the introduction
+points. Seen on the dev relay as the ring warning returning after hours of clean self-dials, with
+the dirty-generation fix already in place. Not yet confirmed with publisher debug logs; the dev
+relay now runs with `tor_hsservice=debug` to catch the next one. arti main (checked 2026-10-11)
+still replaces the list in `set_upload_results`.
+
+**What changed:**
+
+- `publish/reactor.rs`: `TimePeriodContext::merge_upload_results` replaces only the results of the
+  HSDirs in the batch and keeps the others. A full re-upload (after `mark_all_dirty`) still covers
+  every HSDir, so it replaces them all, as before.
+- `publish/reactor.rs`: test `a_failed_upload_to_one_new_hsdir_keeps_the_ring_reachable`. With the
+  old replace it fails (1 result kept instead of 3).
+
 Testing this crate needs its dev-dependencies, which the Night Drop workspace does not resolve:
 copy the directory elsewhere, append `[workspace]` to its `Cargo.toml`, and run
-`cargo test --all-features --lib` there (51 pass, 2 ignored, on 2026-10-11).
+`cargo test --all-features --lib` there (52 pass, 2 ignored, on 2026-10-11).
 
-**Remove this directory and the `[patch.crates-io]` entry** once arti ships both fixes and Night
+**Remove this directory and the `[patch.crates-io]` entry** once arti ships all three fixes and Night
 Drop moves to that arti.

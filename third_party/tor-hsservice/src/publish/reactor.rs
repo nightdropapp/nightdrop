@@ -532,9 +532,23 @@ impl TimePeriodContext {
             .for_each(|(_relay_id, status)| *status = DescriptorStatus::Dirty);
     }
 
-    /// Update the upload result for this time period.
-    fn set_upload_results(&mut self, upload_results: Vec<HsDirUploadStatus>) {
-        self.upload_results = upload_results;
+    /// Record a batch of upload results for this time period.
+    ///
+    /// A batch covers only the HsDirs that were dirty, so it replaces the results of those HsDirs
+    /// and keeps the rest. Replacing the whole list would forget the HsDirs that still hold the
+    /// current descriptor, and a failed upload to one newly added HsDir would then read as the
+    /// whole ring missing it (`State::DegradedUnreachable`).
+    fn merge_upload_results(&mut self, batch: Vec<HsDirUploadStatus>) {
+        for res in batch {
+            match self
+                .upload_results
+                .iter_mut()
+                .find(|old| old.relay_ids == res.relay_ids)
+            {
+                Some(old) => *old = res,
+                None => self.upload_results.push(res),
+            }
+        }
     }
 }
 
@@ -946,7 +960,7 @@ impl<R: Runtime, M: Mockable> Reactor<R, M> {
             upload_results.push(upload_res);
         }
 
-        period.set_upload_results(upload_results);
+        period.merge_upload_results(upload_results);
     }
 
     /// Maybe update our list of HsDirs.
@@ -2351,6 +2365,65 @@ mod test {
         // Degraded but reachable (because some of the secondary HsDir uploads failed).
         assert_eq!(status, State::DegradedReachable);
         assert!(matches!(err, Some(Problem::DescriptorUpload(_))));
+    }
+
+    /// An `HsDirUploadStatus` for a distinct HsDir.
+    fn upload_status_for(n: u8, upload_res: UploadResult) -> HsDirUploadStatus {
+        HsDirUploadStatus {
+            relay_ids: RelayIds::builder()
+                .ed_identity([n; 32].into())
+                .build()
+                .unwrap(),
+            upload_res,
+            revision_counter: RevisionCounter::from(13),
+        }
+    }
+
+    #[test]
+    fn a_failed_upload_to_one_new_hsdir_keeps_the_ring_reachable() {
+        let netdir = construct_netdir();
+        let all_params = netdir.hs_all_time_periods();
+        let current_period = netdir.hs_time_period();
+        let primary_params = all_params
+            .iter()
+            .find(|param| param.time_period() == current_period)
+            .unwrap();
+        let secondary_params = all_params
+            .iter()
+            .find(|param| param.time_period() != current_period)
+            .unwrap();
+        let failed = || Err(DescUploadRetryError::Bug(internal!("test")));
+
+        let mut ctxs = [
+            create_time_period_ctx(
+                primary_params,
+                vec![upload_status_for(1, Ok(())), upload_status_for(2, Ok(()))],
+            ),
+            create_time_period_ctx(
+                secondary_params,
+                vec![upload_status_for(3, Ok(())), upload_status_for(4, Ok(()))],
+            ),
+        ];
+
+        // A consensus change adds HsDir 5 to the secondary ring; the round uploads to it alone,
+        // and fails. HsDirs 3 and 4 still hold the descriptor.
+        ctxs[1].merge_upload_results(vec![upload_status_for(5, failed())]);
+        assert_eq!(ctxs[1].upload_results.len(), 3);
+        let (status, err) = upload_result_state(&netdir, &ctxs);
+        assert_eq!(status, State::DegradedReachable);
+        assert!(matches!(err, Some(Problem::DescriptorUpload(_))));
+
+        // The retry succeeds: its result replaces the failure.
+        ctxs[1].merge_upload_results(vec![upload_status_for(5, Ok(()))]);
+        assert_eq!(ctxs[1].upload_results.len(), 3);
+        let (status, err) = upload_result_state(&netdir, &ctxs);
+        assert_eq!(status, State::Running);
+        assert!(err.is_none());
+
+        // A full re-upload that fails everywhere on a ring is still reported as unreachable.
+        ctxs[1].merge_upload_results((3..=5).map(|n| upload_status_for(n, failed())).collect());
+        let (status, _) = upload_result_state(&netdir, &ctxs);
+        assert_eq!(status, State::DegradedUnreachable);
     }
 
     #[test]
