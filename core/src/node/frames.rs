@@ -423,6 +423,8 @@ impl Node {
                 let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
                 let enabled = plaintext == b"on";
                 chat.contact.remote_storage = enabled;
+                chat.storage_timeline
+                    .push((crate::api::now_secs(), enabled));
                 chat.history.push(ChatMessage::system(if enabled {
                     "☁️ The other person enabled 24h server storage for this chat. Messages \
                      are held (encrypted) on the relay for up to 24 hours."

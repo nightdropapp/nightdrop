@@ -41,6 +41,12 @@ pub struct PersistedChat {
     /// beginning, so those messages keep expiring as they did.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub disappearing_timeline: Option<Vec<(u64, u64)>>,
+    /// When opt-in server storage was switched on or off, `(unix secs, on)`, oldest first; the
+    /// 24h bomb deletes only messages sent while it was on. `None` in a state from before 0.2,
+    /// where the bomb covered the whole chat: restored as on from the load, so nothing already
+    /// there is deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub storage_timeline: Option<Vec<(u64, bool)>>,
     pub session_pickle: String,
     pub history: Vec<PersistedMessage>,
     /// Whether the chat was torn down (peer deleted / code re-used). Persisted so a deleted

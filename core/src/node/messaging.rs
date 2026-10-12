@@ -1702,6 +1702,8 @@ impl Node {
                 .get_mut(contact_id)
                 .ok_or_else(|| anyhow::anyhow!("unknown contact"))?;
             chat.contact.remote_storage = enabled;
+            chat.storage_timeline
+                .push((crate::api::now_secs(), enabled));
             // Start optimistic on (re)enable; the next send corrects it if no relay is reachable.
             chat.remote_storage_healthy = true;
             if chat.authorized && !chat.closed {
@@ -2164,23 +2166,26 @@ impl Node {
                     changed = true;
                 }
             }
-            // Device-side deletion: the 24h server-storage time-bomb (§11.4, if on) for the whole
-            // chat, and the disappearing timer (#10) per message — the timer in effect when it was
-            // sent or received, so turning one on never deletes the history before it. The
-            // timer's own notices stay, so an emptied chat still says why.
-            let bomb = chat.contact.remote_storage.then_some(horizon);
-            let timeline = &chat.disappearing_timeline;
-            if bomb.is_some() || !timeline.is_empty() {
+            // Device-side deletion, per message and forward-only: the 24h server-storage bomb
+            // (§11.4) if storage was on when it was sent or received, and the disappearing timer
+            // (#10) in effect then. Neither reaches messages from before it was switched on, and
+            // both still expire what was sent while it was on. System notices are exempt, so an
+            // emptied chat still says why.
+            let (storage, timeline) = (&chat.storage_timeline, &chat.disappearing_timeline);
+            if !storage.is_empty() || !timeline.is_empty() {
                 let before = chat.history.len();
                 chat.history.retain(|m| {
                     let age = now.saturating_sub(m.at);
-                    let timer = if m.system {
-                        0
+                    let (bombed, timer) = if m.system {
+                        (false, 0)
                     } else {
-                        super::timer_at(timeline, m.at)
+                        (
+                            super::storage_on_at(storage, m.at),
+                            super::timer_at(timeline, m.at),
+                        )
                     };
                     let expired =
-                        m.at != 0 && (bomb.is_some_and(|h| age > h) || (timer > 0 && age > timer));
+                        m.at != 0 && ((bombed && age > horizon) || (timer > 0 && age > timer));
                     if expired {
                         for id in [m.media_id.as_str(), m.thumb_id.as_str()] {
                             if !id.is_empty() {

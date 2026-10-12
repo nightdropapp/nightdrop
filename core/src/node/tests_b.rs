@@ -635,13 +635,14 @@ fn sweep_expires_stale_queued_messages_and_time_bombs_ephemeral_chats() {
     bob.connect_with_bundle("alice", &bundle).unwrap();
     alice.pump().unwrap();
     let bob_contact = alice.contacts()[0].id.clone();
+    let ttl = RELAY_TTL.as_secs();
 
     // A queued message older than 24h flips to "expired" (§11.3).
     net.disconnect("bob");
     alice.send(&bob_contact, "never picked up").unwrap();
     {
         let chat = alice.chats.get_mut(&bob_contact).unwrap();
-        chat.history.last_mut().unwrap().at -= RELAY_TTL.as_secs() + 60;
+        chat.history.last_mut().unwrap().at -= ttl + 120;
     }
     alice.sweep_time();
     assert_eq!(
@@ -649,13 +650,15 @@ fn sweep_expires_stale_queued_messages_and_time_bombs_ephemeral_chats() {
         "expired"
     );
 
-    // In an ephemeral (server-storage) chat, >24h-old device copies are destroyed
-    // (§11.4); fresh ones and normal chats are untouched.
+    // Server storage switched on (backdated to between the two messages): the >24h-old message
+    // sent while it was on is destroyed on the device (§11.4); the older one from before it, and
+    // the fresh one, stay.
     alice.set_remote_storage(&bob_contact, true).unwrap();
+    alice.chats.get_mut(&bob_contact).unwrap().storage_timeline[0].0 -= ttl + 90;
     alice.send(&bob_contact, "doomed").unwrap();
     {
         let chat = alice.chats.get_mut(&bob_contact).unwrap();
-        chat.history.last_mut().unwrap().at -= RELAY_TTL.as_secs() + 60;
+        chat.history.last_mut().unwrap().at -= ttl + 60;
     }
     alice.send(&bob_contact, "fresh").unwrap();
     let before = alice.messages(&bob_contact).len();
@@ -663,11 +666,118 @@ fn sweep_expires_stale_queued_messages_and_time_bombs_ephemeral_chats() {
     let after = alice.messages(&bob_contact);
     assert_eq!(
         after.len(),
-        before - 2,
-        "expired msg + doomed msg removed: {after:?}"
+        before - 1,
+        "only the doomed msg removed: {after:?}"
     );
     assert!(after.iter().any(|m| m.text == "fresh"));
+    assert!(after.iter().any(|m| m.text == "never picked up"));
     assert!(!after.iter().any(|m| m.text == "doomed"));
+}
+
+/// The 24h bomb is per message: it reaches only what was sent or received while server storage
+/// was on — never the history before it, never what came after it was switched off — and keeps
+/// reaching those messages after the switch-off. Both devices keep their own record of when.
+#[test]
+fn server_storage_bomb_covers_only_messages_from_while_it_was_on() {
+    let net = MemoryNetwork::new();
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay);
+    let bundle = alice.publish_bundle();
+    let alice_id = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_id = alice.contacts()[0].id.clone();
+    let ttl = RELAY_TTL.as_secs();
+
+    alice.send(&bob_id, "before").unwrap();
+    bob.pump().unwrap();
+    alice.set_remote_storage(&bob_id, true).unwrap();
+    bob.pump().unwrap();
+    assert!(
+        bob.contacts()[0].remote_storage,
+        "the switch reaches the peer"
+    );
+    alice.send(&bob_id, "during").unwrap();
+    bob.pump().unwrap();
+    alice.set_remote_storage(&bob_id, false).unwrap();
+    bob.pump().unwrap();
+    alice.send(&bob_id, "after").unwrap();
+    bob.pump().unwrap();
+
+    // Restamp the events 10 s apart, two days ago (the test runs within one second).
+    let base = crate::api::now_secs() - 2 * ttl;
+    for node in [&mut alice, &mut bob] {
+        for chat in node.chats.values_mut() {
+            let mut switches = 0;
+            for m in chat.history.iter_mut() {
+                m.at = match m.text.as_str() {
+                    "before" => base,
+                    "during" => base + 20,
+                    "after" => base + 40,
+                    _ if m.system => {
+                        switches += 1;
+                        base + 10 + 20 * (switches - 1)
+                    }
+                    _ => m.at,
+                };
+            }
+            assert_eq!(chat.storage_timeline.len(), 2);
+            chat.storage_timeline[0].0 = base + 10;
+            chat.storage_timeline[1].0 = base + 30;
+        }
+    }
+    alice.sweep_time();
+    bob.sweep_time();
+
+    for (node, id) in [(&alice, &bob_id), (&bob, &alice_id)] {
+        let texts: Vec<String> = node.messages(id).iter().map(|m| m.text.clone()).collect();
+        assert!(texts.iter().any(|t| t == "before"), "{texts:?}");
+        assert!(!texts.iter().any(|t| t == "during"), "{texts:?}");
+        assert!(texts.iter().any(|t| t == "after"), "{texts:?}");
+    }
+    // Only the peer gets notices for the switch (the switcher sees the banner); they stay.
+    assert!(
+        bob.messages(&alice_id).iter().filter(|m| m.system).count() >= 2,
+        "the storage notices stay"
+    );
+}
+
+/// A state saved before 0.2 has no record of when storage was switched on: it counts as on
+/// from the load, so the upgrade deletes nothing already in the chat.
+#[test]
+fn a_pre_02_state_with_storage_on_deletes_nothing_already_there() {
+    let net = MemoryNetwork::new();
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay);
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_id = alice.contacts()[0].id.clone();
+    alice.set_remote_storage(&bob_id, true).unwrap();
+    alice.send(&bob_id, "old").unwrap();
+    alice
+        .chats
+        .get_mut(&bob_id)
+        .unwrap()
+        .history
+        .last_mut()
+        .unwrap()
+        .at -= 3 * RELAY_TTL.as_secs();
+
+    let key = [7u8; 32];
+    let mut state = alice.export(&key);
+    for chat in state.chats.iter_mut() {
+        chat.storage_timeline = None; // as a 0.1.x state file has it
+    }
+    let mut restored = Node::restore(&state, Box::new(net.endpoint("alice2")), &key).unwrap();
+    restored.sweep_time();
+    assert!(restored.messages(&bob_id).iter().any(|m| m.text == "old"));
+    assert!(restored.contacts()[0].remote_storage);
 }
 
 #[test]

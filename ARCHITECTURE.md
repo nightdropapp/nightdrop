@@ -1100,8 +1100,8 @@ brute force."
 
 ### 11.1 Locked decisions
 - **Time-bomb (24h):** always on the **relay queue** (undelivered blob older than 24h → reaped).
-  On the **device**, auto-deletion applies **only to ephemeral / opt-in server-storage chats**,
-  **never** to normal local-first history.
+  On the **device**, auto-deletion applies **only to messages from while opt-in server storage
+  was on** (§11.4), **never** to normal local-first history.
 - **Delivery state via ack** (not a mailbox-gone guess): `queued → delivered | expired | recalled`.
 - **Backup modes:** **Lite (default)** and **Full**.
   - **Lite** = identity + onion key + contacts (`.onion` + names) + **session pickles**. **No**
@@ -1255,10 +1255,14 @@ relay harvest it was holding, which lost that harvest.
 - The "stored on relay / queued" indicator also disappears once **delivered** or **expired**.
 
 ### 11.4 Time-bomb (ephemeral chats, device side)
-- Only for chats in **opt-in server-storage / ephemeral mode** (both parties opted in, persistent
-  warning shown). A client loop checks each ephemeral message's age; `age > 24h` → destroy on the
-  device. The relay reaper independently destroys the server copy. Normal local-first history is
-  **untouched**.
+- Only for messages sent or received while **opt-in server storage** was on (a shared setting,
+  persistent warning shown on both sides). A client loop checks each such message's age; `age >
+  24h` → destroy on the device. The relay reaper independently destroys the server copy.
+  **Forward-only and per message** (decided 2026-10-12, `Chat::storage_timeline`, read by
+  `storage_on_at`): history from before storage was switched on and messages after it was
+  switched off are **untouched**, and what was sent while it was on still expires after it is
+  switched off. System notices are exempt. A state from before 0.2, which kept no record of when
+  storage was switched on, counts it as on from the load, so the upgrade deletes nothing.
 - Honest limits to document in UI: cannot force-delete the **peer's** device copy, and a hostile
   relay could retain a blob — but it is undecryptable ciphertext, and once the **honest** network
   expires it, an honest fetch can't recover it.
@@ -1272,8 +1276,8 @@ relay harvest it was holding, which lost that harvest.
   used to apply to the whole chat: setting 1 hour deleted everything older on both devices, notices
   included, which let either person wipe the other's copy and left no trace why (seen on devices,
   2026-10-11). A state saved before the timeline gets one entry from the beginning, so a chat that
-  already had a timer keeps expiring its existing messages. `sweep_time` also applies the 24h
-  ephemeral bomb, which still covers the whole chat. Same honest limits apply (age is measured from
+  already had a timer keeps expiring its existing messages. `sweep_time` applies both, each per
+  message. Same honest limits apply (age is measured from
   send/receipt).
 
 ### 11.5 Backup content matrix

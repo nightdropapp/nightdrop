@@ -35,6 +35,7 @@ impl Node {
                     remote_storage: chat.contact.remote_storage,
                     disappearing_secs: chat.contact.disappearing_secs,
                     disappearing_timeline: Some(chat.disappearing_timeline.clone()),
+                    storage_timeline: Some(chat.storage_timeline.clone()),
                     session_pickle: chat.session.pickle().encrypt(key),
                     history: chat
                         .history
@@ -779,6 +780,13 @@ fn chat_from_persisted(
             // From before 0.2, when the timer applied to the whole chat: keep it applying to
             // what is already there.
             None if chat.disappearing_secs > 0 => vec![(0, chat.disappearing_secs)],
+            None => Vec::new(),
+        },
+        storage_timeline: match &chat.storage_timeline {
+            Some(timeline) => timeline.clone(),
+            // From before 0.2, when the bomb covered the whole chat and when storage was switched
+            // on was not kept: treat it as on from now, so no message already here is deleted.
+            None if chat.remote_storage => vec![(crate::api::now_secs(), true)],
             None => Vec::new(),
         },
         remote_storage_healthy: true,

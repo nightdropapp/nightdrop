@@ -713,6 +713,9 @@ struct Chat {
     /// Every change of the disappearing timer, `(unix secs, timer secs)`, oldest first: what
     /// [`timer_at`] reads to give each message the timer in effect when it was sent or received.
     disappearing_timeline: Vec<(u64, u64)>,
+    /// Every switch of opt-in server storage, `(unix secs, on)`, oldest first: what
+    /// [`storage_on_at`] reads so the 24h bomb reaches only messages sent while it was on.
+    storage_timeline: Vec<(u64, bool)>,
     /// Whether the **last** opt-in-server-storage attempt for this chat reached a relay while the
     /// peer was already online (§6). Goes false when server storage is on but no relay accepted a
     /// copy — the message still reached the peer directly, but was **not** stored server-side, so
@@ -848,6 +851,7 @@ impl Chat {
             closed: false,
             relay_receipts: HashMap::new(),
             disappearing_timeline: Vec::new(),
+            storage_timeline: Vec::new(),
             remote_storage_healthy: true,
             mailbox: None,
             relay_set: None,
@@ -3339,6 +3343,18 @@ fn pack_unsend(target_msg_id: &str) -> Vec<u8> {
 /// Inverse of [`pack_unsend`]: the target `msg_id`.
 fn unpack_unsend(buf: &[u8]) -> Result<String> {
     Ok(String::from_utf8(buf.to_vec())?)
+}
+
+/// Whether opt-in server storage was on for a message stamped `at`: the last switch made at or
+/// before it (`Chat::storage_timeline`). The 24h bomb deletes only those messages, so turning
+/// storage on never reaches back into the history, and turning it off still expires what was
+/// sent while it was on.
+fn storage_on_at(timeline: &[(u64, bool)], at: u64) -> bool {
+    timeline
+        .iter()
+        .rev()
+        .find(|(changed, _)| *changed <= at)
+        .is_some_and(|(_, on)| *on)
 }
 
 /// How long after start the optional announcements go out even if the transport never reports
