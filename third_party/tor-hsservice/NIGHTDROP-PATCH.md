@@ -65,6 +65,13 @@ the dirty-generation fix already in place. Not yet confirmed with publisher debu
 relay now runs with `tor_hsservice=debug` to catch the next one. arti main (checked 2026-10-11)
 still replaces the list in `set_upload_results`.
 
+A second way to get a false failure, not changed here: a retry resends the same descriptor with
+the same revision counter (`upload_descriptor_with_retries` reuses it), so when an attempt times
+out after the HSDir already stored it, every retry is refused with HTTP 400 "Invalid HS
+descriptor. Rejected." and the HSDir is recorded as failed while it holds the current descriptor
+(seen on a test device, 2026-10-12: one timeout, then 12 refusals). With the merge it costs that
+one HSDir's result, not the ring's.
+
 **What changed:**
 
 - `publish/reactor.rs`: `TimePeriodContext::merge_upload_results` replaces only the results of the
