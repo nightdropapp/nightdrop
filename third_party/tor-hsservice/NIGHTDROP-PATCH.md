@@ -61,8 +61,11 @@ HsDir rings") although the ring's other HSDirs hold the current descriptor. The 
 dirty and is retried on the next trigger, so the reading can last long enough for the relay
 watchdog to restart the relay (`relay/src/main.rs`, 900 s), and a restart rotates the introduction
 points. Seen on the dev relay as the ring warning returning after hours of clean self-dials, with
-the dirty-generation fix already in place. Not yet confirmed with publisher debug logs; the dev
-relay now runs with `tor_hsservice=debug` to catch the next one. arti main (checked 2026-10-11)
+the dirty-generation fix already in place. Confirmed with publisher debug logs on the dev relay
+(2026-10-12 UTC, period 20738): one HSDir kept timing out while the other seven took the
+descriptor ("uploaded successfully to 7/8"), then a round went to that HSDir alone, "0/1", and the
+watchdog reported the ring missing in the same second. The lone round can be a new HSDir after a
+consensus change or, as here, the next try of one that keeps failing. arti main (checked 2026-10-11)
 still replaces the list in `set_upload_results`.
 
 A second way to get a false failure, not changed here: a retry resends the same descriptor with
