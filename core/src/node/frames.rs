@@ -54,7 +54,9 @@ impl Node {
                 let contact_id = identity_key;
                 // Prefer the address the sender advertised (works over Tor/relay where the
                 // transport can't tell us who called); fall back to the transport's view.
-                let peer_address = if !address.is_empty() {
+                // The address the joiner states is kept and dialed; a malformed one is ignored in
+                // favour of the transport's own view.
+                let peer_address = if super::limits::sane_address(&address) {
                     address
                 } else {
                     from_address.unwrap_or_default()
@@ -192,6 +194,9 @@ impl Node {
                 Ok(None)
             }
             Frame::Message { from, id, message } => {
+                if !super::limits::sane_id(&id) {
+                    return Ok(None); // a contact's id is kept with the message; bound it
+                }
                 let olm = message.to_olm()?;
                 let Some(chat) = self.chats.get_mut(&from) else {
                     return Ok(None);
@@ -217,7 +222,8 @@ impl Node {
                 })?;
                 // Decrypting on their ratchet is proof it was them (silence-detection design).
                 chat.mark_alive();
-                let text = String::from_utf8_lossy(&plaintext).into_owned();
+                let text =
+                    super::limits::clamp_text(String::from_utf8_lossy(&plaintext).into_owned());
                 // Their message proves they are alive; it says nothing whatever about whether they
                 // picked up OUR earlier queued ones, which is what promoting those claimed.
                 //
@@ -244,6 +250,9 @@ impl Node {
                 Ok(Some((from, text)))
             }
             Frame::Burn { from, id, message } => {
+                if !super::limits::sane_id(&id) {
+                    return Ok(None);
+                }
                 // A burn message (`docs/design/burn-messages.md`). Same acceptance path as
                 // `Message` — authorized, decryptable, de-duplicated — but the timer travels
                 // inside the ciphertext and the message is stored blurred (not yet viewed).
@@ -738,7 +747,9 @@ impl Node {
                     }
                     let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
                     let new_address = String::from_utf8_lossy(&plaintext).into_owned();
-                    if new_address.trim().is_empty() || new_address == chat.peer_address {
+                    if !super::limits::sane_address(&new_address)
+                        || new_address == chat.peer_address
+                    {
                         return Ok(None);
                     }
                     chat.peer_address = new_address.clone();

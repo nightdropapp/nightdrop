@@ -679,6 +679,9 @@ was not.
 ## 15. Where knowledge lives
 
 - `ARCHITECTURE.md` is authoritative; when code and doc disagree, reconcile them in the same change.
+- **Every value from outside has a row in `docs/trust-boundaries.md`** — a frame field, an invite
+  parameter, a relay request, a backup field. A change that adds one adds its row and its check in
+  the same commit; most audit findings were a value used before anyone asked what bounds it.
 - **Everything project-related belongs in a committed file.** `CLAUDE.md` and `TODO.txt` are
   gitignored: `CLAUDE.md` may only *summarise* rules whose full text lives in a committed file it
   names, and `TODO.txt` holds future work and nothing else.

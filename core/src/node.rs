@@ -1515,6 +1515,8 @@ pub(crate) const MAX_OPENERS_PER_INVITE: usize = 3;
 
 mod backup;
 mod frames;
+mod limits;
+pub(crate) use limits::sane_address;
 mod mailbox;
 mod media_kind;
 mod messaging;
@@ -3324,7 +3326,7 @@ fn unpack_edit(buf: &[u8]) -> Result<(String, String)> {
     let mut p = 0;
     let target = String::from_utf8(take_field(buf, &mut p)?)?;
     let text = String::from_utf8(buf[p..].to_vec())?;
-    Ok((target, text))
+    Ok((target, limits::clamp_text(text)))
 }
 
 /// Pack a `Burn` envelope: `[burn_secs as ASCII][text...]` (encrypted on the session), so the
@@ -3345,7 +3347,7 @@ fn unpack_burn(buf: &[u8]) -> Result<(u64, String)> {
         .parse::<u64>()
         .unwrap_or(0);
     let text = String::from_utf8(buf[p..].to_vec())?;
-    Ok((secs, text))
+    Ok((secs, limits::clamp_text(text)))
 }
 
 /// Pack a `BurnMedia` envelope: `[burn_secs][transfer_id][kind][mime][data...]`.
@@ -3372,6 +3374,7 @@ fn unpack_burn_media(buf: &[u8]) -> Result<(u64, String, String, String, Vec<u8>
         .parse::<u64>()
         .unwrap_or(0);
     let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
+    anyhow::ensure!(limits::sane_id(&transfer_id), "bad transfer id");
     let kind = String::from_utf8(take_field(buf, &mut p)?)?;
     let mime = String::from_utf8(take_field(buf, &mut p)?)?;
     // The contact chose both: normalise before they are stored (media_kind.rs).
@@ -3509,6 +3512,7 @@ fn pack_media(transfer_id: &str, kind: &str, mime: &str, data: &[u8]) -> Vec<u8>
 fn unpack_media(buf: &[u8]) -> Result<(String, String, String, Vec<u8>)> {
     let mut p = 0;
     let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
+    anyhow::ensure!(limits::sane_id(&transfer_id), "bad transfer id");
     let kind = String::from_utf8(take_field(buf, &mut p)?)?;
     let mime = String::from_utf8(take_field(buf, &mut p)?)?;
     // The contact chose both: normalise before they are stored (media_kind.rs).
@@ -3537,6 +3541,7 @@ fn pack_media_incoming(
 fn unpack_media_incoming(buf: &[u8]) -> Result<(String, String, String, u64, Vec<u8>)> {
     let mut p = 0;
     let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
+    anyhow::ensure!(limits::sane_id(&transfer_id), "bad transfer id");
     let kind = String::from_utf8(take_field(buf, &mut p)?)?;
     let mime = String::from_utf8(take_field(buf, &mut p)?)?;
     // The contact chose both: normalise before they are stored (media_kind.rs).

@@ -3163,8 +3163,13 @@ pub(crate) fn parse_invite(payload: &str) -> Result<(String, PreKeyBundle)> {
             }
         }
     }
+    let addr = addr.ok_or_else(|| anyhow::anyhow!("invite missing addr"))?;
+    // Kept and dialed: bounded like every peer address (node/limits.rs).
+    if !crate::node::sane_address(&addr) {
+        anyhow::bail!("not a Night Drop invite");
+    }
     Ok((
-        addr.ok_or_else(|| anyhow::anyhow!("invite missing addr"))?,
+        addr,
         PreKeyBundle {
             identity_key: ik.ok_or_else(|| anyhow::anyhow!("invite missing ik"))?,
             one_time_key: otk.ok_or_else(|| anyhow::anyhow!("invite missing otk"))?,

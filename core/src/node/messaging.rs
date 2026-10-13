@@ -83,6 +83,9 @@ impl Node {
     /// is an ordinary message; anything else seals a [`Frame::Burn`] instead, with the duration
     /// inside the ciphertext.
     fn send_inner(&mut self, contact_id: &str, text: &str, burn_secs: u64) -> Result<()> {
+        if text.len() > super::limits::MAX_TEXT_BYTES {
+            anyhow::bail!("message too long (the limit is 64 KB)");
+        }
         let from = self.identity_key();
         let chat = self
             .chats
@@ -789,6 +792,9 @@ impl Node {
     /// the recall, so the network round is not under the lock.
     #[cfg(test)]
     pub fn edit_message(&mut self, contact_id: &str, msg_id: &str, new_text: &str) -> Result<()> {
+        if new_text.len() > super::limits::MAX_TEXT_BYTES {
+            anyhow::bail!("message too long (the limit is 64 KB)");
+        }
         let recalled = self
             .begin_edit(contact_id, msg_id, new_text)?
             .map(|plan| plan.run());
