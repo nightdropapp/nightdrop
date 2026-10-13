@@ -2631,3 +2631,27 @@ fn forged_unsealed_control_frames_change_nothing_for_an_established_contact() {
         .any(|m| m.text == "still here"));
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn a_contacts_display_name_is_cleaned() {
+    // Self-audit 2026-10-13, finding 7.
+    use super::{clean_display_name, MAX_NAME_CHARS};
+    assert_eq!(clean_display_name("  Alice   Smith "), "Alice Smith");
+    assert_eq!(clean_display_name("Al\u{202E}ecila"), "Alecila");
+    assert_eq!(
+        clean_display_name("A\u{200B}l\u{2066}i\u{E0041}ce\n\t"),
+        "Alice"
+    );
+    assert_eq!(clean_display_name("\u{202E}\u{200B} \n"), DEFAULT_NAME);
+    assert_eq!(clean_display_name(""), DEFAULT_NAME);
+    let long = "é".repeat(500);
+    assert_eq!(clean_display_name(&long).chars().count(), MAX_NAME_CHARS);
+    // Real names in other scripts survive untouched.
+    assert_eq!(clean_display_name("Zoë 李 Ахмед"), "Zoë 李 Ахмед");
+    assert_eq!(clean_display_name("محمد"), "محمد");
+    assert_eq!(clean_display_name("می\u{200C}خواهم"), "می\u{200C}خواهم");
+    assert_eq!(
+        clean_display_name("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{2764}\u{FE0F}"),
+        "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{2764}\u{FE0F}"
+    );
+}

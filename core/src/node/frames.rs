@@ -716,12 +716,8 @@ impl Node {
                     return Ok(None);
                 }
                 let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
-                let name = String::from_utf8_lossy(&plaintext).into_owned();
-                chat.contact.their_name = if name.trim().is_empty() {
-                    DEFAULT_NAME.to_string()
-                } else {
-                    name.trim().to_string()
-                };
+                let name = String::from_utf8_lossy(&plaintext);
+                chat.contact.their_name = super::clean_display_name(&name);
                 devlog!(
                     "[nightdrop] peer {from} is now known as '{}'",
                     chat.contact.their_name

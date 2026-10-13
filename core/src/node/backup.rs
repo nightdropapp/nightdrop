@@ -761,7 +761,8 @@ fn chat_from_persisted(
     Chat {
         contact: Contact {
             id: chat.contact_id.clone(),
-            their_name: chat.their_name.clone(),
+            // Names stored before they were cleaned on receipt are cleaned here (finding 7).
+            their_name: super::clean_display_name(&chat.their_name),
             my_name: chat.my_name.clone(),
             remote_storage: chat.remote_storage,
             disappearing_secs: chat.disappearing_secs,

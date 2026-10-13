@@ -3725,6 +3725,69 @@ pub fn run_join_handshake(
     }
 }
 
+/// Longest display name a contact may give themselves, in characters.
+pub(crate) const MAX_NAME_CHARS: usize = 64;
+
+/// A contact's self-chosen name, made safe to show: control and invisible formatting characters
+/// removed (bidi overrides and isolates, zero-width characters, tag characters), runs of
+/// whitespace collapsed, and at most [`MAX_NAME_CHARS`] kept. The name arrives from the contact
+/// and was stored as sent, so it could reorder the text around it, hide characters, or fill the
+/// screen (self-audit 2026-10-13, finding 7). Empty → [`DEFAULT_NAME`].
+pub(crate) fn clean_display_name(raw: &str) -> String {
+    fn invisible(c: char) -> bool {
+        c.is_control()
+            || matches!(
+                c,
+                '\u{00AD}'
+                    | '\u{034F}'
+                    | '\u{061C}'
+                    | '\u{115F}'
+                    | '\u{1160}'
+                    | '\u{17B4}'
+                    | '\u{17B5}'
+                    | '\u{180B}'..='\u{180F}'
+                    // Not U+200C/U+200D: the non-joiner is ordinary Persian spelling and the
+                    // joiner builds composite emoji; neither can reorder text.
+                    | '\u{200B}'
+                    | '\u{200E}'
+                    | '\u{200F}'
+                    | '\u{202A}'..='\u{202E}'
+                    | '\u{2060}'..='\u{206F}'
+                    | '\u{3164}'
+                    // Not U+FE0E/U+FE0F: they pick text or emoji presentation.
+                    | '\u{FE00}'..='\u{FE0D}'
+                    | '\u{FEFF}'
+                    | '\u{FFA0}'
+                    | '\u{FFF0}'..='\u{FFFB}'
+                    | '\u{E0000}'..='\u{E0FFF}'
+            )
+    }
+    let mut out = String::new();
+    let mut count = 0usize;
+    let mut pending_space = false;
+    for c in raw.chars().filter(|&c| !invisible(c)) {
+        if c.is_whitespace() {
+            pending_space = !out.is_empty();
+            continue;
+        }
+        if count >= MAX_NAME_CHARS {
+            break;
+        }
+        if pending_space && count + 1 < MAX_NAME_CHARS {
+            out.push(' ');
+            count += 1;
+        }
+        pending_space = false;
+        out.push(c);
+        count += 1;
+    }
+    if out.is_empty() {
+        DEFAULT_NAME.to_string()
+    } else {
+        out
+    }
+}
+
 /// Six characters derived from an identity key, so two contacts who never named themselves are
 /// still distinguishable (`docs/design/contact-naming.md` §3).
 ///
