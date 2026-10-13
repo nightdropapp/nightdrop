@@ -691,8 +691,10 @@ on a re-pair (new session) exactly like `verified`.
 - **Onion client authorization (reachability gate):** the Tor transport can restrict *who may even
   fetch our onion descriptor* to paired contacts, using v3 **restricted discovery**
   (`core/src/transport/{client_auth,tor}.rs`, `--features tor`). Each side hands the other a **public**
-  client descriptor-encryption key during pairing and on address rotation (`Frame::ClientKey`,
-  `node::announce_client_key`); we write authorized peers' keys into a directory arti watches, and
+  client descriptor-encryption key during pairing and on address rotation (`Frame::ClientKeySealed`,
+  `node::announce_client_key`), sealed on the pair's session: the key is public, but the frame must be
+  authenticated, or anyone able to deliver one could replace a contact's key and cut their direct path
+  (the plaintext `Frame::ClientKey` before 0.2 did exactly that and is now ignored); we write authorized peers' keys into a directory arti watches, and
   `delete_chat`/`logout` revoke them. This is **defense-in-depth**, not a new secrecy boundary (the
   ratchet already provides that): it raises the cost of frame injection, address scanning, and presence
   probing by stopping the *connection*, not just the payload. It stays **off until the first contact is
