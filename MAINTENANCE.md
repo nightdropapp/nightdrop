@@ -474,9 +474,27 @@ base jumped 16 → 402 when the scheme was adopted and must never go back below 
 | Directory-signing key | **Offline** since 2026-10-13: on a USB stick, not on any machine (which stick: `MAINTENANCE.local.md`). Ed25519, base64; a different key from the GPG one. Needed only to sign a new relay list: `nightdrop-relay sign-directory "$(cat <usb>/directory-signing-key)" <version> <onions…>`, then unmount. The relay never reads it |
 | Relay state backup | `relay-state.zip` in the checkout (gitignored, 0600): the relay's onion identity and keystore, `onion`, `relay-list.json`. Leaves out the signing key (offline), `arti-cache` (regenerable) and `queue.json` (people's queued mail, which must not outlive its 24 h). Remake it after any change to `relay-state/arti-state/keystore` |
 | Update-signing key | **Offline** since 2026-10-13: on the same USB stick as the directory key, and on paper (`MAINTENANCE.local.md`). Ed25519, base64. Signs `update.json` at publish time: plug in the stick and run `make update-manifest` — the script finds `update-signing-key` on any mounted removable drive (or `~/.config/nightdrop-signing/`), then unmount. `NIGHTDROP_UPDATE_KEY=<file>` is only for a key restored from the paper backup (the stick is FAT, so anything running as you can read it while mounted). Its public half is `update::UPDATE_PUBKEY` in every released app, so **losing it stops every app seeing updates** and leaking it lets the holder offer builds |
+| Recovery keys | **Offline**, in `recovery/` on the key USB stick (`update-recovery-key`, `directory-recovery-key`; MAINTENANCE.local.md), since 2026-10-13. They sign nothing but a key rotation (below); their public halves are `UPDATE_RECOVERY_PUBKEY` / `DIRECTORY_RECOVERY_PUBKEY` in every app from 0.2. **Print them on paper and keep a copy apart from the signing keys** — the recovery key is the root: if it leaks too, nothing can be rotated away. `NIGHTDROP_KEY_DIR=<stick> cargo test -p nightdrop baked_keys_match -- --ignored` checks all four baked keys against the stick |
 | GitHub | `gh`, authenticated as `nightdropapp` |
 | Security mailbox | `security@nightdrop.app`, Proton Mail on the custom domain with **our own key**: reports stay PGP-encrypted to the published key and are decrypted locally; Proton's address-key encryption stays off |
 | GitLab (fdroiddata fork) | `gitlab_token.txt` at the repo root (gitignored); use as a `PRIVATE-TOKEN:` header against the API. `glab auth status` (its own stale token) and `ssh -T git@gitlab.com` (no key registered) both fail and **say nothing about this token** — on 2026-08-10 they were taken as proof the work could not be done from here. Rarely needed since the merge |
+
+
+**Rotating a signing key** (`core/src/keyroll.rs`) — when the update or relay-list signing key may
+have leaked, or is lost. Apps trust the newest key a recovery-signed rotation names, remember it,
+and refuse every older key from then on, so a leaked key stops working as soon as an app has seen
+the rotation once.
+
+1. `nightdrop-relay gen-update-key <stick>/<purpose>-signing-key.<n>` — a new signing key (refuses
+   to overwrite); note the base64 public key it prints.
+2. `nightdrop-relay sign-rotation <stick>/recovery/<purpose>-recovery-key <update|directory> <n>
+   <new-public-key-b64>` — `n` one higher than any earlier rotation (the baked key is 0).
+3. Update: save the output as `deploy/update-rotation.json` and commit it; every `make
+   update-manifest` from then on embeds it, signed with the new key (point `NIGHTDROP_UPDATE_KEY`
+   at it, or replace `update-signing-key` on the stick). Relay list: sign every list from then on
+   with `sign-directory --rotation <file> <new-secret> …`.
+4. Publish soon and keep publishing: an app learns the new key on its next check. The next release
+   can bake the new key as its signing key; the rotation stays published for older installs.
 
 ### 11.6 Check what you built, not what you ran
 

@@ -33,6 +33,20 @@ pub const DIRECTORY_PUBKEY: [u8; 32] = [
     61, 145, 225, 209, 136, 253, 4, 131, 143, 195, 240,
 ];
 
+/// The recovery key for [`DIRECTORY_PUBKEY`]: signs nothing but a rotation naming a new list-signing
+/// key (`keyroll.rs`). Its secret is offline, apart from the signing key.
+pub const DIRECTORY_RECOVERY_PUBKEY: [u8; 32] = [
+    4, 80, 145, 52, 44, 52, 205, 33, 230, 77, 151, 2, 12, 15, 230, 94, 172, 183, 156, 28, 130, 45,
+    244, 109, 28, 119, 211, 126, 191, 110, 84, 227,
+];
+
+/// The relay list's keys, as `keyroll` takes them.
+pub const DIRECTORY_ROOTS: crate::keyroll::Roots = crate::keyroll::Roots {
+    purpose: crate::keyroll::Purpose::Directory,
+    signing: DIRECTORY_PUBKEY,
+    recovery: DIRECTORY_RECOVERY_PUBKEY,
+};
+
 /// Where the app fetches the signed list: our own onion site (the same one the update check uses,
 /// [`crate::update::UPDATE_ONION`]), file `website/relays.json` — published there as-is from
 /// `nightdrop-relay sign-directory`. Fetching it from the site rather than from relays means losing
@@ -87,6 +101,10 @@ pub struct RelayDirectory {
 pub struct SignedDirectory {
     pub payload: String,
     pub sig: String,
+    /// A rotation of the list-signing key, carried by every list once one exists (`keyroll.rs`).
+    /// Apps from before rotations existed ignore it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rotation: Option<crate::keyroll::Rotation>,
 }
 
 impl SignedDirectory {
@@ -123,7 +141,16 @@ pub fn sign(dir: &RelayDirectory, signing_key: &ed25519_dalek::SigningKey) -> Si
     SignedDirectory {
         payload: B64.encode(&payload),
         sig: B64.encode(sig.to_bytes()),
+        rotation: None,
     }
+}
+
+/// Operator tooling (`sign-directory --rotation`): attach a rotation of the list-signing key to a
+/// signed list's wire form.
+pub fn with_rotation(wire: &str, rotation: crate::keyroll::Rotation) -> Option<String> {
+    let mut signed = SignedDirectory::from_wire(wire)?;
+    signed.rotation = Some(rotation);
+    Some(signed.to_wire())
 }
 
 /// Operator tooling: generate a fresh Ed25519 directory-signing keypair. Returns the base64

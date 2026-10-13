@@ -16,6 +16,7 @@ pub mod crypto;
 pub mod diag;
 pub mod directory;
 pub mod identity;
+pub mod keyroll;
 pub mod pake;
 pub mod pqkem;
 pub mod relay_client;

@@ -1557,6 +1557,19 @@ impl NightdropCore {
         Ok(key)
     }
 
+    /// Keep a signing key a manifest rotated to (`keyroll.rs`), so an older one is refused from now on.
+    fn remember_update_key(&self, moved: Option<crate::keyroll::Trust>) {
+        if let Some(trust) = moved {
+            crate::diag!(
+                "update: the signing key was rotated (sequence {})",
+                trust.seq
+            );
+            let mut g = self.lock();
+            g.me.update_key = Some(trust);
+            g.save();
+        }
+    }
+
     /// Ask our onion site whether a newer release exists (`crate::update`).
     ///
     /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
@@ -1569,13 +1582,20 @@ impl NightdropCore {
         // Take a transport handle under the lock, then DROP the lock before any network I/O. A
         // Tor fetch bounded at 30s would otherwise pin the core lock for 30s and freeze every
         // other FFI call and the poller behind it (§6).
-        let transport = self.lock().me.transport_handle();
-        match crate::update::check(transport.as_ref(), &current_version) {
-            Ok(Some(s)) => Some(AppUpdate {
-                current: s.current,
-                latest: s.latest,
-                update_available: s.update_available,
-            }),
+        let (transport, learned) = {
+            let g = self.lock();
+            (g.me.transport_handle(), g.me.update_key.clone())
+        };
+        match crate::update::check_trusting(transport.as_ref(), &current_version, learned.as_ref())
+        {
+            Ok(Some((s, moved))) => {
+                self.remember_update_key(moved);
+                Some(AppUpdate {
+                    current: s.current,
+                    latest: s.latest,
+                    update_available: s.update_available,
+                })
+            }
             // Site down, Tor slow, malformed JSON, or a transport that cannot fetch anonymously.
             // All the same to the user: nothing to report.
             Ok(None) => None,
@@ -1628,7 +1648,10 @@ impl NightdropCore {
         ) else {
             anyhow::bail!("this transport cannot fetch anonymously");
         };
-        let manifest = crate::update::parse_manifest(&fetched?)?;
+        let learned = self.lock().me.update_key.clone();
+        let (manifest, moved) =
+            crate::update::parse_manifest_trusting(&fetched?, learned.as_ref())?;
+        self.remember_update_key(moved);
         // The manifest is fetched again here, so a check that saw a newer release proves nothing
         // about this one. A host replaying an older signed manifest would otherwise hand a desktop
         // user an old, perhaps vulnerable, genuinely signed build (Android refuses a downgrade
@@ -2950,7 +2973,7 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
                         g.me.finish_directory_fetch(
                             fetched,
                             now_secs(),
-                            &crate::directory::DIRECTORY_PUBKEY,
+                            &crate::directory::DIRECTORY_ROOTS,
                         );
                     }));
                 }

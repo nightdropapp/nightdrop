@@ -1057,6 +1057,9 @@ pub struct Node {
     /// Version of the last relay directory we accepted; a fetched list is applied only if newer
     /// (monotonic anti-rollback). Persisted.
     directory_version: u64,
+    /// Signing keys learned through rotations (`keyroll.rs`); None = the baked key. Persisted.
+    pub(crate) update_key: Option<crate::keyroll::Trust>,
+    pub(crate) directory_key: Option<crate::keyroll::Trust>,
     /// When the relay list is next fetched from our onion site (unix seconds; 0 = as soon as Tor is
     /// up). Persisted, so the daily schedule holds across restarts.
     directory_next_check: u64,
@@ -1582,6 +1585,8 @@ impl Node {
             receipt_sends: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
+            update_key: None,
+            directory_key: None,
             directory_next_check: 0,
             awaiting_receipt: Vec::new(),
             pending_receipts: Vec::new(),

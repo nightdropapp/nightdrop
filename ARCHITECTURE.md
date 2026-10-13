@@ -966,6 +966,11 @@ and the download). The same fields also sit in the clear beside it for apps from
 which ignore `signed`. Unsigned or badly signed reads as "no answer". The private key signs at
 publish time only (`nightdrop-relay sign-update`), so it need not live on the web host; it does
 not stop a replayed *older* signed manifest, which can only hide an update, never offer a build.
+**The signing key can be rotated** (`core/src/keyroll.rs`): each app also carries a *recovery* key,
+kept offline and used for nothing but signing "the signing key is now K, sequence n". A manifest may
+carry that statement; the app adopts the named key, remembers it in its sealed state, and refuses
+every older key from then on — so a leaked key is cut off, and a lost one replaced, without a
+release. The relay list (`directory.rs`) works the same way with its own pair.
 
 **The manifest cannot drift from what is served.** `scripts/gen-update-manifest.sh` (run by
 `make update-manifest` at publish time, deliberately *not* by `make config` — `MAINTENANCE.md` §12)

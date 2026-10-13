@@ -14,6 +14,17 @@ fn key() -> SigningKey {
 fn pubkey() -> [u8; 32] {
     key().verifying_key().to_bytes()
 }
+fn recovery() -> SigningKey {
+    SigningKey::from_bytes(&[11u8; 32])
+}
+/// The test deployment's keys: [`key`] signs lists, [`recovery`] may rotate it.
+fn roots() -> crate::keyroll::Roots {
+    crate::keyroll::Roots {
+        purpose: crate::keyroll::Purpose::Directory,
+        signing: pubkey(),
+        recovery: recovery().verifying_key().to_bytes(),
+    }
+}
 fn list(version: u64, relays: &[&str]) -> String {
     let dir = RelayDirectory {
         version,
@@ -48,7 +59,7 @@ fn a_good_list_is_adopted_and_the_next_fetch_is_a_day_away() {
     n.finish_directory_fetch(
         site(Some(Ok(list(3, &["a.onion", " b.onion ", ""])))),
         NOW,
-        &pubkey(),
+        &roots(),
     );
     assert_eq!(n.directory_version, 3);
     assert_eq!(
@@ -63,11 +74,11 @@ fn a_good_list_is_adopted_and_the_next_fetch_is_a_day_away() {
 #[test]
 fn an_unchanged_list_still_counts_as_a_good_fetch() {
     let mut n = node();
-    n.finish_directory_fetch(site(Some(Ok(list(3, &["a.onion"])))), NOW, &pubkey());
+    n.finish_directory_fetch(site(Some(Ok(list(3, &["a.onion"])))), NOW, &roots());
     // The site keeps serving version 3: nothing to adopt, but the site answered with a genuine
     // list, so this is not a failure to retry in a few hours.
     let later = NOW + CHECK_INTERVAL_SECS;
-    n.finish_directory_fetch(site(Some(Ok(list(3, &["a.onion"])))), later, &pubkey());
+    n.finish_directory_fetch(site(Some(Ok(list(3, &["a.onion"])))), later, &roots());
     assert!(!n.directory_fetch_due(later + RETRY_INTERVAL_SECS));
     assert!(n.directory_fetch_due(later + CHECK_INTERVAL_SECS));
 }
@@ -75,7 +86,7 @@ fn an_unchanged_list_still_counts_as_a_good_fetch() {
 #[test]
 fn a_forged_or_older_list_cannot_move_the_relay_set() {
     let mut n = node();
-    n.finish_directory_fetch(site(Some(Ok(list(5, &["good.onion"])))), NOW, &pubkey());
+    n.finish_directory_fetch(site(Some(Ok(list(5, &["good.onion"])))), NOW, &roots());
 
     // Signed by someone else (a compromised website, say): rejected, and retried sooner.
     let forged = directory::sign(
@@ -88,7 +99,7 @@ fn a_forged_or_older_list_cannot_move_the_relay_set() {
     )
     .to_wire();
     let t = NOW + CHECK_INTERVAL_SECS;
-    n.finish_directory_fetch(site(Some(Ok(forged))), t, &pubkey());
+    n.finish_directory_fetch(site(Some(Ok(forged))), t, &roots());
     assert_eq!(n.discovered_relays, vec!["good.onion"]);
     assert_eq!(n.directory_version, 5);
     assert!(
@@ -98,13 +109,13 @@ fn a_forged_or_older_list_cannot_move_the_relay_set() {
 
     // Genuine but older (a rollback): ignored.
     assert_eq!(
-        n.adopt_directory(&list(4, &["old.onion"]), &pubkey()),
+        n.adopt_directory(&list(4, &["old.onion"]), &roots()),
         DirectoryOutcome::Current
     );
     assert_eq!(n.discovered_relays, vec!["good.onion"]);
     // Not JSON at all.
     assert_eq!(
-        n.adopt_directory("<html>404</html>", &pubkey()),
+        n.adopt_directory("<html>404</html>", &roots()),
         DirectoryOutcome::Invalid
     );
 }
@@ -114,7 +125,7 @@ fn a_failed_or_impossible_fetch_retries_in_a_few_hours() {
     for fetched in [Some(Err(anyhow::anyhow!("onion unreachable"))), None] {
         let mut n = node();
         let _plan = n.begin_directory_fetch(NOW);
-        n.finish_directory_fetch(site(fetched), NOW, &pubkey());
+        n.finish_directory_fetch(site(fetched), NOW, &roots());
         assert!(!n.directory_fetch_due(NOW + RETRY_INTERVAL_SECS - 1));
         assert!(n.directory_fetch_due(NOW + RETRY_INTERVAL_SECS));
         assert!(n.discovered_relays.is_empty());
@@ -124,7 +135,7 @@ fn a_failed_or_impossible_fetch_retries_in_a_few_hours() {
 #[test]
 fn the_schedule_survives_a_restart() {
     let mut n = node();
-    n.finish_directory_fetch(site(Some(Ok(list(2, &["a.onion"])))), NOW, &pubkey());
+    n.finish_directory_fetch(site(Some(Ok(list(2, &["a.onion"])))), NOW, &roots());
     let key: crate::storage::StoreKey = [7u8; 32];
     let state = n.export(&key);
     let back = Node::restore(&state, Box::new(MemoryNetwork::new().endpoint("me")), &key).unwrap();
@@ -202,7 +213,7 @@ fn when_the_site_fails_a_relay_served_list_is_still_adopted() {
             list(6, &["later-relay.onion"]),
         ],
     };
-    n.finish_directory_fetch(result, NOW, &pubkey());
+    n.finish_directory_fetch(result, NOW, &roots());
     assert_eq!(
         n.discovered_relays,
         vec!["from-relay.onion"],
@@ -296,7 +307,7 @@ fn the_primary_listed_again_by_the_directory_is_one_relay() {
     assert_eq!(
         n.adopt_directory(
             &list(1, &["primary.onion", "other.onion", "mine.onion"]),
-            &pubkey()
+            &roots()
         ),
         DirectoryOutcome::Applied { changed: true }
     );
@@ -308,4 +319,41 @@ fn the_primary_listed_again_by_the_directory_is_one_relay() {
     addrs.sort();
     assert_eq!(addrs, ["mine.onion", "other.onion", "primary.onion"]);
     assert_eq!(n.directory_relays().len(), 3);
+}
+
+#[test]
+fn a_rotated_list_key_is_adopted_and_the_old_one_refused_from_then_on() {
+    // Self-audit 2026-10-13, key-compromise plan: the list-signing key leaked, so the operator
+    // names a new one with the recovery key.
+    use base64::Engine as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let net = MemoryNetwork::new();
+    let mut n = Node::new(Box::new(net.endpoint("me")));
+    let new_key = SigningKey::from_bytes(&[12u8; 32]);
+    let rotation = crate::keyroll::sign_rotation(
+        &b64.encode(recovery().to_bytes()),
+        crate::keyroll::Purpose::Directory,
+        1,
+        &b64.encode(new_key.verifying_key().to_bytes()),
+    )
+    .unwrap();
+    let dir = |version: u64, relays: &[&str]| RelayDirectory {
+        version,
+        issued_at: NOW,
+        relays: relays.iter().map(|s| s.to_string()).collect(),
+    };
+    let mut signed = directory::sign(&dir(5, &["new.onion"]), &new_key);
+    signed.rotation = Some(rotation);
+    assert!(matches!(
+        n.adopt_directory(&signed.to_wire(), &roots()),
+        DirectoryOutcome::Applied { .. }
+    ));
+    assert_eq!(n.directory_key.as_ref().map(|t| t.seq), Some(1));
+    // The leaked old key can no longer move the list, even with a higher version.
+    let stale = directory::sign(&dir(9, &["evil.onion"]), &key()).to_wire();
+    assert!(matches!(
+        n.adopt_directory(&stale, &roots()),
+        DirectoryOutcome::Invalid
+    ));
+    assert!(!n.discovered_relays.iter().any(|r| r == "evil.onion"));
 }

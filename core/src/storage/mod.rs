@@ -435,6 +435,13 @@ pub struct PersistedState {
     pub discovered_relays: Vec<String>,
     #[serde(default, skip_serializing_if = "is_zero_u64")]
     pub directory_version: u64,
+    /// The newest signing keys accepted through a recovery-signed rotation (`keyroll.rs`), for the
+    /// update manifest and the relay list. None = the key baked into this build. Kept so a leaked
+    /// older key can never be accepted again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub update_key: Option<crate::keyroll::Trust>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub directory_key: Option<crate::keyroll::Trust>,
     /// When the relay list is next fetched from the onion site (unix seconds). 0 = due once Tor is
     /// up; older state files have none.
     #[serde(default, skip_serializing_if = "is_zero_u64")]
@@ -632,6 +639,8 @@ mod tests {
             passes: Vec::new(),
             discovered_relays: Vec::new(),
             directory_version: 0,
+            update_key: None,
+            directory_key: None,
             directory_next_check: 0,
             pending_control: Vec::new(),
             pending_invites: Vec::new(),

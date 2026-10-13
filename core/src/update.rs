@@ -99,6 +99,23 @@ pub const UPDATE_PUBKEY: [u8; 32] = [
     169, 252, 216, 32, 143, 32, 36, 72, 135, 13, 85,
 ];
 
+/// The recovery key for [`UPDATE_PUBKEY`]: it signs nothing but a [`keyroll::Rotation`] naming a
+/// new signing key, should that one leak or be lost (`keyroll.rs`). Its secret is offline, apart
+/// from the signing key. Permanent like the signing key.
+///
+/// [`keyroll::Rotation`]: crate::keyroll::Rotation
+pub const UPDATE_RECOVERY_PUBKEY: [u8; 32] = [
+    28, 16, 172, 144, 142, 41, 89, 37, 149, 245, 192, 253, 108, 164, 138, 70, 148, 13, 32, 33, 38,
+    235, 171, 205, 168, 64, 121, 202, 145, 164, 68, 128,
+];
+
+/// The update purpose's keys, as `keyroll` takes them.
+pub const UPDATE_ROOTS: crate::keyroll::Roots = crate::keyroll::Roots {
+    purpose: crate::keyroll::Purpose::Update,
+    signing: UPDATE_PUBKEY,
+    recovery: UPDATE_RECOVERY_PUBKEY,
+};
+
 /// Domain separation: a signature over a manifest can never be read as one over anything else.
 const UPDATE_SIGN_CONTEXT: &[u8] = b"nightdrop/update/v1\n";
 
@@ -108,6 +125,9 @@ const UPDATE_SIGN_CONTEXT: &[u8] = b"nightdrop/update/v1\n";
 struct SignedEnvelope {
     #[serde(default)]
     signed: Option<SignedPayload>,
+    /// A rotation of the signing key, carried by every manifest once one exists (`keyroll.rs`).
+    #[serde(default)]
+    rotation: Option<crate::keyroll::Rotation>,
 }
 
 #[derive(Deserialize)]
@@ -122,14 +142,39 @@ struct SignedPayload {
 /// Parse a served manifest, trusting **only** its signed payload. Unsigned, badly signed or
 /// malformed is an error, which the check reports as "no answer" and the download refuses.
 pub fn parse_manifest(body: &[u8]) -> Result<UpdateManifest> {
-    parse_manifest_with(body, &UPDATE_PUBKEY)
+    parse_manifest_trusting(body, None).map(|(m, _)| m)
 }
 
+/// [`parse_manifest`] against the signing key this install has learned (`learned`, from earlier
+/// rotations), returning the manifest and, when the manifest carried a newer valid rotation, the
+/// [`Trust`](crate::keyroll::Trust) to remember. A manifest signed by any older key is refused.
+pub fn parse_manifest_trusting(
+    body: &[u8],
+    learned: Option<&crate::keyroll::Trust>,
+) -> Result<(UpdateManifest, Option<crate::keyroll::Trust>)> {
+    parse_manifest_rooted(body, &UPDATE_ROOTS, learned)
+}
+
+fn parse_manifest_rooted(
+    body: &[u8],
+    roots: &crate::keyroll::Roots,
+    learned: Option<&crate::keyroll::Trust>,
+) -> Result<(UpdateManifest, Option<crate::keyroll::Trust>)> {
+    let envelope: SignedEnvelope = serde_json::from_slice(body)?;
+    let (key, moved) = crate::keyroll::current_key(roots, learned, envelope.rotation.as_ref());
+    let manifest = verify_envelope(envelope, &key)?;
+    Ok((manifest, moved))
+}
+
+#[cfg(test)]
 fn parse_manifest_with(body: &[u8], pubkey: &[u8; 32]) -> Result<UpdateManifest> {
+    verify_envelope(serde_json::from_slice(body)?, pubkey)
+}
+
+fn verify_envelope(envelope: SignedEnvelope, pubkey: &[u8; 32]) -> Result<UpdateManifest> {
     use base64::Engine as _;
     use ed25519_dalek::{Signature, VerifyingKey};
     let b64 = base64::engine::general_purpose::STANDARD;
-    let envelope: SignedEnvelope = serde_json::from_slice(body)?;
     let signed = envelope
         .signed
         .ok_or_else(|| anyhow::anyhow!("update manifest is not signed"))?;
@@ -236,6 +281,15 @@ pub struct UpdateStatus {
 /// `current_version` accepts the pubspec form (`"0.1.17+403"`); the build metadata is ignored.
 /// Returns `Ok(None)` when the transport cannot fetch anonymously — the caller does nothing.
 pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<UpdateStatus>> {
+    check_trusting(transport, current_version, None).map(|o| o.map(|(s, _)| s))
+}
+
+/// [`check`] against the learned signing key; also returns a newly learned one to remember.
+pub fn check_trusting(
+    transport: &dyn Transport,
+    current_version: &str,
+    learned: Option<&crate::keyroll::Trust>,
+) -> Result<Option<(UpdateStatus, Option<crate::keyroll::Trust>)>> {
     // Started before the fetch, not after: `onion_get` blocks for the whole Tor round trip, so a
     // timer set on the line below would measure the JSON parse and report a 22µs network fetch.
     let started = std::time::Instant::now();
@@ -253,7 +307,7 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
             return Err(e);
         }
     };
-    let manifest: UpdateManifest = match parse_manifest(&body) {
+    let (manifest, moved) = match parse_manifest_trusting(&body, learned) {
         Ok(m) => m,
         Err(e) => {
             crate::diag!(
@@ -279,7 +333,7 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
             .builds(native_build().platform)
             .map_or(0, std::collections::HashMap::len)
     );
-    Ok(Some(status))
+    Ok(Some((status, moved)))
 }
 
 /// Which published build belongs on **this** device.
@@ -787,6 +841,40 @@ mod tests {
         ed25519_dalek::SigningKey::from_bytes(&s)
             .verifying_key()
             .to_bytes()
+    }
+
+    #[test]
+    fn a_rotated_signing_key_is_learned_and_the_old_one_refused() {
+        // Self-audit 2026-10-13, key-compromise plan.
+        use base64::Engine as _;
+        let b64 = base64::engine::general_purpose::STANDARD;
+        let (old_sk, _) = generate_update_key();
+        let (recovery_sk, _) = generate_update_key();
+        let (new_sk, _) = generate_update_key();
+        let roots = crate::keyroll::Roots {
+            purpose: crate::keyroll::Purpose::Update,
+            signing: pubkey_of(&old_sk),
+            recovery: pubkey_of(&recovery_sk),
+        };
+        let rotation = crate::keyroll::sign_rotation(
+            &recovery_sk,
+            crate::keyroll::Purpose::Update,
+            1,
+            &b64.encode(pubkey_of(&new_sk)),
+        )
+        .unwrap();
+        let payload = r#"{"latest":"0.3.0"}"#;
+        let served = signed_with(&new_sk, payload);
+        let mut envelope: serde_json::Value = serde_json::from_str(&served).unwrap();
+        envelope["rotation"] = serde_json::to_value(&rotation).unwrap();
+        let with_rotation = envelope.to_string();
+        let (m, moved) = parse_manifest_rooted(with_rotation.as_bytes(), &roots, None).unwrap();
+        assert_eq!(m.latest, "0.3.0");
+        let learned = moved.expect("the rotation is learned");
+        // From now on the old key is refused, even for a manifest without the rotation.
+        let old_signed = signed_with(&old_sk, payload);
+        assert!(parse_manifest_rooted(old_signed.as_bytes(), &roots, Some(&learned)).is_err());
+        assert!(parse_manifest_rooted(served.as_bytes(), &roots, Some(&learned)).is_ok());
     }
 
     #[test]

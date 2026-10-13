@@ -2757,3 +2757,21 @@ fn deleting_a_chat_or_burning_media_removes_every_copy_on_disk() {
     );
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn learned_signing_keys_survive_a_save_and_restore() {
+    // A rotation, once seen, must hold across restarts: that is what keeps a leaked old key out.
+    let net = MemoryNetwork::new();
+    let mut n = Node::new(Box::new(net.endpoint("me")));
+    let trust = crate::keyroll::Trust {
+        seq: 2,
+        key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+    };
+    n.update_key = Some(trust.clone());
+    n.directory_key = Some(trust.clone());
+    let key: StoreKey = [4u8; 32];
+    let state = n.export(&key);
+    let restored = Node::restore(&state, Box::new(net.endpoint("me2")), &key).unwrap();
+    assert_eq!(restored.update_key, Some(trust.clone()));
+    assert_eq!(restored.directory_key, Some(trust));
+}

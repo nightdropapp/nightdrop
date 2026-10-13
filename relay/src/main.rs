@@ -20,6 +20,7 @@
 //! Operator subcommands (no Tor bootstrap):
 //! - `gen-directory-key` / `sign-directory` — the signed relay directory (§3.1).
 //! - `gen-update-key` / `sign-update` — the signed update manifest (`core/src/update.rs`).
+//! - `sign-rotation` — name a new signing key with a recovery key (`core/src/keyroll.rs`).
 //! - `authorize-client` / `revoke-client` / `list-clients` — private-relay client authorization
 //!   (§3.2). Any authorized client (a `.auth` file under `<state>/authorized-clients/`) flips the
 //!   relay's onion to **restricted discovery**: only those clients can fetch its descriptor.
@@ -73,6 +74,7 @@ fn main() -> anyhow::Result<()> {
         Some("sign-directory") => return sign_directory(&args[2..]),
         Some("gen-update-key") => return gen_update_key(&args[2..]),
         Some("sign-update") => return sign_update(&args[2..]),
+        Some("sign-rotation") => return sign_rotation(&args[2..]),
         Some("authorize-client") => return authorize_client(&args[2..]),
         Some("revoke-client") => return revoke_client(&args[2..]),
         Some("list-clients") => return list_clients(),
@@ -843,8 +845,11 @@ fn gen_update_key(args: &[String]) -> anyhow::Result<()> {
         .collect::<Vec<_>>()
         .join(", ");
     eprintln!("Update signing key written to {out} (keep it secret, backed up, off the web host).");
-    eprintln!("Bake the PUBLIC key into core/src/update.rs and rebuild:");
-    eprintln!("     pub const UPDATE_PUBKEY: [u8; 32] = [{arr}];");
+    eprintln!(
+        "Its PUBLIC key, as an array (to bake into a release) and in base64 (for a rotation):"
+    );
+    eprintln!("     [{arr}]");
+    eprintln!("     {}", nightdrop::keyroll::encode_key(&public));
     Ok(())
 }
 
@@ -862,13 +867,46 @@ fn sign_update(args: &[String]) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// `sign-rotation <recovery-key-file> <update|directory> <seq> <new-public-key-b64>`: print the
+/// rotation statement naming a new signing key (`core/src/keyroll.rs`). Publish it with every
+/// later manifest or list: `deploy/update-rotation.json` (read by `make update-manifest`), or
+/// `sign-directory --rotation <file>`. `seq` must exceed every earlier rotation's.
+fn sign_rotation(args: &[String]) -> anyhow::Result<()> {
+    let [key_file, purpose, seq, new_key] = args else {
+        anyhow::bail!(
+            "usage: nightdrop-relay sign-rotation <recovery-key-file> <update|directory> <seq> <new-public-key-b64>"
+        );
+    };
+    let purpose = nightdrop::keyroll::Purpose::parse(purpose)
+        .ok_or_else(|| anyhow::anyhow!("purpose must be update or directory"))?;
+    let seq: u64 = seq.parse().context("seq must be a number")?;
+    anyhow::ensure!(seq >= 1, "seq 0 is the baked key; a rotation starts at 1");
+    let secret = std::fs::read_to_string(key_file)?;
+    let rotation = nightdrop::keyroll::sign_rotation(&secret, purpose, seq, new_key)
+        .ok_or_else(|| anyhow::anyhow!("bad recovery key file or new public key"))?;
+    println!("{}", rotation.to_json());
+    Ok(())
+}
+
 /// `sign-directory <privkey-b64> <version> <relay.onion> [more...]`: sign a relay list and print
 /// the one-line JSON. Drop it as `<state>/relay-list.json` on each relay you run; apps fetch it,
 /// verify it against the baked-in key, and adopt the relays. Bump `version` on every change.
 fn sign_directory(args: &[String]) -> anyhow::Result<()> {
+    // `--rotation <file>` first: a rotation of the list-signing key (`sign-rotation directory`),
+    // carried by every list from then on.
+    let (rotation, args) = match args {
+        [flag, file, rest @ ..] if flag == "--rotation" => {
+            let json = std::fs::read_to_string(file)?;
+            let rotation: nightdrop::keyroll::Rotation =
+                nightdrop::keyroll::Rotation::from_json(&json)
+                    .ok_or_else(|| anyhow::anyhow!("{file} is not a rotation"))?;
+            (Some(rotation), rest)
+        }
+        _ => (None, args),
+    };
     if args.len() < 3 {
         anyhow::bail!(
-            "usage: nightdrop-relay sign-directory <privkey-b64> <version> <relay.onion> [more...]"
+            "usage: nightdrop-relay sign-directory [--rotation <file>] <privkey-b64> <version> <relay.onion> [more...]"
         );
     }
     let version: u64 = args[1].parse().context("version must be a number")?;
@@ -879,6 +917,10 @@ fn sign_directory(args: &[String]) -> anyhow::Result<()> {
         .unwrap_or(0);
     let signed = nightdrop::directory::sign_list(&args[0], version, issued_at, relays)
         .context("invalid private key")?;
+    let signed = match rotation {
+        Some(r) => nightdrop::directory::with_rotation(&signed, r).context("bad signed list")?,
+        None => signed,
+    };
     println!("{signed}");
     Ok(())
 }

@@ -633,17 +633,35 @@ impl Node {
         self.relay_set()
     }
 
-    /// Adopt a signed relay list if it verifies against `pubkey` and is newer than ours.
-    /// `pubkey` is [`DIRECTORY_PUBKEY`](crate::directory::DIRECTORY_PUBKEY) outside tests.
-    pub(crate) fn adopt_directory(&mut self, wire: &str, pubkey: &[u8; 32]) -> DirectoryOutcome {
+    /// Adopt a signed relay list if it verifies against the current list-signing key and is newer
+    /// than ours. `roots` is [`DIRECTORY_ROOTS`](crate::directory::DIRECTORY_ROOTS) outside tests.
+    pub(crate) fn adopt_directory(
+        &mut self,
+        wire: &str,
+        roots: &crate::keyroll::Roots,
+    ) -> DirectoryOutcome {
         let Some(signed) = crate::directory::SignedDirectory::from_wire(wire) else {
             return DirectoryOutcome::Invalid;
         };
         // Verified against the operator key: an unsigned or forged list can't move our relay set,
-        // wherever it came from (a relay, or a compromised website).
-        let Some(dir) = signed.verify(pubkey) else {
+        // wherever it came from (a relay, or a compromised website). The key is the newest one a
+        // recovery-signed rotation has named (`keyroll.rs`); an older one is refused.
+        let (key, moved) = crate::keyroll::current_key(
+            roots,
+            self.directory_key.as_ref(),
+            signed.rotation.as_ref(),
+        );
+        let Some(dir) = signed.verify(&key) else {
             return DirectoryOutcome::Invalid;
         };
+        if let Some(trust) = moved {
+            crate::diag!(
+                "directory: the list-signing key was rotated (sequence {})",
+                trust.seq
+            );
+            self.directory_key = Some(trust);
+            self.dirty = true;
+        }
         if dir.version <= self.directory_version {
             return DirectoryOutcome::Current; // not newer (monotonic anti-rollback)
         }
@@ -691,14 +709,14 @@ impl Node {
         &mut self,
         result: DirectoryFetchResult,
         now: u64,
-        pubkey: &[u8; 32],
+        roots: &crate::keyroll::Roots,
     ) {
         let DirectoryFetchResult {
             site: fetched,
             relay_lists,
         } = result;
         let outcome = match &fetched {
-            Some(Ok(wire)) => self.adopt_directory(wire, pubkey),
+            Some(Ok(wire)) => self.adopt_directory(wire, roots),
             _ => DirectoryOutcome::Invalid,
         };
         match outcome {
@@ -723,7 +741,7 @@ impl Node {
                 // What the relays answered (asked off the lock, `fetch_directory`): the first list
                 // that is genuine and newer wins, as relay polling always did.
                 for wire in &relay_lists {
-                    if let DirectoryOutcome::Applied { .. } = self.adopt_directory(wire, pubkey) {
+                    if let DirectoryOutcome::Applied { .. } = self.adopt_directory(wire, roots) {
                         break;
                     }
                 }

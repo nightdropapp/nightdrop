@@ -149,6 +149,8 @@ impl Node {
                 .collect(),
             discovered_relays: self.discovered_relays.clone(),
             directory_version: self.directory_version,
+            update_key: self.update_key.clone(),
+            directory_key: self.directory_key.clone(),
             directory_next_check: self.directory_next_check,
             pending_control: self.export_pending_control(),
             pending_invites: self.export_pending_invites(),
@@ -404,6 +406,8 @@ impl Node {
             .extend(overflow.into_iter().map(|e| (e, until)));
         node.discovered_relays = state.discovered_relays.clone();
         node.directory_version = state.directory_version;
+        node.update_key = state.update_key.clone();
+        node.directory_key = state.directory_key.clone();
         node.directory_next_check = state.directory_next_check;
         node.relay_keys = state
             .relay_keys

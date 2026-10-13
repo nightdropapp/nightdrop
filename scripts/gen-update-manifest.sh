@@ -127,4 +127,10 @@ printf '%s' "$json" > "$tmp"
 sig="$(cargo run -q --release -p nightdrop_relay -- sign-update "$key" "$tmp")"
 payload="$(base64 -w0 < "$tmp")"
 [ -n "$sig" ] && [ -n "$payload" ] || { echo "gen-update-manifest: signing failed" >&2; exit 1; }
-printf '%s,"signed":{"payload":"%s","sig":"%s"}}\n' "${json%\}}" "$payload" "$sig" > website/update.json
+# A rotation of the signing key (core/src/keyroll.rs), once one has been made, rides along in every
+# manifest from then on, so an app that missed it learns the new key on its next check.
+rotation=""
+if [ -f deploy/update-rotation.json ]; then
+  rotation=",\"rotation\":$(tr -d '\n' < deploy/update-rotation.json)"
+fi
+printf '%s,"signed":{"payload":"%s","sig":"%s"}%s}\n' "${json%\}}" "$payload" "$sig" "$rotation" > website/update.json
