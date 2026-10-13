@@ -679,6 +679,19 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// Compare two versions, ignoring build metadata on either side.
+/// Refuse a download that is not strictly newer than `current` (self-audit 2026-10-13, second
+/// round: a replayed older signed manifest must not become a downgrade).
+pub fn ensure_newer(current: Option<&str>, latest: &str) -> Result<()> {
+    let Some(current) = current else {
+        anyhow::bail!("this build's version is not known yet; try again in a moment");
+    };
+    if !is_newer(latest, current) {
+        crate::diag!("update: download REFUSED — the site offers {latest}, this is {current}");
+        anyhow::bail!("the site does not offer a newer version than this one");
+    }
+    Ok(())
+}
+
 pub fn compare(current: &str, latest: &str) -> UpdateStatus {
     UpdateStatus {
         update_available: is_newer(latest, current),
@@ -774,6 +787,23 @@ mod tests {
         ed25519_dalek::SigningKey::from_bytes(&s)
             .verifying_key()
             .to_bytes()
+    }
+
+    #[test]
+    fn only_a_strictly_newer_release_is_downloaded() {
+        assert!(ensure_newer(Some("0.2.0"), "0.2.1").is_ok());
+        assert!(
+            ensure_newer(Some("0.2.0"), "0.2.0").is_err(),
+            "same version"
+        );
+        assert!(
+            ensure_newer(Some("0.2.1"), "0.2.0").is_err(),
+            "a replayed older manifest"
+        );
+        assert!(
+            ensure_newer(None, "9.9.9").is_err(),
+            "unknown running version"
+        );
     }
 
     #[test]

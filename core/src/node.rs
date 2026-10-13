@@ -1928,6 +1928,11 @@ impl Node {
         let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
     }
 
+    /// This build's app version, as [`set_app_version`](Self::set_app_version) recorded it.
+    pub(crate) fn app_version(&self) -> Option<&str> {
+        self.app_version.as_deref()
+    }
+
     /// Record this build's app version (the pubspec form, `"0.1.27+412"`, is accepted; the build
     /// number is dropped). A changed version re-announces to every chat.
     pub fn set_app_version(&mut self, version: &str) {

@@ -1629,6 +1629,12 @@ impl NightdropCore {
             anyhow::bail!("this transport cannot fetch anonymously");
         };
         let manifest = crate::update::parse_manifest(&fetched?)?;
+        // The manifest is fetched again here, so a check that saw a newer release proves nothing
+        // about this one. A host replaying an older signed manifest would otherwise hand a desktop
+        // user an old, perhaps vulnerable, genuinely signed build (Android refuses a downgrade
+        // itself). Only strictly newer than what is running, and nothing if that is unknown.
+        let current = self.lock().me.app_version().map(str::to_string);
+        crate::update::ensure_newer(current.as_deref(), &manifest.latest)?;
         crate::update::download(
             transport.as_ref(),
             &manifest,
