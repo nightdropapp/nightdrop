@@ -91,6 +91,13 @@ DataDirectory $TORDATA
 HiddenServiceDir $HS
 HiddenServiceVersion 3
 HiddenServicePort 80 127.0.0.1:$PORT
+# Flood defences (2026-10-13 audit): proof-of-work only under load (clients without it, like the
+# app's update check, still get in, at lower priority during an attack); intro-point rate limits;
+# and one circuit may not hold more than 32 streams (a browser page uses a handful).
+HiddenServicePoWDefensesEnabled 1
+HiddenServiceEnableIntroDoSDefense 1
+HiddenServiceMaxStreams 32
+HiddenServiceMaxStreamsCloseCircuit 1
 Log notice stderr
 EOF
 
@@ -158,11 +165,21 @@ http {
   # A Tor client pulling 45 MB at 25 KB/s must not be timed out mid-transfer.
   send_timeout 3600s;
   keepalive_timeout 75s;
+  server_tokens off;
   server {
     listen 127.0.0.1:$PORT;
     root $WEB;
     index index.html;
     autoindex off;
+    # The same headers as the clear-web vhost (deploy/nginx-nightdrop.conf), less HSTS and
+    # Onion-Location, which mean nothing here. Set at server level and never in a location: an
+    # add_header inside a location drops every inherited one (2026-10-13 audit).
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "no-referrer" always;
+    add_header Content-Security-Policy "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'" always;
+    # Served from the live checkout, so nothing hidden may leak (.git, editor files, .env).
+    location ~ /\.(?!well-known/) { return 404; }
   }
 }
 NGINXCONF

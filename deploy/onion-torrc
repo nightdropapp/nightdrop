@@ -17,6 +17,12 @@ HiddenServiceDir /var/lib/tor/nightdrop
 HiddenServiceVersion 3
 # Serve the onion from nginx's localhost-only onion vhost (deploy/nginx-nightdrop.conf).
 HiddenServicePort 80 127.0.0.1:8080
+# Flood defences, as on the maintainer's machine (scripts/onion-website.sh): proof-of-work under
+# load, intro-point rate limits, at most 32 streams per circuit.
+HiddenServicePoWDefensesEnabled 1
+HiddenServiceEnableIntroDoSDefense 1
+HiddenServiceMaxStreams 32
+HiddenServiceMaxStreamsCloseCircuit 1
 
 # Hosting an onion service is a Tor *client* publishing a descriptor — it is not a relay or exit,
 # so no bandwidth is carried for the network and no special provider permission is needed.
