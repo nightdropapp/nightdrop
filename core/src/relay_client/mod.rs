@@ -83,6 +83,10 @@ pub struct RelayLimits {
     /// (self-audit 2026-10-13, finding 4). A flood of *small* posts can still fill it — that needs
     /// a cost on posting (proof of work), which is not built.
     pub small_reserve_bytes: usize,
+    /// Charged per stored blob on top of its length and handle: the entry's own bookkeeping (ids,
+    /// timestamps, map slot) is real memory and real `queue.json`, and without it an empty blob
+    /// cost nothing. 512 by default.
+    pub entry_overhead_bytes: usize,
     /// Longest accepted TTL; longer requests are clamped, keeping the 24h promise (§6)
     /// even against a hostile client asking for more.
     pub max_ttl: Duration,
@@ -103,6 +107,7 @@ impl Default for RelayLimits {
             max_total_bytes: 1024 * 1024 * 1024,
             small_blob_bytes: 64 * 1024,
             small_reserve_bytes: 128 * 1024 * 1024,
+            entry_overhead_bytes: 512,
             max_ttl: Duration::from_secs(24 * 60 * 60),
             // base64 inflates ~4/3; + headroom for the JSON envelope (handle, ttl, version).
             // (`/ 3 * 4` avoids the intermediate overflow that `* 4 / 3` risks on 32-bit.)
@@ -360,6 +365,29 @@ struct Stored {
     /// monotonic `Instant` and can't survive a restart). Enforced again on load.
     expiry_unix: u64,
     bytes: Vec<u8>,
+    /// What this entry counts against `max_total_bytes`: the blob, its handle and
+    /// `entry_overhead_bytes` ([`entry_cost`]). Freed exactly, wherever it leaves the store.
+    cost: usize,
+}
+
+/// Longest handle a post may use. Every handle any version sends is under 64 characters
+/// (`mbx:` + base64, `rdv:<slot>:<leg>`, `bkp:` + base64).
+pub const MAX_HANDLE_BYTES: usize = 128;
+
+/// Whether `handle` may be posted to: 1..=[`MAX_HANDLE_BYTES`] of `A-Z a-z 0-9 : _ - .`. Handles
+/// were unchecked, and neither they nor a stored entry's own bookkeeping counted against the
+/// relay's byte cap, so posts with huge handles or empty blobs filled memory and `queue.json`
+/// without limit (self-audit 2026-10-13, third round).
+pub fn valid_handle(handle: &str) -> bool {
+    (1..=MAX_HANDLE_BYTES).contains(&handle.len())
+        && handle
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b':' | b'_' | b'-' | b'.'))
+}
+
+/// What one stored blob costs against `max_total_bytes`.
+fn entry_cost(handle: &str, blob_len: usize, overhead: usize) -> usize {
+    blob_len + handle.len() + overhead
 }
 
 /// The mailbox map plus a running byte total (kept in sync by post/drain/recall/reap)
@@ -393,14 +421,14 @@ impl StoreInner {
         let mut freed = 0;
         while let Some(first) = queue.first() {
             if first.expiry <= now {
-                freed += queue.remove(0).bytes.len();
+                freed += queue.remove(0).cost;
                 continue;
             }
             if !budget.admit(first.bytes.len()) {
                 break;
             }
             let s = queue.remove(0);
-            freed += s.bytes.len();
+            freed += s.cost;
             taken.push(s);
         }
         if queue.is_empty() {
@@ -482,7 +510,7 @@ fn write_store_bytes(json: &[u8], path: &Path) -> bool {
 
 /// Load a persisted store, dropping anything already past its wall-clock expiry and rebuilding
 /// each blob's monotonic `Instant` expiry from the remaining TTL. Missing/corrupt file → empty.
-fn load_store(path: &Path) -> StoreInner {
+fn load_store(path: &Path, overhead: usize) -> StoreInner {
     let mut inner = StoreInner::default();
     let Ok(data) = std::fs::read(path) else {
         return inner;
@@ -501,8 +529,10 @@ fn load_store(path: &Path) -> StoreInner {
             let Ok(bytes) = B64.decode(b.blob.as_bytes()) else {
                 continue;
             };
-            inner.total_bytes += bytes.len();
+            let cost = entry_cost(&handle, bytes.len(), overhead);
+            inner.total_bytes += cost;
             queue.push(Stored {
+                cost,
                 msg_id: b.msg_id,
                 delete_token: b.delete_token,
                 posted: now_i, // real post time is lost across a restart (dashboard age only)
@@ -628,7 +658,10 @@ impl RelayCore {
         limits: RelayLimits,
         persist_path: PathBuf,
     ) -> Self {
-        let store: Store = Arc::new(Mutex::new(load_store(&persist_path)));
+        let store: Store = Arc::new(Mutex::new(load_store(
+            &persist_path,
+            limits.entry_overhead_bytes,
+        )));
         spawn_reaper(Arc::clone(&store), logger.clone());
         let writer: Arc<Mutex<()>> = Arc::default();
         spawn_flusher(
@@ -731,7 +764,7 @@ fn spawn_reaper(store: Store, logger: Option<RelayLogger>) {
             queue.retain(|s| {
                 let keep = s.expiry > now;
                 if !keep {
-                    freed += s.bytes.len();
+                    freed += s.cost;
                 }
                 keep
             });
@@ -815,15 +848,20 @@ fn process(
             };
             ev.blob_len = bytes.len();
             ev.blob_hash = short_hash(&bytes);
+            if !valid_handle(&handle) {
+                ev.result = "rejected: bad handle".into();
+                return (Response::err("bad handle"), ev);
+            }
+            let cost = entry_cost(&handle, bytes.len(), limits.entry_overhead_bytes);
 
             // Resource limits (reject-new; see [`RelayLimits`]). Checked before storing
             // so a flood can neither OOM the relay nor evict queued mail.
             let reject = if bytes.len() > limits.max_blob_bytes {
                 Some("blob too large")
-            } else if inner.total_bytes + bytes.len() > limits.max_total_bytes {
+            } else if inner.total_bytes + cost > limits.max_total_bytes {
                 Some("relay full")
             } else if bytes.len() > limits.small_blob_bytes
-                && inner.total_bytes + bytes.len()
+                && inner.total_bytes + cost
                     > limits
                         .max_total_bytes
                         .saturating_sub(limits.small_reserve_bytes)
@@ -854,8 +892,9 @@ fn process(
 
             let msg_id = random_token();
             let delete_token = random_token();
-            inner.total_bytes += bytes.len();
+            inner.total_bytes += cost;
             inner.map.entry(handle.clone()).or_default().push(Stored {
+                cost,
                 msg_id: msg_id.clone(),
                 delete_token: delete_token.clone(),
                 posted: now,
@@ -977,7 +1016,7 @@ fn process(
                 queue.retain(|s| {
                     let hit = s.msg_id == msg_id && s.delete_token == delete_token;
                     if hit {
-                        freed += s.bytes.len();
+                        freed += s.cost;
                     }
                     !hit
                 });
@@ -1564,6 +1603,7 @@ mod tests {
                 expiry: now_i + Duration::from_secs(3600),
                 expiry_unix: now_u + 3600,
                 bytes: b"live-blob".to_vec(),
+                cost: 9,
             }],
         );
         inner.map.insert(
@@ -1575,12 +1615,13 @@ mod tests {
                 expiry: now_i,
                 expiry_unix: now_u.saturating_sub(10), // already expired
                 bytes: b"expired".to_vec(),
+                cost: 7,
             }],
         );
         inner.total_bytes = 9 + 7;
 
         write_store_bytes(&serialize_store(&inner).unwrap(), &path);
-        let loaded = load_store(&path);
+        let loaded = load_store(&path, 0);
 
         assert_eq!(
             loaded.map.get("mbx:live").map(|q| q.len()),
@@ -1595,8 +1636,9 @@ mod tests {
             "an expired blob must not be resurrected past its TTL"
         );
         assert_eq!(
-            loaded.total_bytes, 9,
-            "byte total counts only the live blob"
+            loaded.total_bytes,
+            entry_cost("mbx:live", 9, 0),
+            "byte total counts only the live blob (and its handle)"
         );
 
         let _ = std::fs::remove_file(&path);
@@ -1687,6 +1729,7 @@ mod tests {
                         expiry: Instant::now() + Duration::from_secs(60),
                         expiry_unix: now_unix() + 60,
                         bytes: vec![b'x'; size],
+                        cost: size,
                     }],
                 );
                 inner.dirty = true;
@@ -1703,7 +1746,7 @@ mod tests {
         }
         do_flush(&store, &writer, &path, false);
         assert_eq!(torn, 0, "a queue file on disk failed to parse");
-        let last = load_store(&path);
+        let last = load_store(&path, 0);
         assert_eq!(
             last.map["mbx:t"][0].msg_id, "299",
             "the newest snapshot is on disk"
@@ -1742,7 +1785,7 @@ mod tests {
         }
         // Let the background flusher write the deferred posts.
         std::thread::sleep(FLUSH_MIN_INTERVAL + Duration::from_millis(400));
-        let recovered = load_store(&path);
+        let recovered = load_store(&path, 0);
         assert_eq!(
             recovered.map.len(),
             5,
@@ -1832,9 +1875,10 @@ mod tests {
             max_blob_bytes: 8,
             max_mailbox_blobs: 2,
             max_mailbox_bytes: 12,
-            max_total_bytes: 20,
+            max_total_bytes: 30,
             small_blob_bytes: usize::MAX,
             small_reserve_bytes: 0,
+            entry_overhead_bytes: 0,
             max_ttl: Duration::from_secs(60),
             max_line_bytes: 4096,
         };
@@ -1858,8 +1902,9 @@ mod tests {
             "queued mail was NOT evicted"
         );
 
-        // Global cap: filling other mailboxes stops before OOM (total is 6B, cap 20B).
-        client.post("other1", b"12345678", ttl).unwrap(); // total 14
+        // Global cap: filling other mailboxes stops before OOM. Each entry counts its blob and its
+        // handle: "mbx" holds 2 × (3 + 3) = 12 of the 30-byte cap.
+        client.post("other1", b"12345678", ttl).unwrap(); // + 8 + 6 = 26
         assert!(
             client.post("other2", b"12345678", ttl).is_err(),
             "relay full"
@@ -1871,6 +1916,54 @@ mod tests {
     }
 
     #[test]
+    fn every_real_handle_is_valid_and_junk_is_not() {
+        for ok in [
+            "mbx:Zm9vYmFyYmF6cXV4Zm9vYmFyYmF6cXV4Zm9vYmFyYmE",
+            "mbx:ab-_CD12",
+            "rdv:k3mf9q:joiner",
+            "bkp:AAAAAAAAAAAAAAAAAAAAAA",
+        ] {
+            assert!(valid_handle(ok), "{ok}");
+        }
+        let long = "m".repeat(MAX_HANDLE_BYTES + 1);
+        for bad in [
+            "",
+            long.as_str(),
+            "mbx:a b",
+            "mbx:é",
+            "mbx:a\n",
+            "../x",
+            "mbx:a/b",
+        ] {
+            assert!(!valid_handle(bad), "{bad:?}");
+        }
+    }
+
+    #[test]
+    fn empty_blobs_and_long_handles_cannot_grow_the_store_without_limit() {
+        // Self-audit 2026-10-13, third round: an empty blob counted 0 bytes and a handle counted
+        // nothing, so posts to fresh handles grew memory and queue.json past every cap.
+        let limits = RelayLimits {
+            max_total_bytes: 10_000,
+            entry_overhead_bytes: 512,
+            ..RelayLimits::default()
+        };
+        let addr = RelayServer::spawn_with_limits("127.0.0.1:0", None, limits).unwrap();
+        let client = RelayClient::new(addr.to_string());
+        let ttl = Duration::from_secs(30);
+        let mut stored = 0;
+        for i in 0..1000 {
+            if client.post(&format!("mbx:junk{i}"), b"", ttl).is_ok() {
+                stored += 1;
+            }
+        }
+        assert!(stored < 20, "{stored} empty blobs stored under a 10 kB cap");
+        assert!(client
+            .post(&"m".repeat(MAX_HANDLE_BYTES + 1), b"x", ttl)
+            .is_err());
+    }
+
+    #[test]
     fn a_flood_of_large_blobs_cannot_block_small_messages() {
         // Self-audit 2026-10-13, finding 4: anyone can post, so large junk blobs filled the relay
         // and every message after them was refused as "relay full" for up to a day.
@@ -1878,9 +1971,10 @@ mod tests {
             max_blob_bytes: 100,
             max_mailbox_blobs: 100,
             max_mailbox_bytes: 1000,
-            max_total_bytes: 400,
+            max_total_bytes: 480,
             small_blob_bytes: 10,
-            small_reserve_bytes: 100,
+            small_reserve_bytes: 160,
+            entry_overhead_bytes: 0,
             max_ttl: Duration::from_secs(60),
             max_line_bytes: 4096,
         };
@@ -1896,7 +1990,7 @@ mod tests {
         }
         assert_eq!(
             posted, 3,
-            "large blobs stop at total - reserve (300 of 400)"
+            "large blobs stop at total - reserve (3 × (100 + 5) of 320)"
         );
         // Ordinary messages still get through, into the reserve.
         for i in 0..10 {

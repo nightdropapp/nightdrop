@@ -31,7 +31,7 @@ tor-cell = "0.47"
 # CfgPath for the restricted-discovery authorized-clients directory (private relays, §3.2).
 tor-config-path = "0.47"
 safelog = "0.10"
-tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "time"] }
 futures = "0.3"
 # arti's dir cache pulls rusqlite; bundle SQLite from source (no system libsqlite3 needed).
 libsqlite3-sys = { version = "0.38", features = ["bundled"] }

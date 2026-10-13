@@ -50,6 +50,8 @@ pub struct Stats {
     pub line_busy: AtomicU64,
     /// A connection closed by the per-connection rate limit.
     pub rate_limited: AtomicU64,
+    /// A stream closed for sending nothing for a minute, or dripping its request.
+    pub timed_out: AtomicU64,
     /// The most streams open at once during the interval.
     pub peak_open: AtomicUsize,
     /// Requests per operation, in [`OPS`] order.
@@ -74,6 +76,7 @@ impl Stats {
             line_too_long: AtomicU64::new(0),
             line_busy: AtomicU64::new(0),
             rate_limited: AtomicU64::new(0),
+            timed_out: AtomicU64::new(0),
             peak_open: AtomicUsize::new(0),
             ops: [const { AtomicU64::new(0) }; 8],
             rejected_full: AtomicU64::new(0),
@@ -128,7 +131,7 @@ impl Stats {
             .join(" ");
         format!(
             "stats {}m: streams open={open_now} peak={peak} accepted={} accept_failed={} \
-             dropped_capacity={} client_ended={} errors={} line_too_long={} line_busy={} rate_limited={} | \
+             dropped_capacity={} client_ended={} errors={} line_too_long={} line_busy={} rate_limited={} timed_out={} | \
              requests {ops} | post_rejected full={} mailbox={} large={} other={} | \
              posted_bytes={} | store blobs={stored_blobs} bytes={stored_bytes}",
             INTERVAL.as_secs() / 60,
@@ -140,6 +143,7 @@ impl Stats {
             t(&self.line_too_long),
             t(&self.line_busy),
             t(&self.rate_limited),
+            t(&self.timed_out),
             t(&self.rejected_full),
             t(&self.rejected_mailbox),
             t(&self.rejected_large),

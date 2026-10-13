@@ -434,6 +434,10 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
                 let _ = write.flush().await;
                 break;
             }
+            Err(ref e) if e.kind() == std::io::ErrorKind::TimedOut => {
+                stats::STATS.timed_out.fetch_add(1, Ordering::Relaxed);
+                break; // idle or dripping: free the slot (see `read_line_paced`)
+            }
             Err(ref e) if e.kind() == std::io::ErrorKind::OutOfMemory => {
                 // The in-flight line budget (`MAX_LINE_BYTES_IN_FLIGHT`): tell the client, who
                 // retries, rather than dropping the stream without a word.
@@ -667,6 +671,14 @@ fn tor_client_unusable<R: tor_rtcompat::Runtime>(client: &TorClient<R>) -> Optio
 
 /// Async twin of the core's line-capped reader: read one newline-terminated line, bounding the
 /// buffer at `max` bytes. `Ok(None)` at EOF; `Err(InvalidData)` if a line exceeds `max`.
+/// Longest a stream may go without sending anything before it is closed.
+const LINE_IDLE: Duration = Duration::from_secs(60);
+/// After this long, a request line must be arriving at [`MIN_LINE_RATE`] on average. A 150 MB
+/// media post over a slow Tor circuit is still several times faster.
+const LINE_GRACE: Duration = Duration::from_secs(60);
+/// Bytes per second a long request line must average past [`LINE_GRACE`].
+const MIN_LINE_RATE: u64 = 2 * 1024;
+
 /// Bytes all streams together may hold in partly read request lines. `max_line_bytes` bounds one
 /// line (~200 MB, so a full media post fits), but up to [`MAX_CONCURRENT_STREAMS`] streams could
 /// each grow one at once — far past this machine's memory, and anyone may connect (self-audit
@@ -707,12 +719,41 @@ async fn read_line_capped<R>(reader: &mut R, max: usize) -> std::io::Result<Opti
 where
     R: futures::io::AsyncBufRead + Unpin,
 {
+    read_line_paced(reader, max, LINE_IDLE, LINE_GRACE, MIN_LINE_RATE).await
+}
+
+/// [`read_line_capped`] with its pacing limits as arguments, so tests can use short ones.
+async fn read_line_paced<R>(
+    reader: &mut R,
+    max: usize,
+    idle: Duration,
+    grace: Duration,
+    min_rate: u64,
+) -> std::io::Result<Option<String>>
+where
+    R: futures::io::AsyncBufRead + Unpin,
+{
     // `AsyncBufReadExt` (fill_buf / consume_unpin) is imported at the top of the file.
     let mut buf: Vec<u8> = Vec::new();
     let mut budget = LineBudget(0);
+    let started = Instant::now();
     loop {
+        // A stream that stops sending, or drips, holds one of MAX_CONCURRENT_STREAMS slots; with
+        // no limit, a few idle streams could keep everyone else out for good (self-audit
+        // 2026-10-13, third round). Clients open one stream per request and send it at once.
+        let elapsed = started.elapsed();
+        if elapsed > grace && (buf.len() as f64) < min_rate as f64 * elapsed.as_secs_f64() {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "request line arriving too slowly",
+            ));
+        }
         let (consumed, done) = {
-            let chunk = reader.fill_buf().await?;
+            let chunk = tokio::time::timeout(idle, reader.fill_buf())
+                .await
+                .map_err(|_| {
+                    std::io::Error::new(std::io::ErrorKind::TimedOut, "idle request stream")
+                })??;
             if chunk.is_empty() {
                 (0usize, true)
             } else if let Some(i) = chunk.iter().position(|&b| b == b'\n') {
@@ -857,6 +898,9 @@ fn auth_dir() -> String {
 /// of dark. Well under arti's max of 20.
 const RELAY_INTRO_POINTS: u8 = 6;
 
+/// Most streams one client circuit may have open at once (see `relay_onion_config`).
+const RELAY_STREAMS_PER_CIRCUIT: u32 = 16;
+
 /// How often the watchdog proves reachability with an end-to-end self-dial. Each probe costs one
 /// descriptor fetch and one rendezvous circuit, so this is deliberately minutes rather than the
 /// 30s of the old status poll — a status read was free, evidence is not.
@@ -929,6 +973,10 @@ fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<On
     let mut builder = OnionServiceConfigBuilder::default();
     builder.nickname(nickname);
     builder.num_intro_points(RELAY_INTRO_POINTS);
+    // arti's default lets one rendezvous circuit hold 65,535 streams, so a single client could fill
+    // all MAX_CONCURRENT_STREAMS slots. A client opens one stream per request and runs only a few
+    // at once; past this the circuit is torn down (self-audit 2026-10-13, third round).
+    builder.max_concurrent_streams_per_circuit(RELAY_STREAMS_PER_CIRCUIT);
     if nightdrop::transport::client_auth::authorized_count(Path::new(auth_dir)) > 0 {
         let mut provider = DirectoryKeyProviderBuilder::default();
         provider
@@ -1086,6 +1134,92 @@ fn now_hms() -> String {
 
 #[cfg(test)]
 mod tests {
+    /// A reader that sends `chunks` with `gap` between them, then nothing (pending forever).
+    struct Drip {
+        chunks: Vec<&'static [u8]>,
+        gap: Duration,
+        next: Option<std::pin::Pin<Box<tokio::time::Sleep>>>,
+        cur: Vec<u8>,
+    }
+
+    impl futures::io::AsyncRead for Drip {
+        fn poll_read(
+            self: std::pin::Pin<&mut Self>,
+            _: &mut std::task::Context<'_>,
+            _: &mut [u8],
+        ) -> std::task::Poll<std::io::Result<usize>> {
+            unreachable!("read through AsyncBufRead")
+        }
+    }
+
+    impl futures::io::AsyncBufRead for Drip {
+        fn poll_fill_buf(
+            self: std::pin::Pin<&mut Self>,
+            cx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<std::io::Result<&[u8]>> {
+            use std::future::Future as _;
+            let this = self.get_mut();
+            if !this.cur.is_empty() {
+                return std::task::Poll::Ready(Ok(&this.cur));
+            }
+            if this.chunks.is_empty() {
+                return std::task::Poll::Pending; // silent from here on
+            }
+            let gap = this.gap;
+            let sleep = this
+                .next
+                .get_or_insert_with(|| Box::pin(tokio::time::sleep(gap)));
+            if sleep.as_mut().poll(cx).is_pending() {
+                return std::task::Poll::Pending;
+            }
+            this.next = None;
+            this.cur = this.chunks.remove(0).to_vec();
+            std::task::Poll::Ready(Ok(&this.cur))
+        }
+        fn consume(self: std::pin::Pin<&mut Self>, amt: usize) {
+            self.get_mut().cur.drain(..amt);
+        }
+    }
+
+    fn drip(chunks: Vec<&'static [u8]>, gap_ms: u64) -> Drip {
+        Drip {
+            chunks,
+            gap: Duration::from_millis(gap_ms),
+            next: None,
+            cur: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn idle_and_dripping_streams_are_cut_and_prompt_ones_are_not() {
+        // Self-audit 2026-10-13, third round: a stream that sent nothing held a slot forever.
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        let (idle, grace) = (Duration::from_millis(300), Duration::from_millis(500));
+        rt.block_on(async {
+            // A prompt request is read.
+            let mut ok = drip(vec![b"{\"v\":1}", b"\n"], 10);
+            let line = read_line_paced(&mut ok, 4096, idle, grace, 10)
+                .await
+                .unwrap();
+            assert_eq!(line.as_deref(), Some("{\"v\":1}"));
+            // Silence is cut after `idle`.
+            let mut silent = drip(vec![b"{"], 10);
+            let e = read_line_paced(&mut silent, 4096, idle, grace, 10)
+                .await
+                .unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::TimedOut);
+            // A byte every 200 ms never goes idle, but falls under 10 B/s past the grace.
+            let mut slow = drip(vec![b"a"; 30], 200);
+            let e = read_line_paced(&mut slow, 4096, idle, grace, 10)
+                .await
+                .unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::TimedOut);
+        });
+    }
+
     #[test]
     fn concurrent_request_lines_share_one_memory_budget() {
         // Self-audit 2026-10-13, finding 4. Margins are wide so other tests reading small lines in
