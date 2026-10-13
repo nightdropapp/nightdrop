@@ -48,9 +48,15 @@ and watch `ss -tn` here while it connects.
 sudo install -d -o "$USER" -g "$USER" /var/www/nightdrop
 sudo certbot certonly --nginx -d nightdrop.app -d www.nightdrop.app   # BEFORE the vhost
 sudo cp deploy/nginx-nightdrop.conf /etc/nginx/conf.d/nightdrop.conf
+sudo cp deploy/nginx-00-default.conf /etc/nginx/conf.d/00-default.conf
 sudo nginx -t && sudo systemctl reload nginx
 scripts/deploy-clearnet.sh
 ```
+
+`00-default.conf` answers every name this host does not serve, and every bare-IP or SNI-less
+connection, by closing it (port 80) or refusing the TLS handshake (443). Without it nginx answers
+those with the first vhost it loaded — on this machine another site, whose certificate then
+tied the IP serving nightdrop.app to the operator's personal domain in scanners' indexes.
 
 `certonly` keeps certbot from rewriting a config shared with other sites, and the vhost fails
 `nginx -t` until the certificate exists.
@@ -129,6 +135,10 @@ descriptor until they refetch, so a cutover is not instantaneous even when done 
 its own deliberate operation, never bundled with a clear-web change.
 
 ## 7. Open items needing a human
+
+- [ ] Install `deploy/nginx-00-default.conf` (§2) and retire the unused vhost (named in MAINTENANCE.local.md) and
+  its DNS record (2026-10-13 audit). The shared home IP stays linkable through DNS for as long as
+  other sites are served from it; the server migration is the moment to separate them.
 
 - [x] `sitemap.xml` submitted to Google Search Console (2026-10-12, a Domain property verified by
   a DNS TXT record). A Domain property needs the sitemap's full address,
