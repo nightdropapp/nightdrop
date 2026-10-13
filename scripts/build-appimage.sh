@@ -28,6 +28,13 @@
 #   scripts/build-appimage.sh --host       # build on this machine (NOT portable; dev only)
 #   scripts/build-appimage.sh --no-build   # package using the existing build/ bundle
 #   scripts/build-appimage.sh --diag       # bake in opt-in diagnostics (protocol outcomes only)
+#   scripts/build-appimage.sh --unsigned   # skip the embedded GPG signature (dev builds only)
+#
+# The AppImage is GPG-signed inside (its .sha256_sig section) with the release key
+# (NIGHTDROP_GPG_ID, default security@nightdrop.app — the key that signs SHA256SUMS), so an update
+# tool can check that a newer AppImage comes from the same publisher. Unsigned, AppImageUpdate
+# (zsync from the GitHub release) could not tell our build from anyone's. The build fails if the
+# signature did not land.
 #
 # Without --out the AppImage lands in website/applications/linux/, which the onion site serves
 # live: running this IS a deploy (MAINTENANCE.md §12).
@@ -48,12 +55,14 @@ c()  { printf '\033[0;34mℹ\033[0m %s\n' "$*"; }
 ok() { printf '\033[0;32m✓\033[0m %s\n' "$*"; }
 err(){ printf '\033[0;31m✗\033[0m %s\n' "$*" >&2; }
 
-DO_BUILD=1; DIAG=0; IN_CONTAINER=1; CUSTOM_OUT=""
+DO_BUILD=1; DIAG=0; IN_CONTAINER=1; CUSTOM_OUT=""; SIGN=1
+GPG_ID="${NIGHTDROP_GPG_ID:-security@nightdrop.app}"
 while [ $# -gt 0 ]; do case "$1" in
   --no-build) DO_BUILD=0 ;;
   --diag) DIAG=1 ;;
   --host) IN_CONTAINER=0 ;;
   --out) shift; CUSTOM_OUT="${1:?--out needs a file path}" ;;
+  --unsigned) SIGN=0 ;;
   -h|--help) awk 'NR>1 && !/^#/{exit} NR>1{sub(/^# ?/,""); print}' "$0"; exit 0 ;;
   *) err "unknown option: $1"; exit 1 ;;
 esac; shift; done
@@ -207,10 +216,25 @@ done
 ok "icons → AppDir usr/share/icons/hicolor/*/apps/$APP_ID.png (16–512) + .DirIcon"
 
 mkdir -p "$OUT_DIR"
+SIGN_ARGS=()
+if [ "$SIGN" = 1 ]; then
+  gpg --list-secret-keys "$GPG_ID" >/dev/null 2>&1 \
+    || { err "no secret key for $GPG_ID to sign the AppImage (--unsigned for a dev build)"; exit 1; }
+  SIGN_ARGS=(--sign --sign-key "$GPG_ID")
+fi
 c "Packaging AppImage…"
-ARCH=x86_64 "${AITOOL_RUN[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
-  || ARCH=x86_64 "${AITOOL_RUN[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
+ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
+  || ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
 chmod +x "$OUT"
+if [ "$SIGN" = 1 ]; then
+  # appimagetool can carry on unsigned when gpg fails; an all-zero signature section means it did.
+  if ! readelf -x .sha256_sig "$OUT" 2>/dev/null | grep -qE '0x[0-9a-f]+ +[0-9a-f ]*[1-9a-f]'; then
+    err "the AppImage's embedded signature is empty — gpg did not sign it; refusing to ship it"
+    rm -f "$OUT"
+    exit 1
+  fi
+  ok "AppImage signed with $GPG_ID (embedded .sha256_sig)"
+fi
 
 # The .zsync that UPDATE_INFO points at: block checksums of this exact file, so an update tool can
 # fetch only the blocks that changed. Its URL is the AppImage's bare name, resolved next to the

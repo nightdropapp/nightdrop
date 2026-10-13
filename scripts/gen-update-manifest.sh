@@ -78,11 +78,49 @@ json="$json}"
 # signed payload; older ones read the same fields in the clear and ignore "signed". Without a valid
 # signature a new app sees no update at all, so a missing key is a hard stop, never an unsigned
 # file. The key never goes on a command line (`ps`), and is read from outside website/.
-key="${NIGHTDROP_UPDATE_KEY:-$HOME/.config/nightdrop-signing/update-signing-key}"
-if [ ! -r "$key" ]; then
-  echo "gen-update-manifest: no update signing key at $key (MAINTENANCE.md, credentials) — NOT writing update.json" >&2
+#
+# Where the key is found, first match wins (MAINTENANCE.md §11.5):
+#   1. NIGHTDROP_UPDATE_KEY — only for a key restored from the paper backup, when no copy is reachable;
+#   2. ~/.config/nightdrop-signing/update-signing-key — a copy on this machine, if one is kept;
+#   3. update-signing-key at the top of any mounted removable drive (/run/media/$USER/*, /media/$USER/*)
+#      — the offline USB stick: plug it in, run this, unmount it.
+# Two drives holding different keys is refused rather than guessed between.
+find_update_key() {
+  if [ -n "${NIGHTDROP_UPDATE_KEY:-}" ]; then
+    echo "$NIGHTDROP_UPDATE_KEY"
+    return
+  fi
+  local home_key="$HOME/.config/nightdrop-signing/update-signing-key"
+  if [ -r "$home_key" ]; then
+    echo "$home_key"
+    return
+  fi
+  local found=() f
+  for f in /run/media/"$USER"/*/update-signing-key /media/"$USER"/*/update-signing-key; do
+    [ -r "$f" ] && found+=("$f")
+  done
+  if [ "${#found[@]}" -gt 1 ]; then
+    for f in "${found[@]:1}"; do
+      if ! cmp -s "${found[0]}" "$f"; then
+        echo "gen-update-manifest: different update keys on ${found[*]} — unplug all but the real one" >&2
+        return 1
+      fi
+    done
+  fi
+  if [ "${#found[@]}" -gt 0 ]; then
+    echo "${found[0]}"
+  fi
+  return 0 # nothing found is reported by the caller, with what to do about it
+}
+key="$(find_update_key)" || exit 1
+if [ -z "$key" ] || [ ! -r "$key" ]; then
+  echo "gen-update-manifest: no update signing key found — NOT writing update.json." >&2
+  echo "  Plug in the offline key USB (it holds update-signing-key) and run this again." >&2
+  echo "  Only if no copy of the file is left: restore it from the paper backup to a file and run" >&2
+  echo "  NIGHTDROP_UPDATE_KEY=<that file> make update-manifest   (MAINTENANCE.md §11.5)." >&2
   exit 1
 fi
+echo "gen-update-manifest: signing with $key" >&2
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 printf '%s' "$json" > "$tmp"
