@@ -1608,6 +1608,14 @@ impl Node {
     /// restored backup carried attachments, they are sealed into the store now.
     pub fn set_media_store(&mut self, dir: String, key: StoreKey) {
         std::fs::create_dir_all(&dir).ok();
+        // The media store sits beside the state file, in the app's data dir: make that owner-only.
+        // On desktop it was created 0755, so other users on the machine could list it and read the
+        // contacts' onion client keys (.auth) — how many contacts, and when they changed. With the
+        // dir at 0700 nothing beneath it is reachable, whatever each file's own mode (self-audit
+        // 2026-10-13, round 5). Android's is private already; Windows ACLs are per-user.
+        if let Some(data_dir) = std::path::Path::new(&dir).parent() {
+            let _ = create_private_dir(data_dir);
+        }
         // Flush any backup-carried attachments into the store, preserving their original ids so
         // the history references resolve. (Done before `dir`/`key` move into `media_store`.)
         if !self.pending_media.is_empty() {

@@ -539,7 +539,17 @@ pub fn write_atomic(path: &std::path::Path, bytes: &[u8]) -> Result<()> {
     tmp.push(".tmp");
     let tmp = std::path::PathBuf::from(tmp);
     {
-        let mut f = std::fs::File::create(&tmp)?;
+        // Owner-only (0600 on unix): sealed, but nobody else's business either.
+        let mut f = {
+            let mut o = std::fs::OpenOptions::new();
+            o.write(true).create(true).truncate(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt as _;
+                o.mode(0o600);
+            }
+            o.open(&tmp)?
+        };
         f.write_all(bytes)?;
         f.sync_all()?;
     }

@@ -2657,3 +2657,31 @@ fn a_contacts_display_name_is_cleaned() {
         "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467} \u{2764}\u{FE0F}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn the_data_dir_and_state_file_are_owner_only() {
+    // Self-audit 2026-10-13, round 5: on desktop the data dir was 0755 and the state file 0644.
+    use std::os::unix::fs::PermissionsExt as _;
+    let base = std::env::temp_dir().join(format!("nightdrop-perms-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::set_permissions(&base, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let net = MemoryNetwork::new();
+    let mut node = Node::new(Box::new(net.endpoint("me")));
+    node.set_media_store(
+        base.join("nightdrop-media").to_string_lossy().into_owned(),
+        [3u8; 32],
+    );
+    let mode = |p: &std::path::Path| std::fs::metadata(p).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode(&base), 0o700, "data dir");
+    let state = base.join("nightdrop-state.bin");
+    crate::storage::save_to_file(
+        state.to_str().unwrap(),
+        &[3u8; 32],
+        &node.export(&[3u8; 32]),
+    )
+    .unwrap();
+    assert_eq!(mode(&state), 0o600, "state file");
+    let _ = std::fs::remove_dir_all(&base);
+}
