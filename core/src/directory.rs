@@ -23,10 +23,8 @@ use serde::{Deserialize, Serialize};
 /// The operator's Ed25519 directory-signing **public** key, baked into the app. The app trusts
 /// only relay lists signed by the matching private key.
 ///
-/// This is the **Night Drop deployment** key; the operator holds the matching private key in
-/// `relay-state/directory-signing-key` (gitignored) — on the relay host, not offline, so whoever
-/// controls that host can sign relay lists; moving it offline is open (self-audit 2026-10-13,
-/// finding 8) — and uses it to `nightdrop-relay sign-directory`
+/// This is the **Night Drop deployment** key; the operator holds the matching private key offline,
+/// on a USB stick and on no machine (since 2026-10-13; `MAINTENANCE.md` §11.5), and uses it to `nightdrop-relay sign-directory`
 /// the relay list. To run your **own** deployment, `nightdrop-relay gen-directory-key` mints a fresh
 /// pair — paste its public key here and rebuild the app. An all-zero key means "no directory
 /// configured" and verifies nothing (the feature stays inert until a real key is baked in).
