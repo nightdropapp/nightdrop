@@ -1511,6 +1511,7 @@ pub(crate) const MAX_OPENERS_PER_INVITE: usize = 3;
 mod backup;
 mod frames;
 mod mailbox;
+mod media_kind;
 mod messaging;
 mod pairing;
 pub(crate) use pairing::InviteExtras;
@@ -1615,7 +1616,9 @@ impl Node {
                     base64::engine::general_purpose::STANDARD.decode(item.data.as_bytes())
                 {
                     if let Ok(sealed) = crate::storage::seal(&key, &bytes) {
-                        let _ = std::fs::write(format!("{dir}/{}.bin", item.id), sealed);
+                        if messaging::is_media_id(&item.id) {
+                            let _ = std::fs::write(format!("{dir}/{}.bin", item.id), sealed);
+                        }
                     }
                 }
             }
@@ -3332,6 +3335,8 @@ fn unpack_burn_media(buf: &[u8]) -> Result<(u64, String, String, String, Vec<u8>
     let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
     let kind = String::from_utf8(take_field(buf, &mut p)?)?;
     let mime = String::from_utf8(take_field(buf, &mut p)?)?;
+    // The contact chose both: normalise before they are stored (media_kind.rs).
+    let (kind, mime) = media_kind::sanitize(kind, mime);
     Ok((secs, transfer_id, kind, mime, buf[p..].to_vec()))
 }
 
@@ -3467,6 +3472,8 @@ fn unpack_media(buf: &[u8]) -> Result<(String, String, String, Vec<u8>)> {
     let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
     let kind = String::from_utf8(take_field(buf, &mut p)?)?;
     let mime = String::from_utf8(take_field(buf, &mut p)?)?;
+    // The contact chose both: normalise before they are stored (media_kind.rs).
+    let (kind, mime) = media_kind::sanitize(kind, mime);
     Ok((transfer_id, kind, mime, buf[p..].to_vec()))
 }
 
@@ -3493,6 +3500,8 @@ fn unpack_media_incoming(buf: &[u8]) -> Result<(String, String, String, u64, Vec
     let transfer_id = String::from_utf8(take_field(buf, &mut p)?)?;
     let kind = String::from_utf8(take_field(buf, &mut p)?)?;
     let mime = String::from_utf8(take_field(buf, &mut p)?)?;
+    // The contact chose both: normalise before they are stored (media_kind.rs).
+    let (kind, mime) = media_kind::sanitize(kind, mime);
     if p + 8 > buf.len() {
         anyhow::bail!("corrupt media-incoming envelope");
     }

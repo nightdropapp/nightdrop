@@ -312,7 +312,11 @@ impl Node {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(f.data.as_bytes())
                 .map_err(|_| anyhow::anyhow!("bad onion-key encoding"))?;
-            let dest = root.join(&f.path);
+            // The path comes from the backup, which an attacker can craft: `join` follows `..`
+            // and an absolute path replaces `root` outright, so an unchecked one wrote anywhere
+            // the user can write — an autostart entry on desktop (self-audit 2026-10-13,
+            // finding 2). Only plain relative components, as `collect_onion_keys` produces.
+            let dest = keystore_dest(&root, &f.path)?;
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;
             }
@@ -533,7 +537,9 @@ impl Node {
                     base64::engine::general_purpose::STANDARD.decode(item.data.as_bytes())
                 {
                     if let Ok(sealed) = crate::storage::seal(mkey, &bytes) {
-                        let _ = std::fs::write(format!("{dir}/{}.bin", item.id), sealed);
+                        if super::messaging::is_media_id(&item.id) {
+                            let _ = std::fs::write(format!("{dir}/{}.bin", item.id), sealed);
+                        }
                     }
                 }
             }
@@ -725,6 +731,26 @@ impl Node {
     }
 }
 
+/// Where a restored keystore file goes: `root` joined with `rel`, **only** if `rel` is made of
+/// plain relative components. Refuses an absolute path, a drive prefix, `..`, an empty path, and
+/// (Windows) a component carrying `\` or `:` that `Path` on Unix would not split — so a backup
+/// written on one OS cannot smuggle a separator to another. See `write_onion_keys`.
+fn keystore_dest(root: &std::path::Path, rel: &str) -> Result<std::path::PathBuf> {
+    use std::path::Component;
+    let path = std::path::Path::new(rel);
+    let mut parts = 0usize;
+    for c in path.components() {
+        match c {
+            Component::Normal(part) if !part.to_string_lossy().contains(['\\', ':']) => parts += 1,
+            _ => anyhow::bail!("backup carries an unsafe keystore path"),
+        }
+    }
+    if parts == 0 {
+        anyhow::bail!("backup carries an empty keystore path");
+    }
+    Ok(root.join(path))
+}
+
 /// A chat rebuilt from its persisted form (restore and scoped-backup merge). `relay_receipts` is
 /// passed in because only a restore has queued copies to recall.
 fn chat_from_persisted(
@@ -833,4 +859,75 @@ fn unhex_32(s: &str) -> Option<[u8; 32]> {
         *byte = u8::from_str_radix(s.get(2 * i..2 * i + 2)?, 16).ok()?;
     }
     Some(out)
+}
+
+#[cfg(test)]
+mod path_safety_tests {
+    use super::keystore_dest;
+    use std::path::Path;
+
+    #[test]
+    fn a_real_keystore_path_lands_under_root() {
+        let root = Path::new("/data/app/arti-state/keystore");
+        let rel = "hss/nightdrop/ks_hs_blind_id+20649_1440_43200.ed25519_expanded_private";
+        assert_eq!(keystore_dest(root, rel).unwrap(), root.join(rel));
+    }
+
+    #[test]
+    fn a_crafted_path_is_refused() {
+        let root = Path::new("/data/app/arti-state/keystore");
+        for bad in [
+            "/home/u/.config/autostart/x.desktop",
+            "../../../../.config/autostart/x.desktop",
+            "hss/../../escape",
+            "",
+            ".",
+            "hss\\..\\..\\evil",
+            "C:\\Users\\u\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\Startup\\x.bat",
+            "C:x",
+        ] {
+            assert!(keystore_dest(root, bad).is_err(), "{bad:?} must be refused");
+        }
+    }
+
+    #[test]
+    fn restoring_a_crafted_keystore_file_writes_nothing_outside_the_state_dir() {
+        use base64::Engine as _;
+        let base = std::env::temp_dir().join(format!("nd-ks-{}", std::process::id()));
+        let state = base.join("state");
+        std::fs::create_dir_all(&state).unwrap();
+        let target = base.join("escaped.txt");
+        let files = vec![crate::storage::PersistedFile {
+            path: target.to_string_lossy().into_owned(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"owned"),
+        }];
+        let r = crate::node::Node::write_onion_keys(&files, state.to_str().unwrap());
+        assert!(r.is_err());
+        assert!(!target.exists(), "an absolute path escaped the keystore");
+        let files = vec![crate::storage::PersistedFile {
+            path: "../../../escaped.txt".into(),
+            data: base64::engine::general_purpose::STANDARD.encode(b"owned"),
+        }];
+        assert!(crate::node::Node::write_onion_keys(&files, state.to_str().unwrap()).is_err());
+        assert!(!target.exists(), "a ../ path escaped the keystore");
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn media_ids_carry_no_path_characters() {
+        use super::super::messaging::is_media_id;
+        assert!(is_media_id(&crate::storage::random_password()));
+        for bad in [
+            "",
+            "../x",
+            "A/B",
+            "A\\B",
+            "a-lower",
+            "X.bin",
+            "ABC:DEF",
+            &"A".repeat(65),
+        ] {
+            assert!(!is_media_id(bad), "{bad:?}");
+        }
+    }
 }

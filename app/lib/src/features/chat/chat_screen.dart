@@ -1628,10 +1628,13 @@ class _MediaContent extends StatelessWidget {
   /// so a video pre-warmed when its bubble scrolled into view opens near-instantly on tap.
   Future<String> _fileFuture(BuildContext context) {
     final core = NightdropScope.of(context);
-    final ext = message.mime.split('/').last;
+    // No extension from here: the mime is the contact's claim, and naming the file after it let
+    // a contact choose how the OS opened it (.bat ran on Windows; .html/.m3u fetched over
+    // clearnet). The core names the file from its own bytes and refuses anything that is not a
+    // known video container (core/src/node/media_kind.rs).
     return MediaCache.files.putIfAbsent(
       message.mediaId,
-      () => core.mediaToFile(message.mediaId, ext),
+      () => core.mediaToFile(message.mediaId, ''),
     );
   }
 
@@ -1750,7 +1753,10 @@ class _MediaContent extends StatelessWidget {
     final thumbFuture = message.isVideo ? _thumbBytes(context) : null;
     // Pre-warm: start decrypting to a temp file now (the bubble is in view) so the system
     // player launches almost immediately when tapped.
-    if (message.isVideo && arrived && !inFlight) _fileFuture(context);
+    // A refused (non-video) attachment fails here and again, with a message, on tap.
+    if (message.isVideo && arrived && !inFlight) {
+      _fileFuture(context).ignore();
+    }
 
     if (message.isVideo && thumbFuture != null) {
       return Column(

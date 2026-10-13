@@ -1259,6 +1259,9 @@ impl Node {
 
     /// Decrypt and return the bytes of a stored attachment (for inline image display).
     pub fn media_bytes(&self, media_id: &str) -> Result<Vec<u8>> {
+        if !is_media_id(media_id) {
+            anyhow::bail!("not a media id");
+        }
         let (dir, key) = self
             .media_store
             .as_ref()
@@ -1276,17 +1279,24 @@ impl Node {
     /// ([`clear_open_cache`](Self::clear_open_cache)); the residual exposure is the interval a
     /// decrypted file exists on disk while (and briefly after) the external player holds it, plus
     /// the case of a crash before the next-launch sweep. Documented in `website/limits.html`.
-    pub fn media_to_file(&self, media_id: &str, suggested_ext: &str) -> Result<String> {
+    ///
+    /// Only a recognised video container is written, and its extension comes from its own bytes
+    /// ([`media_kind::video_ext`](super::media_kind::video_ext)). `_suggested_ext` is ignored: the
+    /// app used to pass the contact's mime here, which let a contact choose how the OS opened the
+    /// file (self-audit 2026-10-13, finding 1). Kept in the signature so the bridge is unchanged.
+    pub fn media_to_file(&self, media_id: &str, _suggested_ext: &str) -> Result<String> {
+        if !is_media_id(media_id) {
+            anyhow::bail!("not a media id");
+        }
         let data = self.media_bytes(media_id)?;
+        let ext = super::media_kind::video_ext(&data).ok_or_else(|| {
+            crate::diag!("media: refused to open an attachment that is not a known video format");
+            anyhow::anyhow!("this attachment is not a video format Night Drop can open safely")
+        })?;
         let dir = self
             .open_cache_dir()
             .ok_or_else(|| anyhow::anyhow!("media not available without persistence"))?;
         create_private_dir(&dir)?;
-        let ext = if suggested_ext.is_empty() {
-            "bin"
-        } else {
-            suggested_ext
-        };
         let path = dir.join(format!("{media_id}.{ext}"));
         write_private_file(&path, &data)?;
         Ok(path.to_string_lossy().into_owned())
@@ -2133,7 +2143,9 @@ impl Node {
         }
         if let Some((dir, _)) = &self.media_store {
             for id in dead_media {
-                let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                if is_media_id(&id) {
+                    let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                }
             }
         }
         self.dirty |= changed;
@@ -2200,9 +2212,25 @@ impl Node {
         }
         if let Some((dir, _)) = &self.media_store {
             for id in dead_media {
-                let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                if is_media_id(&id) {
+                    let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                }
             }
         }
         self.dirty |= changed;
     }
+}
+
+/// Whether `id` can be a media id: what [`store_media`](Node::store_media) generates
+/// (`random_password`: `A-Z`, `2-9`, dashes). Every path built from a media id goes through this,
+/// because ids also arrive from backups and restored history, which an attacker can craft: an id
+/// with `/`, `\` or `..` in it would read, write or delete files outside the media store
+/// (self-audit 2026-10-13, finding 2). Deliberately looser than the generator (any `A-Z0-9-`) so
+/// it never strands real media; what matters is that no path character gets through.
+pub(crate) fn is_media_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 64
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_uppercase() || b.is_ascii_digit() || b == b'-')
 }

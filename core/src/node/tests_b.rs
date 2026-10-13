@@ -990,7 +990,9 @@ fn media_to_file_writes_owner_only_plaintext_into_the_app_private_scratch() {
     let mut node = Node::new(Box::new(net.endpoint("me")));
     node.set_media_store(media_dir.to_string_lossy().into_owned(), key);
 
-    let id = node.store_media(b"decrypted video bytes").unwrap();
+    // A real MP4 header: media_to_file only writes recognised video containers (media_kind.rs).
+    let video = b"\0\0\0\x20ftypisom\0\0\0\0decrypted video bytes";
+    let id = node.store_media(video).unwrap();
     let path = node.media_to_file(&id, "mp4").unwrap();
     let p = std::path::Path::new(&path);
 
@@ -1005,7 +1007,7 @@ fn media_to_file_writes_owner_only_plaintext_into_the_app_private_scratch() {
         !legacy.exists(),
         "still wrote to the shared temp dir: {legacy:?}"
     );
-    assert_eq!(std::fs::read(p).unwrap(), b"decrypted video bytes");
+    assert_eq!(std::fs::read(p).unwrap(), video);
 
     #[cfg(unix)]
     {
@@ -2472,4 +2474,82 @@ fn the_timer_in_effect_is_the_last_change_at_or_before_a_message() {
     assert_eq!(super::timer_at(&timeline, 250), 0, "turned off");
     assert_eq!(super::timer_at(&timeline, 999), 60);
     assert_eq!(super::timer_at(&[], 999), 0);
+}
+
+#[test]
+fn a_contact_cannot_choose_how_an_attachment_is_opened() {
+    // Self-audit 2026-10-13, finding 1: the file handed to the OS was named after the contact's
+    // mime, so "video/bat" ran on Windows and "video/html" / "video/m3u" fetched over clearnet.
+    let key: StoreKey = [7u8; 32];
+    let base = std::env::temp_dir().join(format!("nightdrop-ext-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut node = Node::new(Box::new(net.endpoint("me")));
+    node.set_media_store(
+        base.join("nightdrop-media").to_string_lossy().into_owned(),
+        key,
+    );
+
+    // Not a video at all: refused whatever extension is asked for.
+    for (bytes, asked) in [
+        (&b"@echo off\r\ncalc\r\n"[..], "bat"),
+        (b"#EXTM3U\nhttp://198.51.100.7/a.mp4\n", "mp4"),
+        (b"<html><img src=http://198.51.100.7/></html>", "html"),
+    ] {
+        let id = node.store_media(bytes).unwrap();
+        assert!(
+            node.media_to_file(&id, asked).is_err(),
+            "opened a {asked} payload"
+        );
+    }
+    // A real video: its extension comes from its bytes, not from what was asked.
+    let id = node.store_media(b"\0\0\0\x20ftypisom\0\0\0\0rest").unwrap();
+    let path = node.media_to_file(&id, "x\\..\\..\\evil.bat").unwrap();
+    assert!(path.ends_with(&format!("{id}.mp4")), "{path}");
+    // An id with path characters never reaches the filesystem.
+    assert!(node.media_bytes("../../etc/passwd").is_err());
+    assert!(node.media_to_file("../x", "mp4").is_err());
+    let _ = std::fs::remove_dir_all(&base);
+}
+
+#[test]
+fn a_contacts_kind_and_mime_are_sanitised_on_receipt() {
+    // Self-audit 2026-10-13, finding 1: what a contact claims an attachment is never reaches
+    // the store as sent.
+    let key: StoreKey = [9u8; 32];
+    let dir = std::env::temp_dir().join(format!("nightdrop-mime-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}-a", dir.display()), key);
+    bob.set_media_store(format!("{}-b", dir.display()), key);
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    for (kind, mime, want_kind, want_mime) in [
+        ("video", "video/bat", "video", "video/octet-stream"),
+        (
+            "video",
+            "video/x\\..\\..\\evil.bat",
+            "video",
+            "video/octet-stream",
+        ),
+        ("video", "text/html", "video", "video/octet-stream"),
+        ("program", "application/x-msdownload", "image", "image/jpeg"),
+        ("video", "video/webm", "video", "video/webm"),
+    ] {
+        alice
+            .send_media(&bob_contact, b"payload", mime, kind, &[])
+            .unwrap();
+        bob.pump().unwrap();
+        let msg = bob.messages(&alice_contact).into_iter().last().unwrap();
+        assert_eq!(
+            (msg.kind.as_str(), msg.mime.as_str()),
+            (want_kind, want_mime),
+            "{kind} {mime}"
+        );
+    }
+    std::fs::remove_dir_all(format!("{}-a", dir.display())).ok();
+    std::fs::remove_dir_all(format!("{}-b", dir.display())).ok();
 }

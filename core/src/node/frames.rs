@@ -985,7 +985,9 @@ impl Node {
                 }
                 if let Some((dir, _)) = &self.media_store {
                     for id in dead_media {
-                        let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                        if super::messaging::is_media_id(&id) {
+                            let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+                        }
                     }
                 }
                 if !removed {
