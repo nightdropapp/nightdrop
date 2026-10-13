@@ -671,13 +671,16 @@ fn tor_client_unusable<R: tor_rtcompat::Runtime>(client: &TorClient<R>) -> Optio
 
 /// Async twin of the core's line-capped reader: read one newline-terminated line, bounding the
 /// buffer at `max` bytes. `Ok(None)` at EOF; `Err(InvalidData)` if a line exceeds `max`.
-/// Longest a stream may go without sending anything before it is closed.
+/// Longest a stream may go without sending anything before it is closed. The app's own relay
+/// dialer gives up after the same 60 s without progress (`RELAY_STALL_TIMEOUT`), so no client that
+/// would have succeeded is cut.
 const LINE_IDLE: Duration = Duration::from_secs(60);
-/// After this long, a request line must be arriving at [`MIN_LINE_RATE`] on average. A 150 MB
-/// media post over a slow Tor circuit is still several times faster.
-const LINE_GRACE: Duration = Duration::from_secs(60);
-/// Bytes per second a long request line must average past [`LINE_GRACE`].
-const MIN_LINE_RATE: u64 = 2 * 1024;
+/// After this long, a request line must be arriving at [`MIN_LINE_RATE`] on average.
+const LINE_GRACE: Duration = Duration::from_secs(120);
+/// Bytes per second a long request line must average past [`LINE_GRACE`]. Deliberately low: the app
+/// sets no minimum speed, and a phone on a censored network behind a slow bridge (Snowflake) may
+/// crawl; a 300 KB photo still gets 20 minutes. It stops only the drip that holds a slot for hours.
+const MIN_LINE_RATE: u64 = 256;
 
 /// Bytes all streams together may hold in partly read request lines. `max_line_bytes` bounds one
 /// line (~200 MB, so a full media post fits), but up to [`MAX_CONCURRENT_STREAMS`] streams could
