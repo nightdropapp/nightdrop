@@ -1745,6 +1745,10 @@ impl NightdropCore {
     /// blocks on relay round-trips, so it runs **without** the core lock held; only the brief
     /// identity-mutating steps (relay lookup, session open) take the lock.
     pub fn join_via_short_code(&self, code: &str) -> Result<Contact> {
+        // Codes are generated in lowercase (slot alphabet and words alike), so a keyboard's
+        // auto-capitalised first letter or stray spaces must not turn the right code into a wrong
+        // one — and spend one of the inviter's three guesses doing it.
+        let code = code.trim().to_ascii_lowercase();
         let (slot, secret) = code
             .split_once('-')
             .ok_or_else(|| anyhow::anyhow!("malformed short code"))?;
@@ -3138,9 +3142,20 @@ pub(crate) fn parse_invite(payload: &str) -> Result<(String, PreKeyBundle)> {
     ))
 }
 
+/// The short-code word list: 64 words, four distinct per code (15.2M codes, ~24 bits; three
+/// online guesses per invite ≈ 1 in 5 million). Was 16 words (43,680 codes, ~1 in 14,600) until
+/// 2026-10-13 (self-audit, second round). Plain, easy to say and spell, no silent letters or
+/// regional spellings, and **no two share their first three letters**, so a typo cannot land on
+/// another valid word (pinned by `short_code_words_are_distinct_by_prefix`). Only the inviter's
+/// generator reads this list: a joiner types what it is shown, so changing it breaks nothing.
 const WORDS: &[&str] = &[
     "cedar", "lantern", "river", "ember", "willow", "cobalt", "harbor", "thistle", "quartz",
-    "meadow", "cinder", "aurora", "marble", "nimbus", "raven", "saffron",
+    "meadow", "cinder", "aurora", "marble", "nimbus", "raven", "saffron", "amber", "anchor",
+    "apple", "arrow", "badger", "basil", "beacon", "birch", "bramble", "canyon", "castle",
+    "clover", "comet", "coral", "delta", "dune", "eagle", "falcon", "fern", "forest", "garnet",
+    "granite", "hazel", "heron", "ivory", "jasper", "kettle", "lagoon", "lemon", "lotus", "maple",
+    "oak", "ocean", "olive", "orchid", "otter", "pebble", "pine", "plum", "silver", "spruce",
+    "summit", "tiger", "topaz", "tulip", "violet", "walnut", "zebra",
 ];
 
 /// A placeholder `slot-words` code returned with a QR invite (§5a). Nothing is staged for it, so
@@ -3164,7 +3179,7 @@ fn random_slot() -> String {
         .collect()
 }
 
-/// The shared secret words for a short code: four distinct words from [`WORDS`] (~15 bits). They
+/// The shared secret words for a short code: four distinct words from [`WORDS`] (~24 bits). They
 /// feed SPAKE2 and never leave the device; SPAKE2 rules out offline guessing, and the inviter's
 /// cap on distinct openers (`node::MAX_OPENERS_PER_INVITE`) bounds online guessing
 /// (`ARCHITECTURE.md` §5b).
@@ -4420,7 +4435,14 @@ mod tests {
 
         // A publishes a short code; B joins via the interactive SPAKE2 handshake.
         let code = a.create_short_code_invite().unwrap();
-        let b_contact = join(&b, &a, &code).unwrap().id;
+        // As a phone keyboard delivers it: first letter capitalised, a stray space either side.
+        let mut typed: Vec<char> = code.chars().collect();
+        typed[0] = typed[0].to_ascii_uppercase();
+        let typed = format!(
+            " {}\n",
+            typed.into_iter().collect::<String>().replace("-c", "-C")
+        );
+        let b_contact = join(&b, &a, &typed).unwrap().id;
 
         a.poll_once().unwrap();
         let a_contact = a.incoming_requests()[0].id.clone();
@@ -4440,6 +4462,42 @@ mod tests {
         let code2 = a.create_short_code_invite().unwrap();
         let slot2 = code2.split_once('-').unwrap().0;
         assert!(join(&b, &a, &format!("{slot2}-wrong-secret-words-x")).is_err());
+    }
+
+    #[test]
+    fn short_code_words_are_distinct_by_prefix() {
+        // 64 words, so four distinct ones give 15.2M codes (three guesses ≈ 1 in 5M); no two
+        // share their first three letters, so a typo cannot land on another valid word.
+        assert_eq!(WORDS.len(), 64);
+        let mut prefixes: Vec<&str> = WORDS.iter().map(|w| &w[..3]).collect();
+        prefixes.sort();
+        prefixes.dedup();
+        assert_eq!(
+            prefixes.len(),
+            WORDS.len(),
+            "two words share a 3-letter prefix"
+        );
+        for w in WORDS {
+            assert!((3..=7).contains(&w.len()), "{w}");
+            assert!(w.bytes().all(|b| b.is_ascii_lowercase()), "{w}");
+        }
+    }
+
+    #[test]
+    fn a_short_code_secret_is_four_distinct_words_from_the_whole_list() {
+        let mut seen = std::collections::HashSet::new();
+        for _ in 0..2000 {
+            let secret = random_secret_words();
+            let words: Vec<&str> = secret.split('-').collect();
+            assert_eq!(words.len(), 4, "{secret}");
+            let distinct: std::collections::HashSet<_> = words.iter().collect();
+            assert_eq!(distinct.len(), 4, "{secret}");
+            for w in words {
+                assert!(WORDS.contains(&w), "{w}");
+                seen.insert(w.to_string());
+            }
+        }
+        assert_eq!(seen.len(), WORDS.len(), "every word is drawn");
     }
 
     #[test]

@@ -191,10 +191,13 @@ without a fresh online handshake, and the sealed payload is readable only by a p
 completes SPAKE2 with the right words. The rendezvous is therefore **never trusted** — a
 guessed or random slot yields only un-attackable protocol messages. **Online** guessing is what
 remains: each opener the inviter answers lets its sender test one guess, and the relay operator
-sees the slot's mailbox. The secret is four words from sixteen (~15 bits), so an inviter that
+sees the slot's mailbox. The secret is four distinct words from sixty-four (~24 bits; sixteen, ~15
+bits, until 2026-10-13), so an inviter that
 answered every opener could be brute-forced within the code's 10-minute life. An invite therefore
 answers at most **three distinct openers** (`MAX_OPENERS_PER_INVITE`; a joiner's re-posts of the
-same opener don't count) and is then retired — three guesses in ~43,680. The price is that junk
+same opener don't count) and is then retired — three guesses in ~15.2 million, about 1 in 5 million
+(Magic Wormhole, the same design, accepts one guess in 65,536). The three, rather than one, leave
+room for a joiner who gives up and retries the same code, which makes a new opener. The price is that junk
 openers can burn a code, which the joiner sees as a timeout and fixes with a fresh code. (The earlier scheme
 sealed the payload under an Argon2 key from the words with a fixed salt, which *was*
 offline-attackable for low-entropy codes; SPAKE2 replaced it.) The tradeoff is that

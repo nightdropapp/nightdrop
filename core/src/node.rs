@@ -1503,7 +1503,7 @@ struct PendingInvite {
 ///
 /// SPAKE2 stops an observer testing guesses offline, but each opener is still one online guess:
 /// the inviter answers it, and the answer lets whoever sent it check that one guess. The code's
-/// secret is four words from sixteen (about 15 bits), and the relay operator sees the slot's
+/// secret is four words from sixty-four (about 24 bits), and the relay operator sees the slot's
 /// mailbox, so an invite answering every opener could be ground through in its 10-minute life.
 /// A real joiner sends one opener and re-posts it unchanged; three leaves room for someone who
 /// gives up and tries the code again. The cost of a cap is that three junk openers burn a code,
