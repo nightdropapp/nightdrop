@@ -26,6 +26,8 @@
 
 mod tui;
 
+mod stats;
+
 use std::path::Path;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::mpsc::Receiver;
@@ -100,6 +102,14 @@ fn main() -> anyhow::Result<()> {
     } else {
         (None, None)
     };
+    // Every store request also feeds the traffic counters (`stats.rs`): counts only, read from the
+    // event's operation and result, never its handle or ids. Printed only with NIGHTDROP_RELAY_STATS.
+    let logger: Option<RelayLogger> = Some(Arc::new(move |ev: RelayEvent| {
+        stats::STATS.record(&ev);
+        if let Some(inner) = &logger {
+            inner(ev);
+        }
+    }));
     // Serve the operator-signed relay directory if one is present (§3.1). Drop the output of
     // `nightdrop-relay sign-directory` as <state>/relay-list.json; clients fetch + verify it.
     let directory = std::fs::read_to_string(format!("{state_dir}/relay-list.json"))
@@ -310,14 +320,32 @@ fn main() -> anyhow::Result<()> {
         // live-stream counter sheds load past MAX_CONCURRENT_STREAMS so a connection flood can't
         // spawn unbounded tasks.
         let active = Arc::new(AtomicUsize::new(0));
+        if std::env::var("NIGHTDROP_RELAY_STATS").is_ok() {
+            let active = Arc::clone(&active);
+            let core = Arc::clone(&core);
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(stats::INTERVAL);
+                tick.tick().await; // the first tick is immediate; report after a full interval
+                loop {
+                    tick.tick().await;
+                    let store = core.snapshot();
+                    let blobs = store.iter().map(|m| m.depth).sum();
+                    let bytes = store.iter().map(|m| m.total_bytes).sum();
+                    let open = active.load(Ordering::Relaxed);
+                    eprintln!("nightdrop-relay: {}", stats::STATS.take_line(open, blobs, bytes));
+                }
+            });
+        }
         let mut streams = handle_rend_requests(rend_requests);
         while let Some(request) = streams.next().await {
             let open = active.fetch_add(1, Ordering::Relaxed);
             if open >= MAX_CONCURRENT_STREAMS {
                 active.fetch_sub(1, Ordering::Relaxed);
+                stats::STATS.dropped_capacity.fetch_add(1, Ordering::Relaxed);
                 tracing::warn!(target: "nightdrop_relay::streams", open, "at capacity: dropped a rendezvous");
                 continue; // at capacity — drop the rendezvous; the client retries
             }
+            stats::STATS.note_open(open + 1);
             let core = Arc::clone(&core);
             let guard = ConnGuard(Arc::clone(&active));
             let served = Arc::clone(&last_served);
@@ -329,6 +357,7 @@ fn main() -> anyhow::Result<()> {
                 // only when RUST_LOG is set (see the tracing setup above).
                 match request.accept(Connected::new_empty()).await {
                     Ok(stream) => {
+                        stats::STATS.accepted.fetch_add(1, Ordering::Relaxed);
                         // Someone reached this onion. The watchdog reads this as proof that the
                         // service is live even when its own self-dial is failing. Our own probe
                         // lands here too, which is harmless: the watchdog only consults this while
@@ -336,10 +365,12 @@ fn main() -> anyhow::Result<()> {
                         // that reached us would have ended the spell instead.
                         served.store(start.elapsed().as_secs(), Ordering::Relaxed);
                         if let Err(e) = serve_stream(stream, core).await {
+                            stats::STATS.stream_errors.fetch_add(1, Ordering::Relaxed);
                             tracing::info!(target: "nightdrop_relay::streams", open, "stream ended with an error: {e:#}");
                         }
                     }
                     Err(e) => {
+                        stats::STATS.accept_failed.fetch_add(1, Ordering::Relaxed);
                         tracing::info!(target: "nightdrop_relay::streams", open, "stream accept failed: {e:#}");
                     }
                 }
@@ -380,6 +411,7 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
                         .write_all(RelayCore::error_line("rate limit exceeded").as_bytes())
                         .await;
                     let _ = write.flush().await;
+                    stats::STATS.rate_limited.fetch_add(1, Ordering::Relaxed);
                     break; // close the connection; a fresh one over Tor is costly for the flooder
                 }
                 tokens -= 1.0;
@@ -387,8 +419,19 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
                 write.flush().await?;
             }
             Err(ref e) if e.kind() == std::io::ErrorKind::InvalidData => {
+                stats::STATS.line_too_long.fetch_add(1, Ordering::Relaxed);
                 let _ = write
                     .write_all(RelayCore::error_line("line too long").as_bytes())
+                    .await;
+                let _ = write.flush().await;
+                break;
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::OutOfMemory => {
+                // The in-flight line budget (`MAX_LINE_BYTES_IN_FLIGHT`): tell the client, who
+                // retries, rather than dropping the stream without a word.
+                stats::STATS.line_busy.fetch_add(1, Ordering::Relaxed);
+                let _ = write
+                    .write_all(RelayCore::error_line("relay busy").as_bytes())
                     .await;
                 let _ = write.flush().await;
                 break;
