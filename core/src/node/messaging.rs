@@ -1302,6 +1302,30 @@ impl Node {
         Ok(path.to_string_lossy().into_owned())
     }
 
+    /// Delete an attachment for good: its sealed file, and any decrypted copy `media_to_file`
+    /// left in the open-cache for a player. Burn expiry, unsend and the disappearing timer used to
+    /// remove only the sealed file, so a burned video that had been opened stayed on disk in the
+    /// clear until the next launch swept the cache — days, on a desktop left running (self-audit
+    /// 2026-10-13, round 6).
+    pub(crate) fn forget_media(&self, id: &str) {
+        if !is_media_id(id) {
+            return;
+        }
+        if let Some((dir, _)) = &self.media_store {
+            let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
+        }
+        if let Some(open) = self.open_cache_dir() {
+            let prefix = format!("{id}.");
+            if let Ok(entries) = std::fs::read_dir(&open) {
+                for e in entries.flatten() {
+                    if e.file_name().to_string_lossy().starts_with(&prefix) {
+                        let _ = std::fs::remove_file(e.path());
+                    }
+                }
+            }
+        }
+    }
+
     /// The app-private scratch dir for **decrypted** attachments (§1.4): a sibling of the sealed
     /// media store, so it inherits the app-private location while staying separate from the sealed
     /// `.bin` files (a startup sweep can clear it without touching them). `None` if no store is set.
@@ -2141,12 +2165,8 @@ impl Node {
             });
             changed |= chat.history.len() != before;
         }
-        if let Some((dir, _)) = &self.media_store {
-            for id in dead_media {
-                if is_media_id(&id) {
-                    let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
-                }
-            }
+        for id in dead_media {
+            self.forget_media(&id); // sealed file and any decrypted copy
         }
         self.dirty |= changed;
         changed
@@ -2210,12 +2230,8 @@ impl Node {
                 changed |= chat.history.len() != before;
             }
         }
-        if let Some((dir, _)) = &self.media_store {
-            for id in dead_media {
-                if is_media_id(&id) {
-                    let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
-                }
-            }
+        for id in dead_media {
+            self.forget_media(&id); // sealed file and any decrypted copy
         }
         self.dirty |= changed;
     }

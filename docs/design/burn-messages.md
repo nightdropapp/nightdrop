@@ -165,7 +165,13 @@ attachment leaks its size, which it must — the bytes have to arrive.
 
 Reveal works by `transfer_id` rather than `msg_id`, because attachments carry no `msg_id`;
 `mark_burn_viewed` accepts either. Burning deletes the sealed file as well as the message, which
-is asserted on disk rather than assumed.
+is asserted on disk rather than assumed. **From 2026-10-13 it also deletes the copies made for
+viewing**, which it did not before (self-audit, round 6): a video opened in a player left its
+decrypted file in `nightdrop-open/` until the next launch, and the app's in-memory `MediaCache`
+kept a revealed photo until logout. `Node::forget_media` now removes both files (burn expiry,
+unsend, the disappearing timer, and deleting the whole chat), and the cache drops anything a
+chat's history no longer references at its next refresh. What a player or the OS copied while the
+file was open is outside the app's reach.
 
 ## 8. Burn-view receipts (added 2026-09-23)
 

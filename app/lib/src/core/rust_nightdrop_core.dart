@@ -1444,6 +1444,7 @@ class RustNightdropCore extends NightdropCore {
     _contacts = _contacts.where((c) => c.id != contactId).toList();
     _requests = _requests.where((c) => c.id != contactId).toList();
     _messages.remove(contactId);
+    MediaCache.forgetChat(contactId);
     notifyListeners();
     unawaited(() async {
       try {
@@ -1954,7 +1955,7 @@ class RustNightdropCore extends NightdropCore {
 
   List<Message> _mapMessages(String contactId, List<rust.ChatMessage> history) {
     var i = 0;
-    return _withPendingReveals(contactId, history
+    final mapped = _withPendingReveals(contactId, history
         .map((m) => Message(
               id: '$contactId-${i++}',
               contactId: contactId,
@@ -1983,5 +1984,8 @@ class RustNightdropCore extends NightdropCore {
                       m.viewedAt.toInt() * 1000),
             ))
         .toList());
+    MediaCache.retainChat(contactId,
+        MediaCache.keysOf(mapped.map((m) => (mediaId: m.mediaId, thumbId: m.thumbId))));
+    return mapped;
   }
 }

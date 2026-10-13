@@ -1807,6 +1807,22 @@ impl Node {
             .get(contact_id)
             .map(|c| c.peer_address.clone())
             .unwrap_or_default();
+        // Its attachments go with it: sealed files and any decrypted copy. They were left on disk,
+        // unreferenced but readable by anyone holding the store key (self-audit 2026-10-13, round 6).
+        let media: Vec<String> = self
+            .chats
+            .get(contact_id)
+            .map(|c| {
+                c.history
+                    .iter()
+                    .flat_map(|m| [m.media_id.clone(), m.thumb_id.clone()])
+                    .filter(|id| !id.is_empty())
+                    .collect()
+            })
+            .unwrap_or_default();
+        for id in &media {
+            self.forget_media(id);
+        }
         self.chats.remove(contact_id);
         // Onion client auth (#22), both directions. `revoke_client` drops *their* permission to
         // reach us. `forget_peer_key` drops *our* key for reaching them — which arti stores in a

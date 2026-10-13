@@ -2685,3 +2685,75 @@ fn the_data_dir_and_state_file_are_owner_only() {
     assert_eq!(mode(&state), 0o600, "state file");
     let _ = std::fs::remove_dir_all(&base);
 }
+
+#[test]
+fn deleting_a_chat_or_burning_media_removes_every_copy_on_disk() {
+    // Self-audit 2026-10-13, round 6: delete_chat left the chat's sealed attachments on disk, and
+    // burn/unsend/disappearing removed only the sealed file, not a decrypted copy opened in a player.
+    let key: StoreKey = [9u8; 32];
+    let base = std::env::temp_dir().join(format!("nightdrop-forget-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(
+        base.join("a/nightdrop-media")
+            .to_string_lossy()
+            .into_owned(),
+        key,
+    );
+    bob.set_media_store(
+        base.join("b/nightdrop-media")
+            .to_string_lossy()
+            .into_owned(),
+        key,
+    );
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    let video = super::media_kind::sample_mp4(b"isom", 1, b"");
+    alice
+        .send_media(&bob_contact, &video, "video/mp4", "video", &[])
+        .unwrap();
+    bob.pump().unwrap();
+    let id = bob
+        .messages(&alice_contact)
+        .last()
+        .unwrap()
+        .media_id
+        .clone();
+    let sealed = base.join(format!("b/nightdrop-media/{id}.bin"));
+    let opened = std::path::PathBuf::from(bob.media_to_file(&id, "").unwrap());
+    assert!(sealed.exists() && opened.exists());
+
+    // forget_media (what burn expiry, unsend and the disappearing timer call) takes both.
+    bob.forget_media(&id);
+    assert!(!sealed.exists(), "sealed file left behind");
+    assert!(!opened.exists(), "decrypted copy left behind");
+
+    // And deleting a chat takes all of its attachments.
+    alice
+        .send_media(&bob_contact, &video, "video/mp4", "video", &[])
+        .unwrap();
+    bob.pump().unwrap();
+    let id2 = bob
+        .messages(&alice_contact)
+        .last()
+        .unwrap()
+        .media_id
+        .clone();
+    let sealed2 = base.join(format!("b/nightdrop-media/{id2}.bin"));
+    let opened2 = std::path::PathBuf::from(bob.media_to_file(&id2, "").unwrap());
+    bob.delete_chat(&alice_contact).unwrap();
+    assert!(
+        !sealed2.exists(),
+        "a deleted chat's attachment stayed on disk"
+    );
+    assert!(
+        !opened2.exists(),
+        "a deleted chat's opened copy stayed on disk"
+    );
+    let _ = std::fs::remove_dir_all(&base);
+}

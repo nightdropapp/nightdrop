@@ -1007,12 +1007,8 @@ impl Node {
                     });
                     removed = chat.history.len() != before;
                 }
-                if let Some((dir, _)) = &self.media_store {
-                    for id in dead_media {
-                        if super::messaging::is_media_id(&id) {
-                            let _ = std::fs::remove_file(format!("{dir}/{id}.bin"));
-                        }
-                    }
+                for id in dead_media {
+                    self.forget_media(&id); // sealed file and any decrypted copy
                 }
                 if !removed {
                     return Ok(None);
