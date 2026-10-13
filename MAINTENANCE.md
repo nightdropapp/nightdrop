@@ -634,6 +634,18 @@ the expected conflict, not a fault.
 Deploying a new relay build: back up the binary, install, restart once, then confirm a
 `self-dial reached` line — systemd's "active" proves nothing (§13).
 
+**Relay diagnostics, and what they must not log.** `NIGHTDROP_RELAY_STATS=1` prints one line per
+5 minutes of aggregate counts (streams, refusals, requests per operation, store size;
+`relay/src/stats.rs`) — nothing that tells clients apart. `RUST_LOG` is arti's tracing and needs care:
+at its default `warn`, `tor_hsservice::helpers` already logs one line per failed client connection,
+and `nightdrop_relay::streams` at `info` one per stream — per-client timing in the persistent
+journal, which §1a's "no logs" rules out. Use `error` as the default and enable only the service's
+own modules: `RUST_LOG=error,tor_hsservice::publish=debug,tor_hsservice::ipt_mgr=debug,tor_hsservice::ipt_establish=debug,tor_guardmgr=info,tor_dirmgr=info,tor_circmgr::hspool=warn`.
+Both go in a dated drop-in (`~/.config/systemd/user/nightdrop-relay.service.d/diagnostics.conf`),
+never the unit. **Active since 2026-10-13, to remove by 2026-10-27**: it is there to explain three
+~15-minute spells the live relay was unreachable on 2026-10-12/13 while a test relay on the same host
+was not.
+
 ---
 
 ## 15. Where knowledge lives
