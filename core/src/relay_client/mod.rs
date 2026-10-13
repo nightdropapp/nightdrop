@@ -74,6 +74,15 @@ pub struct RelayLimits {
     pub max_mailbox_bytes: usize,
     /// Total bytes across all mailboxes (the OOM backstop).
     pub max_total_bytes: usize,
+    /// Blobs up to this size are "small": every text message and control frame (padded to at
+    /// most 16 KiB, then sealed). Only they may use [`small_reserve_bytes`](Self::small_reserve_bytes).
+    pub small_blob_bytes: usize,
+    /// The last part of `max_total_bytes`, kept for small blobs. Anyone may post, so a few
+    /// anonymous 150 MB junk blobs used to fill the relay and refuse every message for up to a day;
+    /// large blobs now stop short of this, so ordinary messages still get through a flood of them
+    /// (self-audit 2026-10-13, finding 4). A flood of *small* posts can still fill it — that needs
+    /// a cost on posting (proof of work), which is not built.
+    pub small_reserve_bytes: usize,
     /// Longest accepted TTL; longer requests are clamped, keeping the 24h promise (§6)
     /// even against a hostile client asking for more.
     pub max_ttl: Duration,
@@ -92,6 +101,8 @@ impl Default for RelayLimits {
             max_mailbox_bytes: 256 * 1024 * 1024,
             // usize-safe on 32-bit targets too (the core builds for armeabi-v7a).
             max_total_bytes: 1024 * 1024 * 1024,
+            small_blob_bytes: 64 * 1024,
+            small_reserve_bytes: 128 * 1024 * 1024,
             max_ttl: Duration::from_secs(24 * 60 * 60),
             // base64 inflates ~4/3; + headroom for the JSON envelope (handle, ttl, version).
             // (`/ 3 * 4` avoids the intermediate overflow that `* 4 / 3` risks on 32-bit.)
@@ -810,6 +821,14 @@ fn process(
             let reject = if bytes.len() > limits.max_blob_bytes {
                 Some("blob too large")
             } else if inner.total_bytes + bytes.len() > limits.max_total_bytes {
+                Some("relay full")
+            } else if bytes.len() > limits.small_blob_bytes
+                && inner.total_bytes + bytes.len()
+                    > limits
+                        .max_total_bytes
+                        .saturating_sub(limits.small_reserve_bytes)
+            {
+                // Large blobs leave the reserve to small ones (see `small_reserve_bytes`).
                 Some("relay full")
             } else {
                 let q = inner.map.get(&handle);
@@ -1814,6 +1833,8 @@ mod tests {
             max_mailbox_blobs: 2,
             max_mailbox_bytes: 12,
             max_total_bytes: 20,
+            small_blob_bytes: usize::MAX,
+            small_reserve_bytes: 0,
             max_ttl: Duration::from_secs(60),
             max_line_bytes: 4096,
         };
@@ -1847,6 +1868,50 @@ mod tests {
         // Draining frees budget: after a fetch the same post succeeds.
         client.fetch("other1").unwrap();
         client.post("other2", b"12345678", ttl).unwrap();
+    }
+
+    #[test]
+    fn a_flood_of_large_blobs_cannot_block_small_messages() {
+        // Self-audit 2026-10-13, finding 4: anyone can post, so large junk blobs filled the relay
+        // and every message after them was refused as "relay full" for up to a day.
+        let limits = RelayLimits {
+            max_blob_bytes: 100,
+            max_mailbox_blobs: 100,
+            max_mailbox_bytes: 1000,
+            max_total_bytes: 400,
+            small_blob_bytes: 10,
+            small_reserve_bytes: 100,
+            max_ttl: Duration::from_secs(60),
+            max_line_bytes: 4096,
+        };
+        let addr = RelayServer::spawn_with_limits("127.0.0.1:0", None, limits).unwrap();
+        let client = RelayClient::new(addr.to_string());
+        let ttl = Duration::from_secs(30);
+        // The flood: large blobs on throwaway handles until the relay refuses them.
+        let mut posted = 0;
+        for i in 0..10 {
+            if client.post(&format!("junk{i}"), &[0u8; 100], ttl).is_ok() {
+                posted += 1;
+            }
+        }
+        assert_eq!(
+            posted, 3,
+            "large blobs stop at total - reserve (300 of 400)"
+        );
+        // Ordinary messages still get through, into the reserve.
+        for i in 0..10 {
+            client
+                .post(&format!("mbx{i}"), b"0123456789", ttl)
+                .expect("a small message after a large-blob flood");
+        }
+        // And the reserve is still bounded by the total.
+        let mut small = 0;
+        for i in 0..20 {
+            if client.post(&format!("more{i}"), b"0123456789", ttl).is_ok() {
+                small += 1;
+            }
+        }
+        assert!(small < 20, "small posts still stop at max_total_bytes");
     }
 
     #[test]

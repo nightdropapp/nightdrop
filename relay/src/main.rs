@@ -616,21 +616,64 @@ fn tor_client_unusable<R: tor_rtcompat::Runtime>(client: &TorClient<R>) -> Optio
 
 /// Async twin of the core's line-capped reader: read one newline-terminated line, bounding the
 /// buffer at `max` bytes. `Ok(None)` at EOF; `Err(InvalidData)` if a line exceeds `max`.
+/// Bytes all streams together may hold in partly read request lines. `max_line_bytes` bounds one
+/// line (~200 MB, so a full media post fits), but up to [`MAX_CONCURRENT_STREAMS`] streams could
+/// each grow one at once — far past this machine's memory, and anyone may connect (self-audit
+/// 2026-10-13, finding 4). Two or three maximal posts fit at a time; a stream that would go past
+/// it is refused, and the client's retry gets through once the others finish.
+const MAX_LINE_BYTES_IN_FLIGHT: usize = 512 * 1024 * 1024;
+
+static LINE_BYTES_IN_FLIGHT: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
+/// A share of [`MAX_LINE_BYTES_IN_FLIGHT`] held by one line being read; returned on drop.
+struct LineBudget(usize);
+
+impl LineBudget {
+    /// Take `n` more bytes, or `false` (taking nothing) if that would pass the cap.
+    fn grow(&mut self, n: usize) -> bool {
+        use std::sync::atomic::Ordering;
+        let ok = LINE_BYTES_IN_FLIGHT
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |cur| {
+                cur.checked_add(n)
+                    .filter(|&v| v <= MAX_LINE_BYTES_IN_FLIGHT)
+            })
+            .is_ok();
+        if ok {
+            self.0 += n;
+        }
+        ok
+    }
+}
+
+impl Drop for LineBudget {
+    fn drop(&mut self) {
+        LINE_BYTES_IN_FLIGHT.fetch_sub(self.0, std::sync::atomic::Ordering::AcqRel);
+    }
+}
+
 async fn read_line_capped<R>(reader: &mut R, max: usize) -> std::io::Result<Option<String>>
 where
     R: futures::io::AsyncBufRead + Unpin,
 {
     // `AsyncBufReadExt` (fill_buf / consume_unpin) is imported at the top of the file.
     let mut buf: Vec<u8> = Vec::new();
+    let mut budget = LineBudget(0);
     loop {
         let (consumed, done) = {
             let chunk = reader.fill_buf().await?;
             if chunk.is_empty() {
                 (0usize, true)
             } else if let Some(i) = chunk.iter().position(|&b| b == b'\n') {
+                if !budget.grow(i) {
+                    return Err(busy());
+                }
                 buf.extend_from_slice(&chunk[..i]);
                 (i + 1, true)
             } else {
+                if !budget.grow(chunk.len()) {
+                    return Err(busy());
+                }
                 buf.extend_from_slice(chunk);
                 (chunk.len(), false)
             }
@@ -649,6 +692,14 @@ where
             ));
         }
     }
+}
+
+/// The error for a line refused by [`MAX_LINE_BYTES_IN_FLIGHT`].
+fn busy() -> std::io::Error {
+    std::io::Error::new(
+        std::io::ErrorKind::OutOfMemory,
+        "relay busy: too many large requests at once",
+    )
 }
 
 /// `gen-directory-key`: mint a fresh directory-signing keypair. Prints the secret private key (to
@@ -984,6 +1035,26 @@ fn now_hms() -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn concurrent_request_lines_share_one_memory_budget() {
+        // Self-audit 2026-10-13, finding 4. Margins are wide so other tests reading small lines in
+        // parallel cannot flip the outcome.
+        let half = MAX_LINE_BYTES_IN_FLIGHT / 2;
+        let mut a = LineBudget(0);
+        assert!(a.grow(half), "one large line fits");
+        let mut b = LineBudget(0);
+        assert!(
+            !b.grow(half + half / 2),
+            "a second that would pass the cap is refused"
+        );
+        assert_eq!(b.0, 0, "a refused grow takes nothing");
+        drop(a);
+        assert!(
+            b.grow(half + half / 2),
+            "dropping the first line returns its share"
+        );
+    }
+
     use super::*;
 
     /// A cycle in which everything is fine.
