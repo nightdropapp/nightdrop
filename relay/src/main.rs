@@ -19,6 +19,7 @@
 //!
 //! Operator subcommands (no Tor bootstrap):
 //! - `gen-directory-key` / `sign-directory` — the signed relay directory (§3.1).
+//! - `gen-update-key` / `sign-update` — the signed update manifest (`core/src/update.rs`).
 //! - `authorize-client` / `revoke-client` / `list-clients` — private-relay client authorization
 //!   (§3.2). Any authorized client (a `.auth` file under `<state>/authorized-clients/`) flips the
 //!   relay's onion to **restricted discovery**: only those clients can fetch its descriptor.
@@ -68,6 +69,8 @@ fn main() -> anyhow::Result<()> {
     match args.get(1).map(String::as_str) {
         Some("gen-directory-key") => return gen_directory_key(),
         Some("sign-directory") => return sign_directory(&args[2..]),
+        Some("gen-update-key") => return gen_update_key(&args[2..]),
+        Some("sign-update") => return sign_update(&args[2..]),
         Some("authorize-client") => return authorize_client(&args[2..]),
         Some("revoke-client") => return revoke_client(&args[2..]),
         Some("list-clients") => return list_clients(),
@@ -663,6 +666,53 @@ fn gen_directory_key() -> anyhow::Result<()> {
     eprintln!("     {privkey_b64}\n");
     eprintln!("2) BAKE this PUBLIC key into the app (core/src/directory.rs) and rebuild:");
     eprintln!("     pub const DIRECTORY_PUBKEY: [u8; 32] = [{arr}];");
+    Ok(())
+}
+
+/// `gen-update-key <out-file>`: mint the release-signing keypair for `update.json`. Writes the
+/// private key (base64) to `<out-file>`, owner-only, refusing to overwrite one, and prints the
+/// public key as the array to paste into `update::UPDATE_PUBKEY`. Once per deployment: released
+/// apps carry the public key for good.
+fn gen_update_key(args: &[String]) -> anyhow::Result<()> {
+    let Some(out) = args.first() else {
+        anyhow::bail!("usage: nightdrop-relay gen-update-key <out-file>");
+    };
+    let mut file = {
+        let mut o = std::fs::OpenOptions::new();
+        o.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            o.mode(0o600);
+        }
+        o.open(out)
+            .with_context(|| format!("{out} (an existing key is never overwritten)"))?
+    };
+    let (secret_b64, public) = nightdrop::update::generate_update_key();
+    use std::io::Write as _;
+    writeln!(file, "{secret_b64}")?;
+    let arr = public
+        .iter()
+        .map(|b| b.to_string())
+        .collect::<Vec<_>>()
+        .join(", ");
+    eprintln!("Update signing key written to {out} (keep it secret, backed up, off the web host).");
+    eprintln!("Bake the PUBLIC key into core/src/update.rs and rebuild:");
+    eprintln!("     pub const UPDATE_PUBKEY: [u8; 32] = [{arr}];");
+    Ok(())
+}
+
+/// `sign-update <key-file> <manifest-file>`: print the base64 signature of the manifest file's
+/// exact bytes. The key is read from a file, never the command line, where `ps` would show it.
+fn sign_update(args: &[String]) -> anyhow::Result<()> {
+    let [key_file, manifest_file] = args else {
+        anyhow::bail!("usage: nightdrop-relay sign-update <key-file> <manifest-file>");
+    };
+    let secret = std::fs::read_to_string(key_file)?;
+    let payload = std::fs::read(manifest_file)?;
+    let sig = nightdrop::update::sign_manifest(&secret, &payload)
+        .ok_or_else(|| anyhow::anyhow!("{key_file} does not hold a base64 32-byte key"))?;
+    println!("{sig}");
     Ok(())
 }
 

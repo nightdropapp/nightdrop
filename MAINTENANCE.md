@@ -472,6 +472,7 @@ base jumped 16 → 402 when the scheme was adopted and must never go back below 
 | Release cert SHA-256 | `d08b8e64…2c0ac` — also `AllowedAPKSigningKeys` in the recipe and `RELEASE_CERT_SHA256` in `deploy-website.sh` |
 | GPG release key | `security@nightdrop.app`, `079B A016 9201 A8AB 11F3 2385 884E ACB8 89D0 2002`; passphrase normally cached in `gpg-agent` — check with a throwaway `--pinentry-mode error` signature before assuming a human is needed. The **private** key is not in the repo (its location: `MAINTENANCE.local.md`) |
 | Directory-signing key | `relay-state/directory-signing-key` (Ed25519; a different key from the GPG one) |
+| Update-signing key | `~/.config/nightdrop-signing/update-signing-key` (Ed25519, base64; dir 0700, file 0600). Signs `update.json` at publish time; its public half is `update::UPDATE_PUBKEY` in every released app, so **losing it stops every app seeing updates** and leaking it lets the holder offer builds. Back it up off this machine; it is needed only by `make update-manifest`, so it can live offline (`NIGHTDROP_UPDATE_KEY` points the script elsewhere) |
 | GitHub | `gh`, authenticated as `nightdropapp` |
 | Security mailbox | `security@nightdrop.app`, Proton Mail on the custom domain with **our own key**: reports stay PGP-encrypted to the published key and are decrypted locally; Proton's address-key encryption stays off |
 | GitLab (fdroiddata fork) | `gitlab_token.txt` at the repo root (gitignored); use as a `PRIVATE-TOKEN:` header against the API. `glab auth status` (its own stale token) and `ssh -T git@gitlab.com` (no key registered) both fail and **say nothing about this token** — on 2026-08-10 they were taken as proof the work could not be done from here. Rarely needed since the merge |
@@ -543,6 +544,9 @@ Traps, each of which has happened:
   `git diff --stat HEAD <branch> -- website`; if non-empty, bring `main`'s `website/` into the
   branch first or treat the switch as a deploy. Check what is live with
   `curl -s http://127.0.0.1:8787/index.html`.
+- **`update.json` must be signed** with the update-signing key (§11.5): the generator refuses
+  to write it without the key, and apps from 0.2 on trust only the signed payload, so an unsigned or
+  hand-edited `update.json` is a release nobody is told about (ARCHITECTURE.md §10a).
 - **`website/update.json` is generated at publish time only** (`make update-manifest`), after the
   new binaries are in `website/applications/`. It is deliberately *not* part of `make config`: it
   used to be, and bumping the version then announced the release instantly while the site still

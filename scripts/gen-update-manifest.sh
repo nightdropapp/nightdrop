@@ -72,4 +72,21 @@ json="{\"latest\":\"$ver\""
 [ -n "$entries" ] && json="$json,\"android\":{$entries}"
 [ -n "$linux" ] && json="$json,\"linux\":{$linux}"
 [ -n "$windows" ] && json="$json,\"windows\":{$windows}"
-printf '%s}\n' "$json" > website/update.json
+json="$json}"
+
+# Sign it (core/src/update.rs, UPDATE_PUBKEY). Apps from the signing release on trust ONLY the
+# signed payload; older ones read the same fields in the clear and ignore "signed". Without a valid
+# signature a new app sees no update at all, so a missing key is a hard stop, never an unsigned
+# file. The key never goes on a command line (`ps`), and is read from outside website/.
+key="${NIGHTDROP_UPDATE_KEY:-$HOME/.config/nightdrop-signing/update-signing-key}"
+if [ ! -r "$key" ]; then
+  echo "gen-update-manifest: no update signing key at $key (MAINTENANCE.md, credentials) — NOT writing update.json" >&2
+  exit 1
+fi
+tmp="$(mktemp)"
+trap 'rm -f "$tmp"' EXIT
+printf '%s' "$json" > "$tmp"
+sig="$(cargo run -q --release -p nightdrop_relay -- sign-update "$key" "$tmp")"
+payload="$(base64 -w0 < "$tmp")"
+[ -n "$sig" ] && [ -n "$payload" ] || { echo "gen-update-manifest: signing failed" >&2; exit 1; }
+printf '%s,"signed":{"payload":"%s","sig":"%s"}}\n' "${json%\}}" "$payload" "$sig" > website/update.json

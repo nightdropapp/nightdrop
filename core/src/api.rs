@@ -1628,7 +1628,7 @@ impl NightdropCore {
         ) else {
             anyhow::bail!("this transport cannot fetch anonymously");
         };
-        let manifest: crate::update::UpdateManifest = serde_json::from_slice(&fetched?)?;
+        let manifest = crate::update::parse_manifest(&fetched?)?;
         crate::update::download(
             transport.as_ref(),
             &manifest,

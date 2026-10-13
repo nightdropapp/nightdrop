@@ -952,6 +952,18 @@ A check the site did not answer is due again after 3 hours, not a day, and still
 launch. F-Droid installs skip it (F-Droid is their updater); "Check for updates" in the menu always
 asks.
 
+**The manifest is signed, and only what is signed is trusted.** Reaching our onion proves we
+reached our server, not that the server is honest: a compromised site host could serve a
+malicious AppImage or installer with a matching hash, and the hash came from the same place.
+Android was saved by the OS signature check; desktop had nothing else (self-audit 2026-10-13).
+So `update.json` carries `signed: {payload, sig}` — an Ed25519 signature, with the domain string
+`nightdrop/update/v1\n`, over the exact manifest bytes — and the app reads **only** the signed
+payload, against `UPDATE_PUBKEY` baked into it (`update::parse_manifest`, used by both the check
+and the download). The same fields also sit in the clear beside it for apps from before signing,
+which ignore `signed`. Unsigned or badly signed reads as "no answer". The private key signs at
+publish time only (`nightdrop-relay sign-update`), so it need not live on the web host; it does
+not stop a replayed *older* signed manifest, which can only hide an update, never offer a build.
+
 **The manifest cannot drift from what is served.** `scripts/gen-update-manifest.sh` (run by
 `make update-manifest` at publish time, deliberately *not* by `make config` — `MAINTENANCE.md` §12)
 takes the version from `app/pubspec.yaml` and each APK's SHA-256 from the file

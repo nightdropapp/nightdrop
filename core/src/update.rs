@@ -84,7 +84,95 @@ pub struct UpdateDownload {
     pub sha256: String,
 }
 
-/// What the onion site publishes.
+/// The release-signing **public** key the manifest must be signed with (self-audit 2026-10-13,
+/// finding 3). Reaching our onion proves we reached our server, not that the server is honest:
+/// before signing, a compromised site host could serve a malicious AppImage or installer with a
+/// matching hash and the app would call it verified. Android had the OS signature check; desktop
+/// had nothing else.
+///
+/// The private half signs `update.json` at publish time only (`scripts/gen-update-manifest.sh`,
+/// `nightdrop-relay sign-update`), so it can live off the web host; its location is in
+/// `MAINTENANCE.md` (credentials). **Permanent like [`UPDATE_ONION`]:** released apps carry it, so
+/// replacing it strands every install's update check until they update by hand.
+pub const UPDATE_PUBKEY: [u8; 32] = [
+    142, 43, 7, 83, 82, 52, 133, 133, 234, 127, 220, 233, 8, 171, 216, 149, 222, 99, 1, 95, 213,
+    169, 252, 216, 32, 143, 32, 36, 72, 135, 13, 85,
+];
+
+/// Domain separation: a signature over a manifest can never be read as one over anything else.
+const UPDATE_SIGN_CONTEXT: &[u8] = b"nightdrop/update/v1\n";
+
+/// What the onion site serves at [`MANIFEST_PATH`]: the manifest fields in the clear, for apps
+/// from before signing (they ignore `signed`), plus `signed`, which is all this build trusts.
+#[derive(Deserialize)]
+struct SignedEnvelope {
+    #[serde(default)]
+    signed: Option<SignedPayload>,
+}
+
+#[derive(Deserialize)]
+struct SignedPayload {
+    /// base64 of the exact manifest bytes that were signed — so verification never depends on
+    /// re-serialising JSON the same way.
+    payload: String,
+    /// base64 Ed25519 signature over [`UPDATE_SIGN_CONTEXT`] ‖ payload.
+    sig: String,
+}
+
+/// Parse a served manifest, trusting **only** its signed payload. Unsigned, badly signed or
+/// malformed is an error, which the check reports as "no answer" and the download refuses.
+pub fn parse_manifest(body: &[u8]) -> Result<UpdateManifest> {
+    parse_manifest_with(body, &UPDATE_PUBKEY)
+}
+
+fn parse_manifest_with(body: &[u8], pubkey: &[u8; 32]) -> Result<UpdateManifest> {
+    use base64::Engine as _;
+    use ed25519_dalek::{Signature, VerifyingKey};
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let envelope: SignedEnvelope = serde_json::from_slice(body)?;
+    let signed = envelope
+        .signed
+        .ok_or_else(|| anyhow::anyhow!("update manifest is not signed"))?;
+    let payload = b64.decode(signed.payload.trim())?;
+    let sig: [u8; 64] = b64
+        .decode(signed.sig.trim())?
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("update manifest signature has the wrong length"))?;
+    let vk = VerifyingKey::from_bytes(pubkey)?;
+    vk.verify_strict(
+        &[UPDATE_SIGN_CONTEXT, &payload].concat(),
+        &Signature::from_bytes(&sig),
+    )
+    .map_err(|_| anyhow::anyhow!("update manifest signature does not verify"))?;
+    Ok(serde_json::from_slice(&payload)?)
+}
+
+/// Operator tooling (`nightdrop-relay sign-update`): sign the manifest bytes `payload` with the
+/// base64 Ed25519 secret key from [`generate_update_key`], returning the base64 signature for
+/// `signed.sig`. `None` if the key is not a base64 32-byte key.
+pub fn sign_manifest(secret_b64: &str, payload: &[u8]) -> Option<String> {
+    use base64::Engine as _;
+    use ed25519_dalek::Signer as _;
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let mut secret: [u8; 32] = b64.decode(secret_b64.trim()).ok()?.try_into().ok()?;
+    let sk = ed25519_dalek::SigningKey::from_bytes(&secret);
+    zeroize::Zeroize::zeroize(&mut secret);
+    let sig = sk.sign(&[UPDATE_SIGN_CONTEXT, payload].concat());
+    Some(b64.encode(sig.to_bytes()))
+}
+
+/// Operator tooling (`nightdrop-relay gen-update-key`): a fresh release-signing keypair, as the
+/// base64 secret to store and the public key to bake into [`UPDATE_PUBKEY`].
+pub fn generate_update_key() -> (String, [u8; 32]) {
+    use base64::Engine as _;
+    let sk = ed25519_dalek::SigningKey::generate(&mut rand::rngs::OsRng);
+    (
+        base64::engine::general_purpose::STANDARD.encode(sk.to_bytes()),
+        sk.verifying_key().to_bytes(),
+    )
+}
+
+/// What the signed payload carries.
 #[derive(Debug, Deserialize)]
 pub struct UpdateManifest {
     /// The current release, as a bare `MAJOR.MINOR.PATCH` string.
@@ -165,7 +253,7 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
             return Err(e);
         }
     };
-    let manifest: UpdateManifest = match serde_json::from_slice(&body) {
+    let manifest: UpdateManifest = match parse_manifest(&body) {
         Ok(m) => m,
         Err(e) => {
             crate::diag!(
@@ -173,7 +261,7 @@ pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<
                 body.len(),
                 started.elapsed()
             );
-            return Err(e.into());
+            return Err(e);
         }
     };
     let status = compare(current_version, &manifest.latest);
@@ -662,6 +750,92 @@ pub fn body_of(response: &[u8]) -> Result<&[u8]> {
 
 #[cfg(test)]
 mod tests {
+    // ---- Signed manifest (self-audit 2026-10-13, finding 3) ----
+
+    /// What `scripts/gen-update-manifest.sh` wrote with the real signing key (2026-10-13). Pins
+    /// that [`UPDATE_PUBKEY`] is the key the publish step signs with: if they ever diverge, every
+    /// app silently stops seeing updates, and this fails first.
+    const SIGNED_BY_RELEASE_KEY: &str = r#"{"latest":"0.2.0","signed":{"payload":"eyJsYXRlc3QiOiIwLjIuMCJ9","sig":"Y+C+fhJ/rjYWc8W2r3SAUWHZAJoDYQA5hcea0TFRREKSLf9gI8n42EPFcBdXWbGGditAOTX1AFvNqO7bkE2fDA=="}}"#;
+
+    fn signed_with(secret_b64: &str, payload: &str) -> String {
+        use base64::Engine as _;
+        let sig = sign_manifest(secret_b64, payload.as_bytes()).unwrap();
+        let p = base64::engine::general_purpose::STANDARD.encode(payload);
+        format!(r#"{{"latest":"9.9.9","signed":{{"payload":"{p}","sig":"{sig}"}}}}"#)
+    }
+
+    fn pubkey_of(secret_b64: &str) -> [u8; 32] {
+        use base64::Engine as _;
+        let s: [u8; 32] = base64::engine::general_purpose::STANDARD
+            .decode(secret_b64)
+            .unwrap()
+            .try_into()
+            .unwrap();
+        ed25519_dalek::SigningKey::from_bytes(&s)
+            .verifying_key()
+            .to_bytes()
+    }
+
+    #[test]
+    fn the_baked_in_key_verifies_what_the_publish_step_signs() {
+        let m = parse_manifest(SIGNED_BY_RELEASE_KEY.as_bytes()).unwrap();
+        assert_eq!(m.latest, "0.2.0");
+    }
+
+    #[test]
+    fn only_the_signed_payload_is_trusted() {
+        let (sk, _) = generate_update_key();
+        let pk = pubkey_of(&sk);
+        let payload = r#"{"latest":"0.3.0","linux":{"x86_64":{"url":"/a","sha256":"aa"}}}"#;
+        let served = signed_with(&sk, payload);
+        let m = parse_manifest_with(served.as_bytes(), &pk).unwrap();
+        // The clear-text "latest" (9.9.9, what an old app reads) is ignored.
+        assert_eq!(m.latest, "0.3.0");
+        assert_eq!(m.linux["x86_64"].sha256, "aa");
+    }
+
+    #[test]
+    fn unsigned_tampered_or_foreign_manifests_are_refused() {
+        use base64::Engine as _;
+        let (sk, _) = generate_update_key();
+        let pk = pubkey_of(&sk);
+        let payload = r#"{"latest":"0.3.0"}"#;
+        // Unsigned: what every manifest was before.
+        assert!(parse_manifest_with(br#"{"latest":"0.3.0"}"#, &pk).is_err());
+        // A different key (a compromised site host signing its own).
+        let (other, _) = generate_update_key();
+        assert!(parse_manifest_with(signed_with(&other, payload).as_bytes(), &pk).is_err());
+        // The payload changed after signing (a swapped hash).
+        let good = signed_with(&sk, payload);
+        let evil = base64::engine::general_purpose::STANDARD.encode(r#"{"latest":"0.3.1"}"#);
+        let orig = base64::engine::general_purpose::STANDARD.encode(payload);
+        assert!(parse_manifest_with(good.replace(&orig, &evil).as_bytes(), &pk).is_err());
+        // Garbage signature.
+        let bad_sig = format!(
+            r#"{{"signed":{{"payload":"{orig}","sig":"{}"}}}}"#,
+            base64::engine::general_purpose::STANDARD.encode([0u8; 64])
+        );
+        assert!(parse_manifest_with(bad_sig.as_bytes(), &pk).is_err());
+        // A real signature over the same bytes without our context string (cross-protocol).
+        let raw_sig = {
+            use ed25519_dalek::Signer as _;
+            let s: [u8; 32] = base64::engine::general_purpose::STANDARD
+                .decode(&sk)
+                .unwrap()
+                .try_into()
+                .unwrap();
+            base64::engine::general_purpose::STANDARD.encode(
+                ed25519_dalek::SigningKey::from_bytes(&s)
+                    .sign(payload.as_bytes())
+                    .to_bytes(),
+            )
+        };
+        let no_ctx = format!(r#"{{"signed":{{"payload":"{orig}","sig":"{raw_sig}"}}}}"#);
+        assert!(parse_manifest_with(no_ctx.as_bytes(), &pk).is_err());
+        // And the untouched one still verifies.
+        assert!(parse_manifest_with(good.as_bytes(), &pk).is_ok());
+    }
+
     use super::*;
 
     #[test]
