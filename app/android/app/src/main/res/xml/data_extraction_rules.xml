@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Nothing of Night Drop's leaves the device through Android backup (self-audit 2026-10-13,
+     finding 6). Identity and chats move only through the app's own password-encrypted backup,
+     which the user owns (ARCHITECTURE.md §7). Android 12+ applies these rules to Google cloud
+     backup and to device-to-device transfer; the latter ignores allowBackup="false" on its own.
+     The store is sealed under a Keystore key that never transfers, but arti's state (guards),
+     contacts' onion client keys (.auth) and other app files are not, and a privacy app should not
+     copy any of it to a cloud account or another phone. -->
+<data-extraction-rules>
+    <cloud-backup>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </cloud-backup>
+    <device-transfer>
+        <exclude domain="root" />
+        <exclude domain="file" />
+        <exclude domain="database" />
+        <exclude domain="sharedpref" />
+        <exclude domain="external" />
+    </device-transfer>
+</data-extraction-rules>
