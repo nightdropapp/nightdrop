@@ -991,8 +991,8 @@ fn media_to_file_writes_owner_only_plaintext_into_the_app_private_scratch() {
     node.set_media_store(media_dir.to_string_lossy().into_owned(), key);
 
     // A real MP4 header: media_to_file only writes recognised video containers (media_kind.rs).
-    let video = b"\0\0\0\x20ftypisom\0\0\0\0decrypted video bytes";
-    let id = node.store_media(video).unwrap();
+    let video = super::media_kind::sample_mp4(b"isom", 1, b"");
+    let id = node.store_media(&video).unwrap();
     let path = node.media_to_file(&id, "mp4").unwrap();
     let p = std::path::Path::new(&path);
 
@@ -2502,7 +2502,9 @@ fn a_contact_cannot_choose_how_an_attachment_is_opened() {
         );
     }
     // A real video: its extension comes from its bytes, not from what was asked.
-    let id = node.store_media(b"\0\0\0\x20ftypisom\0\0\0\0rest").unwrap();
+    let id = node
+        .store_media(&super::media_kind::sample_mp4(b"isom", 1, b""))
+        .unwrap();
     let path = node.media_to_file(&id, "x\\..\\..\\evil.bat").unwrap();
     assert!(path.ends_with(&format!("{id}.mp4")), "{path}");
     // An id with path characters never reaches the filesystem.

@@ -61,16 +61,19 @@ pub(crate) fn video_ext(data: &[u8]) -> Option<&'static str> {
     // ISO base media (MP4, MOV, M4V, 3GP): a box whose type is `ftyp` at offset 4. QuickTime
     // files may lead with other atoms; accept the ones a .mov really starts with.
     if data.len() >= 12 {
-        match &data[4..8] {
-            b"ftyp" => {
-                return Some(match &data[8..12] {
-                    b"qt  " => "mov",
-                    b"3gp4" | b"3gp5" | b"3gp6" | b"3gg6" | b"3gp7" => "3gp",
-                    _ => "mp4",
-                });
-            }
-            b"moov" | b"mdat" | b"wide" | b"free" | b"skip" => return Some("mov"),
-            _ => {}
+        let ext = match &data[4..8] {
+            b"ftyp" => match &data[8..12] {
+                b"qt  " => Some("mov"),
+                b"3gp4" | b"3gp5" | b"3gp6" | b"3gg6" | b"3gp7" => Some("3gp"),
+                _ => Some("mp4"),
+            },
+            b"moov" | b"mdat" | b"wide" | b"free" | b"skip" => Some("mov"),
+            _ => None,
+        };
+        if let Some(ext) = ext {
+            // The right magic is not enough: a QuickTime reference movie or an external data
+            // reference makes a player (VLC, QuickTime) fetch a URL the contact chose.
+            return iso_bmff_is_self_contained(data).then_some(ext);
         }
     }
     // Matroska / WebM: the EBML magic. The DocType that follows says which.
@@ -87,6 +90,120 @@ pub(crate) fn video_ext(data: &[u8]) -> Option<&'static str> {
         return Some("avi");
     }
     None
+}
+
+/// Box types that hold other boxes on the way to anything that can point outside the file.
+const ISO_CONTAINERS: &[&[u8; 4]] = &[
+    b"moov", b"trak", b"mdia", b"minf", b"dinf", b"edts", b"udta",
+];
+
+/// Whether an ISO base media / QuickTime file can play without fetching anything: it has a
+/// `moov`, every box size adds up, `moov` holds no reference movie (`rmra`/`rmda`/`rdrf`, which
+/// name URLs players follow), and every data reference (`dref`) entry is self-contained (flag 1).
+/// Anything unparseable fails closed — the cost is only that such a file is not opened outside
+/// the app.
+fn iso_bmff_is_self_contained(data: &[u8]) -> bool {
+    let Some(top) = boxes(data) else {
+        return false;
+    };
+    let mut saw_moov = false;
+    for (kind, body) in top {
+        if kind == *b"moov" {
+            saw_moov = true;
+            // Belt and braces for the reference-movie atoms, wherever they sit inside moov
+            // (QuickTime nests them in ways the walk below does not descend into).
+            if [b"rmra", b"rmda", b"rdrf"]
+                .iter()
+                .any(|tag| body.windows(4).any(|w| w == *tag))
+            {
+                return false;
+            }
+            if !drefs_self_contained(body) {
+                return false;
+            }
+        }
+    }
+    saw_moov
+}
+
+/// Walk `body`'s children down through [`ISO_CONTAINERS`]; every `dref` found must reference only
+/// the file itself.
+fn drefs_self_contained(body: &[u8]) -> bool {
+    let Some(children) = boxes(body) else {
+        return false;
+    };
+    children.into_iter().all(|(kind, inner)| {
+        if kind == *b"dref" {
+            dref_self_contained(inner)
+        } else if ISO_CONTAINERS.contains(&&kind) {
+            drefs_self_contained(inner)
+        } else {
+            true
+        }
+    })
+}
+
+/// A `dref` full box: version/flags (4), entry count (4), then entry boxes whose own
+/// version/flags must have the self-contained bit (1) set.
+fn dref_self_contained(body: &[u8]) -> bool {
+    let Some(rest) = body.get(8..) else {
+        return false;
+    };
+    let Some(entries) = boxes(rest) else {
+        return false;
+    };
+    entries
+        .iter()
+        .all(|(_, entry)| entry.get(3).is_some_and(|flags| flags & 1 == 1))
+}
+
+/// Split `data` into ISO boxes `(type, body)`. `None` if a size does not fit: 32-bit size, `1` for
+/// a 64-bit size after the type, `0` for "to the end".
+fn boxes(mut data: &[u8]) -> Option<Vec<([u8; 4], &[u8])>> {
+    let mut out = Vec::new();
+    while !data.is_empty() {
+        let size32 = u32::from_be_bytes(data.get(0..4)?.try_into().ok()?) as u64;
+        let kind: [u8; 4] = data.get(4..8)?.try_into().ok()?;
+        let (header, size) = match size32 {
+            0 => (8u64, data.len() as u64),
+            1 => (16, u64::from_be_bytes(data.get(8..16)?.try_into().ok()?)),
+            n => (8, n),
+        };
+        if size < header || size > data.len() as u64 {
+            return None;
+        }
+        out.push((kind, &data[header as usize..size as usize]));
+        data = &data[size as usize..];
+    }
+    Some(out)
+}
+
+/// Test helper: an ISO box.
+#[cfg(test)]
+pub(crate) fn iso_box(kind: &[u8; 4], body: &[u8]) -> Vec<u8> {
+    let mut v = ((body.len() + 8) as u32).to_be_bytes().to_vec();
+    v.extend_from_slice(kind);
+    v.extend_from_slice(body);
+    v
+}
+
+/// Test helper: a small but well-formed MP4 whose one data reference is the file itself.
+#[cfg(test)]
+pub(crate) fn sample_mp4(brand: &[u8; 4], dref_flags: u8, extra_in_moov: &[u8]) -> Vec<u8> {
+    let url = iso_box(b"url ", &[0, 0, 0, dref_flags]);
+    let mut dref_body = vec![0, 0, 0, 0, 0, 0, 0, 1];
+    dref_body.extend_from_slice(&url);
+    let dinf = iso_box(b"dinf", &iso_box(b"dref", &dref_body));
+    let trak = iso_box(b"trak", &iso_box(b"mdia", &iso_box(b"minf", &dinf)));
+    let mut moov_body = iso_box(b"mvhd", &[0u8; 20]);
+    moov_body.extend_from_slice(&trak);
+    moov_body.extend_from_slice(extra_in_moov);
+    let mut ftyp_body = brand.to_vec();
+    ftyp_body.extend_from_slice(&[0, 0, 0, 0]);
+    let mut out = iso_box(b"ftyp", &ftyp_body);
+    out.extend_from_slice(&iso_box(b"moov", &moov_body));
+    out.extend_from_slice(&iso_box(b"mdat", b"frames"));
+    out
 }
 
 #[cfg(test)]
@@ -147,11 +264,12 @@ mod tests {
 
     #[test]
     fn video_ext_comes_from_the_bytes() {
-        let mut mp4 = vec![0, 0, 0, 0x20];
-        mp4.extend_from_slice(b"ftypisom\0\0\0\0");
-        assert_eq!(video_ext(&mp4), Some("mp4"));
-        let mut mov = vec![0, 0, 0, 0x14];
-        mov.extend_from_slice(b"ftypqt  \0\0\0\0");
+        assert_eq!(video_ext(&sample_mp4(b"isom", 1, b"")), Some("mp4"));
+        assert_eq!(video_ext(&sample_mp4(b"qt  ", 1, b"")), Some("mov"));
+        assert_eq!(video_ext(&sample_mp4(b"3gp5", 1, b"")), Some("3gp"));
+        // moov first, no ftyp (old QuickTime).
+        let mut mov = iso_box(b"moov", &iso_box(b"mvhd", &[0u8; 20]));
+        mov.extend_from_slice(&iso_box(b"mdat", b"x"));
         assert_eq!(video_ext(&mov), Some("mov"));
         let mut webm = vec![0x1A, 0x45, 0xDF, 0xA3, 0x9F, 0x42, 0x82, 0x84];
         webm.extend_from_slice(b"webm");
@@ -163,6 +281,44 @@ mod tests {
         let mut avi = b"RIFF\0\0\0\0AVI ".to_vec();
         avi.extend_from_slice(b"LIST");
         assert_eq!(video_ext(&avi), Some("avi"));
+    }
+
+    #[test]
+    fn an_mp4_that_points_outside_itself_is_refused() {
+        // A QuickTime reference movie: players follow the URL in it.
+        let rmra = iso_box(
+            b"rmra",
+            &iso_box(
+                b"rmda",
+                &iso_box(b"rdrf", b"\0\0\0\0url http://198.51.100.7/a.mov"),
+            ),
+        );
+        assert_eq!(video_ext(&sample_mp4(b"qt  ", 1, &rmra)), None);
+        // A data reference that is not the file itself (flag 0, a location follows).
+        assert_eq!(video_ext(&sample_mp4(b"isom", 0, b"")), None);
+        // No moov at all, and a box whose size runs past the end.
+        assert_eq!(video_ext(&iso_box(b"ftyp", b"isom\0\0\0\0")), None);
+        let mut cut = sample_mp4(b"isom", 1, b"");
+        cut.truncate(cut.len() - 3);
+        assert_eq!(video_ext(&cut), None);
+    }
+
+    /// Real files: `NIGHTDROP_VIDEO_DIR=<dir> cargo test -p nightdrop real_videos -- --ignored`.
+    /// Every file there must be recognised (a refused real video is a regression).
+    #[test]
+    #[ignore]
+    fn real_videos_are_recognised() {
+        let dir = std::env::var("NIGHTDROP_VIDEO_DIR").expect("NIGHTDROP_VIDEO_DIR");
+        let mut refused = Vec::new();
+        for entry in std::fs::read_dir(dir).unwrap().flatten() {
+            let data = std::fs::read(entry.path()).unwrap();
+            let got = video_ext(&data);
+            eprintln!("{:?} -> {got:?}", entry.file_name());
+            if got.is_none() {
+                refused.push(entry.file_name());
+            }
+        }
+        assert!(refused.is_empty(), "refused real videos: {refused:?}");
     }
 
     #[test]
