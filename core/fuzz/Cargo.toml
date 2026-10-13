@@ -40,3 +40,9 @@ path = "fuzz_targets/directory_from_wire.rs"
 test = false
 doc = false
 bench = false
+
+[[bin]]
+name = "update_manifest"
+path = "fuzz_targets/update_manifest.rs"
+test = false
+doc = false

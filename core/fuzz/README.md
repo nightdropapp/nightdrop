@@ -11,6 +11,7 @@ are the highest-value fuzz targets in the project.
 | `wire_decode` | `wire::decode(&[u8])` | Every frame from a peer/relay is parsed here (length prefix + versioned JSON envelope + padding). The primary network input parser. |
 | `relay_handle_line` | `RelayCore::handle_line(&str)` | The relay's request-line handler — its main untrusted-input surface. Malformed/unauthenticated input must not panic or exhaust resources (in scope per `SECURITY.md`). |
 | `directory_from_wire` | `SignedDirectory::from_wire` + `verify` | A relay serves the signed directory; parsing happens **before** signature verification, so a malicious relay can shape the bytes. |
+| `update_manifest` | `update::parse_manifest` | Every install reads `/update.json` from our onion; the envelope, base64 and payload are parsed around an Ed25519 check. Smoke run 2026-10-13: 12.8M execs, clean. |
 
 ## Requirements
 

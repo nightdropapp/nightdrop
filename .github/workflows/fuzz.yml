@@ -91,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [wire_decode, relay_handle_line, directory_from_wire]
+        target: [wire_decode, relay_handle_line, directory_from_wire, update_manifest]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dtolnay/rust-toolchain@02cb101ec7c40f2c49e1d9714d64511d8e1b74de # master
@@ -114,9 +114,13 @@ jobs:
           restore-keys: fuzz-corpus-${{ matrix.target }}-
 
       - name: Fuzz
+        # The duration input reaches the shell through env, never by interpolation into the script.
+        env:
+          DURATION_INPUT: ${{ github.event.inputs.duration }}
         run: |
           mkdir -p "fuzz/corpus/${{ matrix.target }}"
-          DUR="${{ github.event.inputs.duration || '300' }}"
+          DUR="${DURATION_INPUT:-300}"
+          case "$DUR" in ''|*[!0-9]*) echo "duration must be a number of seconds" >&2; exit 1 ;; esac
           # Seeds are passed alongside the (cached) corpus; new finds land in the corpus dir.
           cargo +${{ env.FUZZ_TOOLCHAIN }} fuzz run --target ${{ env.FUZZ_TARGET }} "${{ matrix.target }}" \
             "fuzz/corpus/${{ matrix.target }}" "fuzz/seeds/${{ matrix.target }}" \

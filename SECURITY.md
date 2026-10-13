@@ -13,9 +13,9 @@ responsible disclosure easy.
   fingerprint `079B A016 9201 A8AB 11F3  2385 884E ACB8 89D0 2002`.
   Public key: <https://nightdrop.app/pgp.txt> (also referenced from `security.txt`).
 
-If you cannot use email, open a **private** report through the source host's
-confidential/security advisory channel (e.g. a GitHub/GitLab security advisory) once the
-public repository exists.
+If you cannot use email, open a **private** report through GitHub's security advisory
+channel for <https://github.com/nightdropapp/nightdrop> ("Report a vulnerability" under the
+Security tab) — never a public issue.
 
 Please include, as far as you can:
 
@@ -53,7 +53,9 @@ These are documented limitations, not vulnerabilities (see `ARCHITECTURE.md` §8
 - A fully compromised endpoint (malware with root/jailbreak) or an attacker with the
   unlocked device beyond the at-rest device-theft model.
 - A global passive adversary de-anonymizing Tor itself, and low-latency traffic-analysis
-  / timing correlation (v1 ships no cover traffic — stated, not fixed).
+  / timing correlation. Cover traffic exists but is opt-in and off by default
+  (`docs/design/cover-traffic.md`), so timing is not obfuscated for most users — stated, not
+  fixed.
 - Loss of history after device loss without an opt-in backup, or a lost/forgotten backup
   password — data loss by design.
 - Reports that require the user to disable protections, install a malicious build, or act
