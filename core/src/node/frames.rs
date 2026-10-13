@@ -488,6 +488,18 @@ impl Node {
             Frame::CodeInUse { from, code } => {
                 // The code we joined with was already spent: warn and close our side.
                 devlog!("[nightdrop] code '{code}' reported already used by {from}");
+                // Unauthenticated (`from` is a claim), so it may only end a request that is still
+                // waiting — the one case the inviter sends it, refusing before it ever writes to
+                // the session. Once anything has arrived on our session the chat is established and
+                // ignores it; else anyone who could deliver a frame could close any chat
+                // (self-audit 2026-10-13, finding 5).
+                let waiting = self
+                    .chats
+                    .get(&from)
+                    .is_some_and(|c| !c.session.has_received_message());
+                if !waiting {
+                    return Ok(None);
+                }
                 if let Some(chat) = self.chats.get_mut(&from) {
                     chat.closed = true;
                     chat.history.push(ChatMessage::system(
@@ -777,12 +789,28 @@ impl Node {
                 devlog!("[nightdrop] peer {from} announced their relay set");
                 Ok(Some((from, String::new())))
             }
-            Frame::ClientKey { from, client_key } => {
+            Frame::ClientKey { .. } => {
+                // The unsealed form: its `from` is only a claim, so acting on it let anyone who
+                // could deliver a frame replace a contact's onion key (self-audit 2026-10-13,
+                // finding 5). Still decoded, so a pre-fix 0.2 test build's frame is not an error.
+                crate::diag!("onion-auth: ignored an unsealed client key");
+                Ok(None)
+            }
+            Frame::ClientKeySealed { from, message } => {
                 // Onion client auth (#22): the peer handed us their client key for our onion.
                 // Authorized only for an **approved** contact (`optional-relay.md` §5): onion access
                 // follows the user's decision, so a pending request's key waits for Accept, and a
                 // Decline leaves it none. A stranger with no chat plants nothing. `authorize_client`
                 // validates the key and is a no-op off Tor. Silent (no UI change).
+                // Decrypted on the sender's session: a forgery, replay or splice changes nothing.
+                let Some(client_key) = self.chats.get_mut(&from).and_then(|chat| {
+                    let olm = message.to_olm().ok()?;
+                    let pt = crypto::decrypt(&mut chat.session, &olm).ok()?;
+                    let key = pt.strip_prefix(MARK_CLIENT_KEY_PREFIX)?;
+                    String::from_utf8(key.to_vec()).ok()
+                }) else {
+                    return Ok(None);
+                };
                 if let Some(chat) = self.chats.get_mut(&from) {
                     if chat.authorized {
                         let _ = self.transport.authorize_client(&from, &client_key);

@@ -240,6 +240,11 @@ pub enum Frame {
     /// which never leaves the peer's keymgr); `from` routes it to the right contact. See
     /// `node::announce_client_key`.
     ClientKey { from: String, client_key: String },
+    /// [`ClientKey`](Frame::ClientKey), sealed on the pair's session (`message` decrypts to
+    /// `nightdrop/ctl/client-key/v1:` + the key). The plaintext frame's `from` was believed as
+    /// sent, so anyone able to deliver a frame could replace a contact's onion key and cut their
+    /// direct path (self-audit 2026-10-13, finding 5); receivers now act only on this one.
+    ClientKeySealed { from: String, message: WireOlm },
     /// An image/video (or other) attachment, **E2E-encrypted** on the session. The encrypted
     /// payload is a packed envelope of (transfer_id, kind, mime, raw bytes) — see
     /// `node::pack_media` — so the relay/transport only ever sees ciphertext.

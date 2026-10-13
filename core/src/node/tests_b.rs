@@ -2553,3 +2553,81 @@ fn a_contacts_kind_and_mime_are_sanitised_on_receipt() {
     std::fs::remove_dir_all(format!("{}-a", dir.display())).ok();
     std::fs::remove_dir_all(format!("{}-b", dir.display())).ok();
 }
+
+#[test]
+fn forged_unsealed_control_frames_change_nothing_for_an_established_contact() {
+    // Self-audit 2026-10-13, finding 5: `CodeInUse` and `ClientKey` carried only a claimed `from`,
+    // so anyone able to deliver a frame could close a chat or replace a contact's onion key.
+    let base = std::env::temp_dir().join(format!("nightdrop-forge-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let alice_auth = base.join("alice");
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(AuthTransport {
+        inner: net.endpoint("alice"),
+        auth_dir: alice_auth.clone(),
+    }));
+    let mut bob = Node::new(Box::new(AuthTransport {
+        inner: net.endpoint("bob"),
+        auth_dir: base.join("bob"),
+    }));
+    let bob_ik = bob.identity_key();
+    let bundle = alice.publish_bundle();
+    let alice_for_bob = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    bob.pump().unwrap();
+    bob.send(&alice_for_bob, "hi").unwrap();
+    alice.pump().unwrap();
+    let snapshot = |dir: &std::path::Path| {
+        let mut v: Vec<(String, String)> = std::fs::read_dir(dir)
+            .unwrap()
+            .flatten()
+            .map(|e| {
+                (
+                    e.file_name().to_string_lossy().into_owned(),
+                    std::fs::read_to_string(e.path()).unwrap(),
+                )
+            })
+            .collect();
+        v.sort();
+        v
+    };
+    let before = snapshot(&alice_auth);
+    assert!(!before.is_empty(), "pairing installed bob's key");
+
+    let forged_key = AuthTransport::fake_key("mallory");
+    alice
+        .process_frame(
+            None,
+            Frame::ClientKey {
+                from: bob_ik.clone(),
+                client_key: forged_key,
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        snapshot(&alice_auth),
+        before,
+        "an unsealed client key replaced bob's"
+    );
+
+    alice
+        .process_frame(
+            None,
+            Frame::CodeInUse {
+                from: bob_ik.clone(),
+                code: "x".into(),
+            },
+        )
+        .unwrap();
+    assert!(
+        !alice.chats[&bob_ik].closed,
+        "a forged CodeInUse closed an established chat"
+    );
+    bob.send(&alice_for_bob, "still here").unwrap();
+    alice.pump().unwrap();
+    assert!(alice
+        .messages(&bob_ik)
+        .iter()
+        .any(|m| m.text == "still here"));
+    let _ = std::fs::remove_dir_all(&base);
+}

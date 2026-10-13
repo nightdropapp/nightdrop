@@ -111,6 +111,8 @@ const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
 const MARK_BURNS_V1: &[u8] = b"nightdrop/ctl/burns/v1";
 /// Prefix of a [`Frame::Version`] plaintext; the app version follows it (`"...:0.1.27"`).
 const MARK_VERSION_PREFIX: &[u8] = b"nightdrop/ctl/version/v1:";
+/// Prefix of a [`Frame::ClientKeySealed`] plaintext; the client key follows it.
+const MARK_CLIENT_KEY_PREFIX: &[u8] = b"nightdrop/ctl/client-key/v1:";
 /// Two markers for the screenshot-capability signal (#1), same shape as the verification pair: the
 /// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
 const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
@@ -2585,9 +2587,12 @@ impl Node {
             chat.client_key = Some(secret);
             self.dirty = true;
         }
-        let frame = Frame::ClientKey {
-            from: self.identity_key(),
-            client_key,
+        // Sealed on the pair's session, so only the real contact can set it (finding 5).
+        let marker = [MARK_CLIENT_KEY_PREFIX, client_key.as_bytes()].concat();
+        let Some((_, frame)) = self.authed_control(contact, &marker, |from, message| {
+            Frame::ClientKeySealed { from, message }
+        }) else {
+            return;
         };
         let _ = self.deliver(peer_address, contact, &frame);
     }
