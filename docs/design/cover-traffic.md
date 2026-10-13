@@ -110,10 +110,38 @@ raises the cost.
   So 30 minutes is defensible but not free, and the mean is the lever if it needs to be cheaper
   (60 minutes roughly halves it, at the cost of coarser cover). **n=1 per condition**: Tor circuit
   conditions vary between nights and two runs cannot bound that, so treat 6 mAh/post as ±50% and
-  do not move the default on this alone. A second pair of runs is scheduled.
+  do not move the default on this alone.
 
   Two things make the numbers trustworthy rather than assumed. The "0 posts" in the control is a
   measurement, not an absent recorder: the capture logged 14 liveness heartbeats across the night.
   And run B's `batterystats` line reads `bg:` rather than `fgs:` purely because the counters were
   reset while the app was already backgrounded, so no state transition was observed — the
   `ForegroundService:WakeLock` ran 6h 46m and the service was still up at the end.
+
+  **Second pair, 2026-10-12/13** (`background-traffic.md` Runs 9-10): Galaxy S23 on Wi-Fi, release
+  build c8db5d4 (diag), zero contacts, production relay, screen off and the foreground service up
+  throughout both, run back to back:
+
+  | per hour (window: total) | cover **on** | cover **off** |
+  | --- | --- | --- |
+  | window | 8h 01m 13s | 8h 01m 02s |
+  | whole phone | 50.3 mAh | 57.8 mAh |
+  | Night Drop | 20.0 mAh | 20.7 mAh |
+  | — wake lock | 19.5 mAh | 19.5 mAh |
+  | — CPU | 0.39 mAh | 0.98 mAh |
+  | — Wi-Fi | 0.17 mAh | 0.26 mAh |
+  | Wi-Fi up / down | 0.89 / 1.04 MB | 2.66 / 1.76 MB |
+  | cover posts | 19 (0 failed) | 0 |
+
+  The control cost more, so this pair cannot be subtracted. The difference is Tor, not the app's
+  settings: in the cover-off run the phone's own onion service changed state 14 times against 4,
+  with about 5x the circuit builds and 6x the descriptor-publish activity in the diag log.
+
+  What it does give is a ceiling. Everything the app spent beyond its wake lock in the cover-on run
+  (CPU, Wi-Fi and system services together) was 4.5 mAh over 8 hours, and that covers 89 mailbox
+  checks as well as the 19 posts. So on this phone on Wi-Fi a post costs **at most ~0.24 mAh**,
+  and the app's cost is the wake lock it holds with or without cover. That is about 25x below the
+  August estimate. Each of these two pairs is n=1, on different phones, and the August pair did not
+  record the network, so they do not contradict each other. The cost of a post looks dominated by
+  what the radio does around it. The 30-minute default stands; the open part is a pair on mobile
+  data, where the radio's power-down tail after every post is what the S25 figure may have measured.

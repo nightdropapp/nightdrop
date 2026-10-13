@@ -49,6 +49,8 @@ Runs 2-6 on the S25 on mobile data; screen off > 93% unless noted.
 | 6 | 2026-10-05/06 | 0.1.28 (arti 0.47) | 29.8 mAh/h | 12.5 / 17.1 mAh/h | ~0.8 / ~1.0 MB/h | – |
 | 7 | 2026-10-10/11 | 0.2 pre-release, relay, S25 on **Wi-Fi** | 18.2 mAh/h | – / 17.5 mAh/h | ~1.7 / ~1.6 MB/h | 0.4/h |
 | 8 | 2026-10-10/11 | 0.2 pre-release, direct only, **S23** on Wi-Fi | 20.6 mAh/h | 0.25 (Wi-Fi) / 19.4 mAh/h | ~1.4 / ~1.5 MB/h | 0.5/h |
+| 9 | 2026-10-12, daytime | 0.2 (c8db5d4), S23 on Wi-Fi, no contacts, **cover on** | 20.0 mAh/h | 0.17 (Wi-Fi) / 19.5 mAh/h | ~0.9 / ~1.0 MB/h | – |
+| 10 | 2026-10-12/13 | Run 9 with **cover off** | 20.7 mAh/h | 0.26 (Wi-Fi) / 19.5 mAh/h | ~2.7 / ~1.8 MB/h | – |
 
 - Run 1 (2026-09-30) was a busy day, not a clean run: a process up ~24 h did 78-156 uploads an
   hour; after a restart, 0-32. That contrast is what pointed at uptime.
@@ -74,6 +76,12 @@ Runs 2-6 on the S25 on mobile data; screen off > 93% unless noted.
     (the Run 4/6 rate) and 59% on the S23. Both phones, so the network or Tor, not one device.
   - Whole phone, screen off: S25 52 mAh/h, S23 75 mAh/h; on both the foreground service's wake
     lock was held the whole night.
+- Runs 9 and 10 are the second cover-traffic pair (`design/cover-traffic.md` §6), 8 h each,
+  screen off throughout, back to back on one phone. The wake lock line was identical (156 mAh in
+  each), and the cover-off run cost *more* in total: its own onion service churned (14 state
+  changes against 4, about 5x the circuit builds and 6x the descriptor-publish activity), which
+  moved its CPU line from 0.39 to 0.98 mAh/h and its upload from ~0.9 to ~2.7 MB/h. Night-to-night
+  Tor conditions outweigh 19 cover posts.
 - Runs 4 and 6 still showed 84% of HSDir upload attempts failing and ~7% of circuits abandoned at
   the 2 s floor (median build 583 ms, p99 1,590 ms, none succeeding above 1,986 ms in Run 3).
 
