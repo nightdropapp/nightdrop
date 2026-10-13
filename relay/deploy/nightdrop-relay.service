@@ -60,6 +60,11 @@ RestrictNamespaces=yes
 RestrictRealtime=yes
 RestrictSUIDSGID=yes
 LockPersonality=yes
+MemoryDenyWriteExecute=yes
+UMask=0077
+# A backstop under the relay's own caps (1 GiB store, 512 MiB of request lines in flight).
+MemoryMax=4G
+TasksMax=512
 # Tor needs outbound IP sockets; AF_UNIX for internal plumbing. No AF_NETLINK/others.
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
 SystemCallArchitectures=native

@@ -634,6 +634,16 @@ the expected conflict, not a fault.
 Deploying a new relay build: back up the binary, install, restart once, then confirm a
 `self-dial reached` line — systemd's "active" proves nothing (§13).
 
+**Both services are sandboxed** (2026-10-13). Running as the maintainer's user with `ProtectHome=read-only`, the
+relay could read every key in `~` (release keystore, PGP, SSH), and the website unit had no sandbox
+at all. Now each runs with `ProtectHome=tmpfs` and only its own paths bound back — relay:
+`relay-state/` (rw) and its binary (ro); website: `~/.local/share/nightdrop-website-onion` (rw),
+`website/` and `scripts/` (ro), and the notify socket `%t/systemd/notify` (it is `Type=notify`, and
+`ProtectHome` hides `/run/user` too) — plus `UMask=0077`, `MemoryMax`, a `@system-service` syscall
+filter and the rest of `relay/deploy/nightdrop-relay.service`'s list. `systemd-analyze --user
+security` went from 7.2 and 9.5 to 3.6 and 3.8. A unit change that needs another path must bind
+that path, never widen `ProtectHome`. Pre-sandbox units: `*.service.bak-20261013`.
+
 **Relay diagnostics, and what they must not log.** `NIGHTDROP_RELAY_STATS=1` prints one line per
 5 minutes of aggregate counts (streams, refusals, requests per operation, store size;
 `relay/src/stats.rs`) — nothing that tells clients apart. `RUST_LOG` is arti's tracing and needs care:
