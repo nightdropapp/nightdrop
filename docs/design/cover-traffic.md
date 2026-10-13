@@ -135,7 +135,10 @@ raises the cost.
 
   The control cost more, so this pair cannot be subtracted. The difference is Tor, not the app's
   settings: in the cover-off run the phone's own onion service changed state 14 times against 4,
-  with about 5x the circuit builds and 6x the descriptor-publish activity in the diag log.
+  with about 5x the circuit builds and 6x the descriptor-publish activity in the diag log. The production
+  relay also restarted three times during the cover-off run (02:30, 04:28 and 04:54 UTC, each after
+  ~15 minutes of failing to reach itself), and each restart sends clients through new circuits to it;
+  the cover-on run had none.
 
   What it does give is a ceiling. Everything the app spent beyond its wake lock in the cover-on run
   (CPU, Wi-Fi and system services together) was 4.5 mAh over 8 hours, and that covers 89 mailbox

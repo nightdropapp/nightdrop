@@ -80,8 +80,9 @@ Runs 2-6 on the S25 on mobile data; screen off > 93% unless noted.
   screen off throughout, back to back on one phone. The wake lock line was identical (156 mAh in
   each), and the cover-off run cost *more* in total: its own onion service churned (14 state
   changes against 4, about 5x the circuit builds and 6x the descriptor-publish activity), which
-  moved its CPU line from 0.39 to 0.98 mAh/h and its upload from ~0.9 to ~2.7 MB/h. Night-to-night
-  Tor conditions outweigh 19 cover posts.
+  moved its CPU line from 0.39 to 0.98 mAh/h and its upload from ~0.9 to ~2.7 MB/h. The production relay
+  also restarted three times during Run 10 and not in Run 9. Night-to-night Tor and relay
+  conditions outweigh 19 cover posts.
 - Runs 4 and 6 still showed 84% of HSDir upload attempts failing and ~7% of circuits abandoned at
   the 2 s floor (median build 583 ms, p99 1,590 ms, none succeeding above 1,986 ms in Run 3).
 
