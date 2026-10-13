@@ -41,6 +41,9 @@ pub struct Stats {
     pub dropped_capacity: AtomicU64,
     /// A served stream ended with an I/O error (reset, timeout, closed mid-request).
     pub stream_errors: AtomicU64,
+    /// A served stream the client ended with a Tor END cell — how a client normally hangs up, which
+    /// the read loop sees as an error. Counted apart so `stream_errors` means real failures.
+    pub client_ended: AtomicU64,
     /// A request line over `max_line_bytes`.
     pub line_too_long: AtomicU64,
     /// A request line refused by the relay-wide in-flight line budget.
@@ -67,6 +70,7 @@ impl Stats {
             accept_failed: AtomicU64::new(0),
             dropped_capacity: AtomicU64::new(0),
             stream_errors: AtomicU64::new(0),
+            client_ended: AtomicU64::new(0),
             line_too_long: AtomicU64::new(0),
             line_busy: AtomicU64::new(0),
             rate_limited: AtomicU64::new(0),
@@ -124,13 +128,14 @@ impl Stats {
             .join(" ");
         format!(
             "stats {}m: streams open={open_now} peak={peak} accepted={} accept_failed={} \
-             dropped_capacity={} errors={} line_too_long={} line_busy={} rate_limited={} | \
+             dropped_capacity={} client_ended={} errors={} line_too_long={} line_busy={} rate_limited={} | \
              requests {ops} | post_rejected full={} mailbox={} large={} other={} | \
              posted_bytes={} | store blobs={stored_blobs} bytes={stored_bytes}",
             INTERVAL.as_secs() / 60,
             t(&self.accepted),
             t(&self.accept_failed),
             t(&self.dropped_capacity),
+            t(&self.client_ended),
             t(&self.stream_errors),
             t(&self.line_too_long),
             t(&self.line_busy),

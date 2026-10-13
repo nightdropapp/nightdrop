@@ -365,7 +365,15 @@ fn main() -> anyhow::Result<()> {
                         // that reached us would have ended the spell instead.
                         served.store(start.elapsed().as_secs(), Ordering::Relaxed);
                         if let Err(e) = serve_stream(stream, core).await {
-                            stats::STATS.stream_errors.fetch_add(1, Ordering::Relaxed);
+                            // A client hanging up arrives as an END cell, which the read loop
+                            // reports as an error; only the rest are failures.
+                            let ended = format!("{e:#}").contains("Received an END cell");
+                            let counter = if ended {
+                                &stats::STATS.client_ended
+                            } else {
+                                &stats::STATS.stream_errors
+                            };
+                            counter.fetch_add(1, Ordering::Relaxed);
                             tracing::info!(target: "nightdrop_relay::streams", open, "stream ended with an error: {e:#}");
                         }
                     }
