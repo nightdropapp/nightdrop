@@ -222,6 +222,21 @@ async fn read_line_stalling<R: futures::AsyncRead + Unpin>(
 /// Outbound streams we hold open per peer to avoid re-dialing the onion for every frame.
 type OutStreams = Arc<Mutex<HashMap<Address, (DataStream, Instant)>>>;
 
+/// Refuse anything but a valid v3 onion address (checksum and version included).
+///
+/// Peer and relay addresses arrive from outside — a scanned invite, the address a joiner states in
+/// its Hello, a contact's Address or RelaySet frame — and arti dials whatever it is given, routing
+/// a plain hostname or IP through an exit node. A crafted invite or contact could therefore make
+/// this app send pairing frames (our identity key and onion in their clear routing fields) or relay
+/// requests over clearnet TCP, readable by the exit operator (self-audit 2026-10-13, round 5). Only
+/// onions are ever meant to be dialed, so nothing else is. The address is not echoed: diagnostics
+/// never name one.
+fn require_onion(addr: &str) -> Result<()> {
+    HsId::from_str(addr).map(|_| ()).map_err(|_| {
+        anyhow::anyhow!("refusing to dial a peer or relay that is not an onion address")
+    })
+}
+
 /// A [`Transport`] backed by an embedded Tor client + onion service.
 pub struct TorTransport {
     onion: Address,
@@ -508,6 +523,7 @@ impl TorTransport {
         let runtime = Arc::clone(&self.runtime);
         let closing = Arc::clone(&self.closing);
         Arc::new(move |request_line: &str| -> Result<String> {
+            require_onion(&relay_onion)?;
             let req = if request_line.ends_with('\n') {
                 request_line.to_string()
             } else {
@@ -946,6 +962,7 @@ impl TorTransport {
     /// [`Transport::send`] (`reuse`: write into a warm stream to `peer` if one is open) and
     /// [`Transport::send_fresh`] (always dial).
     fn send_on(&self, peer: &str, frame: &[u8], reuse: bool) -> Result<()> {
+        require_onion(peer)?;
         if self.closing.stopped() {
             anyhow::bail!("peer send abandoned: the transport is closing");
         }
@@ -1806,5 +1823,27 @@ mod timeout_floor_tests {
         );
         // A floor below real build times would not stop the spiral.
         const { assert!(crate::transport::CIRCUIT_TIMEOUT_FLOOR_MS >= 1500) };
+    }
+}
+
+#[cfg(test)]
+mod onion_only_tests {
+    #[test]
+    fn only_v3_onions_are_ever_dialed() {
+        // Self-audit 2026-10-13, round 5: arti dials a plain host through an exit.
+        let relay = "bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion";
+        assert!(super::require_onion(relay).is_ok());
+        let mut bad_checksum = relay.to_string();
+        bad_checksum.replace_range(0..1, "a");
+        for bad in [
+            "example.com",
+            "198.51.100.7",
+            "evil.example.onion",
+            "bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad",
+            bad_checksum.as_str(),
+            "",
+        ] {
+            assert!(super::require_onion(bad).is_err(), "{bad}");
+        }
     }
 }
