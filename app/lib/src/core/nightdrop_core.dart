@@ -392,6 +392,10 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Try `secret`; false if it doesn't open the lock. Callers must not report *why* it failed.
   Future<bool> unlockStore(String secret) async => true;
 
+  /// Seconds before another unlock attempt is accepted (0 = now). After five wrong attempts in a
+  /// row the core imposes a growing wait that survives restarts (`storage/lock.rs`).
+  Future<int> unlockWaitSecs() async => 0;
+
   /// Put the at-rest key behind `secret` and remove the keystore copy.
   Future<void> enableStoreLock(String secret) async {}
 

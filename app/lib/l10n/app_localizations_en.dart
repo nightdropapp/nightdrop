@@ -925,6 +925,11 @@ class AppLocalizationsEn extends AppLocalizations {
   String get lockedFailed => 'That didn\'t unlock it. Try again.';
 
   @override
+  String lockedWait(String time) {
+    return 'Too many wrong tries. Try again in $time.';
+  }
+
+  @override
   String get lockedUnlock => 'Unlock';
 
   @override

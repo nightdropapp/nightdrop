@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import '../../../l10n/app_localizations.dart';
 
@@ -26,15 +28,50 @@ class _LockScreenState extends State<LockScreen> {
   bool _failed = false;
   int _attempts = 0;
 
+  /// Seconds until the core accepts another attempt. After five wrong ones in a row it imposes a
+  /// growing wait, kept on disk so closing the app does not reset it (`storage/lock.rs`).
+  int _wait = 0;
+  Timer? _ticker;
+  bool _askedWait = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (!_askedWait) {
+      _askedWait = true;
+      _refreshWait(NightdropScope.of(context)); // a wait may be running from before a restart
+    }
+  }
+
+  Future<void> _refreshWait(NightdropCore core) async {
+    final secs = await core.unlockWaitSecs();
+    if (!mounted) return;
+    _ticker?.cancel();
+    setState(() => _wait = secs);
+    if (secs <= 0) return;
+    _ticker = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return t.cancel();
+      if (_wait <= 1) {
+        t.cancel();
+        _refreshWait(core); // ask again rather than trust the local count
+      } else {
+        setState(() => _wait--);
+      }
+    });
+  }
+
+  String _waitText(int secs) => secs < 60 ? '$secs s' : '${(secs / 60).ceil()} min';
+
   @override
   void dispose() {
+    _ticker?.cancel();
     _controller.dispose();
     super.dispose();
   }
 
   Future<void> _submit(NightdropCore core) async {
     final secret = _controller.text;
-    if (secret.isEmpty || _busy) return;
+    if (secret.isEmpty || _busy || _wait > 0) return;
     setState(() {
       _busy = true;
       _failed = false;
@@ -49,12 +86,16 @@ class _LockScreenState extends State<LockScreen> {
       return; // the app swaps this screen out; nothing else to do
     }
     _attempts++;
-    final delay = Duration(milliseconds: (500 * _attempts).clamp(500, 5000));
     setState(() {
       _failed = true;
       _controller.clear();
     });
-    await Future<void>.delayed(delay);
+    // The core counts this failure on disk and may now impose a wait (shown instead of the
+    // generic failure). Below that, a short pause after a typo.
+    await _refreshWait(core);
+    if (_wait == 0) {
+      await Future<void>.delayed(Duration(milliseconds: (500 * _attempts).clamp(500, 5000)));
+    }
     if (mounted) setState(() => _busy = false);
   }
 
@@ -104,12 +145,14 @@ class _LockScreenState extends State<LockScreen> {
                     decoration: InputDecoration(
                       labelText: l10n.lockedField,
                       border: const OutlineInputBorder(),
-                      errorText: _failed ? l10n.lockedFailed : null,
+                      errorText: _wait > 0
+                          ? l10n.lockedWait(_waitText(_wait))
+                          : (_failed ? l10n.lockedFailed : null),
                     ),
                   ),
                   const SizedBox(height: 20),
                   FilledButton(
-                    onPressed: _busy ? null : () => _submit(core),
+                    onPressed: _busy || _wait > 0 ? null : () => _submit(core),
                     child: _busy
                         ? const SizedBox(
                             height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2))

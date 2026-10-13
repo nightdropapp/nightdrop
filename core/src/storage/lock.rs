@@ -323,15 +323,98 @@ pub fn is_normal_secret(dir: &str, secret: &str) -> bool {
 /// A wrong secret fails the AEAD tag on both slots; callers must not leak more than a generic
 /// failure.
 pub fn unlock(dir: &str, secret: &str) -> Result<Opened> {
+    // Refused outright while a wait is running, without trying the secret: the wait has to hold
+    // across app restarts, or force-closing the app resets it.
+    let wait = wait_secs(dir);
+    if wait > 0 {
+        anyhow::bail!("too many wrong attempts: try again in {wait} s");
+    }
     let lock = read(dir)?;
     let (m, t, p) = (lock.m_cost_kib, lock.t_cost, lock.p_cost);
     let normal = try_slot(&lock.normal, secret, m, t, p);
     let duress = try_slot(&lock.duress, secret, m, t, p);
     match (normal, duress) {
-        (Some(key), _) => Ok(Opened::Normal(key)),
-        (None, Some(_)) => Ok(Opened::Duress),
-        (None, None) => anyhow::bail!("wrong passphrase"),
+        (Some(key), _) => {
+            let _ = std::fs::remove_file(attempts_path(dir));
+            Ok(Opened::Normal(key))
+        }
+        (None, Some(_)) => {
+            // The duress wipe follows; a count of earlier failures must not survive it.
+            let _ = std::fs::remove_file(attempts_path(dir));
+            Ok(Opened::Duress)
+        }
+        (None, None) => {
+            note_failure(dir);
+            anyhow::bail!("wrong passphrase")
+        }
     }
+}
+
+/// Failed unlocks, beside the lock file: how many in a row, and when the last one was. It holds no
+/// secret. Persisted so the wait survives the app being force-closed (self-audit 2026-10-13, round
+/// 5): the screen's own 0.5–5 s delay reset on every restart, so someone holding an unlocked phone
+/// could try every 4-digit PIN in hours. This still does nothing against an offline attack on a
+/// copy of the lock file (`docs/design/app-lock.md` §2), and someone who can set the phone's clock
+/// forward can shorten a wait; it is a brake on guessing at the screen, which is the PIN's threat.
+pub const ATTEMPTS_FILE: &str = "store-key.attempts";
+
+#[derive(Serialize, Deserialize, Default)]
+struct Attempts {
+    failures: u32,
+    last_unix: u64,
+}
+
+fn attempts_path(dir: &str) -> std::path::PathBuf {
+    std::path::Path::new(dir).join(ATTEMPTS_FILE)
+}
+
+fn now_unix() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+fn read_attempts(dir: &str) -> Attempts {
+    std::fs::read(attempts_path(dir))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+fn note_failure(dir: &str) {
+    let mut a = read_attempts(dir);
+    a.failures = a.failures.saturating_add(1);
+    a.last_unix = now_unix();
+    if let Ok(bytes) = serde_json::to_vec(&a) {
+        let _ = std::fs::write(attempts_path(dir), bytes);
+    }
+}
+
+/// The wait after `failures` wrong attempts in a row: none for the first four (typos), then 30 s,
+/// 5 min, 30 min, and an hour per attempt from the twentieth on. At that pace a 4-digit PIN takes
+/// over a year at the screen.
+pub fn wait_after(failures: u32) -> u64 {
+    match failures {
+        0..=4 => 0,
+        5..=9 => 30,
+        10..=14 => 5 * 60,
+        15..=19 => 30 * 60,
+        _ => 60 * 60,
+    }
+}
+
+/// Seconds before the next unlock attempt is accepted (0 = now). A clock set back counts as the
+/// failure having just happened, so it cannot be used to end a wait early.
+pub fn wait_secs(dir: &str) -> u64 {
+    let a = read_attempts(dir);
+    let wait = wait_after(a.failures);
+    if wait == 0 {
+        return 0;
+    }
+    let since = now_unix().saturating_sub(a.last_unix);
+    let since = if now_unix() < a.last_unix { 0 } else { since };
+    wait.saturating_sub(since)
 }
 
 /// Recover the store key, refusing a duress secret. For callers that only ever want the key and
@@ -365,6 +448,34 @@ pub fn destroy(dir: &str) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn wrong_attempts_are_throttled_across_restarts_and_cleared_by_success() {
+        // Self-audit 2026-10-13, round 5.
+        let dir = std::env::temp_dir().join(format!("nd-lock-throttle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = dir.to_str().unwrap();
+        let key = [5u8; 32];
+        set_passphrase(d, &key, "1234").unwrap();
+        for _ in 0..4 {
+            assert!(unlock(d, "0000").is_err());
+            assert_eq!(wait_secs(d), 0, "typos cost nothing");
+        }
+        assert!(unlock(d, "0000").is_err());
+        assert!(wait_secs(d) > 0, "the fifth wrong attempt starts a wait");
+        // Even the right PIN is refused during the wait — and the wait lives on disk, so a fresh
+        // process (a restarted app) sees it too.
+        assert!(matches!(unlock(d, "1234"), Err(e) if e.to_string().contains("try again")));
+        // Once it has passed, the right PIN opens and clears the count.
+        let mut a = read_attempts(d);
+        a.last_unix -= 31;
+        std::fs::write(attempts_path(d), serde_json::to_vec(&a).unwrap()).unwrap();
+        assert!(matches!(unlock(d, "1234"), Ok(Opened::Normal(k)) if k == key));
+        assert!(!attempts_path(d).exists());
+        assert_eq!(wait_after(20), 3600);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
 
     fn tmpdir() -> String {

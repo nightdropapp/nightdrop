@@ -1618,6 +1618,12 @@ abstract class AppLocalizations {
   /// **'That didn\'t unlock it. Try again.'**
   String get lockedFailed;
 
+  /// Lock screen, after five or more wrong PINs/passphrases in a row: how long until another try is accepted. The wait survives closing the app.
+  ///
+  /// In en, this message translates to:
+  /// **'Too many wrong tries. Try again in {time}.'**
+  String lockedWait(String time);
+
   /// No description provided for @lockedUnlock.
   ///
   /// In en, this message translates to:

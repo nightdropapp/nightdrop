@@ -1217,6 +1217,15 @@
   "lockedBody": "Enter your PIN or passphrase to open your messages.",
   "lockedField": "PIN or passphrase",
   "lockedFailed": "That didn't unlock it. Try again.",
+  "lockedWait": "Too many wrong tries. Try again in {time}.",
+  "@lockedWait": {
+    "description": "Lock screen, after five or more wrong PINs/passphrases in a row: how long until another try is accepted. The wait survives closing the app.",
+    "placeholders": {
+      "time": {
+        "type": "String"
+      }
+    }
+  },
   "lockedUnlock": "Unlock",
   "lockedNoRecovery": "There is no way to recover this. Without it, the messages on this device stay encrypted for good.",
   "appLockOffTitle": "App lock is off",

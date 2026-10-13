@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 1253086703;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -150950124;
 
 // Section: executor
 
@@ -3843,6 +3843,40 @@ fn wire__crate__api__store_secret_is_correct_impl(
         },
     )
 }
+fn wire__crate__api__store_unlock_wait_secs_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "store_unlock_wait_secs",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_dir = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::store_unlock_wait_secs(api_dir))?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
 fn wire__crate__api__subscribe_impl(
     port_: flutter_rust_bridge::for_generated::MessagePort,
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
@@ -4684,10 +4718,11 @@ fn pde_ffi_dispatcher_primary_impl(
         76 => wire__crate__api__set_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
         77 => wire__crate__api__store_is_locked_impl(port, ptr, rust_vec_len, data_len),
         78 => wire__crate__api__store_secret_is_correct_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__api__unlock_store_key_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__api__unsubscribe_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__api__write_bridges_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__store_unlock_wait_secs_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__unlock_store_key_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__unsubscribe_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__write_bridges_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

@@ -93,6 +93,12 @@ Future<void> setStorePassphrase(
     RustLib.instance.api.crateApiSetStorePassphrase(
         dir: dir, keyB64: keyB64, passphrase: passphrase);
 
+/// Seconds before the lock screen may try another secret (0 = now). Wrong attempts are counted on
+/// disk, beside the lock file, and from the fifth in a row each one starts a growing wait that holds
+/// across app restarts (`storage::lock::wait_secs`). The screen shows it instead of "wrong PIN".
+Future<BigInt> storeUnlockWaitSecs({required String dir}) =>
+    RustLib.instance.api.crateApiStoreUnlockWaitSecs(dir: dir);
+
 /// Recover the store key from `secret`, base64-encoded for the Dart side to hand straight back to a
 /// core constructor. Errors on a wrong secret without saying which part was wrong.
 ///

@@ -141,6 +141,17 @@ class RustNightdropCore extends NightdropCore {
     return key;
   }
 
+  @override
+  Future<int> unlockWaitSecs() async {
+    try {
+      final dir = await _torStateDir();
+      if (dir == null) return 0;
+      return (await rust.storeUnlockWaitSecs(dir: dir)).toInt();
+    } catch (_) {
+      return 0;
+    }
+  }
+
   /// Try `secret` against the lock. Returns false on a wrong secret; deliberately says nothing
   /// about *why* it failed, so a damaged lock file and a wrong secret look alike from outside.
   @override

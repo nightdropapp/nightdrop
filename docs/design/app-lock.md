@@ -107,7 +107,13 @@ the old wipe code still armed).
    outside, and onboarding would have offered to overwrite recoverable data. `start()` now stops
    early and sets `needsUnlock` rather than reading a null key and falling through. One text field
    takes either kind of secret (a numeric keypad would make a passphrase unenterable), generic
-   failure text, and a 0.5→5s growing delay after each failure.
+   failure text, and a 0.5→5s pause after a failure. **From 2026-10-13** the core also counts wrong
+   attempts on disk (`store-key.attempts`, beside the lock file) and, from the fifth in a row,
+   refuses every attempt for a growing wait — 30 s, 5 min, 30 min, then an hour per attempt —
+   that survives the app being closed; the screen shows it. Before, the only delay was in the
+   screen's memory and a restart reset it, so a 4-digit PIN fell to someone holding an unlocked
+   phone in hours. Still no help against an offline attack on the lock file (§2), and setting the
+   phone's clock forward shortens a wait.
 4. ~~**Settings flow.**~~ ✅ `app_lock_settings.dart`, reached from the home menu ("App lock").
    Presents the two strengths with §2's trade on each, asks twice (a typo would be unrecoverable),
    enforces 6 digits / 12 characters, and gates on an explicit no-recovery confirmation. Warns when
@@ -142,8 +148,9 @@ verified by reading `rust_nightdrop_core.dart` — `_secure.delete(key: _kStoreK
 
 ## 8. Not yet done
 
-* **Wrong-secret behaviour was not exercised on device** — only in `cargo test`. The growing
-  0.5→5s failure delay and the generic failure text are untested against a real keyboard.
+* **Wrong-secret behaviour was not exercised on device** — only in `cargo test` and widget tests
+  (`app/test/lock_wait_test.dart`). The persisted wait, its countdown and the generic failure text
+  are untested against a real keyboard.
 * **The duress slot** (§4) — implemented since; see `docs/design/duress-wipe.md`.
 
 ## 9. Deliberately not doing
