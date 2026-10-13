@@ -81,6 +81,16 @@ set_target_properties(${BINARY_NAME}
 # them to the application.
 include(flutter/generated_plugins.cmake)
 
+# Plugin libraries are copied into the bundle as built, so they kept their build-tree RUNPATH: an
+# absolute path into this checkout (with the builder's home directory in it) inside every shipped
+# AppImage. Link them with the bundle's own layout instead — they sit in lib/ beside
+# libflutter_linux_gtk.so (self-audit 2026-10-13, round 6).
+foreach(plugin ${FLUTTER_PLUGIN_LIST})
+  set_target_properties(${plugin}_plugin PROPERTIES
+    BUILD_WITH_INSTALL_RPATH ON
+    INSTALL_RPATH "$ORIGIN")
+endforeach(plugin)
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build

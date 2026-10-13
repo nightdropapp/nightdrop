@@ -108,6 +108,12 @@ if [ "$DO_BUILD" = 1 ]; then
   # change, so a host-compiled object would carry this machine's glibc into the "portable" result,
   # and the container's CMake cache names compilers this machine does not have.
   rm -rf "$APP_DIR/build/linux"
+  # Source paths are compiled into the binaries (Rust panic locations, C __FILE__), and they held
+  # the builder's home directory: 994 of them in 0.1.29's libnightdrop.so. Map them to neutral
+  # names, as the F-Droid recipe does for Android (self-audit 2026-10-13, round 6).
+  RUSTUP_DIR="${RUSTUP_HOME:-$HOME/.rustup}"; CARGO_DIR="${CARGO_HOME:-$HOME/.cargo}"
+  RUST_REMAP="--remap-path-prefix=$PROJECT_ROOT=/nightdrop"$'\x1f'"--remap-path-prefix=$CARGO_DIR=/cargo"$'\x1f'"--remap-path-prefix=$RUSTUP_DIR=/rustup"
+  C_REMAP="-ffile-prefix-map=$PROJECT_ROOT=/nightdrop -ffile-prefix-map=$CARGO_DIR=/cargo"
   if [ "$IN_CONTAINER" = 1 ]; then
     command -v podman >/dev/null || { err "podman not found (or pass --host for a non-portable build)"; exit 1; }
     podman image exists "$BUILD_IMAGE" || {
@@ -127,13 +133,15 @@ if [ "$DO_BUILD" = 1 ]; then
       -v "$CARGO:$CARGO" -v "$RUSTUP:$RUSTUP" -v "$PUB:$PUB" \
       -e HOME=/tmp/home -e PUB_CACHE="$PUB" -e CARGO_HOME="$CARGO" -e RUSTUP_HOME="$RUSTUP" \
       -e NIGHTDROP_APP_ID="$APP_ID" \
+      -e CARGO_ENCODED_RUSTFLAGS="$RUST_REMAP" -e CFLAGS="$C_REMAP" -e CXXFLAGS="$C_REMAP" \
       -e PATH="$FLUTTER_HOME/bin:$CARGO/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
       -w "$APP_DIR" "$BUILD_IMAGE" \
       bash -c 'mkdir -p "$HOME" && flutter config --no-analytics >/dev/null 2>&1; flutter build linux --release "$@"' \
       bash "${DEFINES[@]}"
   else
     c "Building Linux release bundle on this machine (NOT portable — dev only)…"
-    ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" && flutter build linux --release "${DEFINES[@]}" )
+    ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" CARGO_ENCODED_RUSTFLAGS="$RUST_REMAP" \
+        CFLAGS="$C_REMAP" CXXFLAGS="$C_REMAP" && flutter build linux --release "${DEFINES[@]}" )
   fi
 fi
 
@@ -226,9 +234,17 @@ c "Packaging AppImage…"
 ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
   || ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
 chmod +x "$OUT"
+signed() { readelf -x .sha256_sig "$OUT" 2>/dev/null | grep -qE '0x[0-9a-f]+ +[0-9a-f ]*[1-9a-f]'; }
+if [ "$SIGN" = 1 ] && ! signed; then
+  # Seen once (2026-10-13), right after a long container build, and not again: gpg declined the
+  # first time. One verbose retry, so a real failure shows gpg's own words.
+  c "the embedded signature came out empty — packaging once more, with appimagetool's output"
+  ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"
+  chmod +x "$OUT"
+fi
 if [ "$SIGN" = 1 ]; then
   # appimagetool can carry on unsigned when gpg fails; an all-zero signature section means it did.
-  if ! readelf -x .sha256_sig "$OUT" 2>/dev/null | grep -qE '0x[0-9a-f]+ +[0-9a-f ]*[1-9a-f]'; then
+  if ! signed; then
     err "the AppImage's embedded signature is empty — gpg did not sign it; refusing to ship it"
     rm -f "$OUT"
     exit 1
