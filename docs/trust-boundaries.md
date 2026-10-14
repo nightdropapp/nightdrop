@@ -15,6 +15,12 @@ Who is on the other side of each boundary:
 * **Backup** — a backup file and its password, which may have been handed over by someone else.
 * **Local** — another user or app on the same device. Out of scope for anything readable as us.
 
+**Tested from the hostile side** in `core/src/node/tests_hostile.rs`: replays, forged senders,
+oversized fields, cross-contact edits, 3,000 seeded mutations of genuine frames, and 1,500 hostile
+plaintexts sealed on a real contact's session across every content-bearing frame, each checked
+against the bounds below. Relay-side abuse is in `relay_client` and `relay/src/main.rs` tests and
+the `relay_handle_line` fuzz target.
+
 ## Frames from contacts and strangers (`core/src/node/frames.rs`)
 
 All but four frames carry an Olm message and act only on a chat whose session decrypts it.

@@ -3869,6 +3869,8 @@ mod tests_directory;
 #[cfg(test)]
 mod tests_held;
 #[cfg(test)]
+mod tests_hostile;
+#[cfg(test)]
 mod tests_mailbox;
 #[cfg(test)]
 mod tests_outbox;
