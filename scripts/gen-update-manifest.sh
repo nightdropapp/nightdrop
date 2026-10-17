@@ -68,7 +68,11 @@ if [ -f "$installer" ]; then
   windows="$(desktop_entry "$installer" "/applications/windows/NightDropSetup.exe" "$got")" || windows=""
 fi
 
-json="{\"latest\":\"$ver\""
+# Apps from 0.2 refuse a manifest past its expiry, or without one (core/src/update.rs): a site host
+# that serves an old signed manifest can no longer freeze update notices for ever. Re-sign before it
+# lapses, release or not (MAINTENANCE.md §11.5). NIGHTDROP_MANIFEST_DAYS overrides the 120 days.
+expires=$(( $(date +%s) + ${NIGHTDROP_MANIFEST_DAYS:-120} * 86400 ))
+json="{\"latest\":\"$ver\",\"expires\":$expires"
 [ -n "$entries" ] && json="$json,\"android\":{$entries}"
 [ -n "$linux" ] && json="$json,\"linux\":{$linux}"
 [ -n "$windows" ] && json="$json,\"windows\":{$windows}"
@@ -134,3 +138,4 @@ if [ -f deploy/update-rotation.json ]; then
   rotation=",\"rotation\":$(tr -d '\n' < deploy/update-rotation.json)"
 fi
 printf '%s,"signed":{"payload":"%s","sig":"%s"}%s}\n' "${json%\}}" "$payload" "$sig" "$rotation" > website/update.json
+echo "gen-update-manifest: signed; it expires $(date -d "@$expires" +%F) — re-sign before then (MAINTENANCE.md §11.5)"

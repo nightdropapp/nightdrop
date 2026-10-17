@@ -172,6 +172,18 @@ fn parse_manifest_with(body: &[u8], pubkey: &[u8; 32]) -> Result<UpdateManifest>
 }
 
 fn verify_envelope(envelope: SignedEnvelope, pubkey: &[u8; 32]) -> Result<UpdateManifest> {
+    let manifest: UpdateManifest = serde_json::from_slice(&verified_payload(envelope, pubkey)?)?;
+    let now = crate::api::now_secs();
+    anyhow::ensure!(
+        manifest.expires > now,
+        "update information has expired or carries no expiry (signed until {}, now {now})",
+        manifest.expires
+    );
+    Ok(manifest)
+}
+
+/// The signed payload's bytes, once its signature checks out under `pubkey`.
+fn verified_payload(envelope: SignedEnvelope, pubkey: &[u8; 32]) -> Result<Vec<u8>> {
     use base64::Engine as _;
     use ed25519_dalek::{Signature, VerifyingKey};
     let b64 = base64::engine::general_purpose::STANDARD;
@@ -189,7 +201,7 @@ fn verify_envelope(envelope: SignedEnvelope, pubkey: &[u8; 32]) -> Result<Update
         &Signature::from_bytes(&sig),
     )
     .map_err(|_| anyhow::anyhow!("update manifest signature does not verify"))?;
-    Ok(serde_json::from_slice(&payload)?)
+    Ok(payload)
 }
 
 /// Operator tooling (`nightdrop-relay sign-update`): sign the manifest bytes `payload` with the
@@ -237,6 +249,14 @@ pub struct UpdateManifest {
     pub linux: std::collections::HashMap<String, UpdateDownload>,
     #[serde(default)]
     pub windows: std::collections::HashMap<String, UpdateDownload>,
+    /// Unix seconds after which this manifest is no longer believed (self-audit 2026-10-17). A
+    /// compromised site host cannot sign a manifest, but it could keep serving an old one, so a
+    /// security release would never be offered (a freeze); with an expiry that stops working, and
+    /// the check reports a failure instead of "up to date". Required: a signed manifest without one
+    /// (and one exists, in this file's tests) is refused. `scripts/gen-update-manifest.sh` sets it,
+    /// so the manifest must be re-signed before it lapses even when nothing is released.
+    #[serde(default)]
+    pub expires: u64,
 }
 
 impl UpdateManifest {
@@ -824,8 +844,18 @@ mod tests {
     /// app silently stops seeing updates, and this fails first.
     const SIGNED_BY_RELEASE_KEY: &str = r#"{"latest":"0.2.0","signed":{"payload":"eyJsYXRlc3QiOiIwLjIuMCJ9","sig":"Y+C+fhJ/rjYWc8W2r3SAUWHZAJoDYQA5hcea0TFRREKSLf9gI8n42EPFcBdXWbGGditAOTX1AFvNqO7bkE2fDA=="}}"#;
 
+    /// `payload` with an expiry a week ahead added, as the publish step writes one.
+    fn fresh(payload: &str) -> String {
+        let mut v: serde_json::Value = serde_json::from_str(payload).unwrap();
+        if v.get("expires").is_none() {
+            v["expires"] = serde_json::json!(crate::api::now_secs() + 7 * 24 * 3600);
+        }
+        v.to_string()
+    }
+
     fn signed_with(secret_b64: &str, payload: &str) -> String {
         use base64::Engine as _;
+        let payload = &fresh(payload);
         let sig = sign_manifest(secret_b64, payload.as_bytes()).unwrap();
         let p = base64::engine::general_purpose::STANDARD.encode(payload);
         format!(r#"{{"latest":"9.9.9","signed":{{"payload":"{p}","sig":"{sig}"}}}}"#)
@@ -896,8 +926,32 @@ mod tests {
 
     #[test]
     fn the_baked_in_key_verifies_what_the_publish_step_signs() {
-        let m = parse_manifest(SIGNED_BY_RELEASE_KEY.as_bytes()).unwrap();
-        assert_eq!(m.latest, "0.2.0");
+        let envelope: SignedEnvelope = serde_json::from_str(SIGNED_BY_RELEASE_KEY).unwrap();
+        let payload = verified_payload(envelope, &UPDATE_PUBKEY).unwrap();
+        assert_eq!(payload, br#"{"latest":"0.2.0"}"#);
+    }
+
+    /// A genuine signed manifest with no expiry — this very fixture, public in the repo — must not
+    /// be accepted: otherwise anyone could serve it for ever and freeze update notices.
+    #[test]
+    fn a_signed_manifest_without_or_past_its_expiry_is_refused() {
+        let err = parse_manifest(SIGNED_BY_RELEASE_KEY.as_bytes()).unwrap_err();
+        assert!(err.to_string().contains("expir"), "{err}");
+
+        use base64::Engine as _;
+        let (sk, _) = generate_update_key();
+        let pk = pubkey_of(&sk);
+        let lapsed = format!(
+            r#"{{"latest":"0.3.0","expires":{}}}"#,
+            crate::api::now_secs() - 1
+        );
+        let sig = sign_manifest(&sk, lapsed.as_bytes()).unwrap();
+        let p = base64::engine::general_purpose::STANDARD.encode(&lapsed);
+        let served = format!(r#"{{"signed":{{"payload":"{p}","sig":"{sig}"}}}}"#);
+        assert!(parse_manifest_with(served.as_bytes(), &pk).is_err());
+        assert!(
+            parse_manifest_with(signed_with(&sk, r#"{"latest":"0.3.0"}"#).as_bytes(), &pk).is_ok()
+        );
     }
 
     #[test]
@@ -917,7 +971,7 @@ mod tests {
         use base64::Engine as _;
         let (sk, _) = generate_update_key();
         let pk = pubkey_of(&sk);
-        let payload = r#"{"latest":"0.3.0"}"#;
+        let payload = &fresh(r#"{"latest":"0.3.0"}"#);
         // Unsigned: what every manifest was before.
         assert!(parse_manifest_with(br#"{"latest":"0.3.0"}"#, &pk).is_err());
         // A different key (a compromised site host signing its own).
