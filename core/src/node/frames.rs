@@ -240,6 +240,11 @@ impl Node {
                     self.pending_receipts.push((from.clone(), id));
                     return Ok(None);
                 }
+                if !within_allowance(chat, 0) {
+                    // Receipted anyway, or the sender re-queues it for ever.
+                    self.pending_receipts.push((from.clone(), id));
+                    return Ok(None);
+                }
                 chat.history
                     .push(ChatMessage::text(false, text.clone(), id.clone()));
                 // Accepted: owe them a receipt naming it.
@@ -287,6 +292,10 @@ impl Node {
                         .iter()
                         .any(|m| !m.from_me && m.msg_id == id && !m.system);
                 if duplicate {
+                    self.pending_receipts.push((from.clone(), id));
+                    return Ok(None);
+                }
+                if !within_allowance(chat, 0) {
                     self.pending_receipts.push((from.clone(), id));
                     return Ok(None);
                 }
@@ -840,7 +849,19 @@ impl Node {
                     }
                     crypto::decrypt(&mut chat.session, &olm)?
                 };
-                let (transfer_id, kind, mime, size, thumb) = unpack_media_incoming(&envelope)?;
+                let (transfer_id, kind, mime, size, mut thumb) = unpack_media_incoming(&envelope)?;
+                // A preview is a small JPEG (320 px); anything bigger is not one, and was stored
+                // unbounded (self-audit 2026-10-17). Dropped, not the placeholder.
+                if thumb.len() > super::limits::MAX_THUMB_BYTES {
+                    thumb.clear();
+                }
+                if !self
+                    .chats
+                    .get_mut(&from)
+                    .is_some_and(|c| within_allowance(c, thumb.len() as u64))
+                {
+                    return Ok(None);
+                }
                 let thumb_id = if thumb.is_empty() {
                     String::new()
                 } else {
@@ -893,6 +914,22 @@ impl Node {
                             && !m.media_id.is_empty()
                     })
                 });
+                if !duplicate
+                    && !self
+                        .chats
+                        .get_mut(&from)
+                        .is_some_and(|c| within_allowance(c, size))
+                {
+                    // Over the allowance: nothing stored, and any "incoming" placeholder goes too.
+                    if let Some(chat) = self.chats.get_mut(&from) {
+                        chat.history.retain(|m| {
+                            !(m.transfer_id == transfer_id && !m.from_me && m.media_id.is_empty())
+                        });
+                    }
+                    self.pending_receipts
+                        .push((from.clone(), format!("t:{transfer_id}")));
+                    return Ok(None);
+                }
                 if !duplicate {
                     let media_id = self.store_media(&data)?;
                     if let Some(chat) = self.chats.get_mut(&from) {
@@ -961,6 +998,16 @@ impl Node {
                             && !m.media_id.is_empty()
                     })
                 });
+                if !duplicate
+                    && !self
+                        .chats
+                        .get_mut(&from)
+                        .is_some_and(|c| within_allowance(c, size))
+                {
+                    self.pending_receipts
+                        .push((from.clone(), format!("t:{transfer_id}")));
+                    return Ok(None);
+                }
                 if !duplicate {
                     let media_id = self.store_media(&data)?;
                     if let Some(chat) = self.chats.get_mut(&from) {
@@ -1032,5 +1079,21 @@ impl Node {
             // the peer transport is unexpected — reserved for a future in-band re-key.
             Frame::Pake { .. } => Ok(None),
         }
+    }
+}
+
+/// Whether a contact's message may be kept, counting it against their daily allowance
+/// ([`limits::Allowance`]). Over the allowance it is dropped, and the chat gets one notice per day.
+fn within_allowance(chat: &mut Chat, media_bytes: u64) -> bool {
+    use super::limits::{Admit, OVER_ALLOWANCE_NOTICE};
+    match chat.allowance.admit(crate::api::now_secs(), media_bytes) {
+        Admit::Yes => true,
+        Admit::DropAndNotice => {
+            crate::diag!("recv: a contact went past the daily allowance — dropping until tomorrow");
+            chat.history
+                .push(ChatMessage::system(OVER_ALLOWANCE_NOTICE.to_string()));
+            false
+        }
+        Admit::Drop => false,
     }
 }

@@ -380,3 +380,57 @@ fn hostile_plaintexts_sealed_by_a_real_contact_stay_within_every_bound() {
     assert!(texts(&s.alice, &s.bob_id).contains(&"after the storm".to_string()));
     let _ = std::fs::remove_dir_all(&base);
 }
+
+/// A contact can add only so much in a day (`limits::Allowance`): past the allowance their
+/// messages are dropped and the chat gets one notice (self-audit 2026-10-17, P10). Dropped ones are
+/// queued for a receipt by the same line as kept ones, so the sender stops re-sending them.
+#[test]
+fn a_flooding_contact_is_cut_off_at_the_daily_allowance_with_one_notice() {
+    let mut s = scene();
+    let max = super::limits::MAX_MESSAGES_PER_DAY as usize;
+    for i in 0..max + 5 {
+        let message = sealed_by_bob(&mut s, format!("flood {i}").as_bytes());
+        let frame = wire::encode(&Frame::Message {
+            from: s.bob_id.clone(),
+            id: format!("m{i:07}"),
+            message,
+        });
+        s.net.endpoint("bob").send("alice", &frame).unwrap();
+    }
+    s.alice.pump().unwrap();
+    let history = s.alice.messages(&s.bob_id);
+    let kept = history.iter().filter(|m| !m.system && !m.from_me).count();
+    let notices = history
+        .iter()
+        .filter(|m| m.system && m.text == super::limits::OVER_ALLOWANCE_NOTICE)
+        .count();
+    assert_eq!(kept, max);
+    assert_eq!(notices, 1);
+    // Carol is a different contact with her own allowance.
+    s.carol.send(&s.alice_id.clone(), "still here").unwrap();
+    s.alice.pump().unwrap();
+    assert!(texts(&s.alice, &s.carol_id).contains(&"still here".to_string()));
+}
+
+/// The preview sent ahead of a video is a small JPEG; anything bigger is not kept (it used to be
+/// stored at any size up to a frame).
+#[test]
+fn an_oversized_video_preview_is_not_stored() {
+    let mut s = scene();
+    let big = vec![0xAB; super::limits::MAX_THUMB_BYTES + 1];
+    let envelope = pack_media_incoming("T1", "video", "video/mp4", 1000, &big);
+    let message = sealed_by_bob(&mut s, &envelope);
+    let frame = wire::encode(&Frame::MediaIncoming {
+        from: s.bob_id.clone(),
+        message,
+    });
+    s.net.endpoint("bob").send("alice", &frame).unwrap();
+    s.alice.pump().unwrap();
+    let placeholder = s
+        .alice
+        .messages(&s.bob_id)
+        .into_iter()
+        .find(|m| m.transfer_id == "T1")
+        .expect("the placeholder is still shown");
+    assert!(placeholder.thumb_id.is_empty(), "no preview stored");
+}

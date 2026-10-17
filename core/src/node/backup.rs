@@ -848,6 +848,7 @@ fn chat_from_persisted(
         peer_wire_old: chat.peer_wire_old,
         told_upgrade: chat.told_upgrade,
         alive_count: 0,
+        allowance: super::limits::Allowance::default(),
     }
 }
 

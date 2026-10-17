@@ -759,6 +759,8 @@ struct Chat {
     /// tell which chats it heard from in one round even within the same second, which `last_seen`
     /// cannot. In memory only.
     alive_count: u64,
+    /// How much this contact has added today ([`limits::Allowance`]). In memory only.
+    allowance: limits::Allowance,
 }
 
 impl Chat {
@@ -868,6 +870,7 @@ impl Chat {
             peer_wire_old: false,
             told_upgrade: false,
             alive_count: 0,
+            allowance: limits::Allowance::default(),
         }
     }
 }
