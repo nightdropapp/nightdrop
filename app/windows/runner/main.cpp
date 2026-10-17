@@ -1,12 +1,26 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
 #include <windows.h>
+#include <werapi.h>
 
 #include "flutter_window.h"
 #include "utils.h"
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // A crash must not leave this process's memory with Windows Error Reporting: it holds the store
+  // key and decrypted messages, and WER can keep or upload a dump of it (self-audit 2026-10-17; the
+  // Linux runner sets a zero core limit for the same reason). FALSE = this user only, no admin
+  // rights needed; the name is our own executable's.
+  {
+    wchar_t exe[MAX_PATH];
+    DWORD n = ::GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    if (n > 0 && n < MAX_PATH) {
+      const wchar_t* name = wcsrchr(exe, L'\\');
+      ::WerAddExcludedApplication(name ? name + 1 : exe, FALSE);
+    }
+  }
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {
