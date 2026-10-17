@@ -974,6 +974,16 @@
   "@imageUnreadable": {
     "description": "Snackbar when a chosen picture is in a format neither the app nor the system can decode. Night Drop never sends a picture it could not clean of its metadata."
   },
+  "blockCaptureMenu": "Block screenshots",
+  "@blockCaptureMenu": {"description": "Menu item for the opt-in setting that blocks screenshots and screen recording of the app (Android)."},
+  "blockCaptureTitle": "Block screenshots",
+  "@blockCaptureTitle": {"description": "Title of the Block screenshots dialog."},
+  "blockCaptureBody": "When on, nobody can take a screenshot of Night Drop, record its screen or cast it on this phone, including apps you installed. Recent apps never show its contents either way.\n\nOff by default: your contacts are told when you screenshot a chat, and a photo of the screen gets past any block.",
+  "@blockCaptureBody": {"description": "Explains the Block screenshots setting and its limit."},
+  "blockCaptureOn": "Screenshots are blocked.",
+  "@blockCaptureOn": {"description": "Snackbar after turning Block screenshots on."},
+  "blockCaptureOff": "Screenshots are allowed again.",
+  "@blockCaptureOff": {"description": "Snackbar after turning Block screenshots off."},
   "couldNotSendAttachment": "Could not send attachment: {error}",
   "@couldNotSendAttachment": {
     "description": "Snackbar when sending a media attachment fails.",

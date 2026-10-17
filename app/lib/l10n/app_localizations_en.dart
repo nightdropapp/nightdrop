@@ -740,6 +740,22 @@ class AppLocalizationsEn extends AppLocalizations {
       'This picture couldn\'t be read, so it wasn\'t sent. Save it as JPEG or PNG and try again.';
 
   @override
+  String get blockCaptureMenu => 'Block screenshots';
+
+  @override
+  String get blockCaptureTitle => 'Block screenshots';
+
+  @override
+  String get blockCaptureBody =>
+      'When on, nobody can take a screenshot of Night Drop, record its screen or cast it on this phone, including apps you installed. Recent apps never show its contents either way.\n\nOff by default: your contacts are told when you screenshot a chat, and a photo of the screen gets past any block.';
+
+  @override
+  String get blockCaptureOn => 'Screenshots are blocked.';
+
+  @override
+  String get blockCaptureOff => 'Screenshots are allowed again.';
+
+  @override
   String couldNotSendAttachment(String error) {
     return 'Could not send attachment: $error';
   }

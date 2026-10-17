@@ -1306,6 +1306,36 @@ abstract class AppLocalizations {
   /// **'This picture couldn\'t be read, so it wasn\'t sent. Save it as JPEG or PNG and try again.'**
   String get imageUnreadable;
 
+  /// Menu item for the opt-in setting that blocks screenshots and screen recording of the app (Android).
+  ///
+  /// In en, this message translates to:
+  /// **'Block screenshots'**
+  String get blockCaptureMenu;
+
+  /// Title of the Block screenshots dialog.
+  ///
+  /// In en, this message translates to:
+  /// **'Block screenshots'**
+  String get blockCaptureTitle;
+
+  /// Explains the Block screenshots setting and its limit.
+  ///
+  /// In en, this message translates to:
+  /// **'When on, nobody can take a screenshot of Night Drop, record its screen or cast it on this phone, including apps you installed. Recent apps never show its contents either way.\n\nOff by default: your contacts are told when you screenshot a chat, and a photo of the screen gets past any block.'**
+  String get blockCaptureBody;
+
+  /// Snackbar after turning Block screenshots on.
+  ///
+  /// In en, this message translates to:
+  /// **'Screenshots are blocked.'**
+  String get blockCaptureOn;
+
+  /// Snackbar after turning Block screenshots off.
+  ///
+  /// In en, this message translates to:
+  /// **'Screenshots are allowed again.'**
+  String get blockCaptureOff;
+
   /// Snackbar when sending a media attachment fails.
   ///
   /// In en, this message translates to:

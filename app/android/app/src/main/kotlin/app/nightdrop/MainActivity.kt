@@ -150,6 +150,21 @@ class MainActivity : FlutterActivity() {
                     // "not F-Droid" — the honest default, since guessing F-Droid would silently
                     // deprive a sideloader of the only update signal they get.
                     "installerPackage" -> result.success(installerPackage())
+                    // Opt-in "Block screenshots" (self-audit 2026-10-17): FLAG_SECURE held for the
+                    // whole life of the window, which also blocks screen recording and casting.
+                    // Kept in Android's own preferences so it applies before any Dart runs.
+                    "getBlockCapture" -> result.success(blockCapture())
+                    "setBlockCapture" -> {
+                        val on = call.arguments as? Boolean ?: false
+                        getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
+                            .putBoolean(PREF_BLOCK_CAPTURE, on).apply()
+                        if (on) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
+                        result.success(null)
+                    }
                     else -> result.notImplemented()
                 }
             }
@@ -167,13 +182,17 @@ class MainActivity : FlutterActivity() {
         } else {
             window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
+        if (blockCapture()) window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
     }
+
+    private fun blockCapture(): Boolean =
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_BLOCK_CAPTURE, false)
 
     override fun onResume() {
         super.onResume()
         // Foreground: let the user screenshot if they choose. Only the pre-33 fallback sets this
         // flag at all; on 33+ it is never set, so there is nothing to clear.
-        if (Build.VERSION.SDK_INT < 33) {
+        if (Build.VERSION.SDK_INT < 33 && !blockCapture()) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
         if (Build.VERSION.SDK_INT >= 34) {
@@ -246,6 +265,8 @@ class MainActivity : FlutterActivity() {
 
     companion object {
         const val CHANNEL = "app.nightdrop/screenshots"
+        const val PREFS = "nightdrop_ui"
+        const val PREF_BLOCK_CAPTURE = "block_capture"
         const val PROCESS_CHANNEL = "app.nightdrop/process"
         const val ENGINE_ID = "main"
 

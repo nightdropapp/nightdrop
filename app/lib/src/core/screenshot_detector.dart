@@ -59,4 +59,20 @@ class ScreenshotDetector {
   static void stop() {
     _onScreenshot = null;
   }
+
+  /// Whether the opt-in "Block screenshots" setting is on (Android only).
+  static Future<bool> blockCapture() async {
+    if (!supported) return false;
+    try {
+      return await _channel.invokeMethod<bool>('getBlockCapture') ?? false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Turn "Block screenshots" on or off; it applies at once and to every later start.
+  static Future<void> setBlockCapture(bool on) async {
+    if (!supported) return;
+    await _channel.invokeMethod<void>('setBlockCapture', on);
+  }
 }

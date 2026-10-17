@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../app.dart';
+import '../../core/screenshot_detector.dart';
 import '../../core/app_config.dart';
 import '../../core/app_version.dart';
 import '../../core/background_delivery.dart';
@@ -66,6 +67,7 @@ class HomeScreen extends StatelessWidget {
               }
               if (value == 'cover') _coverTrafficIfAvailable(context, core);
               if (value == 'burnreceipts') _burnReceiptSettings(context, core);
+              if (value == 'blockcapture') _blockCaptureSettings(context);
               if (value == 'relays') _editRelays(context, core);
               if (value == 'resettor') _confirmResetTor(context, core);
               if (value == 'update') _updateApp(context, core);
@@ -89,6 +91,9 @@ class HomeScreen extends StatelessWidget {
               PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
               PopupMenuItem(
                   value: 'burnreceipts', child: Text(l10n.burnReceiptsMenu)),
+              if (ScreenshotDetector.supported)
+                PopupMenuItem(
+                    value: 'blockcapture', child: Text(l10n.blockCaptureMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),
               PopupMenuItem(value: 'resettor', child: Text(l10n.resetTorMenu)),
               PopupMenuItem(value: 'update', child: Text(l10n.updateApp)),
@@ -434,6 +439,38 @@ Future<void> _burnReceiptSettings(BuildContext context, NightdropCore core) asyn
   await core.setBurnReceipts(turnOn);
   messenger.showSnackBar(SnackBar(
     content: Text(turnOn ? l10n.burnReceiptsOn : l10n.burnReceiptsOff),
+  ));
+}
+
+/// Opt-in "Block screenshots": off by default, because Night Drop tells the contact about a
+/// screenshot instead of forbidding one (a photo of the screen gets past any block). On, it stops
+/// screenshots, screen recording and casting of the app on this phone.
+Future<void> _blockCaptureSettings(BuildContext context) async {
+  final l10n = AppLocalizations.of(context)!;
+  final on = await ScreenshotDetector.blockCapture();
+  if (!context.mounted) return;
+  final turnOn = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: Text(l10n.blockCaptureTitle),
+      content: Text(l10n.blockCaptureBody),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(l10n.cancel),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(!on),
+          child: Text(on ? l10n.turnOff : l10n.turnOn),
+        ),
+      ],
+    ),
+  );
+  if (turnOn == null || !context.mounted) return;
+  final messenger = ScaffoldMessenger.of(context);
+  await ScreenshotDetector.setBlockCapture(turnOn);
+  messenger.showSnackBar(SnackBar(
+    content: Text(turnOn ? l10n.blockCaptureOn : l10n.blockCaptureOff),
   ));
 }
 
