@@ -198,6 +198,23 @@ void main() {
     await settleScroll(tester);
   });
 
+  // The attach button carries a tooltip, and a Tooltip claims the long-press on touch: from 0.1.6
+  // until 2026-10-17 long-pressing 📎 on a phone only showed "Attach image or video", so burn
+  // attachments could be sent only with a desktop right-click (found in the 0.2 device pass).
+  testWidgets('long-pressing attach opens the burn menu, not the tooltip', (tester) async {
+    final (core, _) = await pumpChat(tester);
+    core.peerSupportsBurn(true);
+    await tester.pump();
+
+    await tester.longPress(find.byIcon(Icons.attach_file));
+    await tester.pumpAndSettle();
+
+    expect(find.text('30 seconds'), findsOneWidget, reason: 'the duration menu opens');
+    await tester.tapAt(const Offset(5, 5)); // dismiss without picking
+    await tester.pumpAndSettle();
+    await settleScroll(tester);
+  });
+
   testWidgets('long-pressing send offers durations and sends immediately on choosing one',
       (tester) async {
     final (core, contact) = await pumpChat(tester);

@@ -1964,13 +1964,19 @@ class _Composer extends StatelessWidget {
                 await onBurnAttach(origin);
               }
 
-              return GestureDetector(
-                onLongPress: open,
-                onSecondaryTap: open,
-                child: IconButton(
-                  tooltip: l10n.attachImageOrVideo,
-                  icon: const Icon(Icons.attach_file),
-                  onPressed: onAttach,
+              // The tooltip may not trigger on long-press: a Tooltip wins that gesture on touch,
+              // so the burn menu never opened on phones (0.1.6 to 2026-10-17). Manual trigger
+              // keeps its hover text and screen-reader label.
+              return Tooltip(
+                message: l10n.attachImageOrVideo,
+                triggerMode: TooltipTriggerMode.manual,
+                child: GestureDetector(
+                  onLongPress: open,
+                  onSecondaryTap: open,
+                  child: IconButton(
+                    icon: const Icon(Icons.attach_file),
+                    onPressed: onAttach,
+                  ),
                 ),
               );
             }),
