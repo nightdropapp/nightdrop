@@ -46,6 +46,8 @@ PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 source "$(dirname "$0")/lib/flutter-sdk.sh"
 # shellcheck source=lib/keys.sh
 source "$(dirname "$0")/lib/keys.sh"
+# shellcheck source=lib/sandbox.sh
+source "$(dirname "$0")/lib/sandbox.sh"
 APP_DIR="$PROJECT_ROOT/app"
 APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"
 BUNDLE_SRC="$APP_DIR/build/linux/x64/release/bundle"
@@ -156,8 +158,20 @@ if [ "$DO_BUILD" = 1 ]; then
     # in too: CMake compiles it into the binary (`APPLICATION_ID`), and without it a test-id
     # AppImage carried the test id's packaging around a binary that claimed `app.nightdrop`, so it
     # handed itself off to the real install's running instance.
+    # The build runs third-party code (pub packages, Cargo build scripts, CMake), so the parts of
+    # the checkout it has no business writing are read-only (website/ is the live onion site),
+    # and the relay's Tor keys, the GitLab token and the Android signing properties are hidden
+    # (MAINTENANCE.md §8, the same rules as scripts/lib/sandbox.sh).
+    HIDE=()
+    for d in "$PROJECT_ROOT"/relay-state*; do [ -d "$d" ] && HIDE+=(--mount "type=tmpfs,destination=/nightdrop/$(basename "$d")"); done
+    for d in website .git scripts .github Makefile; do
+      [ -e "$PROJECT_ROOT/$d" ] && HIDE+=(-v "$PROJECT_ROOT/$d:/nightdrop/$d:ro")
+    done
+    for f in gitlab_token.txt app/android/key.properties; do
+      [ -f "$PROJECT_ROOT/$f" ] && HIDE+=(-v "/dev/null:/nightdrop/$f:ro")
+    done
     podman run --rm --userns=keep-id --security-opt label=disable \
-      -v "$PROJECT_ROOT:/nightdrop" -v "$FLUTTER_HOME:$FLUTTER_HOME" \
+      -v "$PROJECT_ROOT:/nightdrop" "${HIDE[@]}" -v "$FLUTTER_HOME:$FLUTTER_HOME" \
       -v "$CARGO:$CARGO" -v "$RUSTUP:$RUSTUP" -v "$PUB:$PUB" \
       -e HOME=/tmp/home -e PUB_CACHE="$PUB" -e CARGO_HOME="$CARGO" -e RUSTUP_HOME="$RUSTUP" \
       -e NIGHTDROP_APP_ID="$APP_ID" \
@@ -169,12 +183,12 @@ if [ "$DO_BUILD" = 1 ]; then
     # The container saw the project at /nightdrop and wrote that path into the checkout's generated
     # plugin list (.flutter-plugins-dependencies), which breaks a plain Gradle or CMake run on this
     # machine until Flutter regenerates it. Regenerate it now with this machine's paths.
-    ( cd "$APP_DIR" && "$FLUTTER_HOME/bin/flutter" pub get --offline >/dev/null 2>&1 ) \
+    ( cd "$APP_DIR" && nd_sandbox "$FLUTTER_HOME/bin/flutter" pub get --offline >/dev/null 2>&1 ) \
       || c "could not refresh the checkout's plugin list; run 'flutter pub get' in app/"
   else
     c "Building Linux release bundle on this machine (NOT portable — dev only)…"
     ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" CARGO_ENCODED_RUSTFLAGS="$RUST_REMAP" \
-        CFLAGS="$C_REMAP" CXXFLAGS="$C_REMAP" && flutter build linux --release "${DEFINES[@]}" )
+        CFLAGS="$C_REMAP" CXXFLAGS="$C_REMAP" && nd_sandbox flutter build linux --release "${DEFINES[@]}" )
   fi
 fi
 

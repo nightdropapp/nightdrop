@@ -259,6 +259,25 @@ where they bite:
   adopted for) while the shell's `PATH` said 3.47.6. Commands that just run `flutter` — `make
   app-test`, a hand-typed `flutter analyze` — still use `PATH`, and an older SDK there rewrites
   `app/pubspec.lock` to its own pins; check the result rather than the command (§11.6).
+- **Builds run sandboxed, and the release key signs afterwards** (2026-10-17). A build runs
+  third-party code as you — Gradle plugins, Cargo build scripts, pub packages — and `website/` is
+  the live onion site. `install-android-app.sh` runs `flutter pub get` and `flutter build apk`
+  through `scripts/lib/sandbox.sh` (bubblewrap): home read-only except the build caches and the
+  checkout; `website/`, `relay-state*/`, `.git/`, `scripts/`, `.github/`, the Makefile read-only;
+  the relay's Tor keys, `~/.gnupg`, `~/.ssh`, `~/.config/gh`, the onion website's and stats job's
+  state, the desktop app's data, the key stick and `/run/user/$UID` (session bus, systemd, agents)
+  hidden; `key.properties`, the keystore and `gitlab_token.txt` read as empty; secret-looking
+  environment variables dropped; a private `/tmp`, its own PID namespace (its Gradle daemon dies with
+  it — a daemon from an unsandboxed run would otherwise be handed the build) and a new session.
+  Gradle therefore debug-signs, and `sign_release_apks` signs the result with the release key
+  outside the sandbox, exactly like the F-Droid builds (v2 only, `--alignment-preserved`,
+  `lib/keys.sh` `nd_sign_apk_release`, which checks the certificate). `build-appimage.sh`'s
+  container gets the same read-only and hidden paths. `ND_NO_SANDBOX=1` turns it off (it warns).
+  **Residual:** the caches (`~/.gradle`, `~/.pub-cache`, `~/.cargo/registry`, the Flutter SDK) stay
+  writable, so a malicious build step could poison a later build. For the APKs, F-Droid's
+  independent build is the check: a tampered APK does not match theirs (§11.3 step 5). For the
+  AppImage and the Windows installer nothing catches it yet; the fix is a fresh build machine per
+  release (the home-server move).
 - **WebTunnel is on in every app build.** The patched cargokit (`builder.dart`) adds
   `--features webtunnel` unless `NIGHTDROP_WEBTUNNEL=0`; a bare `cargo build` leaves it off.
 
@@ -674,6 +693,18 @@ at all. Now each runs with `ProtectHome=tmpfs` and only its own paths bound back
 filter and the rest of `relay/deploy/nightdrop-relay.service`'s list. `systemd-analyze --user
 security` went from 7.2 and 9.5 to 3.6 and 3.8. A unit change that needs another path must bind
 that path, never widen `ProtectHome`. Pre-sandbox units: `*.service.bak-20261013`.
+
+**Flood defences on the onions** (2026-10-17). The relay asks each of its introduction points to
+pass on at most 25 introduction requests a second, bursts of 200 (`RELAY_INTRO_RATE`/`_BURST`,
+C tor's `HiddenServiceEnableIntroDoSDefense` defaults); a device's onion asks for 5 and 100
+(`INBOUND_INTRO_RATE`/`_BURST` in `core/src/transport/tor.rs`). The intro points enforce it (the
+`DOS_PARAMS` extension), so a connection flood is dropped in the Tor network before it costs this
+machine or a phone anything; one request is one new connection, not one message. Behind that:
+16 streams per circuit, idle timeouts, the relay's per-mailbox and store limits. **Proof of work**
+(arti's `hs-pow-full`) is not used: in arti 0.47 it is an `experimental` feature (exempt from
+semver, outside what we treat as audited), and it only helps once every client solves puzzles, so
+the app would have to ship it too. Revisit when arti marks it stable, or if the relay is ever
+flooded despite the rate limit (the `self-dial` heartbeat failing while the host is idle).
 
 **Relay diagnostics, and what they must not log.** `NIGHTDROP_RELAY_STATS=1` prints one line per
 5 minutes of aggregate counts (streams, refusals, requests per operation, store size;

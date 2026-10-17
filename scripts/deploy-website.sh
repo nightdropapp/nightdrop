@@ -21,21 +21,14 @@ WEB="$PROJECT_ROOT/website/applications"
 GPG_ID="${NIGHTDROP_GPG_ID:-security@nightdrop.app}"
 # shellcheck source=lib/keys.sh
 source "$(dirname "$0")/lib/keys.sh"
-# Release signing cert, from `apksigner verify --print-certs`. Matches AllowedAPKSigningKeys in
-# fdroid/app.nightdrop.yml — an APK signed by anything else must not reach the download page.
-RELEASE_CERT_SHA256="d08b8e6408aff4f43556c05b819fef25afdd6912be7a678b0552468a4582c0ac"
+# Release signing cert (lib/keys.sh). An APK signed by anything else must not reach the download page.
+RELEASE_CERT_SHA256="$ND_RELEASE_CERT_SHA256"
 
 c()  { printf '\033[0;34mℹ\033[0m %s\n' "$*"; }
 ok() { printf '\033[0;32m✓\033[0m %s\n' "$*"; }
 err(){ printf '\033[0;31m✗\033[0m %s\n' "$*" >&2; }
 
-find_apksigner() {
-    for p in "${ANDROID_SDK:-$HOME/android-sdk}"/build-tools/*/apksigner \
-             "${ANDROID_HOME:-}"/build-tools/*/apksigner; do
-        [ -x "$p" ] && { echo "$p"; return 0; }
-    done
-    return 1
-}
+find_apksigner() { nd_find_apksigner; }
 
 # An APK reaches the site only if the release key signed it. This is the check that stops a debug
 # build — which install-android-app.sh produces by default — becoming the public download.

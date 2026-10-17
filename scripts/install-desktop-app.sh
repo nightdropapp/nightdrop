@@ -27,6 +27,8 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 # shellcheck source=lib/flutter-sdk.sh
 source "$(dirname "$0")/lib/flutter-sdk.sh"
+# shellcheck source=lib/sandbox.sh
+source "$(dirname "$0")/lib/sandbox.sh"
 APP_DIR="$PROJECT_ROOT/app"
 APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"       # Wayland app_id / .desktop basename / icon name
 APP_NAME="${NIGHTDROP_APP_NAME:-Night Drop}"      # launcher display name
@@ -107,7 +109,8 @@ if [ "$DO_BUILD" -eq 1 ]; then
     info "relay not found (relay-state/onion) — P2P only, no store-and-forward"
   fi
   info "Building release bundle…"
-  ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" && flutter build linux --release "${DART_DEFINES[@]}" )
+  # Sandboxed: the build runs third-party code (scripts/lib/sandbox.sh, MAINTENANCE.md §8).
+  ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" && nd_sandbox flutter build linux --release "${DART_DEFINES[@]}" )
 fi
 [ -x "$BUNDLE_SRC/night_drop" ] || { err "bundle not found at $BUNDLE_SRC (run without --no-build)"; exit 1; }
 

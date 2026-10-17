@@ -309,6 +309,18 @@ export_android_sdk() {
 
 # Flutter names per-ABI outputs after the Android ABI but takes --target-platform in its own
 # vocabulary, so map between the two. Unknown/absent ABI means "build everything".
+# Sign every release APK in $1 with the release key in key.properties $2 (lib/keys.sh). No key
+# properties (a test id, or no key here or on a stick): leave Gradle's debug signature.
+sign_release_apks() {
+    local dir="$1" props="$2" apk
+    [ -n "$props" ] || return 0
+    for apk in "$dir"/app*-release.apk; do
+        [ -f "$apk" ] || continue
+        nd_sign_apk_release "$props" "$apk" || { log_error "signing $(basename "$apk") failed"; return 1; }
+        log_success "signed with the release key: $(basename "$apk")"
+    done
+}
+
 abi_to_target() {
     case "$1" in
         arm64-v8a)   echo "android-arm64" ;;
@@ -397,12 +409,12 @@ build_apk() {
         log_info "No device to query - building a universal APK"
     fi
 
-    # Third-party build code runs sandboxed (scripts/lib/sandbox.sh); only a release build of the
-    # real app, which Gradle signs, sees the release keystore.
-    local sbx=()
-    [ "$BUILD_MODE" == "release" ] && [ "$NIGHTDROP_APP_ID" = "app.nightdrop" ] && sbx=(--keys)
-    if nd_sandbox "${sbx[@]}" "$FLUTTER" build apk "--$BUILD_MODE" "${split[@]}" "${defines[@]}" 2>&1; then
-        local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
+    # Third-party build code runs sandboxed (scripts/lib/sandbox.sh), where the release keystore is
+    # hidden: Gradle debug-signs, and the release key signs the result here, afterwards — the way
+    # the F-Droid builds are signed (fdroid/README.md).
+    local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
+    if nd_sandbox "$FLUTTER" build apk "--$BUILD_MODE" "${split[@]}" "${defines[@]}" 2>&1 \
+       && sign_release_apks "$dir" "${keyprops:-}"; then
         # Install the split matching this device; a release build made all three, a debug build
         # made only this one. Fall back to the universal when there is no per-ABI file.
         #
@@ -440,7 +452,12 @@ build_apk() {
                && [ "${NO_DEPLOY_WEB:-0}" != 1 ] \
                && [ -f "$PROJECT_ROOT/website/applications/android/NightDrop.apk" ]; then
                 log_info "Also building the universal APK for the website"
-                nd_sandbox "${sbx[@]}" "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" 2>&1 | tail -2 \
+                # Not `| tail`: the pipe would hide a failed build and sign a stale APK.
+                local ulog rc=0
+                ulog="$(mktemp)"
+                nd_sandbox "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" > "$ulog" 2>&1 || rc=$?
+                tail -2 "$ulog"; rm -f "$ulog"
+                { [ "$rc" = 0 ] && sign_release_apks "$dir" "${keyprops:-}"; } \
                     || log_warn "universal build failed — the website's universal download will lag"
             fi
             return 0

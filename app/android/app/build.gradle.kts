@@ -42,6 +42,9 @@ val keystorePropertiesFile: File =
 if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
+// Empty inside the build sandbox (scripts/lib/sandbox.sh), where key.properties reads as empty:
+// the build debug-signs, and the script signs the APKs with the release key afterwards.
+val haveReleaseKey = keystoreProperties.getProperty("storeFile") != null
 
 android {
     namespace = "app.nightdrop"
@@ -77,7 +80,7 @@ android {
     }
 
     signingConfigs {
-        if (keystorePropertiesFile.exists()) {
+        if (haveReleaseKey) {
             create("release") {
                 // Relative to the properties file, so the stick's copy can name the keystore beside it.
                 storeFile = keystorePropertiesFile.parentFile.resolve(keystoreProperties.getProperty("storeFile"))
@@ -90,11 +93,12 @@ android {
 
     buildTypes {
         release {
-            signingConfig = if (keystorePropertiesFile.exists()) {
+            signingConfig = if (haveReleaseKey) {
                 signingConfigs.getByName("release")
             } else {
-                // No keystore configured: debug-sign so `flutter run --release` still
-                // works locally. A distributable release REQUIRES key.properties.
+                // No keystore configured: debug-sign so `flutter run --release` still works
+                // locally. A distributable release is signed with the release key afterwards
+                // (install-android-app.sh, fdroid/README.md); deploy-website.sh refuses any other.
                 signingConfigs.getByName("debug")
             }
             // Requested by the F-Droid reviewer on fdroiddata!43625.

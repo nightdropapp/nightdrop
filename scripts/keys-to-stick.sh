@@ -44,7 +44,7 @@ copy() { # copy <src> <dest>: copy, flush, compare byte for byte
 props="$ROOT/app/android/key.properties"
 if [ -f "$props" ]; then
   store="$(sed -n 's/^storeFile=//p' "$props")"
-  case "$store" in /*) ;; *) store="$ROOT/app/android/app/$store" ;; esac
+  case "$store" in /*) ;; *) store="$ROOT/app/android/$store" ;; esac  # as build.gradle.kts reads it
   copy "$store" "$stick/android/$(basename "$store")"
   mkdir -p "$stick/android"
   sed "s#^storeFile=.*#storeFile=$(basename "$store")#" "$props" > "$stick/android/key.properties"
