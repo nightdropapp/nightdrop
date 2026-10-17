@@ -28,6 +28,7 @@ All but four frames carry an Olm message and act only on a chat whose session de
 | Value | From | Used for | Bound |
 |---|---|---|---|
 | Frame length | anyone reaching us | allocation | `MAX_FRAME_BYTES`, checked before reading (`wire::frame_len`) |
+| Inbound streams to our onion | anyone reaching us | frames | 16 streams per circuit; 300 s with no frame closes the stream, 60 s without a byte mid-frame closes it and frees its budget (`tor::read_frame`); 64 MiB inbound budget (`InboundBudget`) |
 | `from` in an Olm frame | contact | which session decrypts | must name a chat; the decrypt authenticates it |
 | `Hello.identity_key` + prekey message | stranger with an invite | new chat | must decrypt with one of our one-time keys (single use) and its pass; becomes a *request* until accepted |
 | `Hello.address` | stranger | kept, dialed | `limits::sane_address` (≤128, safe chars), else the transport's view; dialed only if a v3 onion (`tor::require_onion`) |

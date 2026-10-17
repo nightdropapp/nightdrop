@@ -137,6 +137,16 @@ const BOOTSTRAP_TIMEOUT: Duration = Duration::from_secs(120);
 /// circuit-isolated by arti's per-`.onion` routing).
 const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 
+/// Close an **inbound** stream that has carried no frame for this long. Senders close a warm stream
+/// after [`IDLE_TIMEOUT`] plus up to one [`IDLE_SWEEP`] (two minutes at most), so a real peer
+/// never meets this; it exists so a silent stream cannot sit on our onion for good.
+const INBOUND_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Streams one circuit may hold open to our onion at once. arti's default is 65,535; a contact
+/// uses one warm stream, plus a few while a send overlaps a reconnect. The relay's limit, for the
+/// same reason (self-audit 2026-10-13 R3, 2026-10-17 P6).
+const INBOUND_STREAMS_PER_CIRCUIT: u32 = 16;
+
 /// How often the reaper looks for streams that have gone idle. Interruptible (it sleeps on the
 /// transport's [`StopSignal`]), so this only sets how *late* a stream is closed, never how long a
 /// teardown waits.
@@ -415,7 +425,14 @@ impl TorTransport {
                         if let Ok(mut stream) = request.accept(Connected::new_empty()).await {
                             // The caller is anonymous at the transport layer; routing uses
                             // the frame's own ids / advertised reply address.
-                            while let Ok(frame) = read_frame(&mut stream, &budget).await {
+                            while let Ok(frame) = read_frame(
+                                &mut stream,
+                                &budget,
+                                INBOUND_IDLE_TIMEOUT,
+                                RELAY_STALL_TIMEOUT,
+                            )
+                            .await
+                            {
                                 let len = frame.len();
                                 if tx.send((Address::new(), frame)).is_err() {
                                     budget.release(len); // the transport is gone
@@ -1428,6 +1445,7 @@ fn onion_service_config(
     // first-contact Hellos instead of going briefly dark. Kept small — each IPT is a maintained
     // circuit, and battery matters on mobile — so this trades a little upkeep for reachability.
     builder.num_intro_points(4);
+    builder.max_concurrent_streams_per_circuit(INBOUND_STREAMS_PER_CIRCUIT);
     if let Some(dir) = client_auth_dir {
         if client_auth::authorized_count(std::path::Path::new(dir)) > 0 {
             let mut provider = DirectoryKeyProviderBuilder::default();
@@ -1462,18 +1480,44 @@ async fn write_frame<W: futures::AsyncWrite + Unpin>(w: &mut W, frame: &[u8]) ->
 
 /// Read one length-prefixed frame, reserving its length in `budget` before the body (see
 /// [`InboundBudget`]); `try_recv` releases it when the core takes the frame.
-async fn read_frame<R: AsyncReadExt + Unpin>(r: &mut R, budget: &InboundBudget) -> Result<Vec<u8>> {
+///
+/// `idle` bounds the wait for the next frame to start ([`INBOUND_IDLE_TIMEOUT`]); `stall` bounds
+/// each wait for more of a frame already announced ([`RELAY_STALL_TIMEOUT`], the sender's own
+/// write stall). Without them, anyone who can reach our onion could open streams and leave them
+/// silent for good (self-audit 2026-10-17, P6).
+async fn read_frame<R: AsyncReadExt + Unpin>(
+    r: &mut R,
+    budget: &InboundBudget,
+    idle: Duration,
+    stall: Duration,
+) -> Result<Vec<u8>> {
     let mut prefix = [0u8; 4];
-    r.read_exact(&mut prefix).await?;
+    tokio::time::timeout(idle, r.read_exact(&mut prefix))
+        .await
+        .map_err(|_| anyhow::anyhow!("inbound stream idle; closed"))??;
     let len = crate::wire::frame_len(prefix)?;
     budget.reserve(len).await?;
     // Grow as bytes arrive rather than allocating the announced length up front.
     let mut buf = Vec::new();
-    let read = (&mut *r).take(len as u64).read_to_end(&mut buf).await;
-    if read.is_err() || buf.len() != len {
-        budget.release(len);
-        read?;
-        anyhow::bail!("connection closed mid-frame");
+    let mut chunk = vec![0u8; 64 * 1024];
+    while buf.len() < len {
+        let want = (len - buf.len()).min(chunk.len());
+        let read = match tokio::time::timeout(stall, r.read(&mut chunk[..want])).await {
+            Ok(Ok(n)) if n > 0 => n,
+            Ok(Ok(_)) => {
+                budget.release(len);
+                anyhow::bail!("connection closed mid-frame");
+            }
+            Ok(Err(e)) => {
+                budget.release(len);
+                return Err(e.into());
+            }
+            Err(_) => {
+                budget.release(len);
+                anyhow::bail!("inbound frame stalled; closed");
+            }
+        };
+        buf.extend_from_slice(&chunk[..read]);
     }
     Ok(buf)
 }
@@ -1768,6 +1812,57 @@ mod stall_tests {
         assert!(read.unwrap_err().to_string().contains("stalled"));
         let write = rt().block_on(write_all_stalling(&mut Stalled, b"req\n", stall));
         assert!(write.unwrap_err().to_string().contains("stalled"));
+    }
+
+    /// An inbound stream that never starts a frame, or stops partway through one, is closed — and
+    /// a stopped frame hands its budget back, or one silent sender could hold every other's room.
+    #[test]
+    fn a_silent_or_stalled_inbound_stream_is_closed() {
+        let quick = Duration::from_millis(100);
+        let budget = InboundBudget::default();
+        let idle = rt().block_on(read_frame(&mut Stalled, &budget, quick, quick));
+        assert!(idle.unwrap_err().to_string().contains("idle"));
+
+        // Announces 1000 bytes, sends 3, then goes quiet.
+        struct Trickle(Vec<u8>);
+        impl futures::AsyncRead for Trickle {
+            fn poll_read(
+                mut self: Pin<&mut Self>,
+                _: &mut Context<'_>,
+                buf: &mut [u8],
+            ) -> Poll<std::io::Result<usize>> {
+                if self.0.is_empty() {
+                    return Poll::Pending;
+                }
+                let n = buf.len().min(self.0.len());
+                buf[..n].copy_from_slice(&self.0[..n]);
+                self.0.drain(..n);
+                Poll::Ready(Ok(n))
+            }
+        }
+        let mut src = Trickle([&1000u32.to_be_bytes()[..], b"abc"].concat());
+        let stalled = rt().block_on(read_frame(&mut src, &budget, quick, quick));
+        assert!(stalled.unwrap_err().to_string().contains("stalled"));
+        // Only an empty budget admits a full-budget frame.
+        let full = crate::transport::inbound::INBOUND_BUDGET_BYTES;
+        assert!(
+            budget.try_reserve(full),
+            "the stalled frame's budget was not released"
+        );
+        budget.release(full);
+
+        let mut whole = futures::io::Cursor::new([&3u32.to_be_bytes()[..], b"abc"].concat());
+        let frame = rt().block_on(read_frame(&mut whole, &budget, quick, quick));
+        assert_eq!(frame.unwrap(), b"abc");
+    }
+
+    #[test]
+    fn our_onion_caps_streams_per_circuit() {
+        let cfg = onion_service_config("nd".parse().unwrap(), None).unwrap();
+        assert_eq!(
+            *cfg.max_concurrent_streams_per_circuit(),
+            INBOUND_STREAMS_PER_CIRCUIT
+        );
     }
 
     #[test]
