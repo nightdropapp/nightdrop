@@ -424,6 +424,22 @@ fn password_backup_round_trips_and_rejects_wrong_password() {
     );
 }
 
+/// A restore that fails after `take` has removed the relay's copy must put it back: otherwise one
+/// failed attempt destroys the only server backup (self-audit 2026-10-17, R8-3).
+#[test]
+fn a_failed_server_restore_leaves_the_backup_on_the_relay() {
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let net = MemoryNetwork::new();
+    let password = crate::storage::random_password();
+    let handle = super::backup_handle(&password).unwrap();
+    // Something under the right handle that will not open: damaged, or from a newer app.
+    relay
+        .post(&handle, b"not a backup", Duration::from_secs(3600))
+        .unwrap();
+    assert!(Node::restore_from_server(&relay, &password, Box::new(net.endpoint("z"))).is_err());
+    assert_eq!(relay.peek(&handle).unwrap(), 1, "the backup is still there");
+}
+
 #[test]
 fn server_backup_recovers_on_a_fresh_device() {
     let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();

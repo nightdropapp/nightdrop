@@ -724,14 +724,16 @@ impl Node {
         password: &str,
         transport: Box<dyn Transport>,
     ) -> Result<Self> {
-        let blob = relay
-            .take(&backup_handle(password)?)?
-            .into_iter()
-            .next()
-            .ok_or_else(|| {
-                anyhow::anyhow!("no server backup found (expired or wrong password?)")
-            })?;
-        Self::restore_from_backup(&blob, password, transport)
+        let handle = backup_handle(password)?;
+        let blob = relay.take(&handle)?.into_iter().next().ok_or_else(|| {
+            anyhow::anyhow!("no server backup found (expired or wrong password?)")
+        })?;
+        // `take` removed the relay's copy. If restoring it fails (a damaged or newer-format blob),
+        // put it back, or a failed attempt would destroy the only server backup (self-audit
+        // 2026-10-17, R8-3). A wrong password never gets here: it derives a different handle.
+        Self::restore_from_backup(&blob, password, transport).inspect_err(|_| {
+            let _ = relay.post(&handle, &blob, SERVER_BACKUP_DEFAULT_TTL);
+        })
     }
 }
 
