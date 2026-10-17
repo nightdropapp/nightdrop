@@ -2766,6 +2766,7 @@ fn learned_signing_keys_survive_a_save_and_restore() {
     let trust = crate::keyroll::Trust {
         seq: 2,
         key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".into(),
+        sig: "c2lnbmF0dXJl".into(),
     };
     n.update_key = Some(trust.clone());
     n.directory_key = Some(trust.clone());

@@ -69,10 +69,18 @@ pub struct Rotation {
 
 /// The newest signing key this install has accepted for one purpose. Sequence 0 is the baked key;
 /// it is never stored, since the baked key already says it.
+///
+/// Kept **with its rotation signature** and re-verified every time it is used: it comes back from
+/// the state file and from backups, and a backup can be someone else's file. A bare `seq`/`key`
+/// would let a crafted backup pin a bogus key with a huge sequence, after which every real manifest
+/// and relay list is refused for good (self-audit 2026-10-17, P9). One without a valid signature —
+/// including those written before the signature was kept — is ignored, falling back to the baked key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Trust {
     pub seq: u64,
     pub key: String,
+    #[serde(default)]
+    pub sig: String,
 }
 
 fn message(purpose: Purpose, seq: u64, key_b64: &str) -> Vec<u8> {
@@ -112,6 +120,16 @@ pub fn current_key(
     learned: Option<&Trust>,
     rotation: Option<&Rotation>,
 ) -> ([u8; 32], Option<Trust>) {
+    let learned = learned.filter(|t| {
+        verify_rotation(
+            roots,
+            &Rotation {
+                seq: t.seq,
+                key: t.key.clone(),
+                sig: t.sig.clone(),
+            },
+        )
+    });
     let (mut seq, mut key) = match learned.and_then(|t| decode_key(&t.key).map(|k| (t.seq, k))) {
         Some((s, k)) if s > 0 => (s, k),
         _ => (0, roots.signing),
@@ -125,6 +143,7 @@ pub fn current_key(
                 moved = Some(Trust {
                     seq,
                     key: r.key.trim().to_string(),
+                    sig: r.sig.trim().to_string(),
                 });
             }
         }
@@ -278,5 +297,28 @@ mod tests {
         let mut bumped = one.clone();
         bumped.seq = 9;
         assert_eq!(current_key(&r, None, Some(&bumped)), (r.signing, None));
+    }
+
+    #[test]
+    fn a_remembered_key_without_a_valid_signature_is_ignored() {
+        // What a crafted backup or an old state file can hand back: it must not pin anything.
+        let (r, _, recovery_secret) = roots(Purpose::Update);
+        let (_, bogus) = keypair();
+        let unsigned = Trust {
+            seq: u64::MAX,
+            key: B64.encode(bogus),
+            sig: String::new(),
+        };
+        assert_eq!(current_key(&r, Some(&unsigned), None), (r.signing, None));
+        // A real rotation still moves an install that was handed one.
+        let (_, new_key) = keypair();
+        let rot =
+            sign_rotation(&recovery_secret, Purpose::Update, 1, &B64.encode(new_key)).unwrap();
+        assert_eq!(current_key(&r, Some(&unsigned), Some(&rot)).0, new_key);
+        // A signed one whose key was swapped afterwards is refused too.
+        let (_, learned) = current_key(&r, None, Some(&rot));
+        let mut swapped = learned.unwrap();
+        swapped.key = B64.encode(bogus);
+        assert_eq!(current_key(&r, Some(&swapped), None), (r.signing, None));
     }
 }

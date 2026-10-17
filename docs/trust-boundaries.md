@@ -78,6 +78,7 @@ All but four frames carry an Olm message and act only on a chat whose session de
 | `update.json` | site | update notice, download | ≤8 KiB; Ed25519 over the payload with the current update key (`keyroll`); download only if strictly newer; build bytes checked against the signed SHA-256 |
 | `relays.json` / relay `GetDirectory` | site, relay | shared relay set | ≤16 KiB; Ed25519 with the current directory key; version monotonic |
 | Key rotation | site, relay | which key signs | recovery-key signature binding purpose and sequence; sequence remembered, older keys refused |
+| Remembered signing key (`keyroll::Trust`) | state file, backup | which key signs | kept with its rotation signature and re-verified on every use; unsigned or tampered is ignored (baked key) |
 
 ## Backups (`core/src/node/backup.rs`)
 
@@ -87,6 +88,7 @@ All but four frames carry an Olm message and act only on a chat whose session de
 | Onion keystore file paths | backup | written to disk | `keystore_dest`: plain relative components only |
 | Media ids | backup | file names | `is_media_id` before any path is built |
 | Contact names | backup | shown | `clean_display_name` |
+| Learned update / directory keys | backup | which key signs | re-verified against the recovery key (row under Signed documents) |
 | Everything else (history, relay sets, queued frames) | backup | the restored identity | trusted as the user's own data: restoring a backup someone else made means taking on their identity. Noted, not bounded |
 
 ## Network and files
