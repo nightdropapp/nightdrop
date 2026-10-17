@@ -148,6 +148,7 @@ class _SetupScreenState extends State<SetupScreen> {
                       ? Padding(
                           padding: const EdgeInsets.only(top: 8),
                           child: TextField(
+                            enableIMEPersonalizedLearning: false,
                             key: const Key('setup-relay-address'),
                             controller: _ownRelay,
                             autocorrect: false,

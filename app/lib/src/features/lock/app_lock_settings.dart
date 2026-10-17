@@ -248,6 +248,7 @@ Future<Object?> _askVerifiedSecret(
       disposer: controller.dispose,
       child: _BusyDialog(
         content: (error, submit) => TextField(
+          enableIMEPersonalizedLearning: false,
           controller: controller,
           autofocus: true,
           obscureText: true,
@@ -339,6 +340,7 @@ Future<String?> _askNewDuress(BuildContext context, NightdropCore core) async {
                 Text(l10n.duressBody),
                 const SizedBox(height: 16),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   controller: first,
                   autofocus: true,
                   obscureText: true,
@@ -350,6 +352,7 @@ Future<String?> _askNewDuress(BuildContext context, NightdropCore core) async {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   controller: second,
                   focusNode: secondFocus,
                   obscureText: true,
@@ -497,6 +500,7 @@ Future<void> _disable(BuildContext context, NightdropCore core) async {
       child: _BusyDialog(
         title: Text(l10n.appLockDisable),
         content: (error, submit) => TextField(
+          enableIMEPersonalizedLearning: false,
           controller: controller,
           autofocus: true,
           obscureText: true,
@@ -568,6 +572,7 @@ Future<String?> _askNewSecret(BuildContext context,
               mainAxisSize: MainAxisSize.min,
               children: [
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   controller: first,
                   autofocus: true,
                   obscureText: true,
@@ -580,6 +585,7 @@ Future<String?> _askNewSecret(BuildContext context,
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   controller: second,
                   focusNode: secondFocus,
                   obscureText: true,

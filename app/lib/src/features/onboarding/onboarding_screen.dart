@@ -145,6 +145,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             const SizedBox(height: 12),
             TextField(
+              enableIMEPersonalizedLearning: false,
               controller: controller,
               autofocus: true,
               decoration: InputDecoration(
@@ -208,6 +209,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             ),
             const SizedBox(height: 12),
             TextField(
+              enableIMEPersonalizedLearning: false,
               controller: controller,
               autofocus: true,
               decoration: InputDecoration(

@@ -244,6 +244,7 @@ class _JoinTabState extends State<_JoinTab> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   controller: _controller,
                   autofocus: true,
                   decoration: InputDecoration(

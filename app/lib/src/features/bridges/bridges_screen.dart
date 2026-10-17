@@ -197,6 +197,7 @@ class _BridgesScreenState extends State<BridgesScreen> {
                 ),
                 const SizedBox(height: 12),
                 TextField(
+                  enableIMEPersonalizedLearning: false,
                   controller: _controller,
                   maxLines: 8,
                   minLines: 4,
@@ -296,6 +297,7 @@ class _FetchConsentDialogState extends State<_FetchConsentDialog> {
             Text(l10n.bridgesFetchBody),
             const SizedBox(height: 16),
             TextField(
+              enableIMEPersonalizedLearning: false,
               controller: _country,
               maxLength: 2,
               autocorrect: false,

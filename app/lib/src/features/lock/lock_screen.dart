@@ -128,6 +128,7 @@ class _LockScreenState extends State<LockScreen> {
                   ),
                   const SizedBox(height: 28),
                   TextField(
+                    enableIMEPersonalizedLearning: false,
                     controller: _controller,
                     autofocus: true,
                     obscureText: true,

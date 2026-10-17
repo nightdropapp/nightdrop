@@ -142,6 +142,7 @@ class _PasswordAckDialogState extends State<_PasswordAckDialog> {
           Text(l10n.typeItBack),
           const SizedBox(height: 12),
           TextField(
+            enableIMEPersonalizedLearning: false,
             controller: _controller,
             autofocus: true,
             autocorrect: false,
@@ -287,6 +288,7 @@ Future<void> mergeChatBackup(BuildContext context, NightdropCore core) async {
           ),
           const SizedBox(height: 12),
           TextField(
+            enableIMEPersonalizedLearning: false,
             controller: controller,
             autofocus: true,
             decoration: InputDecoration(

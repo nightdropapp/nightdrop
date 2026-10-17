@@ -206,6 +206,7 @@ class _MyRelaysScreenState extends State<MyRelaysScreen> {
                     children: [
                       Expanded(
                         child: TextField(
+                          enableIMEPersonalizedLearning: false,
                           key: const Key('relays-field'),
                           controller: _field,
                           autocorrect: false,
