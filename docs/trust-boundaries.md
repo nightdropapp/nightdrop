@@ -78,7 +78,7 @@ All but four frames carry an Olm message and act only on a chat whose session de
 
 | Value | From | Used for | Bound |
 |---|---|---|---|
-| `update.json` | site | update notice, download | ≤8 KiB; Ed25519 over the payload with the current update key (`keyroll`); download only if strictly newer; build bytes checked against the signed SHA-256 |
+| `update.json` | site | update notice, download | ≤8 KiB; Ed25519 over the payload with the current update key (`keyroll`); refused past its signed `expires` or without one; download only if strictly newer; build bytes checked against the signed SHA-256 |
 | `relays.json` / relay `GetDirectory` | site, relay | shared relay set | ≤16 KiB; Ed25519 with the current directory key; version monotonic |
 | Key rotation | site, relay | which key signs | recovery-key signature binding purpose and sequence; sequence remembered, older keys refused |
 | Remembered signing key (`keyroll::Trust`) | state file, backup | which key signs | kept with its rotation signature and re-verified on every use; unsigned or tampered is ignored (baked key) |
