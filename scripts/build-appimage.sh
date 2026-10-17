@@ -75,7 +75,7 @@ esac; shift; done
 MAX_GLIBC=2.35
 # The suffix changes whenever scripts/linux-build/Containerfile does, so an image built from an
 # older file is never reused (it is only built when missing). 2: zsync, for the .zsync below.
-BUILD_IMAGE=nightdrop-linux-build:22.04-2
+BUILD_IMAGE=nightdrop-linux-build:22.04-3
 
 # Where AppImage update tools (AppImageUpdate, Gear Lever, AppImageLauncher) look for a newer build:
 # the .zsync asset of this repo's latest GitHub release. Embedded in the AppImage at packaging time;
@@ -88,6 +88,27 @@ UPDATE_INFO="gh-releases-zsync|nightdropapp|nightdrop|latest|Night_Drop-x86_64.A
 # appimagetool: prefer PATH, then ~/.local/bin. Run under FUSE if available, else self-extract.
 AITOOL="$(command -v appimagetool || echo "$HOME/.local/bin/appimagetool")"
 [ -x "$AITOOL" ] || { err "appimagetool not found (see the header for the one-line install)"; exit 1; }
+# Both pieces of tooling that end up in, or produce, what every Linux user runs are pinned by
+# checksum (self-audit 2026-10-17). appimagetool is a "continuous" download; and without
+# --runtime-file it fetched the AppImage runtime — the first code a user's machine executes — from
+# a moving GitHub release on every build, unverified. A change upstream now stops the build until
+# someone has looked at it and updated the pin here.
+APPIMAGETOOL_SHA256="a6d71e2b6cd66f8e8d16c37ad164658985e0cf5fcaa950c90a482890cb9d13e0" # continuous build 295, git 8c8c91f
+RUNTIME_SHA256="156f4bdbde9c52d01814600013e0a273f0118dc2de98975f3c8c63427ec79074" # type2-runtime continuous, 2026-09-28 (0700 extraction dirs)
+RUNTIME_URL="https://github.com/AppImage/type2-runtime/releases/download/continuous/runtime-x86_64"
+[ "$(sha256sum "$AITOOL" | cut -d' ' -f1)" = "$APPIMAGETOOL_SHA256" ] \
+  || { err "appimagetool at $AITOOL is not the pinned build — review the new one, then update APPIMAGETOOL_SHA256"; exit 1; }
+RUNTIME="${XDG_CACHE_HOME:-$HOME/.cache}/nightdrop/appimage-runtime-$RUNTIME_SHA256"
+if [ ! -f "$RUNTIME" ] || [ "$(sha256sum "$RUNTIME" | cut -d' ' -f1)" != "$RUNTIME_SHA256" ]; then
+  mkdir -p "$(dirname "$RUNTIME")"
+  curl -fsSL "$RUNTIME_URL" -o "$RUNTIME.part" || { err "could not download the AppImage runtime"; exit 1; }
+  got="$(sha256sum "$RUNTIME.part" | cut -d' ' -f1)"
+  if [ "$got" != "$RUNTIME_SHA256" ]; then
+    rm -f "$RUNTIME.part"
+    err "the AppImage runtime upstream changed (sha256 $got) — review it, then update RUNTIME_SHA256"; exit 1
+  fi
+  mv "$RUNTIME.part" "$RUNTIME"
+fi
 AITOOL_RUN=("$AITOOL")
 command -v fusermount >/dev/null 2>&1 || command -v fusermount3 >/dev/null 2>&1 \
   || AITOOL_RUN=("$AITOOL" --appimage-extract-and-run)
@@ -253,15 +274,15 @@ if [ "$SIGN" = 1 ]; then
   SIGN_ARGS=(--sign --sign-key "$GPG_ID")
 fi
 c "Packaging AppImage…"
-ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
-  || ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
+ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
+  || ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
 chmod +x "$OUT"
 signed() { readelf -x .sha256_sig "$OUT" 2>/dev/null | grep -qE '0x[0-9a-f]+ +[0-9a-f ]*[1-9a-f]'; }
 if [ "$SIGN" = 1 ] && ! signed; then
   # Seen once (2026-10-13), right after a long container build, and not again: gpg declined the
   # first time. One verbose retry, so a real failure shows gpg's own words.
   c "the embedded signature came out empty — packaging once more, with appimagetool's output"
-  ARCH=x86_64 "${AITOOL_RUN[@]}" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"
+  ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"
   chmod +x "$OUT"
 fi
 if [ "$SIGN" = 1 ]; then
