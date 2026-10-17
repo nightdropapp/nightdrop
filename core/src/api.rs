@@ -138,9 +138,11 @@ fn next_cover_delay() -> Duration {
 }
 
 /// How long a staged short-code invite is honored, and how long a joiner waits for the
-/// inviter to answer before giving up (§5b). Both sides are attended during pairing.
+/// inviter to answer before giving up (§5b). Both sides are attended during pairing. The join
+/// waits four minutes, not two: a Tor state that is new, or that just changed networks, takes about
+/// two and a half to reach the relay (`POST_ESTABLISH_TIMEOUT`), and the inviter's may be one too.
 const SHORT_CODE_TTL: Duration = Duration::from_secs(600);
-const SHORT_CODE_JOIN_TIMEOUT: Duration = Duration::from_secs(120);
+const SHORT_CODE_JOIN_TIMEOUT: Duration = Duration::from_secs(240);
 
 /// Subscribe to push events from the core (flutter_rust_bridge stream). Call once at
 /// startup; the UI refreshes its view whenever an event arrives.

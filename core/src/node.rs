@@ -3580,8 +3580,10 @@ const RENDEZVOUS_POLL: Duration = Duration::from_millis(500);
 /// measured on a phone (2026-10-09), a fresh identity's first relay round failed outright and the
 /// next, two and a half minutes after Tor started, succeeded. Joining straight after creating an
 /// identity — what a new user does — fell inside that window, and 45 s gave up on it every time.
+/// Four minutes since 2026-10-17: two was right at that edge, and the 0.2 device pass hit it twice
+/// (fresh desktop identities, and a phone just switched to mobile data).
 #[cfg(not(test))]
-const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_secs(120);
+const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_secs(240);
 #[cfg(test)]
 const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_millis(300);
 const POST_RETRY_INTERVAL: Duration = Duration::from_secs(2);
