@@ -268,7 +268,9 @@ where they bite:
   the relay's Tor keys, `~/.gnupg`, `~/.ssh`, `~/.config/gh`, the onion website's and stats job's
   state, the desktop app's data, the key stick and `/run/user/$UID` (session bus, systemd, agents)
   hidden; `key.properties`, the keystore and `gitlab_token.txt` read as empty; secret-looking
-  environment variables dropped; a private `/tmp`, its own PID namespace (its Gradle daemon dies with
+  environment variables dropped; adb's key and the USB devices hidden; its own network namespace
+  (`pasta`: the internet, but no service on this machine — the adb server on 127.0.0.1:5037 has no
+  authentication and reaches every paired phone); a private `/tmp`, its own PID namespace (its Gradle daemon dies with
   it — a daemon from an unsandboxed run would otherwise be handed the build) and a new session.
   Gradle therefore debug-signs, and `sign_release_apks` signs the result with the release key
   outside the sandbox, exactly like the F-Droid builds (v2 only, `--alignment-preserved`,

@@ -20,12 +20,15 @@
 #     session bus, systemd's user manager (systemd-run would escape any sandbox), the agents'
 #     sockets, the display;
 #   * the release keystore and key.properties read as empty: no build signs with the release key;
-#     the scripts sign the finished APKs afterwards, outside the sandbox (lib/keys.sh).
+#     the scripts sign the finished APKs afterwards, outside the sandbox (lib/keys.sh);
+#   * adb's key reads as empty and no USB device is visible, so nothing can reach a phone.
 # Environment variables whose names say KEY, TOKEN, SECRET, PASSWORD or CREDENTIAL are dropped.
 # It gets a private /tmp, and a Gradle/Kotlin daemon of its own that ends with the build: an
 # unsandboxed daemon left running from an earlier build would otherwise be handed this build's work.
 # It also starts a new session, so nothing inside can push keystrokes into your terminal (TIOCSTI).
-# The network stays: Gradle, pub and Cargo download. Set ND_NO_SANDBOX=1 to run without it.
+# The internet stays (Gradle, pub and Cargo download), but in a network namespace of its own: no
+# service listening on this machine (adb, databases, the VM's SSH, the onion site) is reachable.
+# Set ND_NO_SANDBOX=1 to run without it.
 
 nd_sandbox() {
   if [ -n "${ND_NO_SANDBOX:-}" ]; then
@@ -83,10 +86,26 @@ nd_sandbox() {
     case "${v^^}" in *KEY*|*TOKEN*|*SECRET*|*PASSWORD*|*PASSWD*|*CREDENTIAL*) a+=(--unsetenv "$v") ;; esac
   done
   [ -f "$root/gitlab_token.txt" ] && a+=(--dev-bind /dev/null "$root/gitlab_token.txt")
-  for d in "$root/app/android/key.properties" "$HOME/.android/nightdrop-release.jks"; do
+  # adb's key too: with it, and the USB devices, build code could start an adb server of its own
+  # and drive any phone that trusts this machine. USB devices are hidden below.
+  for d in "$root/app/android/key.properties" "$HOME/.android/nightdrop-release.jks" \
+           "$HOME/.android/adbkey" "$HOME/.android/adb_known_hosts.pb"; do
     [ -f "$d" ] && a+=(--dev-bind /dev/null "$d")
   done
-  bwrap "${a[@]}" --unshare-pid --proc /proc --die-with-parent --new-session \
+  [ -d /dev/bus/usb ] && a+=(--tmpfs /dev/bus/usb)
+  # Its own network namespace (pasta, the user-mode network podman uses): the internet as usual,
+  # but none of this machine's loopback or LAN services. Sharing the host's network let build code
+  # drive the adb server on 127.0.0.1:5037 — no authentication — and through it any phone that is
+  # plugged in or paired. DNS still works through systemd-resolved's socket.
+  if ! command -v pasta >/dev/null 2>&1; then
+    echo "error: pasta (passt) not found — sudo dnf install passt, or ND_NO_SANDBOX=1" >&2
+    return 1
+  fi
+  # bwrap by absolute path: pasta runs confined (SELinux pasta_t) and, given a bare name, searches
+  # $PATH — including ~/.local/bin, which the policy denies, raising an AVC alert on every build.
+  pasta --config-net --quiet -T none -U none -t none -u none --no-map-gw -D none -- \
+  "$(command -v bwrap)" "${a[@]}" --unshare-user --uid "$uid" --gid "$(id -g)" \
+    --unshare-pid --proc /proc --die-with-parent --new-session \
     --unsetenv DBUS_SESSION_BUS_ADDRESS --unsetenv SSH_AUTH_SOCK --unsetenv GPG_AGENT_INFO \
     --unsetenv DISPLAY --unsetenv WAYLAND_DISPLAY --unsetenv XAUTHORITY \
     --chdir "$PWD" -- "$@"
