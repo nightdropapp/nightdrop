@@ -65,6 +65,13 @@ use tor_hsservice::config::restricted_discovery::DirectoryKeyProviderBuilder;
 use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder};
 use tor_hsservice::{handle_rend_requests, HsNickname};
 
+const USAGE: &str = "\
+usage: nightdrop-relay                 run the relay (state in $NIGHTDROP_RELAY_STATE, default ./relay-state)
+       nightdrop-relay <subcommand>    operator tooling, no Tor:
+         gen-directory-key | sign-directory | gen-update-key | sign-update | sign-rotation
+         authorize-client | revoke-client | list-clients
+Never point a second relay at a state directory a running relay uses.";
+
 fn main() -> anyhow::Result<()> {
     // Operator tooling. Directory (§3.1 — rotate the relay set without an app update) and
     // private-relay client authorization (§3.2 — restrict the onion to authorized clients).
@@ -78,7 +85,14 @@ fn main() -> anyhow::Result<()> {
         Some("authorize-client") => return authorize_client(&args[2..]),
         Some("revoke-client") => return revoke_client(&args[2..]),
         Some("list-clients") => return list_clients(),
-        _ => {}
+        None => {}
+        // Anything else — `--help` included — prints usage and stops. It used to fall through and
+        // start a relay, on `relay-state/` in the current directory: run from the repo root, a
+        // second process on the production state (2026-10-17; BUILD_AND_DEPLOY.md forbids it).
+        Some(_) => {
+            eprintln!("{USAGE}");
+            std::process::exit(2);
+        }
     }
 
     // rustls 0.23 needs a process-default crypto provider before any TLS config is built.
