@@ -123,19 +123,24 @@ if [ "$DO_BUILD" = 1 ]; then
     }
     RUSTUP="${RUSTUP_HOME:-$HOME/.rustup}"; CARGO="${CARGO_HOME:-$HOME/.cargo}"; PUB="${PUB_CACHE:-$HOME/.pub-cache}"
     c "Building Linux release bundle in $BUILD_IMAGE (glibc ≤ $MAX_GLIBC)…"
-    # Same paths inside as outside (package_config.json and CMake caches hold absolute paths), the
-    # host's uid (keep-id), and no SELinux relabelling of the host's toolchain dirs. The app id goes
+    # The project is mounted at /nightdrop, not its own path: Flutter compiles the absolute URI of
+    # the generated plugin registrant into libapp.so, which otherwise named the builder's home
+    # directory in every download (self-audit 2026-10-13 B1). Its package_config.json entries for
+    # the project are relative, and the CMake cache is deleted above. The Flutter SDK, cargo and the
+    # pub cache keep their own paths (package_config.json holds those absolute; none of them ends up
+    # in the bundle, which the check after the build enforces). The host's uid (keep-id), and no
+    # SELinux relabelling of the host's toolchain dirs. The app id goes
     # in too: CMake compiles it into the binary (`APPLICATION_ID`), and without it a test-id
     # AppImage carried the test id's packaging around a binary that claimed `app.nightdrop`, so it
     # handed itself off to the real install's running instance.
     podman run --rm --userns=keep-id --security-opt label=disable \
-      -v "$PROJECT_ROOT:$PROJECT_ROOT" -v "$FLUTTER_HOME:$FLUTTER_HOME" \
+      -v "$PROJECT_ROOT:/nightdrop" -v "$FLUTTER_HOME:$FLUTTER_HOME" \
       -v "$CARGO:$CARGO" -v "$RUSTUP:$RUSTUP" -v "$PUB:$PUB" \
       -e HOME=/tmp/home -e PUB_CACHE="$PUB" -e CARGO_HOME="$CARGO" -e RUSTUP_HOME="$RUSTUP" \
       -e NIGHTDROP_APP_ID="$APP_ID" \
       -e CARGO_ENCODED_RUSTFLAGS="$RUST_REMAP" -e CFLAGS="$C_REMAP" -e CXXFLAGS="$C_REMAP" \
       -e PATH="$FLUTTER_HOME/bin:$CARGO/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin" \
-      -w "$APP_DIR" "$BUILD_IMAGE" \
+      -w "/nightdrop/app" "$BUILD_IMAGE" \
       bash -c 'mkdir -p "$HOME" && flutter config --no-analytics >/dev/null 2>&1; flutter build linux --release "$@"' \
       bash "${DEFINES[@]}"
   else
@@ -146,6 +151,15 @@ if [ "$DO_BUILD" = 1 ]; then
 fi
 
 [ -x "$BUNDLE_SRC/night_drop" ] || { err "bundle not found at $BUNDLE_SRC (run without --no-build)"; exit 1; }
+# Nothing in a download may name the builder's home directory (self-audit 2026-10-13 B1). A --host
+# build is exempt: it is a dev build and cannot avoid the project's real path.
+if [ "$IN_CONTAINER" = 1 ]; then
+  leaks=$(grep -rlaF "$HOME/" "$BUNDLE_SRC" 2>/dev/null || true)
+  if [ -n "$leaks" ]; then
+    err "the bundle names $HOME — refusing to package it:"; printf '  %s\n' $leaks >&2; exit 1
+  fi
+  ok "no builder path in the bundle"
+fi
 # The Rust security core MUST be in the bundle — an incremental Flutter build can silently drop it,
 # leaving an app that crashes at FFI init. Fail loudly (same guard as the desktop installer).
 [ -f "$BUNDLE_SRC/lib/libnightdrop.so" ] || {
