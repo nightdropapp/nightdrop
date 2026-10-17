@@ -898,6 +898,18 @@ E2E blobs — but observation ≠ decryption):
   retain it. This is a UX/hygiene feature, not an exfiltration defense.
 
 **Deliberately avoided leaks**
+- **Nothing in an attachment says where, when or on what it was made** (self-audit 2026-10-17).
+  Photos are re-encoded to JPEG on the device (orientation applied first) and the core then keeps
+  only the segments decoding needs, so EXIF (GPS, make, model, time), XMP, ICC and comments never
+  leave it. Videos are cleaned in place by the core (`node/media_scrub.rs`): MP4/MOV/3GP `udta`,
+  `meta` and top-level `uuid` boxes and any trailer after the last box become zeroed padding, and
+  the header timestamps are zeroed; Matroska/WebM tags, attachments, title and date, and AVI's
+  `INFO` and `IDIT`, likewise. Nothing moves, so picture and sound are bit for bit what was
+  recorded. A video whose container cannot be walked is not sent. What the picture itself shows
+  is the user's to judge.
+- **Only plain JPEGs are drawn.** A received image or video preview reaches the app's decoders
+  only as a Huffman-coded JPEG of sane size (`media_kind::displayable_image`), so a contact
+  cannot aim GIF/WebP/BMP/HEIF decoder bugs at an open chat.
 - **No third-party push.** Background delivery uses a local Android foreground service
   (#13), not FCM/APNs — so there is no push-provider metadata trail (who is notified,
   when) as there is in most mobile messengers. (iOS, which is hard to do without a

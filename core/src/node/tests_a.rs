@@ -1141,10 +1141,10 @@ fn media_on_a_real_network_is_deferred_off_the_lock_and_delivered_in_order() {
     alice
         .send_media(
             &bob_contact,
-            b"a small video",
+            &super::media_scrub::test_mp4(),
             "video/mp4",
             "video",
-            b"thumb",
+            super::media_scrub::TEST_JPEG,
         )
         .unwrap();
     let mine = |n: &Node| {
@@ -1191,7 +1191,10 @@ fn media_on_a_real_network_is_deferred_off_the_lock_and_delivered_in_order() {
         .into_iter()
         .find(|m| !m.from_me && m.kind == "video" && !m.media_id.is_empty())
         .expect("the attachment arrived");
-    assert_eq!(bob.media_plain(&got.media_id).unwrap(), b"a small video");
+    assert_eq!(
+        bob.media_plain(&got.media_id).unwrap(),
+        super::media_scrub::test_mp4()
+    );
     let _ = std::fs::remove_dir_all(format!("{}-a", dir.display()));
     let _ = std::fs::remove_dir_all(format!("{}-b", dir.display()));
 }
@@ -1235,15 +1238,15 @@ fn media_round_trips_e2e_and_is_sealed_at_rest() {
     let bob_contact = alice.contacts()[0].id.clone();
 
     // Alice sends an "image"; Bob receives it as a media message.
-    let pixels = vec![1u8, 2, 3, 4, 5, 6, 7, 8];
+    let pixels = super::media_scrub::TEST_JPEG.to_vec();
     alice
-        .send_media(&bob_contact, &pixels, "image/png", "image", &[])
+        .send_media(&bob_contact, &pixels, "image/jpeg", "image", &[])
         .unwrap();
     bob.pump().unwrap();
 
     let msg = bob.messages(&alice_contact).into_iter().last().unwrap();
     assert_eq!(msg.kind, "image");
-    assert_eq!(msg.mime, "image/png");
+    assert_eq!(msg.mime, "image/jpeg");
     assert_eq!(msg.media_size, pixels.len() as u64);
     assert!(!msg.media_id.is_empty());
 
@@ -1277,7 +1280,7 @@ fn only_a_plain_jpeg_is_handed_to_the_app_to_draw() {
     let jpeg = include_bytes!("../../tests/fixtures/small-baseline.jpg");
     for (bytes, mime) in [(&png[..], "image/png"), (&jpeg[..], "image/jpeg")] {
         alice
-            .send_media(&bob_contact, bytes, mime, "image", &[])
+            .send_media_unclean(&bob_contact, bytes, mime, "image")
             .unwrap();
     }
     bob.pump().unwrap();

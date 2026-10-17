@@ -17,9 +17,9 @@ fn backup_bundles_media_and_restores_it_on_a_fresh_device() {
     alice.pump().unwrap();
     let bob_contact = alice.contacts()[0].id.clone();
 
-    let pixels = vec![10u8, 20, 30, 40, 50];
+    let pixels = super::media_scrub::TEST_JPEG.to_vec();
     alice
-        .send_media(&bob_contact, &pixels, "image/png", "image", &[])
+        .send_media(&bob_contact, &pixels, "image/jpeg", "image", &[])
         .unwrap();
     bob.pump().unwrap();
     let media_id = bob
@@ -1284,7 +1284,13 @@ fn an_attachment_is_confirmed_by_a_receipt_naming_its_transfer_id() {
     let bob_contact = alice.contacts()[0].id.clone();
 
     alice
-        .send_media(&bob_contact, &[1u8, 2, 3, 4], "image/png", "image", &[])
+        .send_media(
+            &bob_contact,
+            super::media_scrub::TEST_JPEG,
+            "image/jpeg",
+            "image",
+            &[],
+        )
         .unwrap();
     let sent = alice.messages(&bob_contact).into_iter().last().unwrap();
     assert!(
@@ -1345,7 +1351,13 @@ fn an_attachment_that_arrives_twice_is_shown_once_and_still_receipted() {
     // Server storage on: the attachment goes direct AND to the relay, so both copies arrive.
     alice.set_remote_storage(&bob_contact, true).unwrap();
     alice
-        .send_media(&bob_contact, &[7u8, 8, 9], "image/png", "image", &[])
+        .send_media(
+            &bob_contact,
+            super::media_scrub::TEST_JPEG,
+            "image/jpeg",
+            "image",
+            &[],
+        )
         .unwrap();
 
     bob.pump().unwrap(); // the direct copy
@@ -1700,7 +1712,7 @@ fn a_burn_attachment_sends_no_thumbnail_and_no_preview_placeholder() {
     let alice_contact = bob.contacts()[0].id.clone();
 
     // A video, which is exactly the case that normally gets a thumbnail + "incoming" placeholder.
-    let payload = vec![42u8; 2048];
+    let payload = super::media_scrub::test_mp4();
     alice
         .send_burn_media(&bob_contact, &payload, "video/mp4", "video", 30)
         .unwrap();
@@ -1753,7 +1765,13 @@ fn a_burn_attachment_sends_no_thumbnail_and_no_preview_placeholder() {
 
     // An attachment nobody opens: at 24h it becomes a tombstone, and its sealed file still goes.
     alice
-        .send_burn_media(&bob_contact, &payload, "image/jpeg", "image", 30)
+        .send_burn_media(
+            &bob_contact,
+            super::media_scrub::TEST_JPEG,
+            "image/jpeg",
+            "image",
+            30,
+        )
         .unwrap();
     bob.pump().unwrap();
     let unopened = bob
@@ -1798,7 +1816,13 @@ fn a_burn_attachment_is_refused_when_the_peer_cannot_burn() {
         chat.contact.peer_supports_burn = None;
     }
     let err = alice
-        .send_burn_media(&bob_contact, &[1u8; 16], "image/png", "image", 30)
+        .send_burn_media(
+            &bob_contact,
+            super::media_scrub::TEST_JPEG,
+            "image/jpeg",
+            "image",
+            30,
+        )
         .expect_err("must refuse rather than send a permanent attachment");
     assert!(err.to_string().contains("cannot burn"));
 }
@@ -2542,7 +2566,7 @@ fn a_contacts_kind_and_mime_are_sanitised_on_receipt() {
         ("video", "video/webm", "video", "video/webm"),
     ] {
         alice
-            .send_media(&bob_contact, b"payload", mime, kind, &[])
+            .send_media_unclean(&bob_contact, b"payload", mime, kind)
             .unwrap();
         bob.pump().unwrap();
         let msg = bob.messages(&alice_contact).into_iter().last().unwrap();

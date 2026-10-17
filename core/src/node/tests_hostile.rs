@@ -223,7 +223,13 @@ fn thousands_of_mutated_frames_never_panic_or_change_who_is_paired() {
     corpus.push(intercept(&s.alice));
     s.bob.set_my_name(&alice_id, "Bob").ok();
     s.bob
-        .send_media(&alice_id, b"\x89PNGxx", "image/png", "image", &[])
+        .send_media(
+            &alice_id,
+            super::media_scrub::TEST_JPEG,
+            "image/jpeg",
+            "image",
+            &[],
+        )
         .unwrap();
     s.bob.send_burn(&alice_id, "burn", 30).ok();
     s.bob.send(&alice_id, "edit me").unwrap();

@@ -1054,7 +1054,20 @@ impl Node {
         kind: &str,
         thumb: &[u8],
     ) -> Result<()> {
-        self.send_media_inner(contact_id, data, mime, kind, thumb, 0)
+        self.send_media_inner(contact_id, data, mime, kind, thumb, 0, true)
+    }
+
+    /// [`send_media`](Self::send_media) without the sender's cleaning: what a contact running a
+    /// modified app can send, for tests of the receiving side.
+    #[cfg(test)]
+    pub(crate) fn send_media_unclean(
+        &mut self,
+        contact_id: &str,
+        data: &[u8],
+        mime: &str,
+        kind: &str,
+    ) -> Result<()> {
+        self.send_media_inner(contact_id, data, mime, kind, &[], 0, false)
     }
 
     /// Send an attachment as a **burn message**. Same gate as [`send_burn`](Self::send_burn):
@@ -1085,9 +1098,11 @@ impl Node {
                 "this contact's app version cannot burn messages — it would keep this one"
             );
         }
-        self.send_media_inner(contact_id, data, mime, kind, &[], burn_secs)
+        self.send_media_inner(contact_id, data, mime, kind, &[], burn_secs, true)
     }
 
+    // `clean` is false only for tests of the receiving side (`send_media_unclean`).
+    #[allow(clippy::too_many_arguments)]
     fn send_media_inner(
         &mut self,
         contact_id: &str,
@@ -1096,6 +1111,7 @@ impl Node {
         kind: &str,
         thumb: &[u8],
         burn_secs: u64,
+        clean: bool,
     ) -> Result<()> {
         if data.len() as u64 > MAX_MEDIA_BYTES {
             anyhow::bail!(
@@ -1121,6 +1137,33 @@ impl Node {
                 anyhow::bail!("this chat was deleted; create a new one to keep talking");
             }
         }
+        // Nothing about where, when or on what it was taken leaves this device: a video's metadata
+        // boxes become padding, a photo keeps only its coding segments (media_scrub.rs, self-audit
+        // 2026-10-17 P1). A video preview that will not clean is dropped, not the video.
+        let (cleaned, cleaned_thumb, mime) = if !clean {
+            (data.to_vec(), thumb.to_vec(), mime)
+        } else if kind == "video" {
+            let mut v = data.to_vec();
+            super::media_scrub::scrub_video(&mut v).map_err(|e| {
+                anyhow::anyhow!(
+                    "{e}: this video was not sent, so its recording details stay private"
+                )
+            })?;
+            let t = if thumb.is_empty() {
+                Vec::new()
+            } else {
+                super::media_scrub::scrub_jpeg(thumb).unwrap_or_default()
+            };
+            (v, t, mime)
+        } else {
+            let t = if thumb.is_empty() {
+                Vec::new()
+            } else {
+                super::media_scrub::scrub_jpeg(thumb).unwrap_or_default()
+            };
+            (super::media_scrub::scrub_jpeg(data)?, t, "image/jpeg")
+        };
+        let (data, thumb) = (&cleaned[..], &cleaned_thumb[..]);
         // Off the lock on a real network, as `send` does: an attachment is tens of megabytes over
         // Tor, and sending it inline held the core lock — every other call and the poller — for
         // the whole upload. The poller sends these in order, the pre-signal first.

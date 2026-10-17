@@ -454,6 +454,14 @@ mod tests {
             let data = std::fs::read(path).unwrap();
             if displayable_image(&data) {
                 ok += 1;
+                // With NIGHTDROP_JPEG_OUT set, also write what sending would make of it.
+                if let Ok(out) = std::env::var("NIGHTDROP_JPEG_OUT") {
+                    let clean = crate::node::media_scrub::scrub_jpeg(&data).unwrap();
+                    std::fs::write(std::path::Path::new(&out).join(format!("{ok}.jpg")), clean)
+                        .unwrap();
+                    std::fs::write(std::path::Path::new(&out).join(format!("{ok}.src")), path)
+                        .unwrap();
+                }
             } else {
                 refused += 1;
                 eprintln!("refused {:?}: {path}", jpeg_frame(&data));

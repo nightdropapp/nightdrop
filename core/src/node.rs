@@ -1519,6 +1519,7 @@ mod limits;
 pub(crate) use limits::sane_address;
 mod mailbox;
 mod media_kind;
+mod media_scrub;
 mod messaging;
 mod pairing;
 pub(crate) use pairing::InviteExtras;
