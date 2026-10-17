@@ -736,6 +736,10 @@ class AppLocalizationsEn extends AppLocalizations {
   String get nothingToPaste => 'Nothing to paste.';
 
   @override
+  String get imageUnreadable =>
+      'This picture couldn\'t be read, so it wasn\'t sent. Save it as JPEG or PNG and try again.';
+
+  @override
   String couldNotSendAttachment(String error) {
     return 'Could not send attachment: $error';
   }

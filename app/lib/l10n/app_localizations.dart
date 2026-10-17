@@ -1300,6 +1300,12 @@ abstract class AppLocalizations {
   /// **'Nothing to paste.'**
   String get nothingToPaste;
 
+  /// Snackbar when a chosen picture is in a format neither the app nor the system can decode. Night Drop never sends a picture it could not clean of its metadata.
+  ///
+  /// In en, this message translates to:
+  /// **'This picture couldn\'t be read, so it wasn\'t sent. Save it as JPEG or PNG and try again.'**
+  String get imageUnreadable;
+
   /// Snackbar when sending a media attachment fails.
   ///
   /// In en, this message translates to:

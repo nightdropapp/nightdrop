@@ -4,42 +4,19 @@ import 'dart:ui' show ImageFilter;
 
 import 'package:fc_native_video_thumbnail/fc_native_video_thumbnail.dart';
 import 'package:file_picker/file_picker.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:image/image.dart' as img;
 import 'package:open_filex/open_filex.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../app.dart';
+import '../../core/image_prep.dart';
 import '../../core/nightdrop_core.dart';
 import '../../core/media_cache.dart';
 import '../../core/models.dart';
 import '../../core/screenshot_detector.dart';
 import '../backup/backup_actions.dart';
 import 'verify_screen.dart';
-
-/// Downscale + recompress an image to JPEG so it's small enough to move over Tor quickly.
-/// Runs in a background isolate (via [compute]). Returns the original bytes on failure.
-Uint8List compressImage(Uint8List input) {
-  try {
-    final decoded = img.decodeImage(input);
-    if (decoded == null) return input;
-    const maxDim = 1600;
-    final scaled = (decoded.width > maxDim || decoded.height > maxDim)
-        ? img.copyResize(
-            decoded,
-            width: decoded.width >= decoded.height ? maxDim : null,
-            height: decoded.height > decoded.width ? maxDim : null,
-          )
-        : decoded;
-    final jpg = img.encodeJpg(scaled, quality: 82);
-    // Only use the recompressed version if it's actually smaller.
-    return jpg.length < input.length ? Uint8List.fromList(jpg) : input;
-  } catch (_) {
-    return input;
-  }
-}
 
 /// Largest attachment the core accepts (must match `MAX_MEDIA_BYTES` in the Rust core).
 const int kMaxMediaBytes = 100 * 1024 * 1024;
@@ -398,10 +375,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     var thumb = <int>[];
     if (isVideo && burnSecs == 0) {
       thumb = await _videoThumbnail(path);
-    } else if (!isVideo && ext != 'gif') {
-      // Images (except animated GIFs): downscale/recompress to JPEG off the UI thread so the
-      // transfer over Tor is fast. GIFs are left alone to preserve animation.
-      bytes = await compute(compressImage, bytes);
+    } else if (!isVideo) {
+      // Every picture leaves as a fresh JPEG with no metadata (no GPS, camera or time), whatever it
+      // was: the recipient's app draws nothing else. One that cannot be read is not sent at all,
+      // never sent as it was (image_prep.dart). An animated GIF sends its first frame.
+      final clean = await prepareImageForSending(bytes);
+      if (clean == null) {
+        if (mounted) _toast(l10n.imageUnreadable);
+        return;
+      }
+      bytes = clean;
       mime = 'image/jpeg';
     }
     if (burnSecs > 0) {
@@ -553,6 +536,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         scrollable: true,
         title: Text(l10n.editMessageTitle),
         content: TextField(
+          enableIMEPersonalizedLearning: false,
           controller: controller,
           autofocus: true,
           minLines: 1,
@@ -651,6 +635,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
         scrollable: true,
         title: Text(l10n.yourNameInChat),
         content: TextField(
+          enableIMEPersonalizedLearning: false,
           controller: controller,
           autofocus: true,
           decoration: const InputDecoration(hintText: kDefaultName),
@@ -690,6 +675,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
             Text(l10n.nameContactBody(contact.identityTag)),
             const SizedBox(height: 16),
             TextField(
+              enableIMEPersonalizedLearning: false,
               controller: controller,
               autofocus: true,
               decoration: InputDecoration(hintText: contact.theirName),
@@ -1918,9 +1904,16 @@ class _ImageViewer extends StatelessWidget {
               return Text(AppLocalizations.of(context)!.imageUnavailable,
                   style: const TextStyle(color: Colors.white));
             }
+            // Decoded at no more than twice the screen's size (never upscaled): a picture is at
+            // most 1600 px from a current sender, and this bounds what any older or hostile one
+            // can make the decoder allocate.
+            final view = MediaQuery.sizeOf(context);
+            final dpr = MediaQuery.devicePixelRatioOf(context);
             return InteractiveViewer(
               maxScale: 5,
-              child: Image.memory(snap.data!, fit: BoxFit.contain),
+              child: Image.memory(snap.data!,
+                  fit: BoxFit.contain,
+                  cacheWidth: (view.longestSide * dpr * 2).round()),
             );
           },
         ),
@@ -1988,6 +1981,7 @@ class _Composer extends StatelessWidget {
             ),
             Expanded(
               child: TextField(
+                enableIMEPersonalizedLearning: false,
                 controller: controller,
                 minLines: 1,
                 maxLines: 4,
