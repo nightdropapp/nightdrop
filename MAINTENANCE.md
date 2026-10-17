@@ -620,6 +620,13 @@ Traps, each of which has happened:
   reported healthy for 90 minutes while every client timed out; the website onion had no check
   and went dark while systemd called it active. The fix each time was an **end-to-end self-dial**
   plus a heartbeat logged every cycle — counters are worthless without evidence the log is growing.
+- **The inspector** (`core/examples/inspector.rs`) is a real core over Tor that pairs like any
+  contact and records exactly what arrives: each text with its byte count, each picture as the
+  app would draw it, each video as the app would open it. Commands go in `<dir>/cmd` (invite,
+  text, file, open a burn message, list the player dir). Use it as the far end when a check needs
+  the received bytes: metadata stripping, size limits, burn clean-up, relay store-and-forward
+  (stop it, send, start it). `cargo run -p nightdrop --features tor --example inspector -- <dir>
+  <relay.onion>`; keep `<dir>` outside /tmp if the identity should outlive a reboot.
 - **The test phones** are a Galaxy S25 and a Wi-Fi-only Galaxy S23, both on wireless adb (serials and
   addresses: `MAINTENANCE.local.md`).
 - **AppImage window icon**: GTK resolves it by theme name, so the AppDir ships

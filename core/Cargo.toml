@@ -118,3 +118,8 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 [[example]]
 name = "webtunnel_bootstrap"
 required-features = ["webtunnel"]
+
+# Device-pass inspector (MAINTENANCE.md §13): a real core over Tor that records what arrives.
+[[example]]
+name = "inspector"
+required-features = ["tor"]
