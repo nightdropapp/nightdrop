@@ -1,9 +1,234 @@
---- a/website/limits.html	2026-10-10 09:58:42.621975129 -0400
-+++ b/website/limits.html	2026-10-10 09:58:42.641592730 -0400
-@@ -246,6 +246,25 @@
+diff --git a/website/index.html b/website/index.html
+index 819f248..25bb728 100644
+--- a/website/index.html
++++ b/website/index.html
+@@ -5,7 +5,7 @@
+   <!-- No external resources: block any third-party script, style, font, image, or beacon —
+        nothing can track a visitor or exfiltrate. (frame-ancestors is ignored in a meta CSP; set
+        it plus X-Frame-Options as HTTP headers on the server for clickjacking protection.) -->
+-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
++  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+   <title>Night Drop — private messaging with no account and no phone number</title>
+   <meta name="description" content="Night Drop is a free, anonymous, end-to-end encrypted 1:1 messenger. No accounts, no server-side keys, no logs. Peer-to-peer over Tor, local-first storage." />
+@@ -77,6 +77,7 @@
+   <!-- Shared config (donation addresses, copy, download links). Generated from
+        config/app_config.json by `make config` — the single source of truth shared with the app. -->
+   <script src="config.js"></script>
++  <script src="site.js" defer></script>
+ </head>
+ <body>
+   <nav>
+@@ -158,8 +159,9 @@
+         <article class="card">
+           <h3>📷 Photos and videos, encrypted too</h3>
+           <p>Attachments travel end-to-end encrypted like every message, and are
+-             stored sealed on your device. Images are compressed on-device so they
+-             move fast over Tor.</p>
++             stored sealed on your device. Before anything is sent, the location, camera
++             model and time the phone wrote into a photo or video are removed, and images are
++             compressed on-device so they move fast over Tor.</p>
+         </article>
+         <article class="card">
+           <h3>🗝️ Backups you own</h3>
+@@ -176,8 +178,8 @@
+         </article>
+         <article class="card">
+           <h3>⏱️ Disappearing messages</h3>
+-          <p>Set a per-chat timer — an hour, a day, a week — and older messages delete
+-             themselves on both devices. It’s a shared setting, so changing it keeps both
++          <p>Set a per-chat timer — an hour, a day, a week — and messages sent from then on
++             delete themselves on both devices once they are that old. It’s a shared setting, so changing it keeps both
+              sides in sync.</p>
+         </article>
+         <article class="card">
+@@ -291,11 +293,11 @@
+       <p class="lead">One app, every device.</p>
+ 
+       <div class="downloads" id="download-links">
+-        <!--<a class="btn ghost" href="#">iOS</a>-->
+-        <a class="btn ghost" href="#">Android</a>
+-        <a class="btn ghost" href="#">Windows</a>
+-        <!--a class="btn ghost" href="#">macOS</a>-->
+-        <a class="btn ghost" href="#">Linux</a>
++        <!-- Working links with JavaScript off too (Tor Browser's Safest level); site.js replaces
++             them from config.js, with same-origin paths on the .onion mirror. -->
++        <a class="btn ghost" href="https://github.com/nightdropapp/nightdrop/releases/latest">Android</a>
++        <a class="btn ghost" href="https://github.com/nightdropapp/nightdrop/releases/latest/download/NightDropSetup.exe">Windows</a>
++        <a class="btn ghost" href="https://github.com/nightdropapp/nightdrop/releases/latest/download/Night_Drop-x86_64.AppImage">Linux</a>
+       </div>
+       <p class="fineprint">
+         The Android button opens the list of builds so you can pick one. The universal build runs
+@@ -325,81 +327,6 @@
+   <!-- Populate the parts that change (addresses, copy, download links) from the shared config
+        so they stay in sync with the app. Falls back to the static HTML above if config.js is
+        absent (e.g. opened without `make config`). -->
+-  <script>
+-    (function () {
+-      var c = window.NIGHTDROP_CONFIG;
+-      if (!c) return;
+-      function esc(s) {
+-        return String(s).replace(/[&<>"]/g, function (m) {
+-          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m];
+-        });
+-      }
+-      function setText(id, txt) {
+-        var e = document.getElementById(id);
+-        if (e && txt) e.textContent = txt;
+-      }
+-      if (c.links && c.links.source) {
+-        var src = document.getElementById('source-link');
+-        if (src) src.href = c.links.source;
+-      }
+-      if (c.app) {
+-        setText('hero-headline', c.app.headline);
+-        setText('hero-tagline', c.app.tagline);
+-        setText('donate-blurb', c.app.blurb);
+-        if (c.app.name) document.title = c.app.name + ' — private messaging with no account and no phone number';
+-      }
+-      if (Array.isArray(c.donations) && c.donations.length) {
+-        var grid = document.getElementById('donate-grid');
+-        if (grid) {
+-          grid.innerHTML = c.donations.map(function (d) {
+-            return '<article class="card coin"><h3>' + esc(d.name) + ' (' + esc(d.ticker) +
+-              ')</h3><p class="muted">' + esc(d.note || '') + '</p><code class="addr">' +
+-              esc(d.address) + '</code></article>';
+-          }).join('');
+-        }
+-      }
+-      if (c.downloads) {
+-        // On the .onion mirror, serve the binaries from this same origin so a visitor never has
+-        // to leave Tor for a clearnet endpoint (GitHub) to download. On clearnet, keep the GitHub
+-        // release links. downloads_onion holds the same-origin /applications/ paths.
+-        var onion = /\.onion$/i.test(location.hostname);
+-        var src = (onion && c.downloads_onion) ? c.downloads_onion : c.downloads;
+-        var box = document.getElementById('download-links');
+-        if (box) {
+-          var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
+-          // Emit only an http(s) URL, or a same-origin /applications/ path (the .onion mirror).
+-          // Never a javascript:/data: scheme, even if the config were tampered with. esc() handles
+-          // characters; this guards the scheme.
+-          var usable = function (u) {
+-            return !!u && (/^https?:\/\//i.test(u) || /^\/applications\/[\w.\/-]+$/.test(u));
+-          };
+-          // A platform with no download configured is OMITTED, not rendered as a dead `#` button.
+-          // config/app_config.json ships empty strings for the platforms that have no build yet
+-          // (windows, and ios/macos which are not in `labels`), and a download button that goes
+-          // nowhere reads as a broken site to the one visitor who came to download.
+-          box.innerHTML = Object.keys(labels).filter(function (k) { return usable(src[k]); })
+-            .map(function (k) {
+-              var url = src[k];
+-              // `download` only for a link to an actual file. Android points at a folder (the
+-              // .onion mirror) or the release page (clearnet) so the visitor picks their build;
+-              // marking those `download` would save the listing page itself instead of opening it.
+-              var dl = /\.[A-Za-z0-9]+$/.test(url) ? ' download' : '';
+-              return '<a class="btn ghost"' + dl + ' href="' + esc(url) + '">' + labels[k] + '</a>';
+-            }).join('');
+-        }
+-      }
+-    })();
+-  </script>
+ 
+-  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
+-  <script>
+-    (function () {
+-      var nav = document.querySelector('nav');
+-      if (!nav) return;
+-      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+-      onScroll();
+-      window.addEventListener('scroll', onScroll, { passive: true });
+-    })();
+-  </script>
+ </body>
+ </html>
+diff --git a/website/limits.html b/website/limits.html
+index 23d0286..4ef3709 100644
+--- a/website/limits.html
++++ b/website/limits.html
+@@ -5,7 +5,7 @@
+   <!-- No external resources: block any third-party script, style, font, image, or beacon —
+        nothing can track a visitor or exfiltrate. (frame-ancestors is ignored in a meta CSP; set
+        it plus X-Frame-Options as HTTP headers on the server for clickjacking protection.) -->
+-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
++  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
+   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+   <title>Night Drop — What we can't protect you from</title>
+   <meta name="description" content="An honest account of Night Drop's limits: what our design protects, what is out of scope, and where the app is still being hardened. No overpromises." />
+@@ -49,40 +49,11 @@
+     "isPartOf": { "@id": "https://nightdrop.app/#website" }
+   }
+   </script>
+-  <style>
+-    /* Page-scoped accents (kept out of the shared stylesheet). */
+-    .page-head { max-width: 760px; margin: 0 auto; padding: 60px 24px 0; text-align: center; }
+-    .page-head h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 16px; }
+-    .callout {
+-      max-width: 820px;
+-      margin: 0 auto;
+-      background: var(--card);
+-      border: 1px solid var(--border);
+-      border-left: 4px solid var(--accent);
+-      border-radius: 12px;
+-      padding: 20px 24px;
+-    }
+-    .callout.warn { border-left-color: #e0b341; }
+-    .callout h3 { margin: 0 0 8px; }
+-    .callout p { margin: 0; color: var(--muted); }
+-    .card h3 .pill {
+-      font-size: 0.7rem;
+-      font-weight: 600;
+-      color: var(--bg);
+-      background: var(--accent-2);
+-      border-radius: 999px;
+-      padding: 2px 8px;
+-      margin-left: 8px;
+-      vertical-align: middle;
+-    }
+-    .card h3 .pill.scope { background: #e0b341; }
+-    .backlink { display: inline-block; margin-top: 8px; color: var(--muted); }
+-  </style>
+ </head>
+ <body>
+   <nav>
+     <div class="nav-inner">
+-      <span class="brand"><a href="index.html" style="color:inherit;display:inline-flex;align-items:center;gap:8px;"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</a></span>
++      <span class="brand"><a href="index.html" class="brand-link"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</a></span>
+       <div class="nav-links">
+         <a href="index.html#features">Features</a>
+         <a href="index.html#why">Why it's different</a>
+@@ -91,7 +62,7 @@
+       </div>
+     </div>
+   </nav>
+-  <header class="hero" style="padding-bottom: 40px;">
++  <header class="hero page-hero">
+     <div class="page-head">
+       <h1>What we can't protect you from</h1>
+       <p class="tagline">
+@@ -216,7 +187,7 @@
+            has, we won't claim more than that — and we'll publish the audit and its fixes when it's
+            done. Treat Night Drop as promising and improving, not battle-tested.</p>
+       </div>
+-      <div class="callout warn" style="margin-top: 20px;">
++      <div class="callout warn spaced">
+         <h3>A seized phone still reveals who you talk to</h3>
+         <p>The app lock encrypts your messages. It does <strong>not</strong> yet cover the file that
+            holds your own Tor address, or the one folder Tor keeps per contact — each named after
+@@ -228,7 +199,7 @@
+            those into the encrypted store too; until that ships, assume a seized phone shows who
+            you have been talking to.</p>
+       </div>
+-      <div class="callout warn" style="margin-top: 20px;">
++      <div class="callout warn spaced">
+         <h3>What a relay can still link about your offline messages</h3>
+         <p>Messages sent while you are offline wait on a relay. From 0.1.26 each chat drops them in
+            its own mailbox, under an address that changes every day, and your phone collects them in
+@@ -245,7 +216,26 @@
+            is wrong by more than three hours, a message can go to a mailbox nobody checks and expire
             unread after 24 hours. Messages delivered directly are unaffected.</p>
        </div>
-       <div class="callout warn" style="margin-top: 20px;">
+-      <div class="callout warn" style="margin-top: 20px;">
++      <div class="callout warn spaced">
 +        <h3>&ldquo;Direct only&rdquo; tells your contacts when you come online.</h3>
 +        <p>From 0.2 you can use Night Drop with no relay at all. Then nothing about your messages
 +           ever touches a server &mdash; but messages to you wait on your contacts' phones and are
@@ -13,7 +238,7 @@
 +        <p>It also means two people on direct only must be online at the same time for a message to
 +           arrive. It waits on the sender's phone until then, with no 24-hour limit.</p>
 +      </div>
-+      <div class="callout warn" style="margin-top: 20px;">
++      <div class="callout warn spaced">
 +        <h3>Your QR code lets one person knock, for one day.</h3>
 +        <p>So that pairing needs no server, your invite carries a key that lets whoever has it reach
 +           your phone even once it only accepts your contacts. That gets their chat request to you,
@@ -22,11 +247,29 @@
 +           a photo of your QR code posted online lets at most one stranger send you a request you can
 +           decline.</p>
 +      </div>
-+      <div class="callout warn" style="margin-top: 20px;">
++      <div class="callout warn spaced">
          <h3>Bridges beat a blocked relay list. Traffic inspection is tested, not proven.</h3>
          <p>If your network blocks Tor by blocking the public list of relays, a bridge is an
             unlisted way in. If it instead inspects traffic and blocks Tor by how it <em>looks</em>,
-@@ -282,11 +301,12 @@
+@@ -263,7 +253,7 @@
+            ordinary the handshake is. If being identified as a Tor user is itself dangerous where
+            you are, do not rely on this alone.</p>
+       </div>
+-      <div class="callout warn" style="margin-top: 20px;">
++      <div class="callout warn spaced">
+         <h3>&ldquo;Get bridges&rdquo; does not go through Tor.</h3>
+         <p>From 0.1.28 the bridges screen can ask the Tor Project for WebTunnel bridges. That one
+            request has to work when Tor cannot, so it goes <strong>directly</strong>, disguised as
+@@ -274,7 +264,7 @@
+            bridges yourself. If being seen contacting the Tor Project is itself dangerous where you
+            are, get bridges another way.</p>
+       </div>
+-      <div class="grid" style="margin-top: 28px;">
++      <div class="grid spaced-lg">
+         <article class="card">
+           <h3>🧪 Real-world Tor testing is ongoing <span class="pill">in progress</span></h3>
+           <p>The full messaging flow is verified end to end in automated tests, and the Tor path
+@@ -282,11 +272,12 @@
               networks, and conditions is still underway. Expect rough edges on flaky connections.</p>
          </article>
          <article class="card">
@@ -44,16 +287,179 @@
          </article>
          <article class="card">
            <h3>🎞️ Opening an attachment in another app <span class="pill">in progress</span></h3>
---- a/website/index.html	2026-10-11 20:26:17.158202649 -0400
-+++ b/website/index.html	2026-10-11 20:26:17.174152163 -0400
-@@ -176,8 +176,8 @@
-         </article>
-         <article class="card">
-           <h3>⏱️ Disappearing messages</h3>
--          <p>Set a per-chat timer — an hour, a day, a week — and older messages delete
--             themselves on both devices. It’s a shared setting, so changing it keeps both
-+          <p>Set a per-chat timer — an hour, a day, a week — and messages sent from then on
-+             delete themselves on both devices once they are that old. It’s a shared setting, so changing it keeps both
-              sides in sync.</p>
-         </article>
-         <article class="card">
+@@ -310,7 +301,7 @@
+     <section class="section">
+       <h2>So what <em>can</em> you count on?</h2>
+       <div class="callout">
+-        <p style="color: var(--text);">
++        <p class="strong-text">
+           Within those honest limits, Night Drop is designed so that <strong>we hold no key to
+           your messages, keep no logs, and store no account that could be seized or subpoenaed.</strong>
+           Any server only ever sees sealed, unreadable blobs under short-lived, unlinkable handles.
+@@ -319,12 +310,12 @@
+           dropped, and opened by no one in between.
+         </p>
+       </div>
+-      <p class="lead" style="margin-top: 32px;">
++      <p class="lead spaced-xl">
+         Read the full design and threat model in the open — the
+         <a href="https://github.com/nightdropapp/nightdrop" id="source-link">source and documentation</a> spell out every
+         claim on this page, including these limits.
+       </p>
+-      <p style="text-align:center;">
++      <p class="centered">
+         <a class="btn ghost" href="index.html">← Back to Night Drop</a>
+       </p>
+     </section>
+@@ -337,25 +328,7 @@
+ 
+   <!-- Point the "source and documentation" link at the real repo when config.js is present. -->
+   <script src="config.js"></script>
+-  <script>
+-    (function () {
+-      var c = window.NIGHTDROP_CONFIG;
+-      if (c && c.links && c.links.source) {
+-        var e = document.getElementById('source-link');
+-        if (e) e.href = c.links.source;
+-      }
+-    })();
+-  </script>
++  <script src="site.js" defer></script>
+ 
+-  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
+-  <script>
+-    (function () {
+-      var nav = document.querySelector('nav');
+-      if (!nav) return;
+-      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
+-      onScroll();
+-      window.addEventListener('scroll', onScroll, { passive: true });
+-    })();
+-  </script>
+ </body>
+ </html>
+diff --git a/website/site.js b/website/site.js
+new file mode 100644
+index 0000000..a0e6944
+--- /dev/null
++++ b/website/site.js
+@@ -0,0 +1,76 @@
++// The site's only script, shared by every page. It lives in a file, not inline, so the pages can be
++// served with `script-src 'self'` and no 'unsafe-inline' (deploy/nginx-nightdrop*.conf): an
++// injected inline script then does not run. Elements are built with the DOM API, never innerHTML,
++// so `require-trusted-types-for 'script'` holds too.
++(function () {
++  'use strict';
++
++  function el(tag, cls, text) {
++    var e = document.createElement(tag);
++    if (cls) e.className = cls;
++    if (text) e.textContent = text;
++    return e;
++  }
++  function setText(id, txt) {
++    var e = document.getElementById(id);
++    if (e && txt) e.textContent = String(txt);
++  }
++
++  // Apply config.js (window.NIGHTDROP_CONFIG), when it is present.
++  var c = window.NIGHTDROP_CONFIG;
++  if (c) {
++    if (c.links && c.links.source) {
++      var src = document.getElementById('source-link');
++      if (src && /^https:\/\//i.test(c.links.source)) src.href = c.links.source;
++    }
++    // Only the home page has the hero text and takes its title from the config.
++    if (c.app && document.getElementById('hero-headline')) {
++      setText('hero-headline', c.app.headline);
++      setText('hero-tagline', c.app.tagline);
++      setText('donate-blurb', c.app.blurb);
++      if (c.app.name) document.title = c.app.name + ' — private messaging with no account and no phone number';
++    }
++    var grid = document.getElementById('donate-grid');
++    if (grid && Array.isArray(c.donations) && c.donations.length) {
++      grid.textContent = '';
++      c.donations.forEach(function (d) {
++        var card = el('article', 'card coin');
++        card.appendChild(el('h3', null, d.name + ' (' + d.ticker + ')'));
++        card.appendChild(el('p', 'muted', d.note || ''));
++        card.appendChild(el('code', 'addr', d.address));
++        grid.appendChild(card);
++      });
++    }
++    var box = document.getElementById('download-links');
++    if (box && c.downloads) {
++      // On the .onion mirror, serve the binaries from this same origin so a visitor never has to
++      // leave Tor for a clearnet endpoint (GitHub). downloads_onion holds the /applications/ paths.
++      var onion = /\.onion$/i.test(location.hostname);
++      var links = (onion && c.downloads_onion) ? c.downloads_onion : c.downloads;
++      var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
++      // Only an http(s) URL or a same-origin /applications/ path, never a javascript:/data: scheme,
++      // even if the config were tampered with.
++      var usable = function (u) {
++        return typeof u === 'string' && (/^https?:\/\//i.test(u) || /^\/applications\/[\w.\/-]+$/.test(u));
++      };
++      box.textContent = '';
++      // A platform with no download configured is left out, not shown as a dead button.
++      Object.keys(labels).filter(function (k) { return usable(links[k]); }).forEach(function (k) {
++        var a = el('a', 'btn ghost', labels[k]);
++        a.href = links[k];
++        // `download` only for a link to an actual file. Android points at a folder (onion) or the
++        // release page (clearnet), where `download` would save the listing page instead.
++        if (/\.[A-Za-z0-9]+$/.test(links[k])) a.setAttribute('download', '');
++        box.appendChild(a);
++      });
++    }
++  }
++
++  // Frosted-glass sticky header: add .scrolled once the page leaves the top.
++  var nav = document.querySelector('nav');
++  if (nav) {
++    var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
++    onScroll();
++    window.addEventListener('scroll', onScroll, { passive: true });
++  }
++})();
+diff --git a/website/styles.css b/website/styles.css
+index 421fe2a..73b4859 100644
+--- a/website/styles.css
++++ b/website/styles.css
+@@ -187,3 +187,38 @@ footer .muted { font-size: 0.9rem; }
+   .nav-links { display: none; }
+ }
+ 
++
++/* Limits page (moved out of an inline <style> so the CSP needs no 'unsafe-inline'). */
++.page-head { max-width: 760px; margin: 0 auto; padding: 60px 24px 0; text-align: center; }
++.page-head h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 16px; }
++.callout {
++  max-width: 820px;
++  margin: 0 auto;
++  background: var(--card);
++  border: 1px solid var(--border);
++  border-left: 4px solid var(--accent);
++  border-radius: 12px;
++  padding: 20px 24px;
++}
++.callout.warn { border-left-color: #e0b341; }
++.callout h3 { margin: 0 0 8px; }
++.callout p { margin: 0; color: var(--muted); }
++.card h3 .pill {
++  font-size: 0.7rem;
++  font-weight: 600;
++  color: var(--bg);
++  background: var(--accent-2);
++  border-radius: 999px;
++  padding: 2px 8px;
++  margin-left: 8px;
++  vertical-align: middle;
++}
++.card h3 .pill.scope { background: #e0b341; }
++.backlink { display: inline-block; margin-top: 8px; color: var(--muted); }
++.brand-link { color: inherit; display: inline-flex; align-items: center; gap: 8px; }
++.hero.page-hero { padding-bottom: 40px; }
++.spaced { margin-top: 20px; }
++.spaced-lg { margin-top: 28px; }
++.spaced-xl { margin-top: 32px; }
++.strong-text { color: var(--text); }
++.centered { text-align: center; }
