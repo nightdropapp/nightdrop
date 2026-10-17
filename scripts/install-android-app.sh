@@ -18,6 +18,8 @@ NC='\033[0m' # No Color
 source "$(dirname "$0")/lib/flutter-sdk.sh"
 # shellcheck source=lib/keys.sh
 source "$(dirname "$0")/lib/keys.sh"
+# shellcheck source=lib/sandbox.sh
+source "$(dirname "$0")/lib/sandbox.sh"
 # This script lives in scripts/; the repo root is its parent.
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ADB="${ADB:-}"
@@ -344,7 +346,7 @@ build_apk() {
     export_android_sdk
 
     log_info "Running: flutter pub get"
-    "$FLUTTER" pub get
+    nd_sandbox "$FLUTTER" pub get
 
     log_warn "First build may take several minutes (Rust cross-compile)"
 
@@ -395,7 +397,11 @@ build_apk() {
         log_info "No device to query - building a universal APK"
     fi
 
-    if "$FLUTTER" build apk "--$BUILD_MODE" "${split[@]}" "${defines[@]}" 2>&1; then
+    # Third-party build code runs sandboxed (scripts/lib/sandbox.sh); only a release build of the
+    # real app, which Gradle signs, sees the release keystore.
+    local sbx=()
+    [ "$BUILD_MODE" == "release" ] && [ "$NIGHTDROP_APP_ID" = "app.nightdrop" ] && sbx=(--keys)
+    if nd_sandbox "${sbx[@]}" "$FLUTTER" build apk "--$BUILD_MODE" "${split[@]}" "${defines[@]}" 2>&1; then
         local dir="$PROJECT_ROOT/app/build/app/outputs/flutter-apk"
         # Install the split matching this device; a release build made all three, a debug build
         # made only this one. Fall back to the universal when there is no per-ABI file.
@@ -434,7 +440,7 @@ build_apk() {
                && [ "${NO_DEPLOY_WEB:-0}" != 1 ] \
                && [ -f "$PROJECT_ROOT/website/applications/android/NightDrop.apk" ]; then
                 log_info "Also building the universal APK for the website"
-                "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" 2>&1 | tail -2 \
+                nd_sandbox "${sbx[@]}" "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" 2>&1 | tail -2 \
                     || log_warn "universal build failed — the website's universal download will lag"
             fi
             return 0

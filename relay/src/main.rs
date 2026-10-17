@@ -62,7 +62,7 @@ use tokio::runtime::Runtime;
 use tor_cell::relaycell::msg::Connected;
 use tor_config_path::CfgPath;
 use tor_hsservice::config::restricted_discovery::DirectoryKeyProviderBuilder;
-use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder};
+use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder, TokenBucketConfig};
 use tor_hsservice::{handle_rend_requests, HsNickname};
 
 const USAGE: &str = "\
@@ -960,6 +960,15 @@ const RELAY_INTRO_POINTS: u8 = 6;
 /// Most streams one client circuit may have open at once (see `relay_onion_config`).
 const RELAY_STREAMS_PER_CIRCUIT: u32 = 16;
 
+/// Introduction requests each introduction point passes on to the relay: per second, and the
+/// burst. Sent to the intro points (the `DOS_PARAMS` extension) and enforced by them, so a flood
+/// of connection attempts is cut off in the Tor network before it reaches this machine. These are
+/// C tor's defaults for `HiddenServiceEnableIntroDoSDefense`. Legitimate load is far below: a
+/// request is one new rendezvous circuit (a client's connection), not one message. Proof of work
+/// (arti's `hs-pow-full`) is still experimental in arti 0.47, so not used (MAINTENANCE.md §14).
+const RELAY_INTRO_RATE: u32 = 25;
+const RELAY_INTRO_BURST: u32 = 200;
+
 /// How often the watchdog proves reachability with an end-to-end self-dial. Each probe costs one
 /// descriptor fetch and one rendezvous circuit, so this is deliberately minutes rather than the
 /// 30s of the old status poll — a status read was free, evidence is not.
@@ -1036,6 +1045,10 @@ fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<On
     // all MAX_CONCURRENT_STREAMS slots. A client opens one stream per request and runs only a few
     // at once; past this the circuit is torn down (self-audit 2026-10-13, third round).
     builder.max_concurrent_streams_per_circuit(RELAY_STREAMS_PER_CIRCUIT);
+    builder.rate_limit_at_intro(Some(TokenBucketConfig::new(
+        RELAY_INTRO_RATE,
+        RELAY_INTRO_BURST,
+    )));
     if nightdrop::transport::client_auth::authorized_count(Path::new(auth_dir)) > 0 {
         let mut provider = DirectoryKeyProviderBuilder::default();
         provider
@@ -1502,5 +1515,22 @@ mod tests {
             nightdrop::relay_client::parse_response_line(&core.handle_line(line.trim())).unwrap();
         assert!(response.ok);
         assert!(core.snapshot().is_empty());
+    }
+
+    #[test]
+    fn the_relay_asks_its_intro_points_to_rate_limit() {
+        let dir = std::env::temp_dir().join(format!("nd-relay-cfg-{}", std::process::id()));
+        let cfg = super::relay_onion_config("nd".parse().unwrap(), dir.to_str().unwrap()).unwrap();
+        assert_eq!(
+            cfg.rate_limit_at_intro().as_ref(),
+            Some(&super::TokenBucketConfig::new(
+                super::RELAY_INTRO_RATE,
+                super::RELAY_INTRO_BURST
+            ))
+        );
+        assert_eq!(
+            *cfg.max_concurrent_streams_per_circuit(),
+            super::RELAY_STREAMS_PER_CIRCUIT
+        );
     }
 }

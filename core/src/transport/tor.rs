@@ -29,7 +29,7 @@ use tor_cell::relaycell::msg::Connected;
 use tor_config_path::CfgPath;
 use tor_hscrypto::pk::HsId;
 use tor_hsservice::config::restricted_discovery::DirectoryKeyProviderBuilder;
-use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder};
+use tor_hsservice::config::{OnionServiceConfig, OnionServiceConfigBuilder, TokenBucketConfig};
 use tor_hsservice::{handle_rend_requests, HsNickname, RunningOnionService};
 use tor_keymgr::KeystoreSelector;
 use tor_llcrypto::pk::ed25519;
@@ -146,6 +146,14 @@ const INBOUND_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 /// uses one warm stream, plus a few while a send overlaps a reconnect. The relay's limit, for the
 /// same reason (self-audit 2026-10-13 R3, 2026-10-17 P6).
 const INBOUND_STREAMS_PER_CIRCUIT: u32 = 16;
+
+/// Introduction requests each of a device's introduction points passes on: per second, and the
+/// burst. Enforced by the intro points themselves (the `DOS_PARAMS` extension), so a flood of
+/// connection attempts at a device's onion is dropped in the Tor network instead of waking the
+/// phone for each one. A request is one new connection from a contact or an inviter, which happens
+/// a few times a minute at most; the burst covers every contact reconnecting at once.
+const INBOUND_INTRO_RATE: u32 = 5;
+const INBOUND_INTRO_BURST: u32 = 100;
 
 /// How often the reaper looks for streams that have gone idle. Interruptible (it sleeps on the
 /// transport's [`StopSignal`]), so this only sets how *late* a stream is closed, never how long a
@@ -1446,6 +1454,10 @@ fn onion_service_config(
     // circuit, and battery matters on mobile — so this trades a little upkeep for reachability.
     builder.num_intro_points(4);
     builder.max_concurrent_streams_per_circuit(INBOUND_STREAMS_PER_CIRCUIT);
+    builder.rate_limit_at_intro(Some(TokenBucketConfig::new(
+        INBOUND_INTRO_RATE,
+        INBOUND_INTRO_BURST,
+    )));
     if let Some(dir) = client_auth_dir {
         if client_auth::authorized_count(std::path::Path::new(dir)) > 0 {
             let mut provider = DirectoryKeyProviderBuilder::default();
@@ -1862,6 +1874,18 @@ mod stall_tests {
         assert_eq!(
             *cfg.max_concurrent_streams_per_circuit(),
             INBOUND_STREAMS_PER_CIRCUIT
+        );
+    }
+
+    #[test]
+    fn our_onion_asks_its_intro_points_to_rate_limit() {
+        let cfg = onion_service_config("nd".parse().unwrap(), None).unwrap();
+        assert_eq!(
+            cfg.rate_limit_at_intro().as_ref(),
+            Some(&TokenBucketConfig::new(
+                INBOUND_INTRO_RATE,
+                INBOUND_INTRO_BURST
+            ))
         );
     }
 
