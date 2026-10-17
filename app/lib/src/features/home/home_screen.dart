@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../app.dart';
+import '../../core/network_watch.dart';
 import '../../core/screenshot_detector.dart';
 import '../../core/app_config.dart';
 import '../../core/app_version.dart';
@@ -119,6 +120,7 @@ class HomeScreen extends StatelessWidget {
           _OnionBanner(core: core),
           const _BackgroundStoppedBanner(),
           _RelayHealthBanner(core: core),
+          _NetworkChangeBanner(core: core),
           _DirectOnlyNote(core: core),
           _ProtocolBreakBanner(core: core),
           _BackupReminderBanner(core: core),
@@ -647,6 +649,88 @@ class _DirectOnlyNote extends StatelessWidget {
             ),
           );
         },
+      ),
+    );
+  }
+}
+
+/// "Network changed — reconnecting to Tor": shown from a network switch until the relay answers
+/// again (at least [_minShown], at most [_maxShown]). See [NetworkWatch].
+class _NetworkChangeBanner extends StatefulWidget {
+  const _NetworkChangeBanner({required this.core});
+
+  final NightdropCore core;
+
+  @override
+  State<_NetworkChangeBanner> createState() => _NetworkChangeBannerState();
+}
+
+class _NetworkChangeBannerState extends State<_NetworkChangeBanner> {
+  static const _minShown = Duration(seconds: 30);
+  static const _maxShown = Duration(minutes: 4);
+  final _watch = NetworkWatch();
+  Timer? _recheck;
+  bool _showing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _watch.addListener(_changed);
+    _watch.start();
+  }
+
+  void _changed() {
+    setState(() => _showing = true);
+    _recheck?.cancel();
+    _recheck = Timer.periodic(const Duration(seconds: 6), (_) => _settle());
+  }
+
+  /// Hide once the relay is reachable again after the minimum, or at the maximum regardless.
+  Future<void> _settle() async {
+    final since = DateTime.now().difference(_watch.changedAt ?? DateTime.now());
+    var done = since >= _maxShown;
+    if (!done && since >= _minShown) {
+      final health = await widget.core.relayHealth();
+      done = health.isEmpty || health.every((h) => h.reachable);
+    }
+    if (done && mounted) {
+      _recheck?.cancel();
+      setState(() => _showing = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _recheck?.cancel();
+    _watch.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_showing) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    return Material(
+      color: scheme.secondaryContainer,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: scheme.onSecondaryContainer),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                AppLocalizations.of(context)!.networkChangedReconnecting,
+                style: TextStyle(color: scheme.onSecondaryContainer, fontSize: 12.5),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

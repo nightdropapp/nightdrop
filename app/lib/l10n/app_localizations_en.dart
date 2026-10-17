@@ -740,6 +740,10 @@ class AppLocalizationsEn extends AppLocalizations {
       'This picture couldn\'t be read, so it wasn\'t sent. Save it as JPEG or PNG and try again.';
 
   @override
+  String get networkChangedReconnecting =>
+      'Network changed — reconnecting to Tor. Messages and new chats can take a minute or two.';
+
+  @override
   String get blockCaptureMenu => 'Block screenshots';
 
   @override

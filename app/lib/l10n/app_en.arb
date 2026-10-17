@@ -974,6 +974,8 @@
   "@imageUnreadable": {
     "description": "Snackbar when a chosen picture is in a format neither the app nor the system can decode. Night Drop never sends a picture it could not clean of its metadata."
   },
+  "networkChangedReconnecting": "Network changed — reconnecting to Tor. Messages and new chats can take a minute or two.",
+  "@networkChangedReconnecting": {"description": "Banner shown after the device switches networks, while Tor rebuilds its connections."},
   "blockCaptureMenu": "Block screenshots",
   "@blockCaptureMenu": {"description": "Menu item for the opt-in setting that blocks screenshots and screen recording of the app (Android)."},
   "blockCaptureTitle": "Block screenshots",

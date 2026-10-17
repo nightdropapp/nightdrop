@@ -1306,6 +1306,12 @@ abstract class AppLocalizations {
   /// **'This picture couldn\'t be read, so it wasn\'t sent. Save it as JPEG or PNG and try again.'**
   String get imageUnreadable;
 
+  /// Banner shown after the device switches networks, while Tor rebuilds its connections.
+  ///
+  /// In en, this message translates to:
+  /// **'Network changed — reconnecting to Tor. Messages and new chats can take a minute or two.'**
+  String get networkChangedReconnecting;
+
   /// Menu item for the opt-in setting that blocks screenshots and screen recording of the app (Android).
   ///
   /// In en, this message translates to:
