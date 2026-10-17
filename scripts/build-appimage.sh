@@ -162,8 +162,11 @@ if [ "$DO_BUILD" = 1 ]; then
     # the checkout it has no business writing are read-only (website/ is the live onion site),
     # and the relay's Tor keys, the GitLab token and the Android signing properties are hidden
     # (MAINTENANCE.md §8, the same rules as scripts/lib/sandbox.sh).
+    # An empty directory over each relay-state*, bound like the project: a `--mount type=tmpfs`
+    # there was applied under the project's bind and hid nothing (a planted key stayed readable).
+    EMPTY_DIR="$(mktemp -d)"
     HIDE=()
-    for d in "$PROJECT_ROOT"/relay-state*; do [ -d "$d" ] && HIDE+=(--mount "type=tmpfs,destination=/nightdrop/$(basename "$d")"); done
+    for d in "$PROJECT_ROOT"/relay-state*; do [ -d "$d" ] && HIDE+=(-v "$EMPTY_DIR:/nightdrop/$(basename "$d"):ro"); done
     for d in website .git scripts .github Makefile; do
       [ -e "$PROJECT_ROOT/$d" ] && HIDE+=(-v "$PROJECT_ROOT/$d:/nightdrop/$d:ro")
     done
@@ -180,6 +183,7 @@ if [ "$DO_BUILD" = 1 ]; then
       -w "/nightdrop/app" "$BUILD_IMAGE" \
       bash -c 'mkdir -p "$HOME" && flutter config --no-analytics >/dev/null 2>&1; flutter build linux --release "$@"' \
       bash "${DEFINES[@]}"
+    rmdir "$EMPTY_DIR"
     # The container saw the project at /nightdrop and wrote that path into the checkout's generated
     # plugin list (.flutter-plugins-dependencies), which breaks a plain Gradle or CMake run on this
     # machine until Flutter regenerates it. Regenerate it now with this machine's paths.
