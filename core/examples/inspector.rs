@@ -83,7 +83,9 @@ fn main() -> anyhow::Result<()> {
                     .find(|s| !s.is_empty())
                     .cloned()
                     .unwrap_or_default();
-                if id.is_empty() || !seen.insert(format!("{}:{}", c.id, id)) {
+                // A video is announced (preview only) before it lands: count the landing as new.
+                let landed = !m.media_id.is_empty();
+                if id.is_empty() || !seen.insert(format!("{}:{}:{landed}", c.id, id)) {
                     continue;
                 }
                 let mut saved = Vec::new();
