@@ -4,6 +4,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../../l10n/app_localizations.dart';
 import '../../app.dart';
+import '../../core/sensitive_clipboard.dart';
 import '../../core/models.dart';
 import '../../core/nightdrop_core.dart';
 import '../chat/chat_screen.dart';
@@ -103,7 +104,7 @@ class _InviteTabState extends State<_InviteTab> {
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: () async {
-                await Clipboard.setData(ClipboardData(text: qrData));
+                await SensitiveClipboard.copy(qrData);
                 if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text(l10n.inviteLinkCopied)),

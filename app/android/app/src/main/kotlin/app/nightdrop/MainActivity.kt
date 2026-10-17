@@ -2,11 +2,14 @@ package app.nightdrop
 
 import android.app.Activity
 import android.app.NotificationManager
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PersistableBundle
 import android.os.Process
 import android.view.WindowManager
 import io.flutter.embedding.android.FlutterActivity
@@ -111,6 +114,20 @@ class MainActivity : FlutterActivity() {
                             FlutterEngineCache.getInstance().remove(ENGINE_ID)
                             Process.killProcess(Process.myPid())
                         }
+                    }
+                    // An invite link carries a single-use pass: mark the copy sensitive, so the
+                    // clipboard preview hides it and keyboards that honour the flag keep it out of
+                    // their history (self-audit 2026-10-17). The extra predates its API 33
+                    // constant and is ignored where unknown.
+                    "copySensitive" -> {
+                        val text = call.arguments as? String ?: ""
+                        val clip = ClipData.newPlainText("Night Drop", text)
+                        clip.description.extras = PersistableBundle().apply {
+                            putBoolean("android.content.extra.IS_SENSITIVE", true)
+                        }
+                        (getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager)
+                            .setPrimaryClip(clip)
+                        result.success(null)
                     }
                     else -> result.notImplemented()
                 }
