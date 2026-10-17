@@ -1,0 +1,52 @@
+# Weekly advisory check of every locked dependency, so a new advisory against something we ship is
+# seen within a week, not at the next manual audit (a rustls one sat unnoticed for three days in
+# October 2026). Rust: cargo-audit against the RustSec database, with the reviewed exceptions in
+# .cargo/audit.toml. Dart: the OSV database, queried directly for every hosted package in
+# app/pubspec.lock. Read-only; no third-party actions beyond the pinned checkout.
+name: Audit
+
+on:
+  schedule:
+    - cron: '41 6 * * 2'
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+    paths: ['Cargo.lock', 'app/pubspec.lock', '.cargo/audit.toml', '.github/workflows/audit.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: cargo audit
+        run: |
+          cargo install cargo-audit --version 0.22.2 --locked --quiet
+          cargo audit --deny warnings
+
+  dart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: OSV query for app/pubspec.lock
+        run: |
+          python3 - <<'EOF'
+          import json, re, sys, urllib.request
+          lock = open('app/pubspec.lock').read()
+          pk = re.findall(r'^  ([a-z0-9_]+):\n(?:    .*\n)*?    source: hosted\n    version: "([^"]+)"', lock, re.M)
+          q = {"queries": [{"package": {"name": n, "ecosystem": "Pub"}, "version": v} for n, v in pk]}
+          req = urllib.request.Request("https://api.osv.dev/v1/querybatch", json.dumps(q).encode(),
+                                       {"Content-Type": "application/json"})
+          res = json.load(urllib.request.urlopen(req, timeout=60))["results"]
+          hits = [(pk[i], [v["id"] for v in r.get("vulns", [])]) for i, r in enumerate(res) if r.get("vulns")]
+          print(f"{len(pk)} hosted packages checked")
+          for h in hits:
+              print("ADVISORY:", h)
+          sys.exit(1 if hits else 0)
+          EOF

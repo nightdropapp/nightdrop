@@ -8,4 +8,12 @@ ignore = [
   # exclusively and never generates or decrypts an RSA key, so the vulnerable code path is never
   # reached. No fixed upstream version exists. Re-evaluate if we ever handle RSA material.
   "RUSTSEC-2023-0071",
+  # RUSTSEC-2025-0141 — bincode is unmaintained (not a vulnerability). It is in Cargo.lock only as an
+  # optional dependency of typed-index-collections (via arti) whose feature is off: `cargo tree -i
+  # bincode` finds it in no build, so no Night Drop binary contains it. Reviewed 2026-10-17.
+  "RUSTSEC-2025-0141",
+  # RUSTSEC-2024-0436 — paste is unmaintained (archived as complete; no known bug). A proc-macro used
+  # at compile time by pwd-grp (arti's fs-mistrust); it generates code and never runs in the app.
+  # Reviewed 2026-10-17. Re-check both whenever arti is bumped.
+  "RUSTSEC-2024-0436",
 ]
