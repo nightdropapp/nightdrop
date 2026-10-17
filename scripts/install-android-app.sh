@@ -16,6 +16,8 @@ NC='\033[0m' # No Color
 # FLUTTER_HOME: the pinned SDK (app/.fvmrc), found or refused by lib/flutter-sdk.sh in check_flutter.
 # shellcheck source=lib/flutter-sdk.sh
 source "$(dirname "$0")/lib/flutter-sdk.sh"
+# shellcheck source=lib/keys.sh
+source "$(dirname "$0")/lib/keys.sh"
 # This script lives in scripts/; the repo root is its parent.
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 ADB="${ADB:-}"
@@ -362,8 +364,15 @@ build_apk() {
     else
         log_warn "Relay not found (relay-state/onion) - P2P only, no store-and-forward"
     fi
-    if [ "$BUILD_MODE" == "release" ] && [ ! -f "$PROJECT_ROOT/app/android/key.properties" ]; then
-        log_warn "No android/key.properties: release APK will be DEBUG-signed (local use only)"
+    if [ "$BUILD_MODE" == "release" ]; then
+        # Same lookup as build.gradle.kts: this machine, then the key stick — for the real id only.
+        local keyprops=""
+        [ "$NIGHTDROP_APP_ID" = "app.nightdrop" ] && keyprops="$(nd_android_key_properties "$PROJECT_ROOT")"
+        if [ -z "$keyprops" ]; then
+            log_warn "No release key (android/key.properties here or on a key stick): release APK will be DEBUG-signed (local use only)"
+        elif [ "$keyprops" != "$PROJECT_ROOT/app/android/key.properties" ]; then
+            log_info "Release key from the key stick: $keyprops"
+        fi
     fi
 
     # Debug and release want different things. A debug install is for iterating, so build only the

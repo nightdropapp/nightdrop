@@ -468,16 +468,16 @@ base jumped 16 → 402 when the scheme was adopted and must never go back below 
 
 | What | Where |
 |---|---|
-| Android release keystore | `~/.android/nightdrop-release.jks`; signing properties in `app/android/key.properties` (gitignored, chmod 600). Copy it into a worktree only for the build and delete it right after |
+| Android release keystore | `~/.android/nightdrop-release.jks`; signing properties in `app/android/key.properties` (gitignored, chmod 600). **Falls back to the key stick** (`<stick>/android/key.properties` + the keystore beside it) when this machine has none — Gradle and `install-android-app.sh` look there for the real app id only, so test ids stay debug-signed. A worktree needs no copy while the stick is in |
 | Release cert SHA-256 | `d08b8e64…2c0ac` — also `AllowedAPKSigningKeys` in the recipe and `RELEASE_CERT_SHA256` in `deploy-website.sh` |
-| GPG release key | `security@nightdrop.app`, `079B A016 9201 A8AB 11F3 2385 884E ACB8 89D0 2002`; passphrase normally cached in `gpg-agent` — check with a throwaway `--pinentry-mode error` signature before assuming a human is needed. The **private** key is not in the repo (its location: `MAINTENANCE.local.md`) |
+| GPG release key | `security@nightdrop.app`, `079B A016 9201 A8AB 11F3 2385 884E ACB8 89D0 2002`; passphrase normally cached in `gpg-agent` — check with a throwaway `--pinentry-mode error` signature before assuming a human is needed. The **private** key is not in the repo (its location: `MAINTENANCE.local.md`). **Falls back to the key stick**: `deploy-website.sh` and `build-appimage.sh` use `<stick>/gnupg` (a keyring of its own) when this machine's keyring lacks the key (`scripts/lib/keys.sh`) |
 | Directory-signing key | **Offline** since 2026-10-13: on a USB stick, not on any machine (which stick: `MAINTENANCE.local.md`). Ed25519, base64; a different key from the GPG one. Needed only to sign a new relay list: `nightdrop-relay sign-directory "$(cat <usb>/directory-signing-key)" <version> <onions…>`, then unmount. The relay never reads it |
-| Relay state backup | `relay-state.zip` in the checkout (gitignored, 0600): the relay's onion identity and keystore, `onion`, `relay-list.json`. Leaves out the signing key (offline), `arti-cache` (regenerable) and `queue.json` (people's queued mail, which must not outlive its 24 h). Remake it after any change to `relay-state/arti-state/keystore` |
+| Relay state backup | Was `relay-state.zip` in the checkout; **deleted 2026-10-17** (self-audit: a stray copy of the live identity). Make a new one into the backup location, never the checkout: the relay's onion identity and keystore, `onion`, `relay-list.json`. Leaves out the signing key (offline), `arti-cache` (regenerable) and `queue.json` (people's queued mail, which must not outlive its 24 h). Remake it after any change to `relay-state/arti-state/keystore` |
 | Update-signing key | **Offline** since 2026-10-13: on the same USB stick as the directory key, and on paper (`MAINTENANCE.local.md`). Ed25519, base64. Signs `update.json` at publish time: plug in the stick and run `make update-manifest` — the script finds `update-signing-key` on any mounted removable drive (or `~/.config/nightdrop-signing/`), then unmount. `NIGHTDROP_UPDATE_KEY=<file>` is only for a key restored from the paper backup (the stick is FAT, so anything running as you can read it while mounted). Its public half is `update::UPDATE_PUBKEY` in every released app, so **losing it stops every app seeing updates** and leaking it lets the holder offer builds |
 | Recovery keys | **Offline**, in `recovery/` on the key USB stick (`update-recovery-key`, `directory-recovery-key`; MAINTENANCE.local.md), since 2026-10-13. They sign nothing but a key rotation (below); their public halves are `UPDATE_RECOVERY_PUBKEY` / `DIRECTORY_RECOVERY_PUBKEY` in every app from 0.2. **Print them on paper and keep a copy apart from the signing keys** — the recovery key is the root: if it leaks too, nothing can be rotated away. `NIGHTDROP_KEY_DIR=<stick> cargo test -p nightdrop baked_keys_match -- --ignored` checks all four baked keys against the stick |
 | GitHub | `gh`, authenticated as `nightdropapp` |
 | Security mailbox | `security@nightdrop.app`, Proton Mail on the custom domain with **our own key**: reports stay PGP-encrypted to the published key and are decrypted locally; Proton's address-key encryption stays off |
-| GitLab (fdroiddata fork) | `gitlab_token.txt` at the repo root (gitignored); use as a `PRIVATE-TOKEN:` header against the API. `glab auth status` (its own stale token) and `ssh -T git@gitlab.com` (no key registered) both fail and **say nothing about this token** — on 2026-08-10 they were taken as proof the work could not be done from here. Rarely needed since the merge |
+| GitLab (fdroiddata fork) | `gitlab_token.txt` at the repo root (gitignored), or at the top of the key stick; use as a `PRIVATE-TOKEN:` header against the API. `glab auth status` (its own stale token) and `ssh -T git@gitlab.com` (no key registered) both fail and **say nothing about this token** — on 2026-08-10 they were taken as proof the work could not be done from here. Rarely needed since the merge |
 
 
 **Rotating a signing key** (`core/src/keyroll.rs`) — when the update or relay-list signing key may
@@ -495,6 +495,12 @@ the rotation once.
    with `sign-directory --rotation <file> <new-secret> …`.
 4. Publish soon and keep publishing: an app learns the new key on its next check. The next release
    can bake the new key as its signing key; the rotation stays published for older installs.
+
+**Moving the release secrets off this machine.** `scripts/keys-to-stick.sh` copies the Android
+keystore and properties, the GPG key (into `<stick>/gnupg`), the PGP export and the GitLab token to
+the key stick, verifies each copy, and prints — never runs — the commands that delete the copies
+here. Once they are deleted, release signing needs the stick plugged in; nothing else changes. Keep a
+second stick with the same contents: the first one has needed a filesystem repair (`FOUND.000`).
 
 ### 11.6 Check what you built, not what you ran
 

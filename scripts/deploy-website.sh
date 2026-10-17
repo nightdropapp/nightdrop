@@ -19,6 +19,8 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 WEB="$PROJECT_ROOT/website/applications"
 GPG_ID="${NIGHTDROP_GPG_ID:-security@nightdrop.app}"
+# shellcheck source=lib/keys.sh
+source "$(dirname "$0")/lib/keys.sh"
 # Release signing cert, from `apksigner verify --print-certs`. Matches AllowedAPKSigningKeys in
 # fdroid/app.nightdrop.yml — an APK signed by anything else must not reach the download page.
 RELEASE_CERT_SHA256="d08b8e6408aff4f43556c05b819fef25afdd6912be7a678b0552468a4582c0ac"
@@ -81,6 +83,9 @@ done
 cd "$WEB"
 mapfile -t files < <(cd "$WEB" && ls android/*.apk linux/*.AppImage windows/*.exe 2>/dev/null || true)
 [ ${#files[@]} -gt 0 ] || { c "nothing deployed yet — nothing to sign"; exit 0; }
+# This machine's keyring, else the key stick's (scripts/lib/keys.sh).
+nd_use_gpg_key "$GPG_ID" \
+    || { err "no secret key for $GPG_ID here or on a plugged-in key stick — nothing signed"; exit 1; }
 
 # Paths in SHA256SUMS are bare filenames so `sha256sum -c` works from the download directory,
 # which is how a user who fetched the files will run it.

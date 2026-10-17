@@ -44,6 +44,8 @@ set -euo pipefail
 PROJECT_ROOT="${PROJECT_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 # shellcheck source=lib/flutter-sdk.sh
 source "$(dirname "$0")/lib/flutter-sdk.sh"
+# shellcheck source=lib/keys.sh
+source "$(dirname "$0")/lib/keys.sh"
 APP_DIR="$PROJECT_ROOT/app"
 APP_ID="${NIGHTDROP_APP_ID:-app.nightdrop}"
 BUNDLE_SRC="$APP_DIR/build/linux/x64/release/bundle"
@@ -143,6 +145,11 @@ if [ "$DO_BUILD" = 1 ]; then
       -w "/nightdrop/app" "$BUILD_IMAGE" \
       bash -c 'mkdir -p "$HOME" && flutter config --no-analytics >/dev/null 2>&1; flutter build linux --release "$@"' \
       bash "${DEFINES[@]}"
+    # The container saw the project at /nightdrop and wrote that path into the checkout's generated
+    # plugin list (.flutter-plugins-dependencies), which breaks a plain Gradle or CMake run on this
+    # machine until Flutter regenerates it. Regenerate it now with this machine's paths.
+    ( cd "$APP_DIR" && "$FLUTTER_HOME/bin/flutter" pub get --offline >/dev/null 2>&1 ) \
+      || c "could not refresh the checkout's plugin list; run 'flutter pub get' in app/"
   else
     c "Building Linux release bundle on this machine (NOT portable — dev only)…"
     ( cd "$APP_DIR" && export PATH="$FLUTTER_HOME/bin:$PATH" CARGO_ENCODED_RUSTFLAGS="$RUST_REMAP" \
@@ -240,8 +247,9 @@ ok "icons → AppDir usr/share/icons/hicolor/*/apps/$APP_ID.png (16–512) + .Di
 mkdir -p "$OUT_DIR"
 SIGN_ARGS=()
 if [ "$SIGN" = 1 ]; then
-  gpg --list-secret-keys "$GPG_ID" >/dev/null 2>&1 \
-    || { err "no secret key for $GPG_ID to sign the AppImage (--unsigned for a dev build)"; exit 1; }
+  # This machine's keyring, else the key stick's (scripts/lib/keys.sh).
+  nd_use_gpg_key "$GPG_ID" \
+    || { err "no secret key for $GPG_ID here or on a plugged-in key stick (--unsigned for a dev build)"; exit 1; }
   SIGN_ARGS=(--sign --sign-key "$GPG_ID")
 fi
 c "Packaging AppImage…"
@@ -272,6 +280,9 @@ fi
 # is not on the dev box; the build image has it.
 ZSYNC="$OUT.zsync"
 rm -f "$ZSYNC"
+# appimagetool also drops a .zsync of its own in the current directory (the repo root, usually),
+# which used to pile up there; the one written below, beside the AppImage, is the one to ship.
+[ "$(pwd)/$(basename "$ZSYNC")" != "$ZSYNC" ] && rm -f "./$(basename "$ZSYNC")"
 if command -v zsyncmake >/dev/null; then
   ( cd "$OUT_DIR" && zsyncmake -u "$(basename "$OUT")" -o "$(basename "$ZSYNC")" "$(basename "$OUT")" ) >/dev/null
 elif command -v podman >/dev/null && podman image exists "$BUILD_IMAGE"; then

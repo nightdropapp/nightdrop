@@ -25,7 +25,20 @@ val appName = (project.findProperty("appName") as String?) ?: "Night Drop"
 // Without it, release builds fall back to the DEBUG key — fine for local testing,
 // never for distribution.
 val keystoreProperties = Properties()
-val keystorePropertiesFile = rootProject.file("key.properties")
+// android/key.properties on this machine first; failing that, the offline key stick
+// (MAINTENANCE.md §11.5): $NIGHTDROP_KEY_DIR/android/key.properties, else android/key.properties at
+// the top of any mounted removable drive. The stick is consulted only for the real app id: test ids
+// stay debug-signed so they upgrade in place, and a build with no stick (F-Droid's) is unchanged.
+val stickKeyProperties: List<File> =
+    if (appId != "app.nightdrop") emptyList()
+    else listOfNotNull(System.getenv("NIGHTDROP_KEY_DIR")?.let { File(it, "android/key.properties") }) +
+        listOf("/run/media/", "/media/").flatMap { base ->
+            File(base + System.getProperty("user.name")).listFiles()
+                ?.map { File(it, "android/key.properties") } ?: emptyList()
+        }
+val keystorePropertiesFile: File =
+    (listOf(rootProject.file("key.properties")) + stickKeyProperties).firstOrNull { it.exists() }
+        ?: rootProject.file("key.properties")
 if (keystorePropertiesFile.exists()) {
     FileInputStream(keystorePropertiesFile).use { keystoreProperties.load(it) }
 }
@@ -66,7 +79,8 @@ android {
     signingConfigs {
         if (keystorePropertiesFile.exists()) {
             create("release") {
-                storeFile = file(keystoreProperties.getProperty("storeFile"))
+                // Relative to the properties file, so the stick's copy can name the keystore beside it.
+                storeFile = keystorePropertiesFile.parentFile.resolve(keystoreProperties.getProperty("storeFile"))
                 storePassword = keystoreProperties.getProperty("storePassword")
                 keyAlias = keystoreProperties.getProperty("keyAlias")
                 keyPassword = keystoreProperties.getProperty("keyPassword")
