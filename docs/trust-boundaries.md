@@ -41,6 +41,8 @@ All but four frames carry an Olm message and act only on a chat whose session de
 | Media / thumbnail bytes | contact | stored sealed; shown; opened externally | `MAX_FRAME_BYTES`; drawn in the app only as a plain JPEG (Huffman baseline/progressive, 1 or 3 components, ≤8192 px a side, ≤40 MP: `media_kind::displayable_image`, checked in `media_bytes`); opened outside the app only as a sniffed, self-contained video (`media_kind::video_ext`) under a name from those bytes |
 | Media `transfer_id` | contact | kept, matched | `limits::sane_id` in every unpacker |
 | `MediaIncoming.size` | contact | shown on a placeholder | display only |
+| `MediaIncoming` preview | contact | stored, drawn | ≤256 KiB (`limits::MAX_THUMB_BYTES`), else dropped; then the JPEG gate when drawn |
+| How much one contact adds | contact | history, media store | per rolling day 5,000 messages and 1 GiB of attachments (`limits::Allowance`); past that dropped, receipted, one notice |
 | `Name` | contact | shown as their name | `clean_display_name` (no control/bidi/invisible, 64 chars) |
 | `Address` | contact | kept, dialed | `limits::sane_address`; dial needs a v3 onion |
 | `RelaySet` | contact | where their mail is posted | `sanitize_peer_set`; dial needs a v3 onion |
