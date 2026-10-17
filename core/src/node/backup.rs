@@ -350,7 +350,7 @@ impl Node {
         }
         let mut out = Vec::new();
         for id in ids {
-            if let Ok(bytes) = self.media_bytes(&id) {
+            if let Ok(bytes) = self.media_plain(&id) {
                 out.push(crate::storage::PersistedMedia {
                     id,
                     data: base64::engine::general_purpose::STANDARD.encode(&bytes),
@@ -646,7 +646,7 @@ impl Node {
         for m in &chat.history {
             for id in [m.media_id.as_str(), m.thumb_id.as_str()] {
                 if !id.is_empty() && seen.insert(id.to_string()) {
-                    if let Ok(bytes) = self.media_bytes(id) {
+                    if let Ok(bytes) = self.media_plain(id) {
                         out.push(crate::storage::PersistedMedia {
                             id: id.to_string(),
                             data: base64::engine::general_purpose::STANDARD.encode(&bytes),

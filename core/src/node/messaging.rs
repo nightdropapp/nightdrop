@@ -1281,8 +1281,9 @@ impl Node {
         Ok(id)
     }
 
-    /// Decrypt and return the bytes of a stored attachment (for inline image display).
-    pub fn media_bytes(&self, media_id: &str) -> Result<Vec<u8>> {
+    /// Decrypt and return the bytes of a stored attachment, whatever they are. For the core's own
+    /// use (backups, the player copy); what the app draws goes through [`media_bytes`](Self::media_bytes).
+    pub(crate) fn media_plain(&self, media_id: &str) -> Result<Vec<u8>> {
         if !is_media_id(media_id) {
             anyhow::bail!("not a media id");
         }
@@ -1292,6 +1293,19 @@ impl Node {
             .ok_or_else(|| anyhow::anyhow!("media not available"))?;
         let sealed = std::fs::read(format!("{dir}/{media_id}.bin"))?;
         crate::storage::open(key, &sealed)
+    }
+
+    /// Decrypt a stored image (a photo, or a video's preview) for the app to draw.
+    ///
+    /// The app decodes these in-process, so only a plain JPEG of sane size leaves here; the engine's
+    /// other decoders never see a contact's bytes (media_kind.rs, self-audit 2026-10-17 P2).
+    pub fn media_bytes(&self, media_id: &str) -> Result<Vec<u8>> {
+        let bytes = self.media_plain(media_id)?;
+        if !super::media_kind::displayable_image(&bytes) {
+            crate::diag!("media: refused to hand over an image that is not a plain JPEG");
+            anyhow::bail!("this image is not in a format Night Drop shows");
+        }
+        Ok(bytes)
     }
 
     /// Decrypt a stored attachment to a plaintext file and return its path (for opening a video
@@ -1312,7 +1326,7 @@ impl Node {
         if !is_media_id(media_id) {
             anyhow::bail!("not a media id");
         }
-        let data = self.media_bytes(media_id)?;
+        let data = self.media_plain(media_id)?;
         let ext = super::media_kind::video_ext(&data).ok_or_else(|| {
             crate::diag!("media: refused to open an attachment that is not a known video format");
             anyhow::anyhow!("this attachment is not a video format Night Drop can open safely")

@@ -43,7 +43,7 @@ fn backup_bundles_media_and_restores_it_on_a_fresh_device() {
     bob2.set_media_store(format!("{}-c", dir.display()), key2);
 
     // The attachment came across in the backup and decrypts to the original bytes.
-    assert_eq!(bob2.media_bytes(&media_id).unwrap(), pixels);
+    assert_eq!(bob2.media_plain(&media_id).unwrap(), pixels);
 
     for s in ["a", "b", "c"] {
         std::fs::remove_dir_all(format!("{}-{s}", dir.display())).ok();

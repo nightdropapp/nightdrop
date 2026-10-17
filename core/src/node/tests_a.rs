@@ -1191,7 +1191,7 @@ fn media_on_a_real_network_is_deferred_off_the_lock_and_delivered_in_order() {
         .into_iter()
         .find(|m| !m.from_me && m.kind == "video" && !m.media_id.is_empty())
         .expect("the attachment arrived");
-    assert_eq!(bob.media_bytes(&got.media_id).unwrap(), b"a small video");
+    assert_eq!(bob.media_plain(&got.media_id).unwrap(), b"a small video");
     let _ = std::fs::remove_dir_all(format!("{}-a", dir.display()));
     let _ = std::fs::remove_dir_all(format!("{}-b", dir.display()));
 }
@@ -1248,9 +1248,50 @@ fn media_round_trips_e2e_and_is_sealed_at_rest() {
     assert!(!msg.media_id.is_empty());
 
     // Bob can decrypt the bytes back, and the on-disk blob is NOT the plaintext.
-    assert_eq!(bob.media_bytes(&msg.media_id).unwrap(), pixels);
+    assert_eq!(bob.media_plain(&msg.media_id).unwrap(), pixels);
     let sealed = std::fs::read(format!("{}-b/{}.bin", dir.display(), msg.media_id)).unwrap();
     assert_ne!(sealed, pixels, "media is sealed at rest");
+
+    std::fs::remove_dir_all(format!("{}-a", dir.display())).ok();
+    std::fs::remove_dir_all(format!("{}-b", dir.display())).ok();
+}
+
+/// What the app draws is decoded in-process, so a contact's image reaches it only as a plain JPEG:
+/// a PNG (or anything else) sent as an "image" is stored but never handed over for drawing, while
+/// the same chat's real JPEG is (self-audit 2026-10-17, P2).
+#[test]
+fn only_a_plain_jpeg_is_handed_to_the_app_to_draw() {
+    let key: StoreKey = [9u8; 32];
+    let dir = std::env::temp_dir().join(format!("nightdrop-draw-test-{}", std::process::id()));
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    alice.set_media_store(format!("{}-a", dir.display()), key);
+    bob.set_media_store(format!("{}-b", dir.display()), key);
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    alice.pump().unwrap();
+    let bob_contact = alice.contacts()[0].id.clone();
+
+    let png = include_bytes!("../../tests/fixtures/small.png");
+    let jpeg = include_bytes!("../../tests/fixtures/small-baseline.jpg");
+    for (bytes, mime) in [(&png[..], "image/png"), (&jpeg[..], "image/jpeg")] {
+        alice
+            .send_media(&bob_contact, bytes, mime, "image", &[])
+            .unwrap();
+    }
+    bob.pump().unwrap();
+    let got: Vec<_> = bob
+        .messages(&alice_contact)
+        .into_iter()
+        .filter(|m| !m.media_id.is_empty())
+        .collect();
+    assert_eq!(got.len(), 2);
+    assert!(
+        bob.media_bytes(&got[0].media_id).is_err(),
+        "the PNG is not drawn"
+    );
+    assert_eq!(bob.media_bytes(&got[1].media_id).unwrap(), jpeg);
 
     std::fs::remove_dir_all(format!("{}-a", dir.display())).ok();
     std::fs::remove_dir_all(format!("{}-b", dir.display())).ok();

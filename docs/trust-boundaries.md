@@ -38,7 +38,7 @@ All but four frames carry an Olm message and act only on a chat whose session de
 | `Burn` timer | contact | delete schedule | parsed u64; 0 refuses to store as permanent |
 | Edit / unsend / viewed / delivered target id | contact | matched against our history | compared only, never stored; scoped to that contact's own (or our own) messages in that chat |
 | Media `kind`, `mime` | contact | rendering; how a file is opened | `media_kind::sanitize` (image/video, fixed mime list) |
-| Media / thumbnail bytes | contact | stored sealed; shown; opened externally | `MAX_FRAME_BYTES`; opened outside the app only as a sniffed, self-contained video (`media_kind::video_ext`) under a name from those bytes |
+| Media / thumbnail bytes | contact | stored sealed; shown; opened externally | `MAX_FRAME_BYTES`; drawn in the app only as a plain JPEG (Huffman baseline/progressive, 1 or 3 components, ≤8192 px a side, ≤40 MP: `media_kind::displayable_image`, checked in `media_bytes`); opened outside the app only as a sniffed, self-contained video (`media_kind::video_ext`) under a name from those bytes |
 | Media `transfer_id` | contact | kept, matched | `limits::sane_id` in every unpacker |
 | `MediaIncoming.size` | contact | shown on a placeholder | display only |
 | `Name` | contact | shown as their name | `clean_display_name` (no control/bidi/invisible, 64 chars) |
