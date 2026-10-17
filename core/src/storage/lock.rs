@@ -188,7 +188,19 @@ fn write_bytes(dir: &str, bytes: &[u8]) -> Result<()> {
     crate::storage::write_atomic(&path(dir), bytes)
 }
 
+/// The largest costs a lock file may ask for: 1 GiB, 16 passes, 8 lanes — far above what this app
+/// writes, so a later increase still fits. The costs come from the file, and a file someone else
+/// wrote could otherwise make every unlock try to allocate terabytes and crash (self-audit
+/// 2026-10-17, R8-4); such a file reads as damaged instead.
+const MAX_M_COST_KIB: u32 = 1024 * 1024;
+const MAX_T_COST: u32 = 16;
+const MAX_P_COST: u32 = 8;
+
 fn derive(passphrase: &str, salt: &[u8], m: u32, t: u32, p: u32) -> Result<StoreKey> {
+    anyhow::ensure!(
+        m <= MAX_M_COST_KIB && t <= MAX_T_COST && p <= MAX_P_COST,
+        "lock file is unreadable"
+    );
     let params = argon2::Params::new(m, t, p, Some(32))
         .map_err(|e| anyhow::anyhow!("bad argon2 parameters: {e}"))?;
     let argon = argon2::Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params);
@@ -657,6 +669,19 @@ mod tests {
         // And it can be re-armed, which writes the field back.
         set_duress(&dir, "normal secret here", "the wipe code").unwrap();
         assert!(duress_armed(&dir, &key));
+    }
+
+    #[test]
+    fn a_lock_file_asking_for_absurd_costs_is_refused_not_attempted() {
+        let dir = tmpdir();
+        set_passphrase(&dir, &[7u8; 32], "correct horse").unwrap();
+        let mut v: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(path(&dir)).unwrap()).unwrap();
+        v["m_cost_kib"] = serde_json::json!(u32::MAX);
+        std::fs::write(path(&dir), serde_json::to_vec(&v).unwrap()).unwrap();
+        // Would abort the process on the allocation without the bound.
+        assert!(unlock(&dir, "correct horse").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
