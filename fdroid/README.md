@@ -100,7 +100,8 @@ in it.
    `VCSException: Git checkout of '<sha>' failed … fatal: unable to read tree`, which reads like a
    bad hash rather than a stale cache. A clean volume also matches what CI does, so a green run here
    means more.
-4. Sign it — **with `--alignment-preserved`**:
+4. Sign it — **with `--alignment-preserved`**. `scripts/sign-apk.sh IN OUT` does exactly this
+   with the release key (here or on the key stick) and checks the certificate; by hand:
 
 ```sh
 apksigner sign --ks "$storeFile" --ks-key-alias "$keyAlias" \

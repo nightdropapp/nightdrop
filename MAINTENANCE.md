@@ -225,6 +225,7 @@ also gives it its own bundle (`~/.local/lib/<id>`) and launcher (`~/.local/bin/<
 | `build-appimage.sh` | build the Linux AppImage in an Ubuntu 22.04 container (§11.7) into `website/applications/linux/` — which **is** the onion site (§12); `--out FILE` writes elsewhere and publishes nothing, `--host` builds here (not portable, refused by its check), `--no-build` repackages the existing bundle. GPG-signs the AppImage inside (`.sha256_sig`, release key `security@nightdrop.app`) and fails if the signature is empty; `--unsigned` only for dev builds |
 | `build-windows-installer.ps1` | build `NightDropSetup.exe` on Windows (`docs/building-windows.md`) |
 | `deploy-website.sh` | publish binaries to the onion site: refuses non-release-signed APKs, regenerates + GPG-signs `SHA256SUMS`, writes `applications/android/index.html` (§12) |
+| `sign-apk.sh IN OUT` | sign an APK with the release key (here or on the key stick) the way every published APK is: v2 only, `--alignment-preserved`, certificate checked (§11.3 step 5) |
 | `gen-update-manifest.sh` | write `website/update.json` (`make update-manifest`) — **publish time only** (§12) |
 | `deploy-clearnet.sh` | rsync `website/` (minus `applications/`) to this machine's nginx web root (`docs/hosting.md`) |
 | `onion-website.sh` | serve `website/` with nginx behind a Tor v3 onion service, with an end-to-end self-dial watchdog |
