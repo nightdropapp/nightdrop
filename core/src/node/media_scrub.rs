@@ -70,9 +70,17 @@ pub(crate) fn scrub_jpeg(data: &[u8]) -> anyhow::Result<Vec<u8>> {
             continue;
         }
         if marker == 0xDA {
-            // The first scan: everything from here on is image data, kept as it is.
+            // The first scan: image data from here to the end-of-image marker, kept as it is.
+            // Nothing after that marker goes: phones append a second JPEG there (the Ultra HDR
+            // gain map on a Galaxy S25, with its own XMP). In scan data a 0xFF byte is always
+            // followed by 0x00 or a restart marker, so the first FF D9 is the real end.
             out.extend_from_slice(&[0xFF, marker]);
-            out.extend_from_slice(&data[p..]);
+            let rest = &data[p..];
+            let end = rest
+                .windows(2)
+                .position(|w| w == [0xFF, 0xD9])
+                .map_or(rest.len(), |i| i + 2);
+            out.extend_from_slice(&rest[..end]);
             return Ok(out);
         }
         let len = u16::from_be_bytes([
@@ -529,6 +537,17 @@ mod tests {
             assert!(!contains(&out, gone));
         }
         assert!(crate::node::media_kind::displayable_image(&out));
+        // A second JPEG appended after the end marker (an Ultra HDR gain map) goes with it.
+        let appended = [
+            &tagged[..],
+            &real[..2],
+            &seg(0xE1, b"http://ns.adobe.com/ hdrgm"),
+            &real[2..],
+        ]
+        .concat();
+        let out2 = scrub_jpeg(&appended).unwrap();
+        assert_eq!(out2, out, "nothing after the first image's end marker");
+        assert!(!contains(&out2, b"hdrgm"));
         // The real file had nothing to drop beyond what we added: same bytes back, but for its
         // own JFIF and coding segments, which are kept.
         assert_eq!(scrub_jpeg(real).unwrap(), real.to_vec());
