@@ -173,9 +173,20 @@ if [ "$DO_BUILD" = 1 ]; then
     for f in gitlab_token.txt app/android/key.properties; do
       [ -f "$PROJECT_ROOT/$f" ] && HIDE+=(-v "/dev/null:/nightdrop/$f:ro")
     done
+    # Nothing that runs later outside the container is writable from in it (MAINTENANCE.md §8): the
+    # checkout and the Flutter SDK are overlays whose writes are thrown away (`:O`), with only the
+    # build-output folders real; cargo's binaries and rustup are read-only, its download caches
+    # and the pub cache writable.
+    OUT_MOUNTS=()
+    for d in app/build app/.dart_tool app/linux/flutter/ephemeral; do
+      mkdir -p "$PROJECT_ROOT/$d"
+      OUT_MOUNTS+=(-v "$PROJECT_ROOT/$d:/nightdrop/$d")
+    done
+    for d in registry git; do mkdir -p "$CARGO/$d"; done
     podman run --rm --userns=keep-id --security-opt label=disable \
-      -v "$PROJECT_ROOT:/nightdrop" "${HIDE[@]}" -v "$FLUTTER_HOME:$FLUTTER_HOME" \
-      -v "$CARGO:$CARGO" -v "$RUSTUP:$RUSTUP" -v "$PUB:$PUB" \
+      -v "$PROJECT_ROOT:/nightdrop:O" "${OUT_MOUNTS[@]}" "${HIDE[@]}" -v "$FLUTTER_HOME:$FLUTTER_HOME:O" \
+      -v "$CARGO:$CARGO:ro" -v "$CARGO/registry:$CARGO/registry" -v "$CARGO/git:$CARGO/git" \
+      -v "$RUSTUP:$RUSTUP:ro" -v "$PUB:$PUB" \
       -e HOME=/tmp/home -e PUB_CACHE="$PUB" -e CARGO_HOME="$CARGO" -e RUSTUP_HOME="$RUSTUP" \
       -e NIGHTDROP_APP_ID="$APP_ID" \
       -e CARGO_ENCODED_RUSTFLAGS="$RUST_REMAP" -e CFLAGS="$C_REMAP" -e CXXFLAGS="$C_REMAP" \
