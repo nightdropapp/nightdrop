@@ -280,6 +280,12 @@ where they bite:
   outside the sandbox, exactly like the F-Droid builds (v2 only, `--alignment-preserved`,
   `lib/keys.sh` `nd_sign_apk_release`, which checks the certificate). `build-appimage.sh`'s
   container gets the same read-only and hidden paths. `ND_NO_SANDBOX=1` turns it off (it warns).
+  `ND_SANDBOX_AT=/tmp/<dir>` also shows the checkout at that neutral path and builds there:
+  `install-android-app.sh` sets it, with Rust's `--remap-path-prefix`, because Flutter compiles the
+  checkout's path into `libapp.so` and Rust its source paths into `libnightdrop.so` — a 0.2 release
+  candidate built at `~/night-drop` carried the builder's home directory ~150 times. The script
+  refuses an APK that still names `$HOME/` (`no_builder_paths`). F-Droid builds at `/build/nightdrop`,
+  the AppImage at `/nightdrop`, for the same reason.
   **Residual:** the download caches (`~/.gradle`, `~/.pub-cache`, `~/.cargo/registry`) and the
   build outputs stay writable, so a malicious build step could poison a later build — and an
   unsandboxed `cargo test` or `flutter test`, which compile from the same caches. For the APKs, F-Droid's
@@ -741,6 +747,12 @@ was not.
   names, and `TODO.txt` holds future work and nothing else.
 - **Private values** — LAN addresses, device serials, key locations — go in the gitignored
   `MAINTENANCE.local.md`, because the repo is public; committed docs name that file instead.
+- **Nothing that names the maintainer** — their name, user name, home directory (write `~/`), or
+  any other site or domain they run — in a committed file, a commit message, or a shipped binary.
+  The project is published under its own name; one such line ties it to a person. Such detail goes
+  in `MAINTENANCE.local.md`. Before pushing, `git log -p origin/main..` and the release artifacts are
+  searched for it (2026-10-18: a personal domain and the user name were scrubbed from unpushed
+  history, and the Android build was found embedding the home directory).
 - Where things go: user-facing limits and residual risks → `SECURITY.md` and `website/limits.html`;
   design and rationale → `ARCHITECTURE.md` or `docs/design/`; something that broke in the field →
   `docs/advisories/`; procedures and traps → this file; why one change was made → the commit message.

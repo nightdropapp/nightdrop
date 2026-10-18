@@ -123,6 +123,23 @@ nd_sandbox() {
     [ -f "$d" ] && a+=(--dev-bind /dev/null "$d")
   done
   [ -d /dev/bus/usb ] && a+=(--tmpfs /dev/bus/usb)
+  # ND_SANDBOX_AT=<dir under /tmp>: the checkout is also seen at that neutral path, and the build
+  # runs there. Flutter compiles the checkout's path into the app (the plugin registrant's file://
+  # URI in libapp.so), so a release built at ~/night-drop carried the builder's home directory; the
+  # F-Droid and AppImage builds use fixed paths for the same reason (2026-10-18).
+  local at="${ND_SANDBOX_AT:-}" cwd="$PWD"
+  if [ -n "$at" ]; then
+    case "$at" in /tmp/?*) ;; *) echo "error: ND_SANDBOX_AT must be under /tmp" >&2; return 1 ;; esac
+    a+=(--overlay-src "$root" --tmp-overlay "$at")
+    for d in "${rw_dirs[@]}"; do
+      case "$d" in "$root"/*) [ -d "$d" ] && a+=(--bind "$d" "$at${d#"$root"}") ;; esac
+    done
+    for d in "$root/gitlab_token.txt" "$root/app/android/key.properties"; do
+      [ -f "$d" ] && a+=(--dev-bind /dev/null "$at${d#"$root"}")
+    done
+    case "$PWD" in "$root"|"$root"/*) cwd="$at${PWD#"$root"}" ;; esac
+    a+=(--setenv PROJECT_ROOT "$at")
+  fi
   # Its own network namespace (pasta, the user-mode network podman uses): the internet as usual,
   # but none of this machine's loopback or LAN services. Sharing the host's network let build code
   # drive the adb server on 127.0.0.1:5037 — no authentication — and through it any phone that is
@@ -138,5 +155,5 @@ nd_sandbox() {
     --unshare-pid --proc /proc --die-with-parent --new-session \
     --unsetenv DBUS_SESSION_BUS_ADDRESS --unsetenv SSH_AUTH_SOCK --unsetenv GPG_AGENT_INFO \
     --unsetenv DISPLAY --unsetenv WAYLAND_DISPLAY --unsetenv XAUTHORITY \
-    --chdir "$PWD" -- "$@"
+    --chdir "$cwd" -- "$@"
 }

@@ -350,12 +350,31 @@ resolve_apk_path() {
     fi
 }
 
+# The builder's home directory must not appear in what we ship (see ND_SANDBOX_AT in build_apk).
+no_builder_paths() {
+    local n
+    n=$(unzip -p "$1" 'lib/*' 'classes*.dex' 2>/dev/null | grep -a -c -F "$HOME/" || true)
+    if [ "${n:-0}" != 0 ]; then
+        log_error "$1 contains $n lines naming $HOME/ — not shipping a builder path"
+        return 1
+    fi
+    log_success "no builder paths in $(basename "$1")"
+}
+
 build_apk() {
     print_header "Building Android APK ($BUILD_MODE, Tor mode)"
 
     cd "$PROJECT_ROOT/app"
 
     export_android_sdk
+
+    # No builder paths in the binaries: Flutter compiles the checkout's path into libapp.so, and
+    # Rust its source paths (panic locations) into libnightdrop.so — 150 of them, all under the
+    # builder's home, in a 0.2 release candidate. Build at a neutral path and map the rest, as the
+    # F-Droid recipe and build-appimage.sh do (2026-10-18). Checked after the build, below.
+    export ND_SANDBOX_AT=/tmp/nightdrop
+    CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$ND_SANDBOX_AT=."$'\x1f'"--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"$'\x1f'"--remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/rustup"
+    export CARGO_ENCODED_RUSTFLAGS
 
     log_info "Running: flutter pub get"
     nd_sandbox "$FLUTTER" pub get
@@ -445,6 +464,7 @@ build_apk() {
                 return 1
             fi
             log_success "core lib present in APK: libnightdrop.so"
+            no_builder_paths "$APK_PATH" || return 1
             # The site also offers a universal APK, and --split-per-abi does not produce one. Build
             # it now rather than letting deploy publish a stale app-release.apk left by an earlier
             # run — that is precisely how the download page drifted a version behind before.
@@ -457,7 +477,8 @@ build_apk() {
                 ulog="$(mktemp)"
                 nd_sandbox "$FLUTTER" build apk "--$BUILD_MODE" "${defines[@]}" > "$ulog" 2>&1 || rc=$?
                 tail -2 "$ulog"; rm -f "$ulog"
-                { [ "$rc" = 0 ] && sign_release_apks "$dir" "${keyprops:-}"; } \
+                { [ "$rc" = 0 ] && sign_release_apks "$dir" "${keyprops:-}" \
+                    && no_builder_paths "$dir/app-$BUILD_MODE.apk"; } \
                     || log_warn "universal build failed — the website's universal download will lag"
             fi
             return 0
