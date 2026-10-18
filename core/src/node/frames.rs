@@ -734,6 +734,12 @@ impl Node {
                             return Ok(None);
                         }
                         chat.contact.peer_blocks_capture = Some(on);
+                        // Our override was of THAT request. Once they stop asking it is spent: a
+                        // later request is honoured until the user overrides it again (and they
+                        // are told again) — not silently ignored (round 13, R13-1).
+                        if !on {
+                            chat.contact.capture_override = false;
+                        }
                         return Ok(Some((from, String::new())));
                     }
                     _ => return Ok(None), // forged, replayed, or spliced — ignore

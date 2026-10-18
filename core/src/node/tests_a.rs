@@ -2824,3 +2824,34 @@ fn overriding_a_contacts_capture_block_tells_them_and_survives_a_restore() {
         "kept across a restore"
     );
 }
+
+/// An override answers one request: once the contact stops blocking, it is spent, so a later
+/// block is honoured (and overriding it again tells them again).
+#[test]
+fn an_override_ends_when_the_contact_stops_blocking() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    bob.announce_block(true);
+    alice.pump().unwrap();
+    alice.set_capture_override(&bob_contact, true);
+    bob.pump().unwrap();
+
+    bob.announce_block(false);
+    alice.pump().unwrap();
+    assert!(
+        !alice.contacts()[0].capture_override,
+        "spent once they stop asking"
+    );
+    bob.announce_block(true);
+    alice.pump().unwrap();
+    let c = &alice.contacts()[0];
+    assert_eq!(c.peer_blocks_capture, Some(true));
+    assert!(
+        !c.capture_override,
+        "a new request is honoured until overridden again"
+    );
+}
