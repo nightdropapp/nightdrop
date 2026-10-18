@@ -1531,6 +1531,39 @@ fn a_contact_that_blocks_captures_says_so_and_it_survives_a_restore() {
 }
 
 #[test]
+fn a_contact_who_updates_is_told_the_capture_block_again() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    bob.set_app_version("0.2.0+416");
+    bob.announce_version();
+    alice.pump().unwrap();
+
+    alice.announce_block(true);
+    bob.pump().unwrap();
+    alice.pump().unwrap(); // delivery confirmed: told_block = Some(true)
+                           // Bob's (older) build ignored it: model that by forgetting it on his side.
+    bob.chats
+        .values_mut()
+        .next()
+        .unwrap()
+        .contact
+        .peer_blocks_capture = None;
+
+    // Bob updates; his new version reaches Alice, who tells him again on the next tick.
+    bob.set_app_version("0.2.1+417");
+    bob.announce_version();
+    alice.pump().unwrap();
+    alice.reannounce_block();
+    bob.pump().unwrap();
+    assert_eq!(bob.contacts()[0].peer_blocks_capture, Some(true));
+    let _ = bob_contact;
+}
+
+#[test]
 fn screenshot_notifies_both_sides_every_time_and_cannot_be_forged() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));

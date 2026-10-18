@@ -358,8 +358,22 @@ impl Node {
                 if chat.contact.peer_app_version.as_deref() == Some(version) {
                     return Ok(None);
                 }
+                // They updated. A build can ignore a marker it does not know yet still confirm the
+                // frame, so what we "told" an older build may never have registered (seen in the
+                // 0.2 device pass: Block screenshots announced to a build without the marker).
+                // Tell the new build again.
+                let updated = chat.contact.peer_app_version.is_some();
+                if updated {
+                    chat.told_captures = None;
+                    chat.told_block = None;
+                }
                 chat.contact.peer_app_version = Some(version.to_string());
                 crate::diag!("version: a contact runs {version}");
+                if updated {
+                    // And forget that this run already told them, or the retry skips them.
+                    self.captures_announced.remove(&from);
+                    self.block_announced.remove(&from);
+                }
                 Ok(Some((from, String::new())))
             }
             Frame::Edit { from, message } => {
