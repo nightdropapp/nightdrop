@@ -306,10 +306,16 @@ c "Packaging AppImage…"
 ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT" >/dev/null 2>&1 \
   || ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"   # re-run verbosely on failure
 chmod +x "$OUT"
-signed() { readelf -x .sha256_sig "$OUT" 2>/dev/null | grep -qE '0x[0-9a-f]+ +[0-9a-f ]*[1-9a-f]'; }
+# The dump is read whole before searching it: `readelf … | grep -q` under pipefail reported a signed
+# AppImage as unsigned about one time in twelve (grep -q exits at the first match, readelf dies of
+# SIGPIPE, and the pipeline fails) — the "empty signature" of 2026-10-13 and 2026-10-18 was this.
+signed() {
+  local dump
+  dump=$(readelf -x .sha256_sig "$OUT" 2>/dev/null) || return 1
+  grep -qE '0x[0-9a-f]+ +[0-9a-f ]*[1-9a-f]' <<<"$dump"
+}
 if [ "$SIGN" = 1 ] && ! signed; then
-  # Seen once (2026-10-13), right after a long container build, and not again: gpg declined the
-  # first time. One verbose retry, so a real failure shows gpg's own words.
+  # One verbose retry, so a real gpg failure shows gpg's own words.
   c "the embedded signature came out empty — packaging once more, with appimagetool's output"
   ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$UPDATE_INFO" "$APPDIR" "$OUT"
   chmod +x "$OUT"
