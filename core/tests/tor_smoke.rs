@@ -209,23 +209,23 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
         "onion address must survive the relaunch"
     );
 
-    // Wait for the restricted descriptor to (re)publish.
-    let mut published = false;
+    // Give the restricted descriptor time to (re)publish. Informational only: `published()` rides
+    // arti's `is_fully_reachable()`, which lags a live service by minutes (see `published` in
+    // transport/tor.rs; the relay's watchdog stopped trusting it for the same reason), and gating
+    // on it failed this test on every run of 2026-10-17/18 before B ever tried. Reaching A is the
+    // proof, and step 4 asserts it.
     for _ in 0..180 {
         if a.published() {
-            published = true;
             break;
         }
         std::thread::sleep(Duration::from_secs(1));
     }
-    assert!(
-        published,
-        "A's restricted descriptor never became reachable"
-    );
+    eprintln!("A reports published: {}", a.published());
 
-    // 4. B (authorized) connects and delivers a frame → admitted.
+    // 4. B (authorized) connects and delivers a frame → admitted. Up to six minutes: a freshly
+    //    republished restricted descriptor takes a while to reach every HsDir.
     let mut b_sent = false;
-    for _ in 0..40 {
+    for _ in 0..120 {
         if b.send(&a_addr, b"authorized hello").is_ok() {
             b_sent = true;
             break;
