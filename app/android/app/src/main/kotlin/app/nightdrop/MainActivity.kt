@@ -60,11 +60,23 @@ class MainActivity : FlutterActivity() {
             Activity.ScreenCaptureCallback {
                 // Reports *that* a capture happened. There is no access to the image, by design of
                 // the platform API and of this feature.
-                channel?.invokeMethod("screenshot", null)
+                //
+                // Once per capture: on a Galaxy S23 (Android 15) every screenshot fired this twice,
+                // so the user and the contact each saw two notices for one capture (0.2 device
+                // pass, 2026-10-18; also in builds before that day). Nobody takes two screenshots
+                // within a second and a half, so a second call inside that is the same capture.
+                val now = android.os.SystemClock.elapsedRealtime()
+                if (now - lastScreenshotAt >= SCREENSHOT_DEBOUNCE_MS) {
+                    lastScreenshotAt = now
+                    channel?.invokeMethod("screenshot", null)
+                }
             }
         } else {
             null
         }
+
+    // When the last screenshot was reported (elapsedRealtime), for the debounce above.
+    private var lastScreenshotAt = -SCREENSHOT_DEBOUNCE_MS
 
     // API 35+ only: told whether this app's window is being screen-recorded. Registered while the
     // activity is visible (onResume/onPause, like the screenshot callback). Dart reports a start
@@ -307,6 +319,7 @@ class MainActivity : FlutterActivity() {
         const val CHANNEL = "app.nightdrop/screenshots"
         const val PREFS = "nightdrop_ui"
         const val PREF_BLOCK_CAPTURE = "block_capture"
+        const val SCREENSHOT_DEBOUNCE_MS = 1500L
         const val PROCESS_CHANNEL = "app.nightdrop/process"
         const val ENGINE_ID = "main"
 
