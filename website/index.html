@@ -5,7 +5,7 @@
   <!-- No external resources: block any third-party script, style, font, image, or beacon —
        nothing can track a visitor or exfiltrate. (frame-ancestors is ignored in a meta CSP; set
        it plus X-Frame-Options as HTTP headers on the server for clickjacking protection.) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Night Drop — private messaging with no account and no phone number</title>
   <meta name="description" content="Night Drop is a free, anonymous, end-to-end encrypted 1:1 messenger. No accounts, no server-side keys, no logs. Peer-to-peer over Tor, local-first storage." />
@@ -77,6 +77,7 @@
   <!-- Shared config (donation addresses, copy, download links). Generated from
        config/app_config.json by `make config` — the single source of truth shared with the app. -->
   <script src="config.js"></script>
+  <script src="site.js" defer></script>
 </head>
 <body>
   <nav>
@@ -158,8 +159,9 @@
         <article class="card">
           <h3>📷 Photos and videos, encrypted too</h3>
           <p>Attachments travel end-to-end encrypted like every message, and are
-             stored sealed on your device. Images are compressed on-device so they
-             move fast over Tor.</p>
+             stored sealed on your device. Before anything is sent, the location, camera
+             model and time the phone wrote into a photo or video are removed, and images are
+             compressed on-device so they move fast over Tor.</p>
         </article>
         <article class="card">
           <h3>🗝️ Backups you own</h3>
@@ -176,8 +178,8 @@
         </article>
         <article class="card">
           <h3>⏱️ Disappearing messages</h3>
-          <p>Set a per-chat timer — an hour, a day, a week — and older messages delete
-             themselves on both devices. It’s a shared setting, so changing it keeps both
+          <p>Set a per-chat timer — an hour, a day, a week — and messages sent from then on
+             delete themselves on both devices once they are that old. It’s a shared setting, so changing it keeps both
              sides in sync.</p>
         </article>
         <article class="card">
@@ -291,11 +293,11 @@
       <p class="lead">One app, every device.</p>
 
       <div class="downloads" id="download-links">
-        <!--<a class="btn ghost" href="#">iOS</a>-->
-        <a class="btn ghost" href="#">Android</a>
-        <a class="btn ghost" href="#">Windows</a>
-        <!--a class="btn ghost" href="#">macOS</a>-->
-        <a class="btn ghost" href="#">Linux</a>
+        <!-- Working links with JavaScript off too (Tor Browser's Safest level); site.js replaces
+             them from config.js, with same-origin paths on the .onion mirror. -->
+        <a class="btn ghost" href="https://github.com/nightdropapp/nightdrop/releases/latest">Android</a>
+        <a class="btn ghost" href="https://github.com/nightdropapp/nightdrop/releases/latest/download/NightDropSetup.exe">Windows</a>
+        <a class="btn ghost" href="https://github.com/nightdropapp/nightdrop/releases/latest/download/Night_Drop-x86_64.AppImage">Linux</a>
       </div>
       <p class="fineprint">
         The Android button opens the list of builds so you can pick one. The universal build runs
@@ -325,81 +327,6 @@
   <!-- Populate the parts that change (addresses, copy, download links) from the shared config
        so they stay in sync with the app. Falls back to the static HTML above if config.js is
        absent (e.g. opened without `make config`). -->
-  <script>
-    (function () {
-      var c = window.NIGHTDROP_CONFIG;
-      if (!c) return;
-      function esc(s) {
-        return String(s).replace(/[&<>"]/g, function (m) {
-          return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m];
-        });
-      }
-      function setText(id, txt) {
-        var e = document.getElementById(id);
-        if (e && txt) e.textContent = txt;
-      }
-      if (c.links && c.links.source) {
-        var src = document.getElementById('source-link');
-        if (src) src.href = c.links.source;
-      }
-      if (c.app) {
-        setText('hero-headline', c.app.headline);
-        setText('hero-tagline', c.app.tagline);
-        setText('donate-blurb', c.app.blurb);
-        if (c.app.name) document.title = c.app.name + ' — private messaging with no account and no phone number';
-      }
-      if (Array.isArray(c.donations) && c.donations.length) {
-        var grid = document.getElementById('donate-grid');
-        if (grid) {
-          grid.innerHTML = c.donations.map(function (d) {
-            return '<article class="card coin"><h3>' + esc(d.name) + ' (' + esc(d.ticker) +
-              ')</h3><p class="muted">' + esc(d.note || '') + '</p><code class="addr">' +
-              esc(d.address) + '</code></article>';
-          }).join('');
-        }
-      }
-      if (c.downloads) {
-        // On the .onion mirror, serve the binaries from this same origin so a visitor never has
-        // to leave Tor for a clearnet endpoint (GitHub) to download. On clearnet, keep the GitHub
-        // release links. downloads_onion holds the same-origin /applications/ paths.
-        var onion = /\.onion$/i.test(location.hostname);
-        var src = (onion && c.downloads_onion) ? c.downloads_onion : c.downloads;
-        var box = document.getElementById('download-links');
-        if (box) {
-          var labels = { android: 'Android', windows: 'Windows', linux: 'Linux' };
-          // Emit only an http(s) URL, or a same-origin /applications/ path (the .onion mirror).
-          // Never a javascript:/data: scheme, even if the config were tampered with. esc() handles
-          // characters; this guards the scheme.
-          var usable = function (u) {
-            return !!u && (/^https?:\/\//i.test(u) || /^\/applications\/[\w.\/-]+$/.test(u));
-          };
-          // A platform with no download configured is OMITTED, not rendered as a dead `#` button.
-          // config/app_config.json ships empty strings for the platforms that have no build yet
-          // (windows, and ios/macos which are not in `labels`), and a download button that goes
-          // nowhere reads as a broken site to the one visitor who came to download.
-          box.innerHTML = Object.keys(labels).filter(function (k) { return usable(src[k]); })
-            .map(function (k) {
-              var url = src[k];
-              // `download` only for a link to an actual file. Android points at a folder (the
-              // .onion mirror) or the release page (clearnet) so the visitor picks their build;
-              // marking those `download` would save the listing page itself instead of opening it.
-              var dl = /\.[A-Za-z0-9]+$/.test(url) ? ' download' : '';
-              return '<a class="btn ghost"' + dl + ' href="' + esc(url) + '">' + labels[k] + '</a>';
-            }).join('');
-        }
-      }
-    })();
-  </script>
 
-  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
-  <script>
-    (function () {
-      var nav = document.querySelector('nav');
-      if (!nav) return;
-      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
-      onScroll();
-      window.addEventListener('scroll', onScroll, { passive: true });
-    })();
-  </script>
 </body>
 </html>

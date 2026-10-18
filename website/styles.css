@@ -187,3 +187,38 @@ footer .muted { font-size: 0.9rem; }
   .nav-links { display: none; }
 }
 
+
+/* Limits page (moved out of an inline <style> so the CSP needs no 'unsafe-inline'). */
+.page-head { max-width: 760px; margin: 0 auto; padding: 60px 24px 0; text-align: center; }
+.page-head h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 16px; }
+.callout {
+  max-width: 820px;
+  margin: 0 auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--accent);
+  border-radius: 12px;
+  padding: 20px 24px;
+}
+.callout.warn { border-left-color: #e0b341; }
+.callout h3 { margin: 0 0 8px; }
+.callout p { margin: 0; color: var(--muted); }
+.card h3 .pill {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: var(--bg);
+  background: var(--accent-2);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+.card h3 .pill.scope { background: #e0b341; }
+.backlink { display: inline-block; margin-top: 8px; color: var(--muted); }
+.brand-link { color: inherit; display: inline-flex; align-items: center; gap: 8px; }
+.hero.page-hero { padding-bottom: 40px; }
+.spaced { margin-top: 20px; }
+.spaced-lg { margin-top: 28px; }
+.spaced-xl { margin-top: 32px; }
+.strong-text { color: var(--text); }
+.centered { text-align: center; }

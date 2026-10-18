@@ -5,7 +5,7 @@
   <!-- No external resources: block any third-party script, style, font, image, or beacon —
        nothing can track a visitor or exfiltrate. (frame-ancestors is ignored in a meta CSP; set
        it plus X-Frame-Options as HTTP headers on the server for clickjacking protection.) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; require-trusted-types-for 'script'; trusted-types 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Night Drop — What we can't protect you from</title>
   <meta name="description" content="An honest account of Night Drop's limits: what our design protects, what is out of scope, and where the app is still being hardened. No overpromises." />
@@ -49,40 +49,11 @@
     "isPartOf": { "@id": "https://nightdrop.app/#website" }
   }
   </script>
-  <style>
-    /* Page-scoped accents (kept out of the shared stylesheet). */
-    .page-head { max-width: 760px; margin: 0 auto; padding: 60px 24px 0; text-align: center; }
-    .page-head h1 { font-size: 2.4rem; line-height: 1.15; margin: 0 0 16px; }
-    .callout {
-      max-width: 820px;
-      margin: 0 auto;
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-left: 4px solid var(--accent);
-      border-radius: 12px;
-      padding: 20px 24px;
-    }
-    .callout.warn { border-left-color: #e0b341; }
-    .callout h3 { margin: 0 0 8px; }
-    .callout p { margin: 0; color: var(--muted); }
-    .card h3 .pill {
-      font-size: 0.7rem;
-      font-weight: 600;
-      color: var(--bg);
-      background: var(--accent-2);
-      border-radius: 999px;
-      padding: 2px 8px;
-      margin-left: 8px;
-      vertical-align: middle;
-    }
-    .card h3 .pill.scope { background: #e0b341; }
-    .backlink { display: inline-block; margin-top: 8px; color: var(--muted); }
-  </style>
 </head>
 <body>
   <nav>
     <div class="nav-inner">
-      <span class="brand"><a href="index.html" style="color:inherit;display:inline-flex;align-items:center;gap:8px;"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</a></span>
+      <span class="brand"><a href="index.html" class="brand-link"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</a></span>
       <div class="nav-links">
         <a href="index.html#features">Features</a>
         <a href="index.html#why">Why it's different</a>
@@ -91,7 +62,7 @@
       </div>
     </div>
   </nav>
-  <header class="hero" style="padding-bottom: 40px;">
+  <header class="hero page-hero">
     <div class="page-head">
       <h1>What we can't protect you from</h1>
       <p class="tagline">
@@ -216,7 +187,7 @@
            has, we won't claim more than that — and we'll publish the audit and its fixes when it's
            done. Treat Night Drop as promising and improving, not battle-tested.</p>
       </div>
-      <div class="callout warn" style="margin-top: 20px;">
+      <div class="callout warn spaced">
         <h3>A seized phone still reveals who you talk to</h3>
         <p>The app lock encrypts your messages. It does <strong>not</strong> yet cover the file that
            holds your own Tor address, or the one folder Tor keeps per contact — each named after
@@ -228,7 +199,7 @@
            those into the encrypted store too; until that ships, assume a seized phone shows who
            you have been talking to.</p>
       </div>
-      <div class="callout warn" style="margin-top: 20px;">
+      <div class="callout warn spaced">
         <h3>What a relay can still link about your offline messages</h3>
         <p>Messages sent while you are offline wait on a relay. From 0.1.26 each chat drops them in
            its own mailbox, under an address that changes every day, and your phone collects them in
@@ -245,7 +216,26 @@
            is wrong by more than three hours, a message can go to a mailbox nobody checks and expire
            unread after 24 hours. Messages delivered directly are unaffected.</p>
       </div>
-      <div class="callout warn" style="margin-top: 20px;">
+      <div class="callout warn spaced">
+        <h3>&ldquo;Direct only&rdquo; tells your contacts when you come online.</h3>
+        <p>From 0.2 you can use Night Drop with no relay at all. Then nothing about your messages
+           ever touches a server &mdash; but messages to you wait on your contacts' phones and are
+           sent the moment your app is online, so each contact can tell, roughly, when you come
+           online. With a relay, messages wait there instead. Opening the app does not announce
+           anything by itself.</p>
+        <p>It also means two people on direct only must be online at the same time for a message to
+           arrive. It waits on the sender's phone until then, with no 24-hour limit.</p>
+      </div>
+      <div class="callout warn spaced">
+        <h3>Your QR code lets one person knock, for one day.</h3>
+        <p>So that pairing needs no server, your invite carries a key that lets whoever has it reach
+           your phone even once it only accepts your contacts. That gets their chat request to you,
+           and nothing else: you still decide whether to accept it, and until you do they learn
+           nothing about you. The key stops working once one request has used it, or after a day. So
+           a photo of your QR code posted online lets at most one stranger send you a request you can
+           decline.</p>
+      </div>
+      <div class="callout warn spaced">
         <h3>Bridges beat a blocked relay list. Traffic inspection is tested, not proven.</h3>
         <p>If your network blocks Tor by blocking the public list of relays, a bridge is an
            unlisted way in. If it instead inspects traffic and blocks Tor by how it <em>looks</em>,
@@ -263,7 +253,7 @@
            ordinary the handshake is. If being identified as a Tor user is itself dangerous where
            you are, do not rely on this alone.</p>
       </div>
-      <div class="callout warn" style="margin-top: 20px;">
+      <div class="callout warn spaced">
         <h3>&ldquo;Get bridges&rdquo; does not go through Tor.</h3>
         <p>From 0.1.28 the bridges screen can ask the Tor Project for WebTunnel bridges. That one
            request has to work when Tor cannot, so it goes <strong>directly</strong>, disguised as
@@ -274,7 +264,7 @@
            bridges yourself. If being seen contacting the Tor Project is itself dangerous where you
            are, get bridges another way.</p>
       </div>
-      <div class="grid" style="margin-top: 28px;">
+      <div class="grid spaced-lg">
         <article class="card">
           <h3>🧪 Real-world Tor testing is ongoing <span class="pill">in progress</span></h3>
           <p>The full messaging flow is verified end to end in automated tests, and the Tor path
@@ -282,11 +272,12 @@
              networks, and conditions is still underway. Expect rough edges on flaky connections.</p>
         </article>
         <article class="card">
-          <h3>🛰️ Relay availability <span class="pill">in progress</span></h3>
-          <p>When both people are online, messages go directly, device to device. Offline delivery
-             and first-contact short codes lean on a relay that holds only sealed, unreadable blobs.
-             You can add extra relays or run your own, so no single one is a choke point — and
-             we're expanding the default set for resilience.</p>
+          <h3>🛰️ Relays are optional <span class="pill">0.2</span></h3>
+          <p>When both people are online, messages go directly, device to device. A relay holds
+             sealed, unreadable messages for up to 24 hours while you are offline, and makes short
+             codes possible. The Night Drop relay is the default; you can add your own (up to four),
+             remove ours, or use <strong>direct only</strong> with no relay at all &mdash; then you
+             receive messages only while the app is online, and add contacts by QR code only.</p>
         </article>
         <article class="card">
           <h3>🎞️ Opening an attachment in another app <span class="pill">in progress</span></h3>
@@ -310,7 +301,7 @@
     <section class="section">
       <h2>So what <em>can</em> you count on?</h2>
       <div class="callout">
-        <p style="color: var(--text);">
+        <p class="strong-text">
           Within those honest limits, Night Drop is designed so that <strong>we hold no key to
           your messages, keep no logs, and store no account that could be seized or subpoenaed.</strong>
           Any server only ever sees sealed, unreadable blobs under short-lived, unlinkable handles.
@@ -319,12 +310,12 @@
           dropped, and opened by no one in between.
         </p>
       </div>
-      <p class="lead" style="margin-top: 32px;">
+      <p class="lead spaced-xl">
         Read the full design and threat model in the open — the
         <a href="https://github.com/nightdropapp/nightdrop" id="source-link">source and documentation</a> spell out every
         claim on this page, including these limits.
       </p>
-      <p style="text-align:center;">
+      <p class="centered">
         <a class="btn ghost" href="index.html">← Back to Night Drop</a>
       </p>
     </section>
@@ -337,25 +328,7 @@
 
   <!-- Point the "source and documentation" link at the real repo when config.js is present. -->
   <script src="config.js"></script>
-  <script>
-    (function () {
-      var c = window.NIGHTDROP_CONFIG;
-      if (c && c.links && c.links.source) {
-        var e = document.getElementById('source-link');
-        if (e) e.href = c.links.source;
-      }
-    })();
-  </script>
+  <script src="site.js" defer></script>
 
-  <!-- Frosted-glass sticky header: add .scrolled once the page leaves the top. -->
-  <script>
-    (function () {
-      var nav = document.querySelector('nav');
-      if (!nav) return;
-      var onScroll = function () { nav.classList.toggle('scrolled', window.scrollY > 8); };
-      onScroll();
-      window.addEventListener('scroll', onScroll, { passive: true });
-    })();
-  </script>
 </body>
 </html>

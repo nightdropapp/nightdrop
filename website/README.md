@@ -48,11 +48,14 @@ make config
 
 That regenerates `website/config.js` (a `window.NIGHTDROP_CONFIG = {…}` snapshot) and
 `app/assets/app_config.json`. `index.html` loads `config.js` and fills in the
-addresses/copy/links; if `config.js` is missing it falls back to the static placeholders in
-the HTML, so the page still renders.
+addresses/copy/links; if `config.js` is missing, or JavaScript is off, the static links in
+the HTML still work, so the page still renders.
 
-- `index.html` — page content + a small script that hydrates from `config.js`.
-- `styles.css` — styling.
+- `index.html`, `limits.html` — page content; no inline script or style, so each page's CSP
+  (a meta tag, plus the nginx header) allows only files from this folder.
+- `site.js` — the one script: fills the page from `config.js`, built with the DOM API (no
+  `innerHTML`, so Trusted Types hold).
+- `styles.css` — styling, including the limits page's.
 - `config.js` — **generated** (do not edit by hand).
 - `icon-192.png`, `icon-512.png`, `icon-512-maskable.png`, `apple-touch-icon.png` —
   favicons / PWA icons, copied from the app's icon set (`images/IconKitchen-Output/web/`).
