@@ -34,8 +34,10 @@ sender allowed captures.
 
 **Also 2026-10-18 — a contact's block applies in their chat.** "Block screenshots" used to protect
 only the person who turned it on from capturing their own screen, which read as protecting the
-conversation. Now each app tells its contacts whether it blocks (two more markers on
-`Frame::Captures`, announced on change like the capability), and the contact's app blocks captures
+conversation. Now each app tells its contacts whether it blocks (a capture-block marker on
+`Frame::Captures` carrying on/off and a sequence, so a quick toggle that arrives out of order
+settles on the newest; announced on change, re-sent to every chat on a change, on a contact's
+update, and by a joiner once approved), and the contact's app blocks captures
 while that chat is open, whatever its own setting (`holdBlock` → FLAG_SECURE on Android), saying
 "They block screenshots of this chat". Where the platform cannot block (desktop), the chat says the
 contact asked and that it is up to the reader. This is cooperative: a modified app can ignore it,
