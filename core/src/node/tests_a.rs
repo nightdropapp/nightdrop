@@ -1545,13 +1545,12 @@ fn a_contact_who_updates_is_told_the_capture_block_again() {
     alice.announce_block(true);
     bob.pump().unwrap();
     alice.pump().unwrap(); // delivery confirmed: told_block = Some(true)
-                           // Bob's (older) build ignored it: model that by forgetting it on his side.
-    bob.chats
-        .values_mut()
-        .next()
-        .unwrap()
-        .contact
-        .peer_blocks_capture = None;
+
+    // Bob's (older) build ignored it: model that by forgetting it on his side — the value and the
+    // sequence, since a build that does not know the marker never read either.
+    let chat = bob.chats.values_mut().next().unwrap();
+    chat.contact.peer_blocks_capture = None;
+    chat.peer_block_seq = 0;
 
     // Bob updates; his new version reaches Alice, who tells him again on the next tick.
     bob.set_app_version("0.2.1+417");
