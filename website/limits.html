@@ -104,8 +104,9 @@
           <p>Night Drop routes over Tor to hide the network path. A powerful global observer who
              can watch huge portions of the internet at once might, in theory, correlate traffic
              timing and volume to link the two ends of a conversation. We pad message sizes to
-             blunt this, but defeating a global passive adversary is an open problem for Tor
-             itself, not something we can solve alone.</p>
+             blunt this, and cover traffic (on by default for new identities that use a relay)
+             blurs your activity as a relay sees it &mdash; but defeating a global passive
+             adversary is an open problem for Tor itself, not something we can solve alone.</p>
         </article>
         <article class="card">
           <h3>🔑 Losing your identity with no backup <span class="pill scope">by design</span></h3>
@@ -118,8 +119,8 @@
           <h3>🕳️ The fact that you use Tor <span class="pill scope">by design</span></h3>
           <p>Night Drop hides <em>what</em> you send and <em>who</em> you send it to. It doesn't
              hide from your own network that you're using Tor at all. In places where using Tor
-             is itself risky, that's a separate consideration — bridges and pluggable transports
-             help, and are on our roadmap.</p>
+             is itself risky, that's a separate consideration — Tor bridges, including
+             WebTunnel, help; their own limits are below.</p>
         </article>
       </div>
     </section>
@@ -191,16 +192,16 @@
            done. Treat Night Drop as promising and improving, not battle-tested.</p>
       </div>
       <div class="callout warn spaced">
-        <h3>A seized phone still reveals who you talk to</h3>
-        <p>The app lock encrypts your messages. It does <strong>not</strong> yet cover the file that
-           holds your own Tor address, or the one folder Tor keeps per contact — each named after
-           <em>their</em> address. Someone who takes your phone and copies its storage can read that
-           list without breaking any encryption, and without your PIN.</p>
-        <p>As of 0.1.15 those entries no longer pile up: deleting a chat removes that person, and
-           logging out or using the wipe code clears the lot. What remains exposed is the identity
-           you are using right now, and the contacts you currently have. We are working on moving
-           those into the encrypted store too; until that ships, assume a seized phone shows who
-           you have been talking to.</p>
+        <h3>A seized phone shows that you use Night Drop, and how many contacts you have</h3>
+        <p>Since 0.1.16 your own Tor address and your contacts' addresses are kept in Night Drop's
+           encrypted store, with your messages and behind the app lock if you set one. Someone who
+           takes your phone and copies its storage can still see that Night Drop is installed and
+           runs a Tor onion service, and one small file per contact holding that contact's public
+           key &mdash; so how many contacts you have, and, to anyone who also has one of their
+           phones, that the two of you talk.</p>
+        <p>Deleting a chat removes that contact's file, and logging out or using the wipe code
+           clears them all. A short lock code can be guessed by someone with a copy and time, so a
+           longer one is better.</p>
       </div>
       <div class="callout warn spaced">
         <h3>What a relay can still link about your offline messages</h3>
@@ -293,8 +294,9 @@
         <article class="card">
           <h3>🔮 Long-horizon quantum computing <span class="pill">tracked</span></h3>
           <p>The part of the encryption that protects message contents already has a strong margin
-             against future quantum computers. The initial key-agreement handshake is classical
-             today, like most messengers — there's no live threat, but a well-resourced adversary
+             against future quantum computers. Pairing by short code already mixes in
+             a post-quantum key exchange (ML-KEM-768), but the handshake that starts each chat's
+             encryption is classical today, like most messengers — there's no live threat, but a well-resourced adversary
              could record traffic now to try to decrypt it years from now. Our plan for closing
              that gap is documented publicly rather than glossed over.</p>
         </article>

@@ -59,7 +59,7 @@
         "@id": "https://nightdrop.app/#app",
         "name": "Night Drop",
         "applicationCategory": "CommunicationApplication",
-        "operatingSystem": "Android, Linux",
+        "operatingSystem": "Android, Windows, Linux",
         "url": "https://nightdrop.app/",
         "image": "https://nightdrop.app/icon-512.png",
         "description": "A free, anonymous, end-to-end encrypted 1:1 messenger. Peer-to-peer over Tor, local-first storage, no accounts and no server-side keys.",
@@ -84,6 +84,7 @@
     <div class="nav-inner">
       <span class="brand"><img src="icon-192.png" alt="" class="brand-icon" width="26" height="26" decoding="async" /> Night Drop</span>
       <div class="nav-links">
+        <a href="#new">New in 0.2</a>
         <a href="#features">Features</a>
         <a href="#why">Why it's different</a>
         <a href="limits.html">Honest limits</a>
@@ -109,6 +110,55 @@
   </header>
 
   <main>
+    <section id="new" class="section alt">
+      <h2>New in 0.2</h2>
+      <p class="lead">
+        0.2 cannot message 0.1. Update, and ask your contacts to update too &mdash; anyone still on
+        0.1 is told, and your messages to them wait until they do.
+      </p>
+      <div class="grid">
+        <article class="card">
+          <h3>🛰️ The relay is optional <span class="pill">0.2</span></h3>
+          <p>Keep the Night Drop relay, add up to four of your own, remove ours, or use
+             <strong>direct only</strong> with no relay at all &mdash; then nothing about your
+             messages ever touches a server. With a relay, each chat has its own mailbox under an
+             address that changes daily, so the relay can't link messages from different contacts.</p>
+        </article>
+        <article class="card">
+          <h3>📲 Pair with no server <span class="pill">0.2</span></h3>
+          <p>Your QR code carries a one-time pass, good for a day, that lets one person send you
+             one chat request &mdash; so pairing works on direct only too. You still decide
+             whether to accept.</p>
+        </article>
+        <article class="card">
+          <h3>🚫 Screenshots blocked by default <span class="pill">0.2</span></h3>
+          <p>On Android, screenshots and screen recordings of Night Drop come out black. If your
+             contact blocks them, they're blocked in your chat with them too. You can still
+             allow screenshots in one chat &mdash; to keep evidence of abuse, say &mdash; and they're
+             told. With blocking off, a screenshot or a recording is reported to the other person.</p>
+        </article>
+        <article class="card">
+          <h3>🌫️ Cover traffic on by default <span class="pill">0.2</span></h3>
+          <p>New identities that use a relay send decoy traffic, so the relay can't read your
+             activity from the volume and timing of your mail. You can turn it off to save
+             battery.</p>
+        </article>
+        <article class="card">
+          <h3>🔗 Invites without the clipboard <span class="pill">0.2</span></h3>
+          <p>Share an invite straight to the app you choose; a copied link is marked sensitive
+             and cleared after a minute. After a network switch, the app says it's
+             reconnecting to Tor instead of leaving you guessing.</p>
+        </article>
+        <article class="card">
+          <h3>🛡️ Tighter everywhere <span class="pill">0.2</span></h3>
+          <p>Signed update notices that expire, daily limits on what one contact can send, no
+             app data in Android backups, keyboards that can't learn what you type, a growing
+             wait after wrong lock codes, and a Windows download. The full list is in the
+             <a href="https://github.com/nightdropapp/nightdrop/releases/tag/v0.2.0" rel="noopener noreferrer">release notes</a>.</p>
+        </article>
+      </div>
+    </section>
+
     <section id="features" class="section">
       <h2>Built privacy-first, from the ground up</h2>
       <div class="grid">
@@ -146,15 +196,16 @@
         <article class="card">
           <h3>📮 Delivered even when they’re offline</h3>
           <p>If your contact is offline, the encrypted message waits on an untrusted
-             relay for up to 24 hours — it sees only ciphertext, never content. You
-             see when it’s queued and when it’s delivered.</p>
+             relay for up to 24 hours — it sees only ciphertext, never content. On direct
+             only, it waits on your phone until you're both online. You see when it’s queued
+             and when it’s delivered.</p>
         </article>
         <article class="card">
-          <h3>🛰️ More ways to reach you</h3>
-          <p>Add extra relays that also hold your mailbox. Messages are copied to all of
+          <h3>🛰️ Your relays, or none</h3>
+          <p>Add up to four relays that hold your mailbox. Messages are copied to all of
              them, so one relay being down or blocked doesn’t drop your mail — and every
-             relay still sees only ciphertext. Run your own if you like; nothing about it
-             is trusted.</p>
+             relay still sees only ciphertext. Run your own, remove ours, or use none at
+             all; nothing about a relay is trusted.</p>
         </article>
         <article class="card">
           <h3>📷 Photos and videos, encrypted too</h3>
@@ -208,6 +259,34 @@
              lingers on a server, because nothing was there.</p>
         </article>
         <article class="card">
+          <h3>🚫 Screenshots blocked</h3>
+          <p>On Android, screenshots and screen recording are blocked by default, for you and,
+             in your chat, for your contact. Turn it off and each capture is reported to the
+             other person instead. A camera pointed at the screen gets past any app &mdash;
+             the honest limits page says what else does.</p>
+        </article>
+        <article class="card">
+          <h3>🔥 Burn after reading</h3>
+          <p>Send a message or photo that stays hidden until it's opened, then deletes itself
+             on a timer. Unopened, it's gone after 24 hours.</p>
+        </article>
+        <article class="card">
+          <h3>🔢 Check who you're talking to</h3>
+          <p>Compare a safety number with your contact in person or on a call, or scan each
+             other's code. If they match, no one is in the middle of your chat.</p>
+        </article>
+        <article class="card">
+          <h3>🔐 App lock and wipe code</h3>
+          <p>Lock the app with a code of its own. Set a second code that, entered instead,
+             wipes your identity and messages rather than unlocking.</p>
+        </article>
+        <article class="card">
+          <h3>🌉 Works where Tor is blocked</h3>
+          <p>Tor bridges, including WebTunnel, which carries Tor inside ordinary
+             HTTPS. The app can fetch bridges from the Tor Project for you &mdash; the one
+             request that doesn't go through Tor, made only when you agree.</p>
+        </article>
+        <article class="card">
           <h3>💻 One app, every device</h3>
           <p>Android, Windows <!--iOS, macOS,--> and Linux from one codebase — with the same
              Rust security core doing the cryptography on every platform.</p>
@@ -229,11 +308,13 @@
             <li>✅ No phone number or account</li>
             <li>✅ No server-side keys</li>
             <li>✅ No logs, minimal metadata</li>
-            <li>✅ Peer-to-peer over Tor</li>
+            <li>✅ Peer-to-peer over Tor; the relay is optional</li>
             <li>✅ Local-first; optional 24h server storage with a warning</li>
             <li>✅ You approve contacts before the first message</li>
             <li>✅ Encrypted backups only you can open — Lite, Full, or one chat</li>
             <li>✅ Disappearing messages and delete-for-everyone</li>
+            <li>✅ Screenshots and screen recording blocked by default (Android)</li>
+            <li>✅ Reproducible builds, checked by F-Droid</li>
             <li>✅ Clear warnings when a message is stored or backed up</li>
             <li>✅ Donations with no account — Monero, Zcash, or Bitcoin silent payments</li>
           </ul>
