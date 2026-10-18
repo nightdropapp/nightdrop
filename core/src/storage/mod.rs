@@ -666,3 +666,36 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
     }
 }
+
+/// Make the app's data folder readable by this user only (0700), on Unix. Its files are sealed, but
+/// a world-readable folder (Flutter creates it with the default umask: 0755) still showed other
+/// accounts the state file's size, one file per contact under `client-auth/` (their public onion
+/// keys: how many contacts, and linkable), and the media folder's counts and times (self-audit
+/// 2026-10-17, round 10). A restrictive folder covers everything in it, including files created
+/// before this ran; the Linux runner also sets umask 077 for what comes after. Best effort: a
+/// failure leaves the folder as it was, which is no worse than before.
+pub fn restrict_dir(dir: &std::path::Path) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700));
+    }
+    #[cfg(not(unix))]
+    let _ = dir;
+}
+
+#[cfg(all(test, unix))]
+mod restrict_dir_tests {
+    #[test]
+    fn the_data_folder_is_made_private() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("nd-restrict-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+        super::restrict_dir(&dir);
+        let mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}

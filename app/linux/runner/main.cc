@@ -1,4 +1,5 @@
 #include <sys/resource.h>
+#include <sys/stat.h>
 
 #include "my_application.h"
 
@@ -11,6 +12,10 @@ int main(int argc, char** argv) {
   // ("Unable to open /proc/PID/root"), and the file picker goes through it.
   struct rlimit no_core = {0, 0};
   setrlimit(RLIMIT_CORE, &no_core);
+  // Owner-only files and folders: the data folder holds sealed state, but a world-readable one
+  // showed other accounts its sizes, times and one file per contact (self-audit 2026-10-17,
+  // round 10). The core also makes the folder itself 0700 when it opens it.
+  umask(077);
 
   g_autoptr(MyApplication) app = my_application_new();
   return g_application_run(G_APPLICATION(app), argc, argv);

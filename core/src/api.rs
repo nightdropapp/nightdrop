@@ -1081,6 +1081,9 @@ impl NightdropCore {
         #[cfg(feature = "tor")]
         {
             retire_previous_tor_core();
+            if let Some(dir) = state_dir.as_deref() {
+                crate::storage::restrict_dir(std::path::Path::new(dir));
+            }
             // The store key is needed BEFORE Tor starts now: the onion identity is sealed under it
             // and has to be in the keystore before the service launches, or arti generates a new
             // one and our address changes (`onion-key-at-rest.md` §4).

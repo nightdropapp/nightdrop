@@ -624,6 +624,8 @@ Traps, each of which has happened:
 
 ## 13. Device testing
 
+- **Test on the S23 first** (the maintainer's rule, 2026-10-17). Use the S25 only for what the S23
+  cannot show (its serials are in `MAINTENANCE.local.md`).
 - **`install-android-app.sh --release` PUBLISHES.** On success it runs `deploy_website()`, copying
   the APK into `website/applications/android/` — live on the onion site. Only `NO_DEPLOY_WEB=1`
   stops it. For a test build, build and `adb install -r` by hand.

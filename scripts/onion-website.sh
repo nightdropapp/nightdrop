@@ -187,6 +187,8 @@ http {
     add_header Cross-Origin-Resource-Policy "same-origin" always;
     # Served from the live checkout, so nothing hidden may leak (.git, editor files, .env).
     location ~ /\.(?!well-known/) { return 404; }
+    # The maintainers' notes for this folder: the clear-web deploy leaves it out too.
+    location = /README.md { return 404; }
   }
 }
 NGINXCONF

@@ -74,6 +74,12 @@
                 android:name="io.flutter.embedding.android.NormalTheme"
                 android:resource="@style/NormalTheme"
             />
+            <!-- No deep-link routing. The activity is exported (it is the launcher), so any app can
+                 start it with a URI, which Flutter would push as a route by default. Night Drop
+                 has no named routes and takes invite links only by paste or scan, so a URI from
+                 elsewhere must never pick a screen — in particular not past the app lock
+                 (self-audit 2026-10-17, round 10). -->
+            <meta-data android:name="flutter_deeplinking_enabled" android:value="false" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
