@@ -522,6 +522,28 @@ impl Node {
                     // edited while we waited. (`Approved` is unauthenticated, but this only sends
                     // our own set on our session with them, which a forger cannot read.)
                     self.announce_relay_set_to(&from);
+                    // What we announced when we joined (capability, capture block, burns,
+                    // version) went out before the inviter had read our request, and an inviter
+                    // that gets a frame from someone it does not know yet drops it — while our side
+                    // counted it delivered and never sent it again (0.2 device pass: the S23's
+                    // version and capability never reached the contact it joined). Approval is the
+                    // first moment they certainly know us: tell them again.
+                    if was_waiting {
+                        if let Some(chat) = self.chats.get_mut(&from) {
+                            chat.told_captures = None;
+                            chat.told_block = None;
+                            chat.told_burns = false;
+                            chat.told_version = None;
+                        }
+                        self.captures_announced.remove(&from);
+                        self.block_announced.remove(&from);
+                        self.burns_announced.remove(&from);
+                        self.version_announced.remove(&from);
+                        self.announce_captures_to(&from);
+                        self.announce_block_to(&from);
+                        self.announce_burns_to(&from);
+                        self.announce_version_to(&from);
+                    }
                     return Ok(Some((from, String::new())));
                 }
                 Ok(None)

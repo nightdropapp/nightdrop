@@ -2733,3 +2733,43 @@ fn a_joiner_announces_its_capture_settings_to_the_inviter() {
         "block reaches the inviter"
     );
 }
+
+/// A joiner announces its standing properties as it joins, before the inviter has read the
+/// request; over a real network those frames can arrive first and be dropped, yet count as
+/// delivered. Approval is the first moment the inviter certainly knows the joiner: it re-announces.
+#[test]
+fn a_joiner_repeats_what_it_announced_once_it_is_approved() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice"))); // inviter
+    alice.set_require_authorization(true);
+    let mut bob = Node::new(Box::new(net.endpoint("bob"))); // joiner
+    bob.announce_captures(true);
+    bob.announce_block(true);
+    bob.set_app_version("0.2.0+416");
+    let bundle = alice.publish_bundle();
+    let alice_contact = bob.connect_with_bundle("alice", &bundle).unwrap();
+    bob.note_awaiting_approval(&alice_contact); // as the API's join paths do
+    alice.pump().unwrap();
+    let bob_id = alice.pending_authorizations()[0].id.clone();
+
+    // Simulate the race: whatever Bob announced at join was lost on Alice's side.
+    {
+        let chat = alice.chats.get_mut(&bob_id).unwrap();
+        chat.contact.peer_captures_silent = None;
+        chat.contact.peer_blocks_capture = None;
+        chat.contact.peer_app_version = None;
+        chat.peer_block_seq = 0;
+    }
+
+    alice.authorize(&bob_id, true).unwrap();
+    bob.pump().unwrap(); // Bob reads the approval and announces again
+    alice.pump().unwrap();
+    let c = alice
+        .contacts()
+        .into_iter()
+        .find(|c| c.id == bob_id)
+        .unwrap();
+    assert_eq!(c.peer_captures_silent, Some(false));
+    assert_eq!(c.peer_blocks_capture, Some(true));
+    assert_eq!(c.peer_app_version.as_deref(), Some("0.2.0"));
+}
