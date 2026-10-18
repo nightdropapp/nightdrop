@@ -112,6 +112,25 @@ void main() {
     await _setRecording(false);
   });
 
+  // A recording already running when the app comes forward is signalled before any chat listens,
+  // and Android does not repeat it: the chat must ask (S25, 2026-10-18 — no notice was sent).
+  testWidgets('a chat asks whether a recording is already running', (tester) async {
+    ScreenshotDetector.recordingChanged(false);
+    ScreenshotDetector.supportedForTest = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('app.nightdrop/screenshots'), (call) async {
+      if (call.method == 'isRecording') return true;
+      return null;
+    });
+    final (core, contact) = await pumpChat(tester);
+    await tester.pump();
+    expect(core.recordings, [contact.id]);
+    ScreenshotDetector.supportedForTest = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('app.nightdrop/screenshots'), null);
+    ScreenshotDetector.recordingChanged(false);
+  });
+
   // The honesty default: where the platform cannot report screenshots — desktop, Android below 14,
   // and this test host — `canDetect` must be false, so no UI can claim a protection that isn't
   // there. A silent capture is the normal case, not an error case.

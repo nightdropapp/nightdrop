@@ -23,7 +23,12 @@ class ScreenshotDetector {
   static const _channel = MethodChannel('app.nightdrop/screenshots');
 
   /// Android 14+ and iOS report screenshots; Android 15+ and iOS report screen recording.
-  static bool get supported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+  static bool get supported =>
+      supportedForTest ?? (!kIsWeb && (Platform.isAndroid || Platform.isIOS));
+
+  /// Lets a test stand in for a phone.
+  @visibleForTesting
+  static bool? supportedForTest;
 
   /// "Block screenshots" needs Android's FLAG_SECURE; iOS has no equivalent, so it is not offered.
   static bool get canBlockCapture => !kIsWeb && Platform.isAndroid;
@@ -86,6 +91,13 @@ class ScreenshotDetector {
       return null;
     });
     if (_recording) onRecording?.call(); // opened while a recording runs
+    // Ask as well: the platform's event can have come before anything here listened (a recording
+    // already running when the app came forward), and it is not sent again.
+    if (supported) {
+      _channel.invokeMethod<bool>('isRecording').then((on) {
+        if (on == true) recordingChanged(true);
+      }, onError: (_) {});
+    }
   }
 
   /// Stop reporting. Called when a chat closes so a screenshot taken on the chat *list* isn't

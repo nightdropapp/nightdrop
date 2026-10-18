@@ -89,11 +89,18 @@ class MainActivity : FlutterActivity() {
         }
 
     private fun sendRecording(state: Int) {
-        // With "Block screenshots" on, a recording captures only black: nothing to report.
+        // With "Block screenshots" on, a recording captures only black (checked on a Galaxy S25:
+        // the window still counts as "visible", but the video shows nothing): nothing to report.
         val on = Build.VERSION.SDK_INT >= 35 &&
             state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE && !blockCapture()
+        recording = on
         channel?.invokeMethod("recording", on)
     }
+
+    // The last recording state sent, for Dart to ask when a chat opens: the event itself can come
+    // before anything in Dart listens (a recording already running when the app comes forward),
+    // and Android does not send it again.
+    private var recording = false
 
     // Lets Dart say whether the engine should outlive this screen, and end the app on Exit.
     private var process: MethodChannel? = null
@@ -196,6 +203,7 @@ class MainActivity : FlutterActivity() {
                     // whole life of the window, which also blocks screen recording and casting.
                     // Kept in Android's own preferences so it applies before any Dart runs.
                     "getBlockCapture" -> result.success(blockCapture())
+                    "isRecording" -> result.success(recording)
                     "setBlockCapture" -> {
                         val on = call.arguments as? Boolean ?: false
                         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
@@ -255,6 +263,7 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT >= 35) {
             screenRecordingCallback?.let { windowManager.removeScreenRecordingCallback(it) }
             // Not watching while paused: a recording seen again on resume is reported as new.
+            recording = false
             channel?.invokeMethod("recording", false)
         }
         // Pre-33 fallback only (see the class comment): best effort at blanking the thumbnail.
