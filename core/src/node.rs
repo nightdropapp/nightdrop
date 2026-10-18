@@ -956,6 +956,9 @@ pub struct Node {
     captures_announced: HashMap<String, bool>,
     /// Contacts told our capture block this run, or being told, with the value that went out.
     block_announced: HashMap<String, bool>,
+    /// When we last re-told a contact that our override of their block stands (unix seconds; in
+    /// memory): at most once an hour, so their toggling cannot fill our held-control queue.
+    override_retold: HashMap<String, u64>,
     /// This build's app version (`"0.1.27"`), set by the app via
     /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
     /// announced until then: a guessed version would be worse than none.
@@ -1592,6 +1595,7 @@ impl Node {
             announce_online: ANNOUNCE_ONLINE_ON_START,
             captures_announced: HashMap::new(),
             block_announced: HashMap::new(),
+            override_retold: HashMap::new(),
             upgrade_notice_in_flight: std::collections::HashSet::new(),
             app_version: None,
             version_announced: HashMap::new(),

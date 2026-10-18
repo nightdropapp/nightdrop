@@ -734,11 +734,25 @@ impl Node {
                             return Ok(None);
                         }
                         chat.contact.peer_blocks_capture = Some(on);
-                        // Our override was of THAT request. Once they stop asking it is spent: a
-                        // later request is honoured until the user overrides it again (and they
-                        // are told again) — not silently ignored (round 13, R13-1).
-                        if !on {
-                            chat.contact.capture_override = false;
+                        // They ask again while our user's override stands: the override stays (a
+                        // harasser toggling must not be able to cancel a victim's choice to keep
+                        // evidence — round 14), and they are told again, so the request is never
+                        // ignored silently (round 13).
+                        let now = crate::api::now_secs();
+                        let retell = on
+                            && chat.contact.capture_override
+                            && self
+                                .override_retold
+                                .get(&from)
+                                .is_none_or(|t| now.saturating_sub(*t) >= 3600);
+                        if retell {
+                            self.override_retold.insert(from.clone(), now);
+                            chat.history.push(ChatMessage::system(
+                                "🔓 They asked again for this chat not to be captured. Screenshots \
+                                 stay allowed here, as you chose; they were told."
+                                    .to_string(),
+                            ));
+                            self.send_capture_notice(&from, MARK_CAPTURE_OVERRIDE_ON);
                         }
                         return Ok(Some((from, String::new())));
                     }

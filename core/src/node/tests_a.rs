@@ -2825,33 +2825,43 @@ fn overriding_a_contacts_capture_block_tells_them_and_survives_a_restore() {
     );
 }
 
-/// An override answers one request: once the contact stops blocking, it is spent, so a later
-/// block is honoured (and overriding it again tells them again).
+/// An override stays until the user removes it — a harasser toggling their block must not be able
+/// to cancel it — and each time they ask again, they are told again.
 #[test]
-fn an_override_ends_when_the_contact_stops_blocking() {
+fn an_override_stays_and_the_contact_is_told_again_when_they_ask_again() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));
     let mut bob = Node::new(Box::new(net.endpoint("bob")));
     let bundle = bob.publish_bundle();
     let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
     bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
     bob.announce_block(true);
     alice.pump().unwrap();
     alice.set_capture_override(&bob_contact, true);
     bob.pump().unwrap();
+    let told = |n: &Node| {
+        n.messages(&alice_contact)
+            .iter()
+            .filter(|m| m.system && m.text.contains("turned off screenshot blocking"))
+            .count()
+    };
+    assert_eq!(told(&bob), 1);
 
     bob.announce_block(false);
     alice.pump().unwrap();
-    assert!(
-        !alice.contacts()[0].capture_override,
-        "spent once they stop asking"
-    );
     bob.announce_block(true);
     alice.pump().unwrap();
-    let c = &alice.contacts()[0];
-    assert_eq!(c.peer_blocks_capture, Some(true));
-    assert!(
-        !c.capture_override,
-        "a new request is honoured until overridden again"
-    );
+    bob.pump().unwrap();
+    assert!(alice.contacts()[0].capture_override, "the override stands");
+    assert_eq!(told(&bob), 2, "asking again is answered again");
+
+    // Toggling again within the hour is not answered again: it cannot be used to fill our queue.
+    bob.announce_block(false);
+    alice.pump().unwrap();
+    bob.announce_block(true);
+    alice.pump().unwrap();
+    bob.pump().unwrap();
+    assert_eq!(told(&bob), 2, "at most once an hour");
+    assert!(alice.contacts()[0].capture_override);
 }
