@@ -376,6 +376,10 @@ abstract class NightdropCore extends ChangeNotifier {
   /// in our chat too. Default is a no-op for implementations without peers.
   Future<void> setCaptureBlock(bool blocked) async {}
 
+  /// Allow screenshots in this chat although the contact blocks them, or block them again; the
+  /// contact is told. Default is a no-op for implementations without peers.
+  Future<void> setCaptureOverride(String contactId, bool allow) async {}
+
   // --- App lock (see docs/design/app-lock.md) ------------------------------------------
   // The at-rest key normally sits in the OS keystore, which anyone holding the unlocked device
   // can read through the app. A lock re-derives it from a secret the user knows instead. Both a

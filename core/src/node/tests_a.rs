@@ -2773,3 +2773,54 @@ fn a_joiner_repeats_what_it_announced_once_it_is_approved() {
     assert_eq!(c.peer_blocks_capture, Some(true));
     assert_eq!(c.peer_app_version.as_deref(), Some("0.2.0"));
 }
+
+/// A contact's capture block is a request; the user may override it per chat (to keep evidence of
+/// abuse, say), and the contact is told each time it changes.
+#[test]
+fn overriding_a_contacts_capture_block_tells_them_and_survives_a_restore() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+    bob.announce_block(true);
+    alice.pump().unwrap();
+
+    assert!(alice.set_capture_override(&bob_contact, true));
+    assert!(
+        !alice.set_capture_override(&bob_contact, true),
+        "no change, no second notice"
+    );
+    bob.pump().unwrap();
+    assert!(alice.contacts()[0].capture_override);
+    assert!(alice
+        .messages(&bob_contact)
+        .iter()
+        .any(|m| m.system && m.text.contains("You allowed screenshots")));
+    let told = |n: &Node| {
+        n.messages(&alice_contact)
+            .iter()
+            .filter(|m| m.system && m.text.contains("turned off screenshot blocking"))
+            .count()
+    };
+    assert_eq!(told(&bob), 1, "the contact is told");
+
+    assert!(alice.set_capture_override(&bob_contact, false));
+    bob.pump().unwrap();
+    assert!(bob
+        .messages(&alice_contact)
+        .iter()
+        .any(|m| m.system && m.text.contains("blocks screenshots in this chat again")));
+
+    alice.set_capture_override(&bob_contact, true);
+    let password = "correct horse battery staple";
+    let backup = alice.backup(password).unwrap();
+    let restored =
+        Node::restore_from_backup(&backup, password, Box::new(net.endpoint("alice2"))).unwrap();
+    assert!(
+        restored.contacts()[0].capture_override,
+        "kept across a restore"
+    );
+}

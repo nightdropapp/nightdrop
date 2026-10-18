@@ -620,6 +620,13 @@ impl Node {
                     Ok(pt) if pt == MARK_RECORDING => {
                         "🔴 The other person is recording their screen with this chat open."
                     }
+                    Ok(pt) if pt == MARK_CAPTURE_OVERRIDE_ON => {
+                        "🔓 The other person turned off screenshot blocking for this chat on their \
+                         phone. You are still told about each screenshot they take."
+                    }
+                    Ok(pt) if pt == MARK_CAPTURE_OVERRIDE_OFF => {
+                        "🔒 The other person blocks screenshots in this chat again, as you asked."
+                    }
                     _ => return Ok(None), // forged, replayed, or a kind this build doesn't know
                 };
                 chat.mark_alive();

@@ -739,6 +739,12 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> setCaptureOverride(String contactId, bool allow) async {
+    await _core!.setCaptureOverride(contactId: contactId, allow: allow);
+    await _refresh();
+  }
+
+  @override
   Future<void> setCaptureBlock(bool blocked) async {
     try {
       await _core?.setCaptureBlock(blocked: blocked);
@@ -1962,6 +1968,7 @@ class RustNightdropCore extends NightdropCore {
         peerVerified: c.peerVerified,
         peerCapturesSilent: c.peerCapturesSilent,
         peerBlocksCapture: c.peerBlocksCapture,
+        captureOverride: c.captureOverride,
         peerSupportsBurn: c.peerSupportsBurn,
         peerRelays: c.peerRelays,
         peerRelayState: c.peerRelayState,

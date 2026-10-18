@@ -315,6 +315,9 @@ pub struct Contact {
     /// screenshots, recording and casting while their chat is open, as they asked. `None` = they
     /// have not said (an older build).
     pub peer_blocks_capture: Option<bool>,
+    /// Whether the user chose to allow screenshots in this chat although the peer blocks them
+    /// ([`set_capture_override`](NightdropCore::set_capture_override)); the peer is told.
+    pub capture_override: bool,
     /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
     /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
     pub peer_relays: Vec<String>,
@@ -2080,6 +2083,16 @@ impl NightdropCore {
         let mut g = self.lock();
         g.me.announce_captures(visible);
         g.save();
+        Ok(())
+    }
+
+    /// Allow screenshots in this chat on this phone although the contact blocks them, or block them
+    /// again. The contact is told either way. No-op if nothing changes.
+    pub fn set_capture_override(&self, contact_id: String, allow: bool) -> Result<()> {
+        let mut g = self.lock();
+        if g.me.set_capture_override(&contact_id, allow) {
+            g.save();
+        }
         Ok(())
     }
 

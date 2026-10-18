@@ -630,6 +630,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// a chat is sent the value only when it differs from what that chat confirmed.
   Future<void> setCaptureBlock({required bool blocked});
 
+  /// Allow screenshots in this chat on this phone although the contact blocks them, or block them
+  /// again. The contact is told either way. No-op if nothing changes.
+  Future<void> setCaptureOverride(
+      {required String contactId, required bool allow});
+
   /// Tell peers whether this device can report screenshots at all (#1).
   ///
   /// `visible` is what the platform can actually do — Android 14+ only. It goes to the PEER, not
@@ -969,6 +974,10 @@ class Contact {
   /// have not said (an older build).
   final bool? peerBlocksCapture;
 
+  /// Whether the user chose to allow screenshots in this chat although the peer blocks them
+  /// ([`set_capture_override`](NightdropCore::set_capture_override)); the peer is told.
+  final bool captureOverride;
+
   /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
   /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
   final List<String> peerRelays;
@@ -1042,6 +1051,7 @@ class Contact {
     required this.peerVerified,
     this.peerCapturesSilent,
     this.peerBlocksCapture,
+    required this.captureOverride,
     required this.peerRelays,
     required this.peerRelayState,
     required this.serverStorageAvailable,
@@ -1068,6 +1078,7 @@ class Contact {
       peerVerified.hashCode ^
       peerCapturesSilent.hashCode ^
       peerBlocksCapture.hashCode ^
+      captureOverride.hashCode ^
       peerRelays.hashCode ^
       peerRelayState.hashCode ^
       serverStorageAvailable.hashCode ^
@@ -1096,6 +1107,7 @@ class Contact {
           peerVerified == other.peerVerified &&
           peerCapturesSilent == other.peerCapturesSilent &&
           peerBlocksCapture == other.peerBlocksCapture &&
+          captureOverride == other.captureOverride &&
           peerRelays == other.peerRelays &&
           peerRelayState == other.peerRelayState &&
           serverStorageAvailable == other.serverStorageAvailable &&

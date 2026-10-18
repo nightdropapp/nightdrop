@@ -75,6 +75,9 @@ pub struct PersistedChat {
     /// `#[serde(default)]` (→ None: they have not said).
     #[serde(default)]
     pub peer_blocks_capture: Option<bool>,
+    /// The user allows screenshots in this chat although the peer blocks them (they were told).
+    #[serde(default)]
+    pub capture_override: bool,
     /// Whether the **peer** signaled that *they* verified this chat's safety number — informational
     /// only (never sets our own `verified`). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]

@@ -179,6 +179,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ScreenshotDetector.holdBlock(wanted);
   }
 
+  /// Allow screenshots here although the contact blocks them (asking first, since they are told),
+  /// or block them again.
+  Future<void> _toggleCaptureOverride(Contact contact) async {
+    final core = NightdropScope.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    if (!contact.captureOverride) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(l10n.captureOverrideTitle),
+          content: Text(l10n.captureOverrideBody),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.cancel)),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.captureOverrideConfirm)),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    await core.setCaptureOverride(contact.id, !contact.captureOverride);
+  }
+
   /// We are on direct only (`optional-relay.md` §3): said once in each chat.
   bool _directOnly = false;
 
@@ -772,7 +798,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       listenable: core,
       builder: (context, _) {
         final contact = _contact(core);
-        _syncPeerBlock(contact?.peerBlocksCapture == true);
+        _syncPeerBlock(contact?.peerBlocksCapture == true && contact?.captureOverride != true);
         if (contact == null) {
           // The chat was deleted while open — leave the screen on the next frame.
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -882,6 +908,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                           contactId: widget.contactId);
                     case 'delete':
                       _confirmDelete(contact);
+                    case 'capture':
+                      _toggleCaptureOverride(contact);
                   }
                 },
                 itemBuilder: (context) => [
@@ -895,6 +923,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   _menuItem('rename', Icons.badge_outlined,
                       l10n.renameYourselfTooltip),
                   _menuItem('backup', Icons.save_alt, l10n.backUpThisChat),
+                  // Their block is a request; overriding it here is the user's right (keeping
+                  // evidence of abuse), and the contact is told.
+                  if (contact.peerBlocksCapture == true && ScreenshotDetector.canBlockCapture)
+                    _menuItem(
+                        'capture',
+                        contact.captureOverride
+                            ? Icons.screenshot_monitor_outlined
+                            : Icons.lock_open_outlined,
+                        contact.captureOverride
+                            ? l10n.captureOverrideOffMenu
+                            : l10n.captureOverrideOnMenu),
                   const PopupMenuDivider(),
                   _menuItem('delete', Icons.delete_outline,
                       l10n.deleteThisChatTooltip),
@@ -930,13 +969,19 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               // (see _syncPeerBlock), or says it cannot where the platform has no way to.
               if (contact.peerBlocksCapture == true)
                 _CompactNotice(
-                  icon: Icons.screenshot_monitor_outlined,
-                  summary: ScreenshotDetector.canBlockCapture
-                      ? l10n.peerBlocksCaptureSummary
-                      : l10n.peerBlocksCaptureUnenforcedSummary,
-                  detail: ScreenshotDetector.canBlockCapture
-                      ? l10n.peerBlocksCaptureBanner
-                      : l10n.peerBlocksCaptureUnenforcedBanner,
+                  icon: contact.captureOverride
+                      ? Icons.lock_open_outlined
+                      : Icons.screenshot_monitor_outlined,
+                  summary: !ScreenshotDetector.canBlockCapture
+                      ? l10n.peerBlocksCaptureUnenforcedSummary
+                      : contact.captureOverride
+                          ? l10n.captureOverrideSummary
+                          : l10n.peerBlocksCaptureSummary,
+                  detail: !ScreenshotDetector.canBlockCapture
+                      ? l10n.peerBlocksCaptureUnenforcedBanner
+                      : contact.captureOverride
+                          ? l10n.captureOverrideBanner
+                          : l10n.peerBlocksCaptureBanner,
                 ),
               // 0.2 cannot talk to 0.1 at all; that notice replaces the older mailbox one.
               if (contact.peerOutdated)

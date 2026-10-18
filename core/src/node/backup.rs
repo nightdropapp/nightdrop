@@ -65,6 +65,7 @@ impl Node {
                     peer_verified: chat.contact.peer_verified,
                     peer_captures_silent: chat.contact.peer_captures_silent,
                     peer_blocks_capture: chat.contact.peer_blocks_capture,
+                    capture_override: chat.contact.capture_override,
                     peer_relays: chat
                         .relay_set
                         .as_ref()
@@ -781,6 +782,7 @@ fn chat_from_persisted(
             peer_verified: chat.peer_verified,
             peer_captures_silent: chat.peer_captures_silent,
             peer_blocks_capture: chat.peer_blocks_capture,
+            capture_override: chat.capture_override,
             peer_relays: Vec::new(), // filled in `contacts()` from `relay_set`
             peer_supports_burn: chat.peer_supports_burn,
             peer_app_version: chat.peer_app_version.clone(),

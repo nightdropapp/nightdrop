@@ -1336,6 +1336,48 @@ abstract class AppLocalizations {
   /// **'When on, nobody can take a screenshot of Night Drop, record its screen or cast it on this phone, including apps you installed. Recent apps never show its contents either way. Your contacts\' Night Drop blocks them too in their chat with you, where their device can.\n\nOn by default. Turn it off to allow screenshots: your contacts are then told when you screenshot a chat or record your screen with it open (Android 15 and later). A photo of the screen gets past any block.'**
   String get blockCaptureBody;
 
+  /// Chat menu: override the contact's request to block screenshots, on this phone.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow screenshots in this chat'**
+  String get captureOverrideOnMenu;
+
+  /// Chat menu: honour the contact's request again.
+  ///
+  /// In en, this message translates to:
+  /// **'Block screenshots in this chat again'**
+  String get captureOverrideOffMenu;
+
+  /// Title of the confirmation before overriding the contact's block.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow screenshots here?'**
+  String get captureOverrideTitle;
+
+  /// Body of the confirmation before overriding the contact's block.
+  ///
+  /// In en, this message translates to:
+  /// **'This person asked that this chat not be captured. You can still allow screenshots and screen recording of it on your phone — to keep evidence of abuse, for instance. They will be told that you did, and told about each screenshot you take.'**
+  String get captureOverrideBody;
+
+  /// Confirm button: override and notify the contact.
+  ///
+  /// In en, this message translates to:
+  /// **'Allow and tell them'**
+  String get captureOverrideConfirm;
+
+  /// One line when the user overrode the contact's block in this chat.
+  ///
+  /// In en, this message translates to:
+  /// **'You allow screenshots here; they were told'**
+  String get captureOverrideSummary;
+
+  /// Full text behind captureOverrideSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'This person blocks screenshots, but you allowed them in this chat on your phone. They were told, and they are told about each screenshot you take. Block them again from the chat menu.'**
+  String get captureOverrideBanner;
+
   /// One line: the contact has Block screenshots on, so this app blocks captures in their chat.
   ///
   /// In en, this message translates to:

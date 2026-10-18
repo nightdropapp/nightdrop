@@ -43,6 +43,13 @@ while that chat is open, whatever its own setting (`holdBlock` → FLAG_SECURE o
 contact asked and that it is up to the reader. This is cooperative: a modified app can ignore it,
 and a photo of the screen gets past any block.
 
+**The user may override it per chat** (round 12, 2026-10-18): a harasser could otherwise turn on
+Block screenshots and stop the person they harass from keeping screenshots as evidence — one of the
+reasons this design allowed screenshots in the first place. The chat menu offers "Allow screenshots
+in this chat" (confirmed first); the contact is told at once, and again if it is turned back off, by
+two more markers on `Frame::Screenshot` (counted against the daily allowance like the other notices),
+and each screenshot taken there is still reported to them as usual.
+
 The **Recents thumbnail** is the opposite case and *is* blocked — Android snapshots the window on
 backgrounding with no user intent behind it, and that image sits in the task switcher for anyone who
 opens it. `FLAG_SECURE` is therefore held only while backgrounded (`MainActivity.onPause` →

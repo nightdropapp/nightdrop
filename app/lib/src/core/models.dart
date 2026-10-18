@@ -59,6 +59,7 @@ class Contact {
     this.peerVerified = false,
     this.peerCapturesSilent,
     this.peerBlocksCapture,
+    this.captureOverride = false,
     this.peerSupportsBurn,
     this.peerRelays = const [],
     this.peerRelayState = 'relays',
@@ -117,6 +118,9 @@ class Contact {
   /// Whether the peer has "Block screenshots" on: then this app blocks captures while their chat
   /// is open (cooperative — their wish, honoured by Night Drop). `null` = they have not said.
   bool? peerBlocksCapture;
+
+  /// The user allows screenshots in this chat although the peer blocks them (the peer was told).
+  bool captureOverride;
 
   /// Whether the peer's build understands burn messages.
   ///

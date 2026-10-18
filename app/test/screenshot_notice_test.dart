@@ -162,6 +162,32 @@ void main() {
         .setMockMethodCallHandler(const MethodChannel('app.nightdrop/screenshots'), null);
   });
 
+  testWidgets('allowing screenshots in a blocking contact\'s chat releases the hold', (tester) async {
+    final holds = <bool>[];
+    ScreenshotDetector.canBlockForTest = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('app.nightdrop/screenshots'), (call) async {
+      if (call.method == 'holdBlock') holds.add(call.arguments as bool);
+      return null;
+    });
+    final (core, _) = await pumpChat(tester);
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    core.contacts.first.peerBlocksCapture = true;
+    core.notifyListeners();
+    await tester.pump();
+    expect(holds, [true]);
+
+    core.contacts.first.captureOverride = true;
+    core.notifyListeners();
+    await tester.pump();
+    expect(holds, [true, false], reason: 'the user chose to allow it here');
+    expect(find.text(l10n.captureOverrideSummary), findsOneWidget);
+
+    ScreenshotDetector.canBlockForTest = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('app.nightdrop/screenshots'), null);
+  });
+
   testWidgets('where captures cannot be blocked, the chat says it is up to you', (tester) async {
     ScreenshotDetector.canBlockForTest = false;
     final (core, _) = await pumpChat(tester);

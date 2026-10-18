@@ -107,6 +107,11 @@ const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
 /// [`Frame::Screenshot`] as a screenshot: a build that predates it decrypts an unknown marker and
 /// ignores the frame, so no wire change is needed.
 const MARK_RECORDING: &[u8] = b"nightdrop/ctl/recording/v1";
+/// The peer chose to allow screenshots in this chat on their phone although we block them (our
+/// request is cooperative; overriding it is their right, and we are told). Same frame.
+const MARK_CAPTURE_OVERRIDE_ON: &[u8] = b"nightdrop/ctl/capture-override-on/v1";
+/// …and blocks them again, as we asked.
+const MARK_CAPTURE_OVERRIDE_OFF: &[u8] = b"nightdrop/ctl/capture-override-off/v1";
 /// Two markers for the safety-number verification signal (§5b′): the state is carried by *which*
 /// one the receiver's ratchet decrypts, so it's authenticated with no tamperable plaintext flag.
 const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
@@ -847,6 +852,7 @@ impl Chat {
                 peer_verified: false,
                 peer_captures_silent: None,
                 peer_blocks_capture: None,
+                capture_override: false,
                 peer_relays: Vec::new(),
                 peer_supports_burn: None,
                 peer_app_version: None,
@@ -2192,6 +2198,42 @@ impl Node {
             )
         };
         chat.history.push(ChatMessage::system(note.to_string()));
+        self.send_capture_notice(contact_id, marker);
+    }
+
+    /// Allow (or stop allowing) screenshots in this chat on this phone although the contact blocks
+    /// them. Their block is a request this app honours by default; the user may override it per
+    /// chat — keeping a screenshot as evidence of abuse is the case that matters (round 12, 2026-10-18)
+    /// — and the contact is always told. Returns whether anything changed.
+    pub fn set_capture_override(&mut self, contact_id: &str, allow: bool) -> bool {
+        let Some(chat) = self.chats.get_mut(contact_id) else {
+            return false;
+        };
+        if chat.closed || chat.contact.capture_override == allow {
+            return false;
+        }
+        chat.contact.capture_override = allow;
+        let (note, marker) = if allow {
+            (
+                "🔓 You allowed screenshots in this chat, although they asked for them to be \
+                 blocked. They were told.",
+                MARK_CAPTURE_OVERRIDE_ON,
+            )
+        } else {
+            (
+                "🔒 You blocked screenshots in this chat again, as they asked. They were told.",
+                MARK_CAPTURE_OVERRIDE_OFF,
+            )
+        };
+        chat.history.push(ChatMessage::system(note.to_string()));
+        self.send_capture_notice(contact_id, marker);
+        self.dirty = true;
+        true
+    }
+
+    /// Send the contact a capture notice (`marker` on [`Frame::Screenshot`]): direct first, held in
+    /// `pending_control` until a copy lands.
+    fn send_capture_notice(&mut self, contact_id: &str, marker: &[u8]) {
         if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
             Frame::Screenshot { from, message }
         }) {
