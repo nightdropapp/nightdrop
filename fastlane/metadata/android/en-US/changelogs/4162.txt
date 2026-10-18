@@ -1,5 +1,5 @@
-Night Drop 0.2: the relay is optional. Remove it to chat directly, pairing by QR code; messages then wait on your device until your contact is online. The relay can no longer link messages from different contacts.
+Night Drop 0.2: the relay is optional. Remove it to chat directly, pairing by QR code; messages wait on your device until your contact is online. The relay can no longer link messages from different contacts.
 
-0.2 cannot message 0.1 apps: contacts still on 0.1 are told to update, and your messages wait until they do.
+0.2 cannot message 0.1 apps: contacts on 0.1 are told to update.
 
-Photos and videos no longer carry location or device details. Disappearing messages apply only to new messages. Plus security tightening and fixes throughout.
+New: a Block screenshots setting, contacts told when you record your screen, invites shared without the clipboard. Photos and videos lose location and device details. Plus security fixes throughout.
