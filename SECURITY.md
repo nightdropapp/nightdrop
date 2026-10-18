@@ -53,8 +53,9 @@ These are documented limitations, not vulnerabilities (see `ARCHITECTURE.md` §8
 - A fully compromised endpoint (malware with root/jailbreak) or an attacker with the
   unlocked device beyond the at-rest device-theft model.
 - A global passive adversary de-anonymizing Tor itself, and low-latency traffic-analysis
-  / timing correlation. Cover traffic exists but is opt-in and off by default
-  (`docs/design/cover-traffic.md`), so timing is not obfuscated for most users — stated, not
+  / timing correlation. Cover traffic is on by default for new identities that use a relay
+  (since 0.2; installs set up earlier keep their setting), but it blurs volume and timing as the
+  relay sees them, not end-to-end timing across Tor (`docs/design/cover-traffic.md`) — stated, not
   fixed.
 - Loss of history after device loss without an opt-in backup, or a lost/forgotten backup
   password — data loss by design.
@@ -118,19 +119,22 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   safe *because backup passwords are randomly generated (~100 bits)*, so entropy — not KDF cost —
   is the load-bearing defense. **Invariant to preserve:** never let a user choose their own
   server-backup password, or the fixed-salt recovery handle becomes brute-forceable by the relay.
-- **Screenshot detection is best-effort, and its absence proves nothing.** *(Known limit, by
-  design.)* Screenshots are deliberately **not** blocked: a permanent `FLAG_SECURE` only pushes a
-  determined person to photograph the screen with a second device, which no software can detect,
-  while breaking a legitimate thing users want. Instead a capture is reported — locally and to the
-  peer over an authenticated control frame (`Frame::Screenshot`). The app-switcher preview is
-  suppressed outright on Android 13+ (`setRecentsScreenshotEnabled`); on older releases that
-  suppression is best-effort and can fail, since the only tool available there is a window flag set
-  as the app leaves the foreground, which does not reliably beat the system's snapshot. The
-  reporting is blind to
-  **every Android below 14** (`Activity.ScreenCaptureCallback` is API 34+), **every desktop
-  platform**, **screen recording**, and **a camera pointed at the screen**. So a peer who sees no
-  notice has learned nothing, and the UI/website must never imply otherwise. What *is* blocked is
-  the Recents thumbnail, since that capture has no user intent behind it.
+- **Blocking and reporting captures is cooperative, and no notice proves nothing.** *(Known limit,
+  by design.)* From 0.2, **Block screenshots** is on by default on Android (`FLAG_SECURE`):
+  screenshots and screen recordings of Night Drop come out black. A contact's block also applies in
+  their chat on your phone, and the chat says so; you can still allow screenshots in one chat (to
+  keep evidence of abuse, for instance), and the contact is told. With blocking off, a capture is
+  reported — locally and to the peer over an authenticated control frame (`Frame::Screenshot`):
+  screenshots on Android 14+ (`Activity.ScreenCaptureCallback`), screen recordings on Android 15+
+  (`WindowManager` recording callback, including a recording already running when the app comes
+  forward). What none of this reaches: **a camera pointed at the screen**; **a modified app**, which
+  can ignore a contact's block and report nothing; **desktop platforms**, which can neither block
+  nor detect (the chat says a contact asked, and leaves it to the reader); **Android below 14**
+  (screenshots) **or below 15** (recordings), where nothing is detected; and a video opened in
+  another app's player. So a peer who sees no notice has learned nothing, and the UI/website must
+  never imply otherwise. The app-switcher preview is suppressed outright on Android 13+
+  (`setRecentsScreenshotEnabled`); on older releases that suppression is best-effort. Design:
+  `docs/design/screenshot-transparency.md`.
 - **What a relay can still link about your mailboxes.** *(Known limit.)* Through 0.1.25 offline
   mail went to a handle that was a static hash of the recipient's identity key, so a relay (or
   whoever seizes one) could tell that deposits from different senders, on different days, were for

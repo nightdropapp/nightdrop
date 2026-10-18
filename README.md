@@ -44,7 +44,8 @@ messages after a restart until you unlock it once, and says so in a notification
 ## Status
 
 **Feature-complete and verified end to end** (Rust and Flutter test suites passing, `cargo
-clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
+clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop). The current release is
+**0.2**; it cannot message 0.1 apps, and contacts still on 0.1 are told to update.
 
 - **E2E crypto** (`core/crypto`, `identity`, `pake`): Signal Double Ratchet via
   `vodozemac` (X3DH + ratchet), a SPAKE2 "bouncer", anonymous device identities.
@@ -66,10 +67,18 @@ clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
   deterministic integration test drives two real cores over an injected transport + relay
   (pairing, authorization, bidirectional + offline delivery).
 - **Relay** (`core/relay_client`, `relay/`): untrusted rendezvous mailbox + 24h
-  store-and-forward; offline delivery; opaque encrypted blobs only.
+  store-and-forward; offline delivery; opaque encrypted blobs only. Each chat has its own
+  mailbox, under an address that changes daily, so the relay cannot link messages from different
+  contacts ([`docs/design/mailbox-handles.md`](docs/design/mailbox-handles.md); what it can still
+  link is in `SECURITY.md`). The relay is itself an onion service and asks its introduction points
+  to rate-limit connection floods.
 - **Short-code pairing**: interactive **SPAKE2** over the rendezvous mailbox — the secret
-  words never leave the device and the relay can't offline-attack the code; QR pairing is
-  pre-authorized.
+  words (from a 64-word list; case and spaces ignored) never leave the device and the relay can't
+  offline-attack the code; a code answers at most three attempts. QR pairing is pre-authorized
+  and needs no server (0.2): the invite carries a **single-use pass**, valid for a day, that lets
+  one person send you one chat request, even once your onion only admits contacts.
+- **Sharing an invite** goes through the system share sheet, not the clipboard; a copied link is
+  marked sensitive and cleared after a minute.
 - **Authorization** (§5): a stranger can't message you until you approve the request.
 - **Persistence** (`core/storage`): encrypted-at-rest store; identity/sessions/history
   survive a restart.
@@ -80,7 +89,8 @@ clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
   **backed-up flag** driving a peer **transparency warning** and an un-backed **logout
   Closed-signal** (§11.6).
 - **Messaging extras**: **unsend / delete-for-everyone** + edit, per-chat **disappearing
-  messages** (shared, synced), in-band **onion-address rotation** (§5c), **safety-number
+  messages** (shared, synced; the timer applies to messages sent from then on), **burn after
+  reading**, in-band **onion-address rotation** (§5c), **safety-number
   verification** (compare a Signal-style number out-of-band, or scan the QR).
 - **Your choice of relays, or none** (#17, 0.2): a list of up to four relays where offline mail
   waits for you. The Night Drop relay is the default and can be removed; you can add your own.
@@ -89,28 +99,48 @@ clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop):
   An empty list is **direct only**: no server at all, messages wait on the sender's device until
   you're both online, and contacts are added by QR code (`docs/design/optional-relay.md`). Chosen
   at setup, changed under **"My relays…"** in the home menu.
-- **Cover traffic** (opt-in): decoy posts that blur per-mailbox volume and timing from the
-  relay. Off by default and measured before shipping — ~78 mAh a night
+- **Cover traffic**: decoy posts that blur per-mailbox volume and timing from the relay. **On by
+  default** for new identities that use a relay (0.2; earlier installs keep their setting), and
+  can be turned off in the menu; measured at ~78 mAh a night
   ([`docs/design/cover-traffic.md`](docs/design/cover-traffic.md) §6).
 - **Post-quantum pairing** (`core/pqkem`): **ML-KEM-768 (FIPS 203)** mixed into the short-code
   rendezvous seal, so a *harvest-now-decrypt-later* adversary must break **both** SPAKE2 and
   ML-KEM. Scoped deliberately: it protects the **rendezvous payload**, a true hybrid that never
   weakens the classical guarantee. The QR path never crosses the network, so it is not wrapped.
-- **Screenshot transparency**: the app does **not** block screenshots (it cannot, honestly) and
-  instead *tells the other person* when one is taken. Best-effort by construction — Android 14+
-  only, blind to cameras and screen recording — and the UI never implies otherwise.
+- **Screenshots and screen recording** (0.2): **blocked by default** on Android. A contact who
+  blocks them has them blocked in their chat on your phone too, and the chat says so; you can
+  still allow screenshots in one chat (to keep evidence of abuse, for instance), and they are told.
+  With blocking off, the other person is *told* when you take a screenshot (Android 14+) or record
+  the screen (Android 15+). Cooperative by construction — a camera, a modified app or a desktop
+  gets past it — and the UI never implies otherwise
+  ([`docs/design/screenshot-transparency.md`](docs/design/screenshot-transparency.md)).
 - **App lock + duress wipe**: a lock code to open the app, and a **separate code that wipes**
   identity and history instead of unlocking.
-- **Media messages**: sealed attachments, streamed and stored encrypted at rest.
+- **Media messages**: sealed attachments, streamed and stored encrypted at rest. Photos and
+  videos lose their location, camera model and time before they leave the device; photos are
+  re-encoded as a fresh JPEG.
 - **Silence detection**: tells you when nothing has arrived for long enough that the *transport*
-  is the likely explanation, rather than leaving you to guess.
+  is the likely explanation, rather than leaving you to guess; after a network switch, "Network
+  changed — reconnecting to Tor" shows until the relay answers again.
 - **Update checks over Tor** (`core/update`): the manifest is fetched from our own onion site
-  only — a v3 onion authenticates itself, and each download is checked against the manifest's
-  SHA-256 before it lands. There is deliberately **no** clearnet fallback, so the update check can
-  never become the thing that deanonymizes you.
+  only — a v3 onion authenticates itself — and must also carry our **update-key signature** and an
+  expiry (an old manifest replayed later is refused); only a strictly newer release is offered, and
+  each download is checked against the manifest's SHA-256 before it lands. The signing keys are
+  offline and can be rotated with offline recovery keys (`core/src/keyroll.rs`). There is
+  deliberately **no** clearnet fallback, so the update check can never become the thing that
+  deanonymizes you.
+- **Hardening** (0.2): a contact can send at most 5,000 messages and 1 GiB of media a day, and
+  oversized or forged control messages are refused (`docs/trust-boundaries.md`); only v3 onions
+  are dialled; no app data goes into Android backups or device-to-device transfer; keyboards may
+  not learn what is typed; wrong app-lock codes are counted on disk, with a growing wait from the
+  fifth; links from other apps don't route into the app; the desktop data folder is private to your
+  user, Linux writes no core dumps, and Windows loads libraries only from the app's folder and
+  System32. Builds run sandboxed, carry no builder paths, and are signed outside the sandbox.
 - **Dart ↔ Rust bridge** + **cargokit** (`app/rust_builder`): the **Linux desktop GUI
-  builds** (bundles `libnightdrop`) and the **Android APK builds** (cargokit
-  cross-compiles the core into `arm64-v8a`, `armeabi-v7a`, `x86_64`) — both verified.
+  builds** (bundles `libnightdrop`; shipped as an AppImage), the **Android APK builds** (cargokit
+  cross-compiles the core into `arm64-v8a`, `armeabi-v7a`, `x86_64`; reproducible, on F-Droid) and
+  the **Windows** build (installer `NightDropSetup.exe`, from 0.2) — all verified. iOS platform
+  code is written but not yet built or shipped.
 - **App** (`app/`): onboarding (create / restore file / restore server) → pairing (QR scan +
   short code) → approve request → chat, per-chat rename, 24h server-storage toggle with a
   warning banner, disappearing-timer picker, backup (Lite/Full, per-chat, server), opt-in

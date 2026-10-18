@@ -99,9 +99,13 @@ It is blind to all of:
 | --- | --- |
 | Screenshot, Android 14+ | ✅ |
 | Screenshot, Android ≤ 13 | ❌ |
-| Screenshot, desktop | ❌ |
-| Screen **recording** | ❌ |
+| Screen **recording**, Android 15+ (2026-10-17: `WindowManager.addScreenRecordingCallback`, `DETECT_SCREEN_RECORDING`; once per recording, including one already running when the app comes forward) | ✅ |
+| Screen recording, Android ≤ 14 | ❌ |
+| Screenshot or recording, desktop | ❌ |
 | A camera pointed at the screen | ❌ — and always will be |
+
+All of this is for when blocking is off: with Block screenshots on (the default), a capture comes
+out black and there is nothing to report.
 
 **Therefore: no notice is not evidence that nothing was captured.** This is stated in
 `SECURITY.md` and on the public limits page, and the code comments repeat it, because it is exactly
