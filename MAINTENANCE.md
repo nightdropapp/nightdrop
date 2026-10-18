@@ -263,8 +263,12 @@ where they bite:
 - **Builds run sandboxed, and the release key signs afterwards** (2026-10-17). A build runs
   third-party code as you — Gradle plugins, Cargo build scripts, pub packages — and `website/` is
   the live onion site. `install-android-app.sh` runs `flutter pub get` and `flutter build apk`
-  through `scripts/lib/sandbox.sh` (bubblewrap): home read-only except the build caches and the
-  checkout; `website/`, `relay-state*/`, `.git/`, `scripts/`, `.github/`, the Makefile read-only;
+  through `scripts/lib/sandbox.sh` (bubblewrap): home read-only except the download caches
+  (`~/.gradle`, `~/.pub-cache`, `~/.cargo/registry`…); nothing that runs later outside it is
+  writable — `~/.cargo/bin`, rustup, the Android SDK are read-only, and the Flutter SDK and the
+  checkout get a throwaway overlay (writes succeed and vanish), with only the build-output folders
+  (`app/build`, `app/.dart_tool`, the Gradle and ephemeral folders) real; `website/`,
+  `relay-state*/`, `.git/`, `scripts/`, `.github/`, the Makefile read-only;
   the relay's Tor keys, `~/.gnupg`, `~/.ssh`, `~/.config/gh`, the onion website's and stats job's
   state, the desktop app's data, the key stick and `/run/user/$UID` (session bus, systemd, agents)
   hidden; `key.properties`, the keystore and `gitlab_token.txt` read as empty; secret-looking
@@ -276,8 +280,9 @@ where they bite:
   outside the sandbox, exactly like the F-Droid builds (v2 only, `--alignment-preserved`,
   `lib/keys.sh` `nd_sign_apk_release`, which checks the certificate). `build-appimage.sh`'s
   container gets the same read-only and hidden paths. `ND_NO_SANDBOX=1` turns it off (it warns).
-  **Residual:** the caches (`~/.gradle`, `~/.pub-cache`, `~/.cargo/registry`, the Flutter SDK) stay
-  writable, so a malicious build step could poison a later build. For the APKs, F-Droid's
+  **Residual:** the download caches (`~/.gradle`, `~/.pub-cache`, `~/.cargo/registry`) and the
+  build outputs stay writable, so a malicious build step could poison a later build — and an
+  unsandboxed `cargo test` or `flutter test`, which compile from the same caches. For the APKs, F-Droid's
   independent build is the check: a tampered APK does not match theirs (§11.3 step 5). For the
   AppImage and the Windows installer nothing catches it yet; the fix is a fresh build machine per
   release (the home-server move).

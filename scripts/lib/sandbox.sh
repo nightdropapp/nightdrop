@@ -47,21 +47,51 @@ nd_sandbox() {
   # tools' temp files). Mounted before the binds below, so a checkout under /tmp stays visible.
   local -a a=(--dev-bind / / --ro-bind "$HOME" "$HOME" --tmpfs /tmp)
   local d
-  # Writable: what a Flutter/Gradle/Cargo build writes to.
-  for d in "$root" "${FLUTTER_HOME:-}" "$HOME/.pub-cache" "$HOME/.gradle" "$HOME/.cargo" \
-           "$HOME/.rustup" "$HOME/.cache" "$HOME/.android" "$HOME/.dart-tool" "$HOME/.dartServer" \
-           "$HOME/.flutter-devtools" "$HOME/.config/flutter" "$HOME/.config/dart" "$HOME/.kotlin" \
-           "$HOME/.m2" "${ANDROID_HOME:-}" "${ND_SANDBOX_RW:-}"; do
-    [ -n "$d" ] && [ -d "$d" ] && a+=(--bind "$d" "$d")
+  # Writable: only what a build writes — outputs and download caches. Never a program that runs
+  # later outside the sandbox: ~/.cargo/bin (cargo itself), the Flutter SDK's tool and its Dart,
+  # rustup's toolchains, the Android SDK's adb, and the checkout's sources (an unsandboxed
+  # `cargo test` would run a planted build.rs) are read-only or throwaway.
+  # The checkout gets a throwaway overlay (Gradle insists every subproject folder be writable);
+  # only the output folders below are the real ones, so a write anywhere else vanishes on exit.
+  a+=(--overlay-src "$root" --tmp-overlay "$root")
+  local -a rw_dirs=(
+    "$root/app/build" "$root/app/.dart_tool" "$root/app/android/.gradle"
+    "$root/app/android/build"
+    "$root/app/android/app/.cxx" "$root/app/ios/Flutter/ephemeral" "$root/app/macos/Flutter/ephemeral"
+    "$root/app/linux/flutter/ephemeral" "$root/app/windows/flutter/ephemeral"
+    "$root/app/android/app/src/main/java/io/flutter/plugins"
+    "$HOME/.pub-cache" "$HOME/.gradle" "$HOME/.cargo/registry" "$HOME/.cargo/git"
+    "$HOME/.android" "$HOME/.dart-tool" "$HOME/.dartServer" "$HOME/.flutter-devtools"
+    "$HOME/.config/flutter" "$HOME/.config/dart" "$HOME/.kotlin" "$HOME/.m2"
+    "${ND_SANDBOX_RW:-}")
+  for d in "${rw_dirs[@]}"; do
+    [ -n "$d" ] || continue
+    # Output folders in the checkout are made if missing (else a write there would land in the
+    # throwaway overlay and be lost); nothing is created in $HOME.
+    case "$d" in "$root"/*) mkdir -p "$d" 2>/dev/null || true ;; esac
+    [ -d "$d" ] && a+=(--bind "$d" "$d")
   done
-  # Flutter keeps two state files directly in $HOME.
-  for d in "$HOME/.flutter" "$HOME/.flutter_tool_state"; do
+  # The Flutter SDK rewrites stamp files in its cache on every run. It gets a throwaway overlay:
+  # the writes succeed and vanish with the sandbox, so its tool and Dart are never changed for real.
+  if [ -n "${FLUTTER_HOME:-}" ] && [ -d "$FLUTTER_HOME" ]; then
+    a+=(--overlay-src "$FLUTTER_HOME" --tmp-overlay "$FLUTTER_HOME")
+  fi
+  # Single files the Flutter tool and pub rewrite on every run: in the checkout (generated, not
+  # code) and in $HOME.
+  for d in "$root/app/pubspec.lock" "$root/app/.flutter-plugins-dependencies" \
+           "$root/app/.flutter-plugins" "$root/app/android/local.properties" \
+           "$HOME/.flutter" "$HOME/.flutter_tool_state"; do
     [ -f "$d" ] && a+=(--bind "$d" "$d")
+  done
+  # Programs that run later must not be rewritten from in here, even inside writable caches.
+  mkdir -p "$HOME/.gradle/init.d" 2>/dev/null || true
+  for d in "$HOME/.pub-cache/bin" "$HOME/.gradle/init.d" "$HOME/.gradle/gradle.properties"; do
+    [ -e "$d" ] && a+=(--ro-bind "$d" "$d")
   done
   # Gradle and Kotlin hand a build to an already-running daemon of theirs. One started outside the
   # sandbox would run this build's code unsandboxed, so the sandbox sees an empty daemon registry
   # and starts its own. Its own PID namespace ends that daemon, and everything else the build
-# started, when the build ends.
+  # started, when the build ends.
   mkdir -p "$HOME/.local/share/kotlin/daemon" 2>/dev/null || true
   for d in "$HOME/.gradle/daemon" "$HOME/.local/share/kotlin/daemon"; do
     [ -n "$d" ] && [ -d "$d" ] && a+=(--tmpfs "$d")
