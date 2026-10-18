@@ -776,9 +776,12 @@ Not built yet: today a device moves by file backup (7a) or server backup (7c).
   bootstraps Tor, fetches the blob by its password-derived handle, and rebuilds the identity;
   the device comes back on a **new onion** (the relay is only reachable after bootstrap, so the
   keystore can't be pre-seeded), which the #11 startup announcement then propagates to contacts.
-  Wired into onboarding as "Restore from server backup". Caveat: the relay copy is drained on
-  fetch, so a wrong-password attempt consumes it — same "lose the password, lose the backup"
-  contract as create.
+  Wired into onboarding as "Restore from server backup". The relay copy is drained on fetch; a
+  wrong password derives a different handle and so touches nothing, and a restore that fails
+  after the fetch (a damaged or newer-format blob) posts the copy back (self-audit 2026-10-17,
+  R8-3). **The Night Drop relay caps every post at 24h** (`RelayLimits::max_ttl`), so the app asks
+  for 24h and the 36h ceiling here applies only to a relay configured for it — offering more than
+  the relay keeps would show the user a wrong expiry.
 - **Which relay (0.2):** the **Night Drop relay**, and only while it is in the user's relay list
   (`relay_features().server_backup`): a fresh device restoring the backup knows no other relay to
   look on. Direct only has no server backup; the file export (7a) and device transfer (7b) are
