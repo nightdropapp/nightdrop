@@ -48,7 +48,11 @@ Block screenshots and stop the person they harass from keeping screenshots as ev
 reasons this design allowed screenshots in the first place. The chat menu offers "Allow screenshots
 in this chat" (confirmed first); the contact is told at once, and again if it is turned back off, by
 two more markers on `Frame::Screenshot` (counted against the daily allowance like the other notices),
-and each screenshot taken there is still reported to them as usual. Neither block reaches a video opened in another app's player: that
+and each screenshot taken there is still reported to them as usual. The override stands until the
+user removes it (round 14): the contact turning their block off and on again does not cancel it —
+that would let the harasser undo the choice — but it does get an answer: a note in the chat and the
+"overridden here" notice re-sent, at most once an hour per chat so toggling cannot fill the queue.
+Neither block reaches a video opened in another app's player: that
 window is the other app's, which Night Drop cannot mark.
 
 The **Recents thumbnail** is the opposite case and *is* blocked — Android snapshots the window on
