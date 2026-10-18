@@ -121,11 +121,12 @@ const MARK_CLIENT_KEY_PREFIX: &[u8] = b"nightdrop/ctl/client-key/v1:";
 /// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
 const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
 const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
-/// Two markers on the same [`Frame::Captures`]: whether WE block captures ("Block screenshots"), so
-/// the contact's app blocks them too while our chat is open. Cooperative: a modified app can ignore
-/// it. A build that predates them decrypts an unknown marker and ignores the frame.
-const MARK_CAPTURE_BLOCK_ON: &[u8] = b"nightdrop/ctl/capture-block-on/v1";
-const MARK_CAPTURE_BLOCK_OFF: &[u8] = b"nightdrop/ctl/capture-block-off/v1";
+/// Prefix of a capture-block announcement on [`Frame::Captures`]: whether WE block captures ("Block
+/// screenshots"), so the contact's app blocks them too while our chat is open. Cooperative: a
+/// modified app can ignore it. The rest is `"1:<seq>"` (on) or `"0:<seq>"` (off): the sequence makes
+/// a quick off-then-on that arrives out of order (relay and direct race) settle on the last one. A
+/// build that predates it decrypts an unknown marker and ignores the frame.
+const MARK_CAPTURE_BLOCK_PREFIX: &[u8] = b"nightdrop/ctl/capture-block/v1:";
 
 /// Dev-only logging. Identity keys, invite codes, and decrypted display names must never
 /// reach release logs (Android's logcat persists them for any `adb`-connected observer);
@@ -753,6 +754,9 @@ struct Chat {
     told_captures: Option<bool>,
     /// Whether the peer last confirmed hearing that we block captures (persisted).
     told_block: Option<bool>,
+    /// The sequence of the last capture-block announcement we accepted from them (persisted), so an
+    /// older one arriving late is ignored.
+    peer_block_seq: u64,
     /// Pairing passes in waiting (`optional-relay.md` §5). Joiner: our own client secret for the
     /// inviter's onion, installed in place of their QR pass once their `RelaySet` proves they
     /// accepted. Inviter: the joiner's client key for our onion and their reply pass, both held
@@ -877,6 +881,7 @@ impl Chat {
             told_address: None,
             told_captures: None,
             told_block: None,
+            peer_block_seq: 0,
             own_key_pending: None,
             peer_key_pending: None,
             pass_pending: None,
@@ -924,6 +929,9 @@ pub struct Node {
     /// Whether this device blocks captures ("Block screenshots"), as the app last told us; `None`
     /// until it says. Announced like [`captures_visible`](Self::captures_visible).
     capture_block: Option<bool>,
+    /// The sequence the current [`capture_block`](Self::capture_block) value went out under: the
+    /// send time in milliseconds when it changed, kept increasing within a run.
+    capture_block_seq: u64,
     /// Whether to tell senders when we open their burn message (`Frame::Viewed`). **Off by
     /// default**: it discloses our reading behaviour, and the person whose behaviour it is should
     /// choose. Nothing depends on it — with it off, a sender's copy simply lives its full 24h.
@@ -1343,7 +1351,8 @@ pub(crate) enum Announce {
     Address,
     RelaySet,
     Captures,
-    Block,
+    /// The capture-block value that went out.
+    Block(bool),
     UpgradeNotice,
 }
 
@@ -1572,6 +1581,7 @@ impl Node {
             last_invite_code: None,
             captures_visible: None,
             capture_block: None,
+            capture_block_seq: 0,
             burns_announced: std::collections::HashSet::new(),
             announce_online: ANNOUNCE_ONLINE_ON_START,
             captures_announced: HashMap::new(),
@@ -2056,6 +2066,16 @@ impl Node {
     pub fn announce_block(&mut self, blocked: bool) {
         if self.capture_block != Some(blocked) {
             self.capture_block = Some(blocked);
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis() as u64);
+            self.capture_block_seq = now_ms.max(self.capture_block_seq + 1);
+            // What any chat holds may be an older value still in flight: tell every chat again.
+            // (Leaving `told_block` let a quick off-then-on skip a chat whose "off" had not been
+            // confirmed yet, which then landed and stuck — 0.2 device pass.)
+            for chat in self.chats.values_mut() {
+                chat.told_block = None;
+            }
             self.block_announced.clear();
         }
         self.reannounce_block();
@@ -2090,16 +2110,16 @@ impl Node {
         let Some(blocked) = self.capture_block else {
             return;
         };
-        let marker = if blocked {
-            MARK_CAPTURE_BLOCK_ON
-        } else {
-            MARK_CAPTURE_BLOCK_OFF
-        };
-        if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
+        let marker = [
+            MARK_CAPTURE_BLOCK_PREFIX,
+            format!("{}:{}", u8::from(blocked), self.capture_block_seq).as_bytes(),
+        ]
+        .concat();
+        if let Some((addr, frame)) = self.authed_control(contact_id, &marker, |from, message| {
             Frame::Captures { from, message }
         }) {
             self.block_announced.insert(contact_id.to_string(), blocked);
-            let done = OutboundDone::Announced(Announce::Block, contact_id.to_string());
+            let done = OutboundDone::Announced(Announce::Block(blocked), contact_id.to_string());
             let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
         }
     }
@@ -2632,12 +2652,15 @@ impl Node {
             let version = self.version_announced.get(contact_id).cloned();
             let address = self.address_announced.get(contact_id).cloned();
             let captures = self.captures_announced.get(contact_id).copied();
-            let block = self.block_announced.get(contact_id).copied();
+            let current_block = self.capture_block;
             if let Some(chat) = self.chats.get_mut(contact_id) {
                 match kind {
                     Announce::Burns => chat.told_burns = true,
                     Announce::Captures if captures.is_some() => chat.told_captures = captures,
-                    Announce::Block if block.is_some() => chat.told_block = block,
+                    // Only what actually went out, and only if it is still the current value.
+                    Announce::Block(sent) if Some(sent) == current_block => {
+                        chat.told_block = Some(sent)
+                    }
                     // Not while they are outdated: their old app discarded it, so they are told
                     // again once they update.
                     Announce::Version if version.is_some() && !chat.outdated() => {
@@ -2665,7 +2688,10 @@ impl Node {
             Announce::Mailbox => self.mailbox_announced.remove(contact_id),
             Announce::Address => self.address_announced.remove(contact_id).is_some(),
             Announce::Captures => self.captures_announced.remove(contact_id).is_some(),
-            Announce::Block => self.block_announced.remove(contact_id).is_some(),
+            Announce::Block(sent) => {
+                self.block_announced.get(contact_id) == Some(&sent)
+                    && self.block_announced.remove(contact_id).is_some()
+            }
         };
     }
 

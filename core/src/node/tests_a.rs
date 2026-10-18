@@ -2710,3 +2710,27 @@ fn timer_labels_are_singular_or_plural() {
     assert_eq!(super::disappearing_label(90), "90 seconds");
     assert_eq!(super::disappearing_label(0), "off");
 }
+
+#[test]
+fn a_joiner_announces_its_capture_settings_to_the_inviter() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    // As the app does at launch, before any pairing.
+    alice.announce_captures(true);
+    alice.announce_block(true);
+    let bundle = bob.publish_bundle();
+    let _bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let c = &bob.contacts()[0];
+    assert_eq!(
+        c.peer_captures_silent,
+        Some(false),
+        "capability reaches the inviter"
+    );
+    assert_eq!(
+        c.peer_blocks_capture,
+        Some(true),
+        "block reaches the inviter"
+    );
+}

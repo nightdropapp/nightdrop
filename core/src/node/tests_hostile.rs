@@ -484,3 +484,46 @@ fn an_oversized_video_preview_is_not_stored() {
         .expect("the placeholder is still shown");
     assert!(placeholder.thumb_id.is_empty(), "no preview stored");
 }
+
+/// A quick "Block screenshots" off-then-on can reach the contact out of order (relay and direct
+/// race). The sequence makes the newer one win: an older announcement arriving late is ignored.
+#[test]
+fn a_late_older_capture_block_announcement_is_ignored() {
+    let mut s = scene();
+    let frame = |s: &mut Scene, body: &str| {
+        let mut pt = MARK_CAPTURE_BLOCK_PREFIX.to_vec();
+        pt.extend_from_slice(body.as_bytes());
+        wire::encode(&Frame::Captures {
+            from: s.bob_id.clone(),
+            message: sealed_by_bob(s, &pt),
+        })
+    };
+    let newer_on = frame(&mut s, "1:200");
+    let older_off = frame(&mut s, "0:100");
+    s.net.endpoint("bob").send("alice", &newer_on).unwrap();
+    s.net.endpoint("bob").send("alice", &older_off).unwrap();
+    s.alice.pump().unwrap();
+    let bob = s
+        .alice
+        .contacts()
+        .into_iter()
+        .find(|c| c.id == s.bob_id)
+        .unwrap();
+    assert_eq!(
+        bob.peer_blocks_capture,
+        Some(true),
+        "the newer announcement stands"
+    );
+
+    // Garbage after the prefix changes nothing.
+    let junk = frame(&mut s, "yes:please");
+    s.net.endpoint("bob").send("alice", &junk).unwrap();
+    s.alice.pump().unwrap();
+    let bob = s
+        .alice
+        .contacts()
+        .into_iter()
+        .find(|c| c.id == s.bob_id)
+        .unwrap();
+    assert_eq!(bob.peer_blocks_capture, Some(true));
+}

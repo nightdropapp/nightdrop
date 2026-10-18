@@ -679,10 +679,22 @@ impl Node {
                     Ok(pt) if pt == MARK_CAPTURES_VISIBLE => true,
                     Ok(pt) if pt == MARK_CAPTURES_SILENT => false,
                     // Their "Block screenshots": our app blocks captures while their chat is open.
-                    // A standing property like the rest of this frame: no history entry.
-                    Ok(pt) if pt == MARK_CAPTURE_BLOCK_ON || pt == MARK_CAPTURE_BLOCK_OFF => {
-                        let on = pt == MARK_CAPTURE_BLOCK_ON;
+                    // A standing property like the rest of this frame: no history entry. Carries a
+                    // sequence; an older one arriving after a newer one is ignored.
+                    Ok(pt) if pt.starts_with(MARK_CAPTURE_BLOCK_PREFIX) => {
+                        let Some((on, seq)) =
+                            std::str::from_utf8(&pt[MARK_CAPTURE_BLOCK_PREFIX.len()..])
+                                .ok()
+                                .and_then(|rest| rest.split_once(':'))
+                                .and_then(|(v, s)| Some((v == "1", s.parse::<u64>().ok()?)))
+                        else {
+                            return Ok(None);
+                        };
                         chat.mark_alive();
+                        if seq <= chat.peer_block_seq {
+                            return Ok(None);
+                        }
+                        chat.peer_block_seq = seq;
                         if chat.contact.peer_blocks_capture == Some(on) {
                             return Ok(None);
                         }

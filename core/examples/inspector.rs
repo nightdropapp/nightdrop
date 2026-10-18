@@ -13,6 +13,7 @@
 //!   file <contact> <kind> <path> send image|video bytes as they are (`send_media`)
 //!   open <contact> <msg_id>      open a burn message: decrypt to the player dir, mark viewed
 //!   opened                       list the decrypted-media dir -> log
+//!   contacts                     each contact's version, capture capability and capture block
 //!   quit
 
 use std::collections::HashSet;
@@ -155,6 +156,15 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 ["opened"] => Ok(serde_json::json!(list_dir(&dir.join("nightdrop-open")))),
+                ["contacts"] => Ok(serde_json::json!(core
+                    .contacts()
+                    .iter()
+                    .map(
+                        |c| serde_json::json!({"id": c.id, "version": c.peer_app_version,
+                        "captures_silent": c.peer_captures_silent,
+                        "blocks_capture": c.peer_blocks_capture})
+                    )
+                    .collect::<Vec<_>>())),
                 ["quit"] => {
                     log(&dir, serde_json::json!({"event": "quit"}));
                     core.shutdown();

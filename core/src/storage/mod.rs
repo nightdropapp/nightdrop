@@ -108,6 +108,8 @@ pub struct PersistedChat {
     pub told_captures: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub told_block: Option<bool>,
+    #[serde(default)]
+    pub peer_block_seq: u64,
     /// Pairing passes in waiting (`optional-relay.md` §5), base64. Joiner: our own client secret for
     /// the inviter's onion, installed in place of their QR pass once they accept. Inviter: the
     /// joiner's client key for our onion and their reply pass, both unused until Accept.

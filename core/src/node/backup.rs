@@ -78,6 +78,7 @@ impl Node {
                     told_address: chat.told_address.clone(),
                     told_captures: chat.told_captures,
                     told_block: chat.told_block,
+                    peer_block_seq: chat.peer_block_seq,
                     own_key_pending: chat.own_key_pending.as_ref().map(super::encode_secret),
                     peer_wire_old: chat.peer_wire_old,
                     told_upgrade: chat.told_upgrade,
@@ -843,6 +844,7 @@ fn chat_from_persisted(
         told_address: chat.told_address.clone(),
         told_captures: chat.told_captures,
         told_block: chat.told_block,
+        peer_block_seq: chat.peer_block_seq,
         own_key_pending: chat
             .own_key_pending
             .as_deref()
