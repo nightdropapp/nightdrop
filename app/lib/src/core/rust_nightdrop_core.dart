@@ -280,6 +280,10 @@ class RustNightdropCore extends NightdropCore {
   /// Re-apply the saved cover-traffic preference to the freshly built core.
   Future<void> _restoreCoverTraffic() async {
     try {
+      // On by default for an identity set up since 2026-10-18 — its setup step saves "1" or "0"
+      // either way. A missing value is an install from before: that setup only wrote a "yes", so
+      // missing is either "declined" or "never asked", and it stays off rather than override a
+      // choice to save battery.
       if (await _secure.read(key: _kCoverTraffic) == '1') {
         await rust.setCoverTraffic(enabled: true);
       }

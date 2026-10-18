@@ -191,7 +191,8 @@ class MainActivity : FlutterActivity() {
                     // "not F-Droid" — the honest default, since guessing F-Droid would silently
                     // deprive a sideloader of the only update signal they get.
                     "installerPackage" -> result.success(installerPackage())
-                    // Opt-in "Block screenshots" (self-audit 2026-10-17): FLAG_SECURE held for the
+                    // "Block screenshots" (self-audit 2026-10-17), ON by default since 2026-10-18
+                    // (security settings start on; the user lowers them): FLAG_SECURE held for the
                     // whole life of the window, which also blocks screen recording and casting.
                     // Kept in Android's own preferences so it applies before any Dart runs.
                     "getBlockCapture" -> result.success(blockCapture())
@@ -227,7 +228,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun blockCapture(): Boolean =
-        getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_BLOCK_CAPTURE, false)
+        getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(PREF_BLOCK_CAPTURE, true)
 
     override fun onResume() {
         super.onResume()

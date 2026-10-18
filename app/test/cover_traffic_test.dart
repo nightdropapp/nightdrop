@@ -69,6 +69,8 @@ void main() {
     expect(find.textContaining('does not stop it'), findsOneWidget);
     expect(core.identity, isNull, reason: 'nothing is created until the user continues');
 
+    // On by default (2026-10-18: security settings start on); turning it off is the user's choice
+    // and is saved as an explicit "no".
     await tester.scrollUntilVisible(find.byKey(const Key('setup-cover')), 200);
     await tester.tap(find.byKey(const Key('setup-cover')));
     await tester.pump();
@@ -76,12 +78,12 @@ void main() {
     await tester.tap(find.byKey(const Key('setup-create')));
     await tester.pumpAndSettle();
 
-    expect(core.cover, isTrue);
+    expect(core.cover, isFalse);
     expect(core.identity, isNotNull);
     expect(find.text('Chats'), findsOneWidget);
   });
 
-  testWidgets('setup leaves cover traffic off by default', (tester) async {
+  testWidgets('setup turns cover traffic on by default', (tester) async {
     final core = _CoverCore();
     await tester.pumpWidget(NightdropApp(core: core));
     await tester.tap(find.text('Create my identity'));
@@ -90,7 +92,7 @@ void main() {
     await tester.tap(find.byKey(const Key('setup-create')));
     await tester.pumpAndSettle();
 
-    expect(core.cover, isFalse);
+    expect(core.cover, isTrue);
     expect(core.identity, isNotNull);
   });
 

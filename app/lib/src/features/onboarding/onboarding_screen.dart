@@ -62,9 +62,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   /// Run the setup step ([SetupScreen]), apply what was chosen, then create the identity.
   ///
-  /// Background delivery and cover traffic are both off by default and always will be — a
-  /// messenger that quietly runs a service, or sends dummy traffic, is not what this app is for.
-  /// But leaving the choices buried in a menu meant most people never made them, and for
+  /// Background delivery starts off — a messenger that quietly runs a service is not what this app
+  /// is for. Cover traffic starts on (2026-10-18: privacy settings start on, and the user chooses
+  /// to lower them); it costs some battery, which the switch says. Leaving the choices buried in a menu meant most people never made them, and for
   /// background delivery the result was an app that looks broken: Android suspends the process
   /// whenever it is off screen, so messages simply do not arrive until it is opened. Asking once,
   /// here, is the difference between an informed "no" and never knowing.
@@ -91,7 +91,9 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     if (choices.backgroundDelivery && await BackgroundDelivery.ensurePermission()) {
       await BackgroundDelivery.setEnabled(true);
     }
-    if (choices.coverTraffic) await core.setCoverTraffic(true);
+    // Saved either way: a missing setting reads as an install from before this question existed
+    // (see `_restoreCoverTraffic`), so a "no" here has to be written down to stay a "no".
+    await core.setCoverTraffic(choices.coverTraffic);
     if (!mounted) return;
     setState(() => _busy = true);
     _startProgress();

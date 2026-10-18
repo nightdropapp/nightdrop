@@ -444,9 +444,10 @@ Future<void> _burnReceiptSettings(BuildContext context, NightdropCore core) asyn
   ));
 }
 
-/// Opt-in "Block screenshots": off by default, because Night Drop tells the contact about a
-/// screenshot instead of forbidding one (a photo of the screen gets past any block). On, it stops
-/// screenshots, screen recording and casting of the app on this phone.
+/// "Block screenshots": on by default (2026-10-18: security settings start on, and the user chooses
+/// to lower them). On, it stops screenshots, screen recording and casting of the app on this phone.
+/// Turned off, captures are allowed and the contact is told about each one (a photo of the screen
+/// gets past any block either way).
 Future<void> _blockCaptureSettings(BuildContext context) async {
   final l10n = AppLocalizations.of(context)!;
   final on = await ScreenshotDetector.blockCapture();

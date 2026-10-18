@@ -866,8 +866,9 @@ E2E blobs — but observation ≠ decryption):
   time _T_, and that **someone** later polled/retrieved that slot. It cannot read it,
   size it meaningfully, or tie it to a real identity.
 - **Liveness/timing** of a mailbox: rough activity patterns (when a slot receives or
-  is drained). Cover traffic is **opt-in and off by default** (`docs/design/cover-traffic.md`),
-  so for most users timing is not obfuscated — an adversary who watches a slot sees the cadence
+  is drained). Cover traffic is **on by default for new identities** since 2026-10-18 (security
+  settings start on; `docs/design/cover-traffic.md`); where it is off (turned off, or an install set
+  up before then), timing is not obfuscated — an adversary who watches a slot sees the cadence
   of real events, just not their content.
 - With **multi-relay fan-out** (#17), the same hash-dedup'd blob is posted to the
   recipient-chosen relay set at about the same time. This buys availability and

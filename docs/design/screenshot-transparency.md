@@ -22,8 +22,15 @@ remote-storage cap, outside `unsend`.
 * It breaks a legitimate need. People screenshot conversations to keep a receipt, to report abuse,
   to remember an address.
 
-So screenshots are **allowed and made visible** instead. The user chose this framing directly:
+So screenshots were **allowed and made visible** instead. The user chose this framing directly:
 "Allow screenshots, but show a message saying that a screenshot was taken."
+
+**Changed 2026-10-18:** "Block screenshots" (Android, `FLAG_SECURE`, added 2026-10-17) is now **on
+by default**, by the maintainer's rule that security settings start on and users choose to lower
+them. The notice described here applies once the user turns blocking off (and on platforms that
+cannot block, such as desktop). The arguments above still hold for why it is not the *only* layer:
+a photo of the screen gets past any block, so the notice is what a contact relies on when the
+sender allowed captures.
 
 The **Recents thumbnail** is the opposite case and *is* blocked — Android snapshots the window on
 backgrounding with no user intent behind it, and that image sits in the task switcher for anyone who
