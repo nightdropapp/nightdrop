@@ -440,6 +440,11 @@ impl Node {
                 }
                 let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
                 let enabled = plaintext == b"on";
+                // Each switch leaves a notice and a timeline entry, so it counts against the
+                // contact's daily allowance like a message; a repeat of the current state is no news.
+                if enabled == chat.contact.remote_storage || !within_allowance(chat, 0) {
+                    return Ok(None);
+                }
                 chat.contact.remote_storage = enabled;
                 chat.storage_timeline
                     .push((crate::api::now_secs(), enabled));
@@ -469,6 +474,9 @@ impl Node {
                     .ok()
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(0);
+                if secs == chat.contact.disappearing_secs || !within_allowance(chat, 0) {
+                    return Ok(None);
+                }
                 chat.contact.disappearing_secs = secs;
                 chat.disappearing_timeline
                     .push((crate::api::now_secs(), secs));
@@ -538,7 +546,7 @@ impl Node {
                 // Keep the conversation visible but mark it closed and leave a notice; the user
                 // creates a new chat to continue.
                 devlog!("[nightdrop] peer {from} deleted the chat");
-                if let Some(chat) = self.chats.get_mut(&from) {
+                if let Some(chat) = self.chats.get_mut(&from).filter(|c| !c.closed) {
                     chat.closed = true;
                     chat.history.push(ChatMessage::system(
                         "👻 The other person deleted this chat. A new chat will need to be \
@@ -557,22 +565,34 @@ impl Node {
                 Ok(None)
             }
             Frame::Screenshot { from, message } => {
-                // Transparency (#1): the peer captured this conversation to their gallery, where
-                // nothing we do — disappearing timers, remote-storage caps, unsend — can reach it.
-                // Authenticate first: an unauthenticated version would let anyone who knows the
-                // identity key manufacture distrust between two people.
-                if !self.verify_control(&from, &message, MARK_SCREENSHOT) {
+                // Transparency (#1): the peer captured this conversation — a screenshot, or a screen
+                // recording (Android 15+) — where nothing we do (disappearing timers, remote-storage
+                // caps, unsend) can reach it. Authenticated: the kind rides in *which* marker
+                // decrypts, decrypted once (a ratchet decrypt spends a message key), so a stranger
+                // who knows the identity key cannot manufacture distrust between two people.
+                let Some(chat) = self.chats.get_mut(&from) else {
+                    return Ok(None);
+                };
+                let Ok(olm) = message.to_olm() else {
+                    return Ok(None);
+                };
+                let note = match crypto::decrypt(&mut chat.session, &olm) {
+                    Ok(pt) if pt == MARK_SCREENSHOT => {
+                        "📸 The other person took a screenshot of this chat."
+                    }
+                    Ok(pt) if pt == MARK_RECORDING => {
+                        "🔴 The other person is recording their screen with this chat open."
+                    }
+                    _ => return Ok(None), // forged, replayed, or a kind this build doesn't know
+                };
+                chat.mark_alive();
+                // Logged every time, not once: unlike `BackedUp`'s state flag, repetition here
+                // is information the user should have — within the daily allowance.
+                if !within_allowance(chat, 0) {
                     return Ok(None);
                 }
-                if let Some(chat) = self.chats.get_mut(&from) {
-                    // Logged every time, not once: unlike `BackedUp`'s state flag, repetition here
-                    // is information the user should have.
-                    chat.history.push(ChatMessage::system(
-                        "📸 The other person took a screenshot of this chat.".to_string(),
-                    ));
-                    return Ok(Some((from, String::new())));
-                }
-                Ok(None)
+                chat.history.push(ChatMessage::system(note.to_string()));
+                Ok(Some((from, String::new())))
             }
             Frame::BackedUp { from, message } => {
                 // Transparency (#7): the peer made a Full backup that includes this chat, so
@@ -614,8 +634,8 @@ impl Node {
                     Ok(pt) if pt == MARK_UNVERIFIED => false,
                     _ => return Ok(None), // forged, replayed, or spliced — ignore
                 };
-                if chat.contact.peer_verified == peer_verified {
-                    return Ok(None); // no change → no history spam
+                if chat.contact.peer_verified == peer_verified || !within_allowance(chat, 0) {
+                    return Ok(None); // no change → no history spam; flipping counts as a message
                 }
                 chat.contact.peer_verified = peer_verified;
                 let note = if peer_verified {
@@ -756,8 +776,11 @@ impl Node {
                     }
                     let plaintext = crypto::decrypt(&mut chat.session, &olm)?;
                     let new_address = String::from_utf8_lossy(&plaintext).into_owned();
+                    // Each change also mints and sends a new client key, so it counts against the
+                    // daily allowance: two addresses alternated could otherwise loop for ever.
                     if !super::limits::sane_address(&new_address)
                         || new_address == chat.peer_address
+                        || !within_allowance(chat, 0)
                     {
                         return Ok(None);
                     }

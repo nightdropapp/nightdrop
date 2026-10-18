@@ -39,7 +39,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.12.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -150950124;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = -1130669597;
 
 // Section: executor
 
@@ -1894,6 +1894,61 @@ fn wire__crate__api__NightdropCore_relay_list_impl(
                     ))?;
                     Ok(output_ok)
                 })())
+            }
+        },
+    )
+}
+fn wire__crate__api__NightdropCore_report_screen_recording_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "NightdropCore_report_screen_recording",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<NightdropCore>,
+            >>::sse_decode(&mut deserializer);
+            let api_contact_id = <String>::sse_decode(&mut deserializer);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
+                    (move || {
+                        let mut api_that_guard = None;
+                        let decode_indices_ =
+                            flutter_rust_bridge::for_generated::lockable_compute_decode_order(
+                                vec![flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                                    &api_that, 0, false,
+                                )],
+                            );
+                        for i in decode_indices_ {
+                            match i {
+                                0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                                _ => unreachable!(),
+                            }
+                        }
+                        let api_that_guard = api_that_guard.unwrap();
+                        let output_ok = crate::api::NightdropCore::report_screen_recording(
+                            &*api_that_guard,
+                            api_contact_id,
+                        )?;
+                        Ok(output_ok)
+                    })(),
+                )
             }
         },
     )
@@ -4623,106 +4678,112 @@ fn pde_ffi_dispatcher_primary_impl(
         }
         35 => wire__crate__api__NightdropCore_relay_health_impl(port, ptr, rust_vec_len, data_len),
         36 => wire__crate__api__NightdropCore_relay_list_impl(port, ptr, rust_vec_len, data_len),
-        37 => wire__crate__api__NightdropCore_report_screenshot_impl(
+        37 => wire__crate__api__NightdropCore_report_screen_recording_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        38 => {
+        38 => wire__crate__api__NightdropCore_report_screenshot_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        39 => {
             wire__crate__api__NightdropCore_restore_backup_impl(port, ptr, rust_vec_len, data_len)
         }
-        39 => wire__crate__api__NightdropCore_restore_backup_tor_impl(
+        40 => wire__crate__api__NightdropCore_restore_backup_tor_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        40 => wire__crate__api__NightdropCore_restore_server_backup_tor_impl(
+        41 => wire__crate__api__NightdropCore_restore_server_backup_tor_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        41 => wire__crate__api__NightdropCore_safety_number_impl(port, ptr, rust_vec_len, data_len),
-        42 => wire__crate__api__NightdropCore_safety_qr_impl(port, ptr, rust_vec_len, data_len),
-        43 => wire__crate__api__NightdropCore_save_backup_impl(port, ptr, rust_vec_len, data_len),
-        44 => {
+        42 => wire__crate__api__NightdropCore_safety_number_impl(port, ptr, rust_vec_len, data_len),
+        43 => wire__crate__api__NightdropCore_safety_qr_impl(port, ptr, rust_vec_len, data_len),
+        44 => wire__crate__api__NightdropCore_save_backup_impl(port, ptr, rust_vec_len, data_len),
+        45 => {
             wire__crate__api__NightdropCore_send_burn_media_impl(port, ptr, rust_vec_len, data_len)
         }
-        45 => wire__crate__api__NightdropCore_send_burn_message_impl(
+        46 => wire__crate__api__NightdropCore_send_burn_message_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        46 => wire__crate__api__NightdropCore_send_media_impl(port, ptr, rust_vec_len, data_len),
-        47 => wire__crate__api__NightdropCore_send_message_impl(port, ptr, rust_vec_len, data_len),
-        48 => {
+        47 => wire__crate__api__NightdropCore_send_media_impl(port, ptr, rust_vec_len, data_len),
+        48 => wire__crate__api__NightdropCore_send_message_impl(port, ptr, rust_vec_len, data_len),
+        49 => {
             wire__crate__api__NightdropCore_set_app_version_impl(port, ptr, rust_vec_len, data_len)
         }
-        49 => {
+        50 => {
             wire__crate__api__NightdropCore_set_background_impl(port, ptr, rust_vec_len, data_len)
         }
-        50 => wire__crate__api__NightdropCore_set_burn_receipts_impl(
+        51 => wire__crate__api__NightdropCore_set_burn_receipts_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        51 => wire__crate__api__NightdropCore_set_capture_reporting_impl(
+        52 => wire__crate__api__NightdropCore_set_capture_reporting_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        52 => {
+        53 => {
             wire__crate__api__NightdropCore_set_disappearing_impl(port, ptr, rust_vec_len, data_len)
         }
-        53 => {
+        54 => {
             wire__crate__api__NightdropCore_set_local_name_impl(port, ptr, rust_vec_len, data_len)
         }
-        54 => wire__crate__api__NightdropCore_set_my_name_impl(port, ptr, rust_vec_len, data_len),
-        55 => {
+        55 => wire__crate__api__NightdropCore_set_my_name_impl(port, ptr, rust_vec_len, data_len),
+        56 => {
             wire__crate__api__NightdropCore_set_relay_list_impl(port, ptr, rust_vec_len, data_len)
         }
-        56 => wire__crate__api__NightdropCore_set_remote_storage_impl(
+        57 => wire__crate__api__NightdropCore_set_remote_storage_impl(
             port,
             ptr,
             rust_vec_len,
             data_len,
         ),
-        57 => wire__crate__api__NightdropCore_set_verified_impl(port, ptr, rust_vec_len, data_len),
-        58 => wire__crate__api__NightdropCore_shutdown_impl(port, ptr, rust_vec_len, data_len),
-        59 => {
+        58 => wire__crate__api__NightdropCore_set_verified_impl(port, ptr, rust_vec_len, data_len),
+        59 => wire__crate__api__NightdropCore_shutdown_impl(port, ptr, rust_vec_len, data_len),
+        60 => {
             wire__crate__api__NightdropCore_unsend_message_impl(port, ptr, rust_vec_len, data_len)
         }
-        60 => {
+        61 => {
             wire__crate__api__NightdropCore_verify_safety_qr_impl(port, ptr, rust_vec_len, data_len)
         }
-        61 => wire__crate__api__check_bridge_impl(port, ptr, rust_vec_len, data_len),
-        62 => wire__crate__api__clear_duress_secret_impl(port, ptr, rust_vec_len, data_len),
-        63 => wire__crate__api__clear_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
-        64 => wire__crate__api__cover_traffic_enabled_impl(port, ptr, rust_vec_len, data_len),
-        65 => wire__crate__api__destroy_store_lock_impl(port, ptr, rust_vec_len, data_len),
-        66 => wire__crate__api__diag_note_impl(port, ptr, rust_vec_len, data_len),
-        67 => wire__crate__api__duress_is_armed_impl(port, ptr, rust_vec_len, data_len),
-        68 => wire__crate__api__fetch_bridges_impl(port, ptr, rust_vec_len, data_len),
-        69 => wire__crate__api__random_store_key_impl(port, ptr, rust_vec_len, data_len),
-        70 => wire__crate__api__read_bridges_impl(port, ptr, rust_vec_len, data_len),
-        71 => wire__crate__api__reset_tor_guards_impl(port, ptr, rust_vec_len, data_len),
-        72 => wire__crate__api__set_cover_traffic_impl(port, ptr, rust_vec_len, data_len),
-        73 => wire__crate__api__set_diagnostics_impl(port, ptr, rust_vec_len, data_len),
-        74 => wire__crate__api__set_diagnostics_log_file_impl(port, ptr, rust_vec_len, data_len),
-        75 => wire__crate__api__set_duress_secret_impl(port, ptr, rust_vec_len, data_len),
-        76 => wire__crate__api__set_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
-        77 => wire__crate__api__store_is_locked_impl(port, ptr, rust_vec_len, data_len),
-        78 => wire__crate__api__store_secret_is_correct_impl(port, ptr, rust_vec_len, data_len),
-        79 => wire__crate__api__store_unlock_wait_secs_impl(port, ptr, rust_vec_len, data_len),
-        80 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
-        81 => wire__crate__api__unlock_store_key_impl(port, ptr, rust_vec_len, data_len),
-        82 => wire__crate__api__unsubscribe_impl(port, ptr, rust_vec_len, data_len),
-        83 => wire__crate__api__write_bridges_impl(port, ptr, rust_vec_len, data_len),
+        62 => wire__crate__api__check_bridge_impl(port, ptr, rust_vec_len, data_len),
+        63 => wire__crate__api__clear_duress_secret_impl(port, ptr, rust_vec_len, data_len),
+        64 => wire__crate__api__clear_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
+        65 => wire__crate__api__cover_traffic_enabled_impl(port, ptr, rust_vec_len, data_len),
+        66 => wire__crate__api__destroy_store_lock_impl(port, ptr, rust_vec_len, data_len),
+        67 => wire__crate__api__diag_note_impl(port, ptr, rust_vec_len, data_len),
+        68 => wire__crate__api__duress_is_armed_impl(port, ptr, rust_vec_len, data_len),
+        69 => wire__crate__api__fetch_bridges_impl(port, ptr, rust_vec_len, data_len),
+        70 => wire__crate__api__random_store_key_impl(port, ptr, rust_vec_len, data_len),
+        71 => wire__crate__api__read_bridges_impl(port, ptr, rust_vec_len, data_len),
+        72 => wire__crate__api__reset_tor_guards_impl(port, ptr, rust_vec_len, data_len),
+        73 => wire__crate__api__set_cover_traffic_impl(port, ptr, rust_vec_len, data_len),
+        74 => wire__crate__api__set_diagnostics_impl(port, ptr, rust_vec_len, data_len),
+        75 => wire__crate__api__set_diagnostics_log_file_impl(port, ptr, rust_vec_len, data_len),
+        76 => wire__crate__api__set_duress_secret_impl(port, ptr, rust_vec_len, data_len),
+        77 => wire__crate__api__set_store_passphrase_impl(port, ptr, rust_vec_len, data_len),
+        78 => wire__crate__api__store_is_locked_impl(port, ptr, rust_vec_len, data_len),
+        79 => wire__crate__api__store_secret_is_correct_impl(port, ptr, rust_vec_len, data_len),
+        80 => wire__crate__api__store_unlock_wait_secs_impl(port, ptr, rust_vec_len, data_len),
+        81 => wire__crate__api__subscribe_impl(port, ptr, rust_vec_len, data_len),
+        82 => wire__crate__api__unlock_store_key_impl(port, ptr, rust_vec_len, data_len),
+        83 => wire__crate__api__unsubscribe_impl(port, ptr, rust_vec_len, data_len),
+        84 => wire__crate__api__write_bridges_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }

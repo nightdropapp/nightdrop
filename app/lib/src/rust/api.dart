@@ -482,6 +482,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// mail. Empty = direct only.
   Future<List<RelayListEntry>> relayList();
 
+  /// Report that this device's screen is being recorded while the chat with `contact_id` is open
+  /// (Android 15+ can tell; call once per recording). Same delivery and caveats as
+  /// [`report_screenshot`](Self::report_screenshot).
+  Future<void> reportScreenRecording({required String contactId});
+
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
   ///
   /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which

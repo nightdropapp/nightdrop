@@ -26,6 +26,9 @@
          — never its contents, and never a photo taken of the screen. Normal permission: no prompt,
          and no ability to read any screen content. -->
     <uses-permission android:name="android.permission.DETECT_SCREEN_CAPTURE" />
+    <!-- Android 15+: told whether this app's window is being screen-recorded, so the open chat can
+         tell the contact (as for a screenshot). A normal permission: no prompt. -->
+    <uses-permission android:name="android.permission.DETECT_SCREEN_RECORDING" />
 
     <!-- Strip permissions that transitive plugins merge in but Night Drop never uses. Keeping the
          permission set minimal matters for a privacy-first app (and for the F-Droid listing). Each

@@ -12,10 +12,16 @@ import 'package:night_drop/src/features/chat/chat_screen.dart';
 /// real device.
 class _RecordingCore extends MockNightdropCore {
   final List<String> reported = [];
+  final List<String> recordings = [];
 
   @override
   Future<void> reportScreenshot(String contactId) async {
     reported.add(contactId);
+  }
+
+  @override
+  Future<void> reportScreenRecording(String contactId) async {
+    recordings.add(contactId);
   }
 
   /// Stand in for a `Captures` frame arriving from the peer.
@@ -31,6 +37,16 @@ Future<void> _fireScreenshot() async {
       .handlePlatformMessage(
     'app.nightdrop/screenshots',
     const StandardMethodCodec().encodeMethodCall(const MethodCall('screenshot')),
+    (_) {},
+  );
+}
+
+/// Pretend Android 15's screen-recording callback changed state.
+Future<void> _setRecording(bool on) async {
+  await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .handlePlatformMessage(
+    'app.nightdrop/screenshots',
+    const StandardMethodCodec().encodeMethodCall(MethodCall('recording', on)),
     (_) {},
   );
 }
@@ -66,6 +82,34 @@ void main() {
     await tester.pump();
 
     expect(core.reported, [contact.id]);
+  });
+
+  // A screen recording is reported like a screenshot, but once per recording: the platform says
+  // "recording" on every start of the app's window, and a notice per frame would be noise.
+  testWidgets('a screen recording is reported once per recording, and again for a new one',
+      (tester) async {
+    final (core, contact) = await pumpChat(tester);
+
+    await _setRecording(true);
+    await tester.pump();
+    await _setRecording(true); // the same recording, said again
+    await tester.pump();
+    expect(core.recordings, [contact.id]);
+    expect(core.reported, isEmpty, reason: 'a recording is not a screenshot');
+
+    await _setRecording(false);
+    await _setRecording(true);
+    await tester.pump();
+    expect(core.recordings, [contact.id, contact.id]);
+    await _setRecording(false);
+  });
+
+  testWidgets('a chat opened while a recording runs reports it', (tester) async {
+    await _setRecording(true);
+    final (core, contact) = await pumpChat(tester);
+    await tester.pump();
+    expect(core.recordings, [contact.id]);
+    await _setRecording(false);
   });
 
   // The honesty default: where the platform cannot report screenshots — desktop, Android below 14,

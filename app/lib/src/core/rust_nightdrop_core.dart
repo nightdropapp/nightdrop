@@ -1858,6 +1858,12 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> reportScreenRecording(String contactId) async {
+    await _core!.reportScreenRecording(contactId: contactId);
+    await _refresh();
+  }
+
+  @override
   Future<void> setDisappearing(String contactId, int secs) async {
     await _core!.setDisappearing(contactId: contactId, secs: BigInt.from(secs));
     await _refresh();

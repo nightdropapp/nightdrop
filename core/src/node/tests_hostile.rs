@@ -412,6 +412,56 @@ fn a_flooding_contact_is_cut_off_at_the_daily_allowance_with_one_notice() {
     assert!(texts(&s.alice, &s.carol_id).contains(&"still here".to_string()));
 }
 
+/// Control frames that leave a notice count against the allowance too: a contact flooding
+/// screenshot notices or flipping the disappearing timer could otherwise grow the history (and the
+/// timer's timeline) without bound, past the cap on messages.
+#[test]
+fn notices_from_control_frames_count_against_the_daily_allowance() {
+    let mut s = scene();
+    let max = super::limits::MAX_MESSAGES_PER_DAY as usize;
+    for i in 0..max + 50 {
+        let frame = if i % 2 == 0 {
+            Frame::Screenshot {
+                from: s.bob_id.clone(),
+                message: sealed_by_bob(&mut s, MARK_SCREENSHOT),
+            }
+        } else {
+            let secs = if i % 4 == 1 { "60" } else { "0" };
+            Frame::Disappearing {
+                from: s.bob_id.clone(),
+                message: sealed_by_bob(&mut s, secs.as_bytes()),
+            }
+        };
+        s.net
+            .endpoint("bob")
+            .send("alice", &wire::encode(&frame))
+            .unwrap();
+    }
+    s.alice.pump().unwrap();
+    let history = s.alice.messages(&s.bob_id);
+    let notices = history.iter().filter(|m| m.system).count();
+    assert!(
+        notices <= max + 1,
+        "{notices} notices kept for {max} allowed (+1 over-allowance notice)"
+    );
+    let chat = &s.alice.chats[&s.bob_id];
+    assert!(chat.disappearing_timeline.len() <= max);
+    // A repeat of the timer already in force is not news: no notice, no timeline entry.
+    let mut t = scene();
+    for _ in 0..3 {
+        let frame = Frame::Disappearing {
+            from: t.bob_id.clone(),
+            message: sealed_by_bob(&mut t, b"60"),
+        };
+        t.net
+            .endpoint("bob")
+            .send("alice", &wire::encode(&frame))
+            .unwrap();
+    }
+    t.alice.pump().unwrap();
+    assert_eq!(t.alice.chats[&t.bob_id].disappearing_timeline.len(), 1);
+}
+
 /// The preview sent ahead of a video is a small JPEG; anything bigger is not kept (it used to be
 /// stored at any size up to a frame).
 #[test]

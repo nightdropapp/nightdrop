@@ -1560,6 +1560,44 @@ fn screenshot_notifies_both_sides_every_time_and_cannot_be_forged() {
 }
 
 #[test]
+fn a_screen_recording_is_reported_to_both_sides_as_its_own_kind() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+
+    alice.report_screen_recording(&bob_contact);
+    bob.pump().unwrap();
+    assert!(alice
+        .messages(&bob_contact)
+        .iter()
+        .any(|m| m.system && m.text.contains("screen is being recorded")));
+    let theirs = bob.messages(&alice_contact);
+    assert_eq!(
+        theirs
+            .iter()
+            .filter(|m| m.system && m.text.contains("recording their screen"))
+            .count(),
+        1
+    );
+    assert!(
+        !theirs.iter().any(|m| m.text.contains("took a screenshot")),
+        "a recording is not reported as a screenshot"
+    );
+
+    // The session still works afterwards: the one decrypt per frame kept the ratchets in step.
+    alice.send(&bob_contact, "after").unwrap();
+    bob.pump().unwrap();
+    assert!(bob
+        .messages(&alice_contact)
+        .iter()
+        .any(|m| !m.system && m.text == "after"));
+}
+
+#[test]
 fn re_pairing_an_approved_chat_echoes_the_approval() {
     // Field report (2026-08-01): pairing again with a contact who had already approved us left the
     // joiner stuck on "waiting for the other person to accept", while the inviter showed a live

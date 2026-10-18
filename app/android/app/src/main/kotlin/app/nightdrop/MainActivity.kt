@@ -65,6 +65,23 @@ class MainActivity : FlutterActivity() {
             null
         }
 
+    // API 35+ only: told whether this app's window is being screen-recorded. Registered while the
+    // activity is visible (onResume/onPause, like the screenshot callback). Dart reports a start
+    // once per recording to the open chat, whose peer is told.
+    private val screenRecordingCallback: java.util.function.Consumer<Int>? =
+        if (Build.VERSION.SDK_INT >= 35) {
+            java.util.function.Consumer { state -> sendRecording(state) }
+        } else {
+            null
+        }
+
+    private fun sendRecording(state: Int) {
+        // With "Block screenshots" on, a recording captures only black: nothing to report.
+        val on = Build.VERSION.SDK_INT >= 35 &&
+            state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE && !blockCapture()
+        channel?.invokeMethod("recording", on)
+    }
+
     // Lets Dart say whether the engine should outlive this screen, and end the app on Exit.
     private var process: MethodChannel? = null
 
@@ -198,11 +215,22 @@ class MainActivity : FlutterActivity() {
         if (Build.VERSION.SDK_INT >= 34) {
             screenCaptureCallback?.let { registerScreenCaptureCallback(mainExecutor, it) }
         }
+        if (Build.VERSION.SDK_INT >= 35) {
+            // Registering returns the current state: a recording already running counts.
+            screenRecordingCallback?.let {
+                sendRecording(windowManager.addScreenRecordingCallback(mainExecutor, it))
+            }
+        }
     }
 
     override fun onPause() {
         if (Build.VERSION.SDK_INT >= 34) {
             screenCaptureCallback?.let { unregisterScreenCaptureCallback(it) }
+        }
+        if (Build.VERSION.SDK_INT >= 35) {
+            screenRecordingCallback?.let { windowManager.removeScreenRecordingCallback(it) }
+            // Not watching while paused: a recording seen again on resume is reported as new.
+            channel?.invokeMethod("recording", false)
         }
         // Pre-33 fallback only (see the class comment): best effort at blanking the thumbnail.
         if (Build.VERSION.SDK_INT < 33) {

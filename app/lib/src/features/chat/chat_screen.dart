@@ -150,6 +150,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ScreenshotDetector.listen(() {
       if (!mounted) return;
       NightdropScope.of(context).reportScreenshot(widget.contactId);
+    }, onRecording: () {
+      // Android 15+: a screen recording started, or was running when the chat opened. Once per
+      // recording and chat (the detector remembers), so leaving and reopening it does not repeat.
+      // Deferred: when the chat opens mid-recording this runs inside initState, where the scope
+      // cannot be looked up yet. A microtask, not a post-frame callback: an idle chat may not
+      // draw another frame for a while.
+      Future.microtask(() {
+        if (!mounted || !ScreenshotDetector.claimRecordingReport(widget.contactId)) return;
+        NightdropScope.of(context).reportScreenRecording(widget.contactId);
+      });
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;

@@ -103,6 +103,10 @@ const MARK_ACK: &[u8] = b"nightdrop/ctl/ack/v1";
 const MARK_BACKEDUP: &[u8] = b"nightdrop/ctl/backedup/v1";
 /// A screenshot of the chat was taken on the peer's device (#1).
 const MARK_SCREENSHOT: &[u8] = b"nightdrop/ctl/screenshot/v1";
+/// The peer's screen was being recorded while this chat was open (Android 15+). Rides the same
+/// [`Frame::Screenshot`] as a screenshot: a build that predates it decrypts an unknown marker and
+/// ignores the frame, so no wire change is needed.
+const MARK_RECORDING: &[u8] = b"nightdrop/ctl/recording/v1";
 /// Two markers for the safety-number verification signal (§5b′): the state is carried by *which*
 /// one the receiver's ratchet decrypts, so it's authenticated with no tamperable plaintext flag.
 const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
@@ -2067,20 +2071,38 @@ impl Node {
     /// Every screenshot is reported; there is no dedupe flag, because the *count* and *timing* are
     /// the informative part.
     pub fn report_screenshot(&mut self, contact_id: &str) {
+        self.report_capture(contact_id, false);
+    }
+
+    /// [`report_screenshot`](Self::report_screenshot) for a screen *recording*: the app calls it
+    /// once when a recording of this chat starts (or the chat is opened while one runs). Android 15+
+    /// only; same delivery, same honesty caveat — silence proves nothing.
+    pub fn report_screen_recording(&mut self, contact_id: &str) {
+        self.report_capture(contact_id, true);
+    }
+
+    fn report_capture(&mut self, contact_id: &str, recording: bool) {
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return;
         };
         if chat.closed {
             return; // nobody left to tell
         }
-        chat.history.push(ChatMessage::system(
-            "📸 You took a screenshot. The other person was told.".to_string(),
-        ));
-        if let Some((addr, frame)) =
-            self.authed_control(contact_id, MARK_SCREENSHOT, |from, message| {
-                Frame::Screenshot { from, message }
-            })
-        {
+        let (note, marker) = if recording {
+            (
+                "🔴 Your screen is being recorded. The other person was told.",
+                MARK_RECORDING,
+            )
+        } else {
+            (
+                "📸 You took a screenshot. The other person was told.",
+                MARK_SCREENSHOT,
+            )
+        };
+        chat.history.push(ChatMessage::system(note.to_string()));
+        if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
+            Frame::Screenshot { from, message }
+        }) {
             // Direct-first (unlike `delete_chat`): when the peer *is* online, "they are
             // screenshotting this right now" is the informative case and should not wait for a
             // relay poll; an offline peer picks up the relay copy on their next drain.

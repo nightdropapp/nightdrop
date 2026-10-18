@@ -2040,6 +2040,16 @@ impl NightdropCore {
         Ok(())
     }
 
+    /// Report that this device's screen is being recorded while the chat with `contact_id` is open
+    /// (Android 15+ can tell; call once per recording). Same delivery and caveats as
+    /// [`report_screenshot`](Self::report_screenshot).
+    pub fn report_screen_recording(&self, contact_id: String) -> Result<()> {
+        let mut g = self.lock();
+        g.me.report_screen_recording(&contact_id);
+        g.save();
+        Ok(())
+    }
+
     /// Tell the core which Night Drop version this is (the pubspec form, `"0.1.27+412"`), so it
     /// can announce it to contacts (`Frame::Version`). The core crate does not know the app's
     /// version; until this is called nothing is announced. Safe to call on every launch.

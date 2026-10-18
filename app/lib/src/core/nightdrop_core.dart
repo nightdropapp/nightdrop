@@ -368,6 +368,10 @@ abstract class NightdropCore extends ChangeNotifier {
   /// captures will be visible. Default is a no-op for implementations without a peer to tell.
   Future<void> reportScreenshot(String contactId) async {}
 
+  /// Report that this screen is being recorded while the chat is open (Android 15+), once per
+  /// recording: logs it locally and tells the peer. Same caveats as [reportScreenshot].
+  Future<void> reportScreenRecording(String contactId) async {}
+
   // --- App lock (see docs/design/app-lock.md) ------------------------------------------
   // The at-rest key normally sits in the OS keystore, which anyone holding the unlocked device
   // can read through the app. A lock re-derives it from a secret the user knows instead. Both a
