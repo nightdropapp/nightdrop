@@ -153,9 +153,23 @@ void main() {
     expect(holds, [true]);
     expect(find.text(l10n.peerBlocksCaptureSummary), findsOneWidget);
 
+    // The activity may have been rebuilt while away: coming forward says it again.
+    for (final st in [
+      AppLifecycleState.inactive,
+      AppLifecycleState.hidden,
+      AppLifecycleState.paused,
+      AppLifecycleState.hidden,
+      AppLifecycleState.inactive,
+      AppLifecycleState.resumed,
+    ]) {
+      tester.binding.handleAppLifecycleStateChanged(st);
+    }
+    await tester.pump();
+    expect(holds, [true, true], reason: 'the hold is restated on resume');
+
     await tester.pumpWidget(const MaterialApp(home: Scaffold()));
     await tester.pump();
-    expect(holds, [true, false], reason: 'released when the chat closes');
+    expect(holds, [true, true, false], reason: 'released when the chat closes');
 
     ScreenshotDetector.canBlockForTest = null;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger

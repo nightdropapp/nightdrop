@@ -179,6 +179,16 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     ScreenshotDetector.holdBlock(wanted);
   }
 
+  /// Android keeps the hold in the activity, and an activity rebuilt while this chat stays open
+  /// (memory pressure, with the engine kept for background delivery) starts without it — so the
+  /// block would lapse silently (round 12, R12-1). Say it again whenever the app comes forward.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && _holdingBlock) {
+      ScreenshotDetector.holdBlock(true);
+    }
+  }
+
   /// Allow screenshots here although the contact blocks them (asking first, since they are told),
   /// or block them again.
   Future<void> _toggleCaptureOverride(Contact contact) async {

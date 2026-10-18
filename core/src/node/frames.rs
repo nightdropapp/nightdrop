@@ -362,7 +362,9 @@ impl Node {
                 // frame, so what we "told" an older build may never have registered (seen in the
                 // 0.2 device pass: Block screenshots announced to a build without the marker).
                 // Tell the new build again.
-                let updated = chat.contact.peer_app_version.is_some();
+                // Each change makes us send our announcements again, so it counts against the daily
+                // allowance: a contact flipping versions cannot use us as an amplifier (R12-2).
+                let updated = chat.contact.peer_app_version.is_some() && within_allowance(chat, 0);
                 if updated {
                     chat.told_captures = None;
                     chat.told_block = None;
@@ -724,7 +726,11 @@ impl Node {
                             return Ok(None);
                         }
                         chat.peer_block_seq = seq;
-                        if chat.contact.peer_blocks_capture == Some(on) {
+                        // A change costs a save and a platform call here: counted against the
+                        // daily allowance, so flipping it cannot be a flood (round 12, R12-3).
+                        if chat.contact.peer_blocks_capture == Some(on)
+                            || !within_allowance(chat, 0)
+                        {
                             return Ok(None);
                         }
                         chat.contact.peer_blocks_capture = Some(on);
