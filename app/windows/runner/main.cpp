@@ -8,6 +8,11 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // DLLs loaded at run time (the Rust core, which Dart opens by name) come only from the app's own
+  // folder and System32 — never the current directory or PATH, where a planted DLL of the same
+  // name would otherwise be found (self-audit 2026-10-17, round 10).
+  ::SetDefaultDllDirectories(LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+
   // A crash must not leave this process's memory with Windows Error Reporting: it holds the store
   // key and decrypted messages, and WER can keep or upload a dump of it (self-audit 2026-10-17; the
   // Linux runner sets a zero core limit for the same reason). FALSE = this user only, no admin
