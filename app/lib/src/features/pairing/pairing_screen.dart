@@ -102,6 +102,16 @@ class _InviteTabState extends State<_InviteTab> {
           // bundle — so share it only over a channel you trust.
           if (preAuth) ...[
             const SizedBox(height: 12),
+            // Share first where there is a share sheet: the link goes straight to the chosen app,
+            // never into the clipboard and whatever keyboard history or sync sits behind it.
+            if (SensitiveClipboard.canShare) ...[
+              FilledButton.tonalIcon(
+                onPressed: () => SensitiveClipboard.share(qrData),
+                icon: const Icon(Icons.share),
+                label: Text(l10n.shareInviteLink),
+              ),
+              const SizedBox(height: 8),
+            ],
             OutlinedButton.icon(
               onPressed: () async {
                 await SensitiveClipboard.copy(qrData);

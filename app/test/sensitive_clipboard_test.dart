@@ -8,7 +8,7 @@ void main() {
 
   setUp(() {
     clip = null;
-    SensitiveClipboard.isAndroid = () => false;
+    SensitiveClipboard.isMobile = () => false;
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(SystemChannels.platform, (call) async {
       if (call.method == 'Clipboard.setData') {
@@ -31,5 +31,21 @@ void main() {
     clip = 'my own note';
     await tester.pump(SensitiveClipboard.clearAfter + const Duration(seconds: 1));
     expect(clip, 'my own note');
+  });
+
+  test('sharing hands the link to the share sheet and leaves the clipboard alone', () async {
+    String? shared;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('app.nightdrop/process'), (call) async {
+      if (call.method == 'shareText') shared = call.arguments as String;
+      return null;
+    });
+    SensitiveClipboard.isMobile = () => true;
+    expect(SensitiveClipboard.canShare, isTrue);
+    await SensitiveClipboard.share('nightdrop://pair?secret');
+    expect(shared, 'nightdrop://pair?secret');
+    expect(clip, isNull, reason: 'the clipboard is never written');
+    SensitiveClipboard.isMobile = () => false;
+    expect(SensitiveClipboard.canShare, isFalse, reason: 'no share sheet on desktop');
   });
 }

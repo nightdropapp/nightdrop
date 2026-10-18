@@ -10,7 +10,8 @@ import 'package:flutter/services.dart';
 ///
 /// **This is not a protection, and the UI must not present it as one.** It is blind to:
 ///
-///  * every Android below 14, and every desktop platform — hence [canDetect];
+///  * every Android below 14, and every desktop platform — hence [canDetect] (iOS reports
+///    screenshots, and recording/mirroring through `UIScreen.isCaptured`; see AppDelegate.swift);
 ///  * a photo of the screen taken with another camera, which no API can ever see;
 ///  * screen *recording* below Android 15 (15+ reports it: `WindowManager`'s recording callback).
 ///
@@ -21,7 +22,11 @@ class ScreenshotDetector {
 
   static const _channel = MethodChannel('app.nightdrop/screenshots');
 
-  static bool get supported => !kIsWeb && Platform.isAndroid;
+  /// Android 14+ and iOS report screenshots; Android 15+ and iOS report screen recording.
+  static bool get supported => !kIsWeb && (Platform.isAndroid || Platform.isIOS);
+
+  /// "Block screenshots" needs Android's FLAG_SECURE; iOS has no equivalent, so it is not offered.
+  static bool get canBlockCapture => !kIsWeb && Platform.isAndroid;
 
   /// Whether this device can report screenshots at all (Android 14+). Cached after the first call:
   /// the answer is a platform constant.
@@ -92,7 +97,7 @@ class ScreenshotDetector {
 
   /// Whether the opt-in "Block screenshots" setting is on (Android only).
   static Future<bool> blockCapture() async {
-    if (!supported) return false;
+    if (!canBlockCapture) return false;
     try {
       return await _channel.invokeMethod<bool>('getBlockCapture') ?? false;
     } catch (_) {
@@ -102,7 +107,7 @@ class ScreenshotDetector {
 
   /// Turn "Block screenshots" on or off; it applies at once and to every later start.
   static Future<void> setBlockCapture(bool on) async {
-    if (!supported) return;
+    if (!canBlockCapture) return;
     await _channel.invokeMethod<void>('setBlockCapture', on);
   }
 }

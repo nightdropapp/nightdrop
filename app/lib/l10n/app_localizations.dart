@@ -172,6 +172,12 @@ abstract class AppLocalizations {
   /// **'Invite link copied'**
   String get inviteLinkCopied;
 
+  /// Button: send the invite link through the system share sheet, not the clipboard.
+  ///
+  /// In en, this message translates to:
+  /// **'Share invite link'**
+  String get shareInviteLink;
+
   /// Button to copy the invite link to the clipboard.
   ///
   /// In en, this message translates to:

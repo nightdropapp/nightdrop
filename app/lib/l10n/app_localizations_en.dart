@@ -50,6 +50,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get inviteLinkCopied => 'Invite link copied';
 
   @override
+  String get shareInviteLink => 'Share invite link';
+
+  @override
   String get copyInviteLink => 'Copy invite link';
 
   @override

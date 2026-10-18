@@ -92,7 +92,7 @@ class HomeScreen extends StatelessWidget {
               PopupMenuItem(value: 'cover', child: Text(l10n.coverTrafficMenu)),
               PopupMenuItem(
                   value: 'burnreceipts', child: Text(l10n.burnReceiptsMenu)),
-              if (ScreenshotDetector.supported)
+              if (ScreenshotDetector.canBlockCapture)
                 PopupMenuItem(
                     value: 'blockcapture', child: Text(l10n.blockCaptureMenu)),
               PopupMenuItem(value: 'relays', child: Text(l10n.myRelaysMenu)),

@@ -52,6 +52,10 @@
   "@inviteLinkCopied": {
     "description": "Snackbar after copying the invite link to the clipboard."
   },
+  "shareInviteLink": "Share invite link",
+  "@shareInviteLink": {
+    "description": "Button: send the invite link through the system share sheet, not the clipboard."
+  },
   "copyInviteLink": "Copy invite link",
   "@copyInviteLink": {
     "description": "Button to copy the invite link to the clipboard."

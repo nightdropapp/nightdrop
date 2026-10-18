@@ -5,6 +5,7 @@ import android.app.NotificationManager
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -136,6 +137,17 @@ class MainActivity : FlutterActivity() {
                     // clipboard preview hides it and keyboards that honour the flag keep it out of
                     // their history (self-audit 2026-10-17). The extra predates its API 33
                     // constant and is ignored where unknown.
+                    // The system share sheet, for an invite link: it goes straight to the app the
+                    // user picks, never through the clipboard, which Samsung's keyboard keeps a
+                    // history of and One UI syncs to other devices (self-audit 2026-10-17, R9-6).
+                    "shareText" -> {
+                        val send = Intent(Intent.ACTION_SEND).apply {
+                            type = "text/plain"
+                            putExtra(Intent.EXTRA_TEXT, call.arguments as? String ?: "")
+                        }
+                        startActivity(Intent.createChooser(send, null))
+                        result.success(null)
+                    }
                     "copySensitive" -> {
                         val text = call.arguments as? String ?: ""
                         val clip = ClipData.newPlainText("Night Drop", text)

@@ -7,23 +7,35 @@ import 'package:flutter/services.dart';
 /// Copying a secret (an invite link carries its single-use pass) without leaving it lying around
 /// (self-audit 2026-10-17, R8-5): on Android it is marked sensitive, so the system's clipboard
 /// preview hides it and keyboards that honour the flag (Gboard, among others) keep it out of their
-/// clipboard history; everywhere it is cleared after [clearAfter], if it is still what the
-/// clipboard holds — something copied since is never touched.
+/// clipboard history; on iOS it stays on this device (no Universal Clipboard) and expires; and
+/// everywhere it is cleared after [clearAfter], if it is still what the clipboard holds —
+/// something copied since is never touched. Where there is a system share sheet (Android, iOS),
+/// [share] avoids the clipboard altogether.
 class SensitiveClipboard {
   SensitiveClipboard._();
 
   static const _channel = MethodChannel('app.nightdrop/process');
   static const clearAfter = Duration(seconds: 60);
 
+  /// Whether [share] can open a system share sheet here (Android, iOS).
+  static bool get canShare => isMobile();
+
+  /// Hand [text] to the system share sheet, so it goes straight to the app the user picks and
+  /// never through the clipboard (whose history some keyboards keep, and some phones sync to other
+  /// devices). Android and iOS; elsewhere, [copy].
+  static Future<void> share(String text) =>
+      _channel.invokeMethod<void>('shareText', text);
+
   /// Injectable for tests.
   @visibleForTesting
-  static bool Function() isAndroid = () => !kIsWeb && io.Platform.isAndroid;
+  static bool Function() isMobile =
+      () => !kIsWeb && (io.Platform.isAndroid || io.Platform.isIOS);
 
   static Timer? _timer;
 
   static Future<void> copy(String text) async {
     var marked = false;
-    if (isAndroid()) {
+    if (isMobile()) {
       try {
         await _channel.invokeMethod<void>('copySensitive', text);
         marked = true;
