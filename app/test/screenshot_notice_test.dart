@@ -131,6 +131,48 @@ void main() {
     ScreenshotDetector.recordingChanged(false);
   });
 
+  // A contact with "Block screenshots" on: this app blocks captures while their chat is open, says
+  // so, and lets go when the chat closes.
+  testWidgets('a contact who blocks screenshots has them blocked in their chat too',
+      (tester) async {
+    final holds = <bool>[];
+    ScreenshotDetector.canBlockForTest = true;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('app.nightdrop/screenshots'), (call) async {
+      if (call.method == 'holdBlock') holds.add(call.arguments as bool);
+      return null;
+    });
+    final (core, _) = await pumpChat(tester);
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    expect(holds, isEmpty, reason: 'nothing held until the contact asks');
+    expect(find.text(l10n.peerBlocksCaptureSummary), findsNothing);
+
+    core.contacts.first.peerBlocksCapture = true;
+    core.notifyListeners();
+    await tester.pump();
+    expect(holds, [true]);
+    expect(find.text(l10n.peerBlocksCaptureSummary), findsOneWidget);
+
+    await tester.pumpWidget(const MaterialApp(home: Scaffold()));
+    await tester.pump();
+    expect(holds, [true, false], reason: 'released when the chat closes');
+
+    ScreenshotDetector.canBlockForTest = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('app.nightdrop/screenshots'), null);
+  });
+
+  testWidgets('where captures cannot be blocked, the chat says it is up to you', (tester) async {
+    ScreenshotDetector.canBlockForTest = false;
+    final (core, _) = await pumpChat(tester);
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    core.contacts.first.peerBlocksCapture = true;
+    core.notifyListeners();
+    await tester.pump();
+    expect(find.text(l10n.peerBlocksCaptureUnenforcedSummary), findsOneWidget);
+    ScreenshotDetector.canBlockForTest = null;
+  });
+
   // The honesty default: where the platform cannot report screenshots — desktop, Android below 14,
   // and this test host — `canDetect` must be false, so no UI can claim a protection that isn't
   // there. A silent capture is the normal case, not an error case.

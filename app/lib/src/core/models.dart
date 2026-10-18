@@ -58,6 +58,7 @@ class Contact {
     this.verified = false,
     this.peerVerified = false,
     this.peerCapturesSilent,
+    this.peerBlocksCapture,
     this.peerSupportsBurn,
     this.peerRelays = const [],
     this.peerRelayState = 'relays',
@@ -112,6 +113,10 @@ class Contact {
   /// render as unknown and never as "captures are visible": assuming the reassuring answer from
   /// silence is exactly the false guarantee this exists to remove.
   bool? peerCapturesSilent;
+
+  /// Whether the peer has "Block screenshots" on: then this app blocks captures while their chat
+  /// is open (cooperative — their wish, honoured by Night Drop). `null` = they have not said.
+  bool? peerBlocksCapture;
 
   /// Whether the peer's build understands burn messages.
   ///

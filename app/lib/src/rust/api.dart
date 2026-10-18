@@ -625,6 +625,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Nothing depends on the receipt arriving: the 24h horizon remains the guarantee.
   Future<void> setBurnReceipts({required bool enabled});
 
+  /// Tell the core whether this device blocks captures ("Block screenshots"), so contacts' apps
+  /// block them too while our chat is open there. Safe to call on every launch and on each change:
+  /// a chat is sent the value only when it differs from what that chat confirmed.
+  Future<void> setCaptureBlock({required bool blocked});
+
   /// Tell peers whether this device can report screenshots at all (#1).
   ///
   /// `visible` is what the platform can actually do — Android 14+ only. It goes to the PEER, not
@@ -959,6 +964,11 @@ class Contact {
   /// answer from silence is precisely the false guarantee this exists to remove.
   final bool? peerCapturesSilent;
 
+  /// Whether the **peer** blocks captures ("Block screenshots"): `Some(true)` means our app blocks
+  /// screenshots, recording and casting while their chat is open, as they asked. `None` = they
+  /// have not said (an older build).
+  final bool? peerBlocksCapture;
+
   /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
   /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
   final List<String> peerRelays;
@@ -1031,6 +1041,7 @@ class Contact {
     required this.verified,
     required this.peerVerified,
     this.peerCapturesSilent,
+    this.peerBlocksCapture,
     required this.peerRelays,
     required this.peerRelayState,
     required this.serverStorageAvailable,
@@ -1056,6 +1067,7 @@ class Contact {
       verified.hashCode ^
       peerVerified.hashCode ^
       peerCapturesSilent.hashCode ^
+      peerBlocksCapture.hashCode ^
       peerRelays.hashCode ^
       peerRelayState.hashCode ^
       serverStorageAvailable.hashCode ^
@@ -1083,6 +1095,7 @@ class Contact {
           verified == other.verified &&
           peerVerified == other.peerVerified &&
           peerCapturesSilent == other.peerCapturesSilent &&
+          peerBlocksCapture == other.peerBlocksCapture &&
           peerRelays == other.peerRelays &&
           peerRelayState == other.peerRelayState &&
           serverStorageAvailable == other.serverStorageAvailable &&

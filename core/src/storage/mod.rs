@@ -71,6 +71,10 @@ pub struct PersistedChat {
     /// keeps older state files loadable and correctly says "they have not told us".
     #[serde(default)]
     pub peer_captures_silent: Option<bool>,
+    /// Whether the peer blocks captures ("Block screenshots"), so we block them in their chat.
+    /// `#[serde(default)]` (→ None: they have not said).
+    #[serde(default)]
+    pub peer_blocks_capture: Option<bool>,
     /// Whether the **peer** signaled that *they* verified this chat's safety number — informational
     /// only (never sets our own `verified`). `#[serde(default)]` keeps older state files loadable.
     #[serde(default)]
@@ -102,6 +106,8 @@ pub struct PersistedChat {
     pub told_address: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub told_captures: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub told_block: Option<bool>,
     /// Pairing passes in waiting (`optional-relay.md` §5), base64. Joiner: our own client secret for
     /// the inviter's onion, installed in place of their QR pass once they accept. Inviter: the
     /// joiner's client key for our onion and their reply pass, both unused until Accept.

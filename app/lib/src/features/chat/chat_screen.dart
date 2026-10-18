@@ -168,6 +168,17 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     });
   }
 
+  /// Whether this chat is holding captures blocked for a contact who asked (their "Block
+  /// screenshots"), whatever our own setting. Kept in step with the contact on every build and
+  /// released when the chat closes.
+  bool _holdingBlock = false;
+
+  void _syncPeerBlock(bool wanted) {
+    if (wanted == _holdingBlock) return;
+    _holdingBlock = wanted;
+    ScreenshotDetector.holdBlock(wanted);
+  }
+
   /// We are on direct only (`optional-relay.md` §3): said once in each chat.
   bool _directOnly = false;
 
@@ -198,6 +209,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.removeObserver(this);
     _scroll.removeListener(_trackBottom);
     ScreenshotDetector.stop();
+    if (_holdingBlock) ScreenshotDetector.holdBlock(false);
     for (final t in _scrollTimers) {
       t.cancel();
     }
@@ -760,6 +772,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
       listenable: core,
       builder: (context, _) {
         final contact = _contact(core);
+        _syncPeerBlock(contact?.peerBlocksCapture == true);
         if (contact == null) {
           // The chat was deleted while open — leave the screen on the next frame.
           WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -913,6 +926,18 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
               // means "they have not told us" and deliberately shows nothing — claiming either
               // answer without evidence is worse than staying quiet.
               if (contact.peerCapturesSilent == true) const _PeerCapturesSilentBanner(),
+              // Their "Block screenshots": this app blocks captures while their chat is open
+              // (see _syncPeerBlock), or says it cannot where the platform has no way to.
+              if (contact.peerBlocksCapture == true)
+                _CompactNotice(
+                  icon: Icons.screenshot_monitor_outlined,
+                  summary: ScreenshotDetector.canBlockCapture
+                      ? l10n.peerBlocksCaptureSummary
+                      : l10n.peerBlocksCaptureUnenforcedSummary,
+                  detail: ScreenshotDetector.canBlockCapture
+                      ? l10n.peerBlocksCaptureBanner
+                      : l10n.peerBlocksCaptureUnenforcedBanner,
+                ),
               // 0.2 cannot talk to 0.1 at all; that notice replaces the older mailbox one.
               if (contact.peerOutdated)
                 _CompactNotice(

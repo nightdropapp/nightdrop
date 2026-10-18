@@ -472,6 +472,8 @@ Future<void> _blockCaptureSettings(BuildContext context) async {
   if (turnOn == null || !context.mounted) return;
   final messenger = ScaffoldMessenger.of(context);
   await ScreenshotDetector.setBlockCapture(turnOn);
+  // Contacts' apps block captures in our chat too while it is on.
+  if (context.mounted) await NightdropScope.of(context).setCaptureBlock(turnOn);
   messenger.showSnackBar(SnackBar(
     content: Text(turnOn ? l10n.blockCaptureOn : l10n.blockCaptureOff),
   ));

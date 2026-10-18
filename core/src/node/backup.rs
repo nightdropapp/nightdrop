@@ -64,6 +64,7 @@ impl Node {
                     verified: chat.contact.verified,
                     peer_verified: chat.contact.peer_verified,
                     peer_captures_silent: chat.contact.peer_captures_silent,
+                    peer_blocks_capture: chat.contact.peer_blocks_capture,
                     peer_relays: chat
                         .relay_set
                         .as_ref()
@@ -76,6 +77,7 @@ impl Node {
                     told_version: chat.told_version.clone(),
                     told_address: chat.told_address.clone(),
                     told_captures: chat.told_captures,
+                    told_block: chat.told_block,
                     own_key_pending: chat.own_key_pending.as_ref().map(super::encode_secret),
                     peer_wire_old: chat.peer_wire_old,
                     told_upgrade: chat.told_upgrade,
@@ -777,6 +779,7 @@ fn chat_from_persisted(
             verified: chat.verified,
             peer_verified: chat.peer_verified,
             peer_captures_silent: chat.peer_captures_silent,
+            peer_blocks_capture: chat.peer_blocks_capture,
             peer_relays: Vec::new(), // filled in `contacts()` from `relay_set`
             peer_supports_burn: chat.peer_supports_burn,
             peer_app_version: chat.peer_app_version.clone(),
@@ -839,6 +842,7 @@ fn chat_from_persisted(
         told_version: chat.told_version.clone(),
         told_address: chat.told_address.clone(),
         told_captures: chat.told_captures,
+        told_block: chat.told_block,
         own_key_pending: chat
             .own_key_pending
             .as_deref()

@@ -32,6 +32,15 @@ cannot block, such as desktop). The arguments above still hold for why it is not
 a photo of the screen gets past any block, so the notice is what a contact relies on when the
 sender allowed captures.
 
+**Also 2026-10-18 — a contact's block applies in their chat.** "Block screenshots" used to protect
+only the person who turned it on from capturing their own screen, which read as protecting the
+conversation. Now each app tells its contacts whether it blocks (two more markers on
+`Frame::Captures`, announced on change like the capability), and the contact's app blocks captures
+while that chat is open, whatever its own setting (`holdBlock` → FLAG_SECURE on Android), saying
+"They block screenshots of this chat". Where the platform cannot block (desktop), the chat says the
+contact asked and that it is up to the reader. This is cooperative: a modified app can ignore it,
+and a photo of the screen gets past any block.
+
 The **Recents thumbnail** is the opposite case and *is* blocked — Android snapshots the window on
 backgrounding with no user intent behind it, and that image sits in the task switcher for anyone who
 opens it. `FLAG_SECURE` is therefore held only while backgrounded (`MainActivity.onPause` →

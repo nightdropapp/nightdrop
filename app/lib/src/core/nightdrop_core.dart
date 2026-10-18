@@ -372,6 +372,10 @@ abstract class NightdropCore extends ChangeNotifier {
   /// recording: logs it locally and tells the peer. Same caveats as [reportScreenshot].
   Future<void> reportScreenRecording(String contactId) async {}
 
+  /// Tell contacts whether this device has "Block screenshots" on, so their app blocks captures
+  /// in our chat too. Default is a no-op for implementations without peers.
+  Future<void> setCaptureBlock(bool blocked) async {}
+
   // --- App lock (see docs/design/app-lock.md) ------------------------------------------
   // The at-rest key normally sits in the OS keystore, which anyone holding the unlocked device
   // can read through the app. A lock re-derives it from a secret the user knows instead. Both a

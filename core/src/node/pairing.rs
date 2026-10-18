@@ -257,6 +257,7 @@ impl Node {
         // Screenshot capability (#1): a contact paired after the launch-time broadcast would
         // otherwise never learn it, and be left reading our silence as "they'd be told".
         self.announce_captures_to(&contact_id);
+        self.announce_block_to(&contact_id);
         self.announce_burns_to(&contact_id);
         self.announce_version_to(&contact_id);
         // The Hello carried the pair's mailbox seed, so there is nothing to agree: `seeded` above.

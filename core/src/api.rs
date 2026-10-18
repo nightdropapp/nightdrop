@@ -311,6 +311,10 @@ pub struct Contact {
     /// must render that as unknown and NOT as "captures are visible": inferring the reassuring
     /// answer from silence is precisely the false guarantee this exists to remove.
     pub peer_captures_silent: Option<bool>,
+    /// Whether the **peer** blocks captures ("Block screenshots"): `Some(true)` means our app blocks
+    /// screenshots, recording and casting while their chat is open, as they asked. `None` = they
+    /// have not said (an older build).
+    pub peer_blocks_capture: Option<bool>,
     /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
     /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
     pub peer_relays: Vec<String>,
@@ -779,6 +783,8 @@ impl Inner {
             self.me.reannounce_address();
             // Whether we can report screenshots, to any chat that missed it.
             self.me.reannounce_captures();
+            // And whether we block captures.
+            self.me.reannounce_block();
             // v2 mailbox handles (`mailbox-handles.md`): offer our contribution to every chat not
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
@@ -2073,6 +2079,16 @@ impl NightdropCore {
     pub fn set_capture_reporting(&self, visible: bool) -> Result<()> {
         let mut g = self.lock();
         g.me.announce_captures(visible);
+        g.save();
+        Ok(())
+    }
+
+    /// Tell the core whether this device blocks captures ("Block screenshots"), so contacts' apps
+    /// block them too while our chat is open there. Safe to call on every launch and on each change:
+    /// a chat is sent the value only when it differs from what that chat confirmed.
+    pub fn set_capture_block(&self, blocked: bool) -> Result<()> {
+        let mut g = self.lock();
+        g.me.announce_block(blocked);
         g.save();
         Ok(())
     }

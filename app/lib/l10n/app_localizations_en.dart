@@ -754,7 +754,22 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get blockCaptureBody =>
-      'When on, nobody can take a screenshot of Night Drop, record its screen or cast it on this phone, including apps you installed. Recent apps never show its contents either way.\n\nOn by default. Turn it off to allow screenshots: your contacts are then told when you screenshot a chat or record your screen with it open (Android 15 and later). A photo of the screen gets past any block.';
+      'When on, nobody can take a screenshot of Night Drop, record its screen or cast it on this phone, including apps you installed. Recent apps never show its contents either way. Your contacts\' Night Drop blocks them too in their chat with you, where their device can.\n\nOn by default. Turn it off to allow screenshots: your contacts are then told when you screenshot a chat or record your screen with it open (Android 15 and later). A photo of the screen gets past any block.';
+
+  @override
+  String get peerBlocksCaptureSummary => 'They block screenshots of this chat';
+
+  @override
+  String get peerBlocksCaptureBanner =>
+      'This person turned on Block screenshots, so Night Drop blocks screenshots, screen recording and casting here too while this chat is open. A photo of the screen still gets past it.';
+
+  @override
+  String get peerBlocksCaptureUnenforcedSummary =>
+      'They asked that this chat not be captured';
+
+  @override
+  String get peerBlocksCaptureUnenforcedBanner =>
+      'This person turned on Block screenshots. This device can\'t block screenshots or screen recording, so it\'s up to you to respect that: don\'t capture this chat.';
 
   @override
   String get blockCaptureOn => 'Screenshots are blocked.';

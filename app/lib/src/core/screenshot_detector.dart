@@ -31,7 +31,11 @@ class ScreenshotDetector {
   static bool? supportedForTest;
 
   /// "Block screenshots" needs Android's FLAG_SECURE; iOS has no equivalent, so it is not offered.
-  static bool get canBlockCapture => !kIsWeb && Platform.isAndroid;
+  static bool get canBlockCapture => canBlockForTest ?? (!kIsWeb && Platform.isAndroid);
+
+  /// Lets a test stand in for an Android phone here.
+  @visibleForTesting
+  static bool? canBlockForTest;
 
   /// Whether this device can report screenshots at all (Android 14+). Cached after the first call:
   /// the answer is a platform constant.
@@ -115,6 +119,15 @@ class ScreenshotDetector {
     } catch (_) {
       return false;
     }
+  }
+
+  /// Block captures while a chat whose contact asked for it is open, whatever our own setting
+  /// (Android; elsewhere there is nothing to hold, see [canBlockCapture]). Released when it closes.
+  static Future<void> holdBlock(bool hold) async {
+    if (!canBlockCapture) return;
+    try {
+      await _channel.invokeMethod<void>('holdBlock', hold);
+    } catch (_) {}
   }
 
   /// Turn "Block screenshots" on or off; it applies at once and to every later start.

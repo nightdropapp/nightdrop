@@ -121,6 +121,11 @@ const MARK_CLIENT_KEY_PREFIX: &[u8] = b"nightdrop/ctl/client-key/v1:";
 /// state is *which* marker the receiver's ratchet decrypts, so there is no plaintext flag to flip.
 const MARK_CAPTURES_VISIBLE: &[u8] = b"nightdrop/ctl/captures-visible/v1";
 const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
+/// Two markers on the same [`Frame::Captures`]: whether WE block captures ("Block screenshots"), so
+/// the contact's app blocks them too while our chat is open. Cooperative: a modified app can ignore
+/// it. A build that predates them decrypts an unknown marker and ignores the frame.
+const MARK_CAPTURE_BLOCK_ON: &[u8] = b"nightdrop/ctl/capture-block-on/v1";
+const MARK_CAPTURE_BLOCK_OFF: &[u8] = b"nightdrop/ctl/capture-block-off/v1";
 
 /// Dev-only logging. Identity keys, invite codes, and decrypted display names must never
 /// reach release logs (Android's logcat persists them for any `adb`-connected observer);
@@ -746,6 +751,8 @@ struct Chat {
     told_address: Option<String>,
     /// Whether the peer last confirmed hearing that we can report screenshots (#1).
     told_captures: Option<bool>,
+    /// Whether the peer last confirmed hearing that we block captures (persisted).
+    told_block: Option<bool>,
     /// Pairing passes in waiting (`optional-relay.md` §5). Joiner: our own client secret for the
     /// inviter's onion, installed in place of their QR pass once their `RelaySet` proves they
     /// accepted. Inviter: the joiner's client key for our onion and their reply pass, both held
@@ -835,6 +842,7 @@ impl Chat {
                 verified: false,
                 peer_verified: false,
                 peer_captures_silent: None,
+                peer_blocks_capture: None,
                 peer_relays: Vec::new(),
                 peer_supports_burn: None,
                 peer_app_version: None,
@@ -868,6 +876,7 @@ impl Chat {
             told_version: None,
             told_address: None,
             told_captures: None,
+            told_block: None,
             own_key_pending: None,
             peer_key_pending: None,
             pass_pending: None,
@@ -912,6 +921,9 @@ pub struct Node {
     /// What we last told peers about whether this device can report screenshots (#1). `None` until
     /// the UI says; only a change is announced, so a restart does not re-broadcast to every chat.
     captures_visible: Option<bool>,
+    /// Whether this device blocks captures ("Block screenshots"), as the app last told us; `None`
+    /// until it says. Announced like [`captures_visible`](Self::captures_visible).
+    capture_block: Option<bool>,
     /// Whether to tell senders when we open their burn message (`Frame::Viewed`). **Off by
     /// default**: it discloses our reading behaviour, and the person whose behaviour it is should
     /// choose. Nothing depends on it — with it off, a sender's copy simply lives its full 24h.
@@ -928,6 +940,8 @@ pub struct Node {
     /// Contacts told our screenshot capability this run, or being told, with the value that went
     /// out (see [`Node::announce_captures`]). Like [`burns_announced`](Self::burns_announced).
     captures_announced: HashMap<String, bool>,
+    /// Contacts told our capture block this run, or being told, with the value that went out.
+    block_announced: HashMap<String, bool>,
     /// This build's app version (`"0.1.27"`), set by the app via
     /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
     /// announced until then: a guessed version would be worse than none.
@@ -1329,6 +1343,7 @@ pub(crate) enum Announce {
     Address,
     RelaySet,
     Captures,
+    Block,
     UpgradeNotice,
 }
 
@@ -1556,9 +1571,11 @@ impl Node {
             require_authorization: false,
             last_invite_code: None,
             captures_visible: None,
+            capture_block: None,
             burns_announced: std::collections::HashSet::new(),
             announce_online: ANNOUNCE_ONLINE_ON_START,
             captures_announced: HashMap::new(),
+            block_announced: HashMap::new(),
             upgrade_notice_in_flight: std::collections::HashSet::new(),
             app_version: None,
             version_announced: HashMap::new(),
@@ -1771,6 +1788,7 @@ impl Node {
         // A request was told nothing about us; now it is a contact.
         self.announce_relay_set_to(contact_id);
         self.announce_captures_to(contact_id);
+        self.announce_block_to(contact_id);
         self.announce_burns_to(contact_id);
         self.announce_version_to(contact_id);
         Ok(())
@@ -2030,6 +2048,60 @@ impl Node {
             .insert(contact_id.to_string(), version.clone());
         let done = OutboundDone::Announced(Announce::Version, contact_id.to_string());
         let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
+    }
+
+    /// Tell every open chat whether this device blocks captures ("Block screenshots"), so their app
+    /// blocks them too while our chat is open there. Same cadence and bookkeeping as
+    /// [`announce_captures`](Self::announce_captures): only a change goes out, retried per chat.
+    pub fn announce_block(&mut self, blocked: bool) {
+        if self.capture_block != Some(blocked) {
+            self.capture_block = Some(blocked);
+            self.block_announced.clear();
+        }
+        self.reannounce_block();
+    }
+
+    /// [`announce_block`](Self::announce_block) again for every chat that has not confirmed the
+    /// current value (the relay-tick retry). Silent until the app has said.
+    pub fn reannounce_block(&mut self) {
+        let now = crate::api::now_secs();
+        let Some(blocked) = self.capture_block else {
+            return;
+        };
+        let ids: Vec<String> = self
+            .chats
+            .iter()
+            .filter(|(id, c)| {
+                c.authorized
+                    && !c.closed
+                    && !self.block_announced.contains_key(id.as_str())
+                    && (self.announce_online || c.told_block != Some(blocked))
+                    && self.may_retry(id, now)
+            })
+            .map(|(id, _)| id.clone())
+            .collect();
+        for id in ids {
+            self.announce_block_to(&id);
+        }
+    }
+
+    /// Tell one chat our capture block (a fresh pairing, or the retry).
+    fn announce_block_to(&mut self, contact_id: &str) {
+        let Some(blocked) = self.capture_block else {
+            return;
+        };
+        let marker = if blocked {
+            MARK_CAPTURE_BLOCK_ON
+        } else {
+            MARK_CAPTURE_BLOCK_OFF
+        };
+        if let Some((addr, frame)) = self.authed_control(contact_id, marker, |from, message| {
+            Frame::Captures { from, message }
+        }) {
+            self.block_announced.insert(contact_id.to_string(), blocked);
+            let done = OutboundDone::Announced(Announce::Block, contact_id.to_string());
+            let _ = self.deliver_with(&addr, contact_id, &frame, false, done);
+        }
     }
 
     /// Tell one freshly paired chat what [`announce_captures`](Self::announce_captures) already told
@@ -2560,10 +2632,12 @@ impl Node {
             let version = self.version_announced.get(contact_id).cloned();
             let address = self.address_announced.get(contact_id).cloned();
             let captures = self.captures_announced.get(contact_id).copied();
+            let block = self.block_announced.get(contact_id).copied();
             if let Some(chat) = self.chats.get_mut(contact_id) {
                 match kind {
                     Announce::Burns => chat.told_burns = true,
                     Announce::Captures if captures.is_some() => chat.told_captures = captures,
+                    Announce::Block if block.is_some() => chat.told_block = block,
                     // Not while they are outdated: their old app discarded it, so they are told
                     // again once they update.
                     Announce::Version if version.is_some() && !chat.outdated() => {
@@ -2591,6 +2665,7 @@ impl Node {
             Announce::Mailbox => self.mailbox_announced.remove(contact_id),
             Announce::Address => self.address_announced.remove(contact_id).is_some(),
             Announce::Captures => self.captures_announced.remove(contact_id).is_some(),
+            Announce::Block => self.block_announced.remove(contact_id).is_some(),
         };
     }
 

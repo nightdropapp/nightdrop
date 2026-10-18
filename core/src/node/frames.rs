@@ -180,6 +180,7 @@ impl Node {
                     // Screenshot capability (#1) — same reason as the joiner side: this chat did not
                     // exist when the launch-time broadcast ran.
                     self.announce_captures_to(&contact_id);
+                    self.announce_block_to(&contact_id);
                     self.announce_burns_to(&contact_id);
                     self.announce_version_to(&contact_id);
                     // Our relay set: the joiner holds mail for us until it arrives.
@@ -663,6 +664,17 @@ impl Node {
                 let visible = match crypto::decrypt(&mut chat.session, &olm) {
                     Ok(pt) if pt == MARK_CAPTURES_VISIBLE => true,
                     Ok(pt) if pt == MARK_CAPTURES_SILENT => false,
+                    // Their "Block screenshots": our app blocks captures while their chat is open.
+                    // A standing property like the rest of this frame: no history entry.
+                    Ok(pt) if pt == MARK_CAPTURE_BLOCK_ON || pt == MARK_CAPTURE_BLOCK_OFF => {
+                        let on = pt == MARK_CAPTURE_BLOCK_ON;
+                        chat.mark_alive();
+                        if chat.contact.peer_blocks_capture == Some(on) {
+                            return Ok(None);
+                        }
+                        chat.contact.peer_blocks_capture = Some(on);
+                        return Ok(Some((from, String::new())));
+                    }
                     _ => return Ok(None), // forged, replayed, or spliced — ignore
                 };
                 if chat.contact.peer_captures_silent == Some(!visible) {

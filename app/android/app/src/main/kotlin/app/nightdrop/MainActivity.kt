@@ -89,10 +89,11 @@ class MainActivity : FlutterActivity() {
         }
 
     private fun sendRecording(state: Int) {
+        lastRecordingState = state
         // With "Block screenshots" on, a recording captures only black (checked on a Galaxy S25:
         // the window still counts as "visible", but the video shows nothing): nothing to report.
         val on = Build.VERSION.SDK_INT >= 35 &&
-            state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE && !blockCapture()
+            state == WindowManager.SCREEN_RECORDING_STATE_VISIBLE && !blocking()
         recording = on
         channel?.invokeMethod("recording", on)
     }
@@ -101,6 +102,27 @@ class MainActivity : FlutterActivity() {
     // before anything in Dart listens (a recording already running when the app comes forward),
     // and Android does not send it again.
     private var recording = false
+    private var lastRecordingState = -1
+
+    // A chat whose contact has "Block screenshots" on is open: captures are blocked for it whatever
+    // our own setting (Dart's `holdBlock`). In memory: the chat sets it on open and clears it on
+    // close.
+    private var heldByChat = false
+
+    /// Captures blocked right now: our own setting, or a chat that asked.
+    private fun blocking(): Boolean = blockCapture() || heldByChat
+
+    /// Make the window's FLAG_SECURE match [blocking]. On API 33+ nothing else sets the flag; below
+    /// that, onPause sets it for the Recents thumbnail and onResume calls this to put it back.
+    private fun applySecure() {
+        if (blocking()) {
+            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        } else {
+            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+        }
+        // What a running recording can see has just changed.
+        if (Build.VERSION.SDK_INT >= 35 && lastRecordingState >= 0) sendRecording(lastRecordingState)
+    }
 
     // Lets Dart say whether the engine should outlive this screen, and end the app on Exit.
     private var process: MethodChannel? = null
@@ -208,11 +230,12 @@ class MainActivity : FlutterActivity() {
                         val on = call.arguments as? Boolean ?: false
                         getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
                             .putBoolean(PREF_BLOCK_CAPTURE, on).apply()
-                        if (on) {
-                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                        } else {
-                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
-                        }
+                        applySecure()
+                        result.success(null)
+                    }
+                    "holdBlock" -> {
+                        heldByChat = call.arguments as? Boolean ?: false
+                        applySecure()
                         result.success(null)
                     }
                     else -> result.notImplemented()
@@ -242,7 +265,7 @@ class MainActivity : FlutterActivity() {
         super.onResume()
         // Foreground: let the user screenshot if they choose. Only the pre-33 fallback sets this
         // flag at all; on 33+ it is never set, so there is nothing to clear.
-        if (Build.VERSION.SDK_INT < 33 && !blockCapture()) {
+        if (Build.VERSION.SDK_INT < 33 && !blocking()) {
             window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
         }
         if (Build.VERSION.SDK_INT >= 34) {
@@ -264,6 +287,7 @@ class MainActivity : FlutterActivity() {
             screenRecordingCallback?.let { windowManager.removeScreenRecordingCallback(it) }
             // Not watching while paused: a recording seen again on resume is reported as new.
             recording = false
+            lastRecordingState = -1
             channel?.invokeMethod("recording", false)
         }
         // Pre-33 fallback only (see the class comment): best effort at blanking the thumbnail.

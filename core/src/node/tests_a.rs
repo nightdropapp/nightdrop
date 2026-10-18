@@ -1485,6 +1485,52 @@ fn a_contact_paired_after_the_announcement_still_learns_the_capability() {
 }
 
 #[test]
+fn a_contact_that_blocks_captures_says_so_and_it_survives_a_restore() {
+    let net = MemoryNetwork::new();
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(net.endpoint("bob")));
+    let bundle = bob.publish_bundle();
+    let _bob_contact = alice.connect_with_bundle("bob", &bundle).unwrap();
+    bob.pump().unwrap();
+    let alice_contact = bob.contacts()[0].id.clone();
+    assert_eq!(
+        bob.contacts()[0].peer_blocks_capture,
+        None,
+        "unknown until said"
+    );
+
+    // Alice turns "Block screenshots" on: Bob's app learns it, so it blocks captures in her chat.
+    alice.announce_block(true);
+    bob.pump().unwrap();
+    assert_eq!(bob.contacts()[0].peer_blocks_capture, Some(true));
+    assert_eq!(
+        alice.contacts()[0].peer_blocks_capture,
+        None,
+        "told to the peer only"
+    );
+    // Rides the same frame as the capability signal without disturbing it.
+    alice.announce_captures(true);
+    bob.pump().unwrap();
+    assert_eq!(bob.contacts()[0].peer_captures_silent, Some(false));
+    assert_eq!(bob.contacts()[0].peer_blocks_capture, Some(true));
+
+    // Off again, and no history line either way.
+    alice.announce_block(false);
+    bob.pump().unwrap();
+    assert_eq!(bob.contacts()[0].peer_blocks_capture, Some(false));
+    assert!(!bob.messages(&alice_contact).iter().any(|m| m.system));
+
+    // Persisted: a backup restore keeps it.
+    alice.announce_block(true);
+    bob.pump().unwrap();
+    let password = "correct horse battery staple";
+    let backup = bob.backup(password).unwrap();
+    let restored =
+        Node::restore_from_backup(&backup, password, Box::new(net.endpoint("bob2"))).unwrap();
+    assert_eq!(restored.contacts()[0].peer_blocks_capture, Some(true));
+}
+
+#[test]
 fn screenshot_notifies_both_sides_every_time_and_cannot_be_forged() {
     let net = MemoryNetwork::new();
     let mut alice = Node::new(Box::new(net.endpoint("alice")));

@@ -735,6 +735,16 @@ class RustNightdropCore extends NightdropCore {
   Future<void> _announceCaptureReporting() async {
     if (_core == null) return;
     await setCaptureReporting(await ScreenshotDetector.canDetect());
+    await setCaptureBlock(await ScreenshotDetector.blockCapture());
+  }
+
+  @override
+  Future<void> setCaptureBlock(bool blocked) async {
+    try {
+      await _core?.setCaptureBlock(blocked: blocked);
+    } catch (_) {
+      // Best-effort, like the capability: the next change or re-pair announces it again.
+    }
   }
 
   /// Everything a freshly built core needs told before it is used, on **every** path that builds
@@ -1951,6 +1961,7 @@ class RustNightdropCore extends NightdropCore {
         verified: c.verified,
         peerVerified: c.peerVerified,
         peerCapturesSilent: c.peerCapturesSilent,
+        peerBlocksCapture: c.peerBlocksCapture,
         peerSupportsBurn: c.peerSupportsBurn,
         peerRelays: c.peerRelays,
         peerRelayState: c.peerRelayState,
