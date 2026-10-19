@@ -44,11 +44,11 @@ class NotificationService {
         // the app by itself.)
         onDidReceiveNotificationResponse: (_) => DesktopShell.show(),
       );
-      // Ready to post from here on. Set before asking for permission, not after: the request
-      // needs an Activity, and the process `BootDelivery` starts after a reboot or an update has
-      // none, so the request throws there. With the flag after it, that one failure left every
-      // later [show] returning silently, and a phone that had come back after a restart received
-      // messages without ever saying so (test build, 2026-10-08).
+      // Ready to post from here on. Set before asking for permission, not after: the request needs
+      // an Activity, and the process `BootDelivery` starts after a reboot or an update has none, so
+      // the request throws there. With the flag after it, that one failure would leave every later
+      // [show] returning silently, and a phone back from a restart would receive messages without
+      // ever saying so.
       _inited = true;
     } catch (_) {
       // Notifications unavailable (unsupported platform / test harness) — ignore.

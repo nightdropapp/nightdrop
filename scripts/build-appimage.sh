@@ -91,7 +91,7 @@ UPDATE_INFO="gh-releases-zsync|nightdropapp|nightdrop|latest|Night_Drop-x86_64.A
 AITOOL="$(command -v appimagetool || echo "$HOME/.local/bin/appimagetool")"
 [ -x "$AITOOL" ] || { err "appimagetool not found (see the header for the one-line install)"; exit 1; }
 # Both pieces of tooling that end up in, or produce, what every Linux user runs are pinned by
-# checksum (self-audit 2026-10-17). appimagetool is a "continuous" download; and without
+# checksum. appimagetool is a "continuous" download; and without
 # --runtime-file it fetched the AppImage runtime — the first code a user's machine executes — from
 # a moving GitHub release on every build, unverified. A change upstream now stops the build until
 # someone has looked at it and updated the pin here.
@@ -133,9 +133,8 @@ if [ "$DO_BUILD" = 1 ]; then
   # change, so a host-compiled object would carry this machine's glibc into the "portable" result,
   # and the container's CMake cache names compilers this machine does not have.
   rm -rf "$APP_DIR/build/linux"
-  # Source paths are compiled into the binaries (Rust panic locations, C __FILE__), and they held
-  # the builder's home directory: 994 of them in 0.1.29's libnightdrop.so. Map them to neutral
-  # names, as the F-Droid recipe does for Android (self-audit 2026-10-13, round 6).
+  # Source paths are compiled into the binaries (Rust panic locations, C __FILE__), naming the
+  # builder's home directory. Map them to neutral names, as the F-Droid recipe does for Android.
   RUSTUP_DIR="${RUSTUP_HOME:-$HOME/.rustup}"; CARGO_DIR="${CARGO_HOME:-$HOME/.cargo}"
   RUST_REMAP="--remap-path-prefix=$PROJECT_ROOT=/nightdrop"$'\x1f'"--remap-path-prefix=$CARGO_DIR=/cargo"$'\x1f'"--remap-path-prefix=$RUSTUP_DIR=/rustup"
   C_REMAP="-ffile-prefix-map=$PROJECT_ROOT=/nightdrop -ffile-prefix-map=$CARGO_DIR=/cargo"
@@ -149,8 +148,8 @@ if [ "$DO_BUILD" = 1 ]; then
     RUSTUP="${RUSTUP_HOME:-$HOME/.rustup}"; CARGO="${CARGO_HOME:-$HOME/.cargo}"; PUB="${PUB_CACHE:-$HOME/.pub-cache}"
     c "Building Linux release bundle in $BUILD_IMAGE (glibc ≤ $MAX_GLIBC)…"
     # The project is mounted at /nightdrop, not its own path: Flutter compiles the absolute URI of
-    # the generated plugin registrant into libapp.so, which otherwise named the builder's home
-    # directory in every download (self-audit 2026-10-13 B1). Its package_config.json entries for
+    # the generated plugin registrant into libapp.so, which would otherwise name the builder's home
+    # directory in every download. Its package_config.json entries for
     # the project are relative, and the CMake cache is deleted above. The Flutter SDK, cargo and the
     # pub cache keep their own paths (package_config.json holds those absolute; none of them ends up
     # in the bundle, which the check after the build enforces). The host's uid (keep-id), and no
@@ -208,7 +207,7 @@ if [ "$DO_BUILD" = 1 ]; then
 fi
 
 [ -x "$BUNDLE_SRC/night_drop" ] || { err "bundle not found at $BUNDLE_SRC (run without --no-build)"; exit 1; }
-# Nothing in a download may name the builder's home directory (self-audit 2026-10-13 B1). A --host
+# Nothing in a download may name the builder's home directory (MAINTENANCE.md §15). A --host
 # build is exempt: it is a dev build and cannot avoid the project's real path.
 if [ "$IN_CONTAINER" = 1 ]; then
   leaks=$(grep -rlaF "$HOME/" "$BUNDLE_SRC" 2>/dev/null || true)
@@ -308,7 +307,7 @@ ARCH=x86_64 "${AITOOL_RUN[@]}" --runtime-file "$RUNTIME" "${SIGN_ARGS[@]}" -u "$
 chmod +x "$OUT"
 # The dump is read whole before searching it: `readelf … | grep -q` under pipefail reported a signed
 # AppImage as unsigned about one time in twelve (grep -q exits at the first match, readelf dies of
-# SIGPIPE, and the pipeline fails) — the "empty signature" of 2026-10-13 and 2026-10-18 was this.
+# SIGPIPE, and the pipeline fails) — read as an "empty signature" that was never gpg's fault.
 signed() {
   local dump
   dump=$(readelf -x .sha256_sig "$OUT" 2>/dev/null) || return 1

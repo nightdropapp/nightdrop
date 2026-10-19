@@ -371,7 +371,7 @@ build_apk() {
     # No builder paths in the binaries: Flutter compiles the checkout's path into libapp.so, and
     # Rust its source paths (panic locations) into libnightdrop.so — 150 of them, all under the
     # builder's home, in a 0.2 release candidate. Build at a neutral path and map the rest, as the
-    # F-Droid recipe and build-appimage.sh do (2026-10-18). Checked after the build, below.
+    # F-Droid recipe and build-appimage.sh do. Checked after the build, below.
     export ND_SANDBOX_AT=/tmp/nightdrop
     CARGO_ENCODED_RUSTFLAGS="--remap-path-prefix=$ND_SANDBOX_AT=."$'\x1f'"--remap-path-prefix=${CARGO_HOME:-$HOME/.cargo}=/cargo"$'\x1f'"--remap-path-prefix=${RUSTUP_HOME:-$HOME/.rustup}=/rustup"
     export CARGO_ENCODED_RUSTFLAGS

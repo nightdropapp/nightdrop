@@ -3,8 +3,8 @@
 /// Daily is often enough to matter for a security fix and rare enough that the request is not a
 /// heartbeat: a beacon every launch would let anyone counting requests infer how many installs
 /// exist and how often they run. A check that got no answer (Tor still starting, the site briefly
-/// down) is retried after [updateRetryAfterFailure] instead of a whole day, which on its own left a
-/// desktop app on 0.1.24 for days after 0.1.27 shipped (2026-10-05).
+/// down) is retried after [updateRetryAfterFailure] instead of a whole day, so one failed check
+/// does not leave an app days behind a release.
 library;
 
 /// After a check the site answered, the next is this far away.

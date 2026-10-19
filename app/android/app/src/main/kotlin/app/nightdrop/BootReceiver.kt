@@ -36,8 +36,7 @@ class BootReceiver : BroadcastReceiver() {
         // state (after a force-stop) as it starts, which is usually because the user just tapped
         // it: the broadcast then arrives before the activity has made its engine, and starting a
         // `--boot` engine here would hand the screen a boot-path engine that posts "locked, open
-        // Night Drop" while it is being opened (test build, 2026-10-08). The activity starts the
-        // engine itself.
+        // Night Drop" while it is being opened. The activity starts the engine itself.
         if (inForeground(app)) return
 
         val loader = FlutterInjector.instance().flutterLoader()

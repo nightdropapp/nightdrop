@@ -48,9 +48,9 @@ class ScanScreen extends StatefulWidget {
 }
 
 /// If the camera hasn't delivered a single preview frame within this long after the reader mounts,
-/// we treat it as a stalled start (the CameraX device was contended and died right after opening —
-/// see the 2026-07-13 logcat capture where the camera went OPEN→ACTIVE→CLOSED in ~1ms yet
-/// `onControllerCreated` still reported success). We surface a retry rather than a black preview.
+/// we treat it as a stalled start (a contended CameraX device can go OPEN→ACTIVE→CLOSED in a
+/// millisecond while `onControllerCreated` still reports success). We surface a retry rather than a
+/// black preview.
 const _cameraStallTimeout = Duration(seconds: 7);
 
 /// How long to keep trying before telling the user it isn't working. The reader re-attempts a

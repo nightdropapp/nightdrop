@@ -6,7 +6,7 @@
 # The Flutter SDK, the Rust toolchain and the pub cache are NOT in the image: build-appimage.sh
 # mounts the host's, so the pinned versions (app/.fvmrc, rust-toolchain.toml) stay the only source.
 # Pinned by digest (the linux/amd64 image), so the build cannot change under us when the tag moves
-# (self-audit 2026-10-17). To update: pull ubuntu:22.04, review, put its amd64 digest here, and bump
+# To update: pull ubuntu:22.04, review, put its amd64 digest here, and bump
 # BUILD_IMAGE in build-appimage.sh so the image is rebuilt.
 FROM docker.io/library/ubuntu:22.04@sha256:79676deb51ebb02885b0b9d33788e78a37cf1045ad79d1bb04c6a222c3556b3d
 ENV DEBIAN_FRONTEND=noninteractive

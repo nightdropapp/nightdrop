@@ -444,10 +444,10 @@ Future<void> _burnReceiptSettings(BuildContext context, NightdropCore core) asyn
   ));
 }
 
-/// "Block screenshots": on by default (2026-10-18: security settings start on, and the user chooses
-/// to lower them). On, it stops screenshots, screen recording and casting of the app on this phone.
-/// Turned off, captures are allowed and the contact is told about each one (a photo of the screen
-/// gets past any block either way).
+/// "Block screenshots": on by default (security settings start on, and the user chooses to lower
+/// them). On, it stops screenshots, screen recording and casting of the app on this phone. Turned
+/// off, captures are allowed and the contact is told about each one (a photo of the screen gets
+/// past any block either way).
 Future<void> _blockCaptureSettings(BuildContext context) async {
   final l10n = AppLocalizations.of(context)!;
   final on = await ScreenshotDetector.blockCapture();
@@ -544,20 +544,14 @@ class _OnionBannerState extends State<_OnionBanner> {
   }
 }
 
-/// Warns when one of the user's **own** advertised extra relays (#17) has stopped answering —
-/// i.e. a self-hosted relay is down, so contacts' offline mail routed through it may be stuck.
-/// Nudges the user to add a backup relay so delivery stays redundant. Polls on the same cadence
-/// as the onion banner (relay health is refreshed by the background poller).
 /// "Android stopped background delivery" — shown when the SYSTEM ended the foreground service,
 /// never when the user did.
 ///
-/// Exists because the failure it reports is invisible by construction: the app stops receiving,
-/// the notification disappears among fifty others, and nothing else changes. On 2026-08-09 the
-/// service was ended by Android's six-hour `dataSync` budget at 03:08 and the phone received
-/// nothing for the next five hours — discovered from `dumpsys batterystats`, which is not
-/// somewhere a user is going to look. The service type was changed to one with no such budget, so
-/// this should stay hidden; it is here so that if some future budget ends the service anyway, the
-/// user is told instead of quietly going offline.
+/// The failure it reports is invisible by construction: the app stops receiving, the notification
+/// disappears among fifty others, and nothing else changes. The service type has no time budget
+/// (an earlier `dataSync` type was ended after six hours), so this should stay hidden; it is here
+/// so that if some future budget ends the service anyway, the user is told instead of quietly
+/// going offline.
 class _BackgroundStoppedBanner extends StatefulWidget {
   const _BackgroundStoppedBanner();
 
@@ -739,6 +733,10 @@ class _NetworkChangeBannerState extends State<_NetworkChangeBanner> {
   }
 }
 
+/// Warns when one of the user's **own** advertised extra relays (#17) has stopped answering —
+/// a self-hosted relay is down, so contacts' offline mail routed through it may be stuck — and
+/// nudges toward a backup relay. Polls on the same cadence as the onion banner (relay health is
+/// refreshed by the background poller).
 class _RelayHealthBanner extends StatefulWidget {
   const _RelayHealthBanner({required this.core});
 

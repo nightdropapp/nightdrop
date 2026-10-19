@@ -41,8 +41,8 @@ PKG_DIR="$APP_DIR/linux/packaging"            # holds the icon master ($APP_ID.p
 # Per-user install locations (no sudo). XDG-correct.
 DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
 # The bundle (binary + lib/ + data/) and the terminal launcher. A test app id gets its own of each:
-# both used to be fixed paths, so installing a test build replaced the real install's bundle
-# (2026-10-10). The default id keeps the original paths, which existing desktop entries point at.
+# with fixed paths, installing a test build would replace the real install's bundle. The default
+# id keeps the original paths, which existing desktop entries point at.
 if [ "$APP_ID" = app.nightdrop ]; then
   INSTALL_DIR="$HOME/.local/lib/nightdrop"
   LAUNCHER="$HOME/.local/bin/nightdrop"

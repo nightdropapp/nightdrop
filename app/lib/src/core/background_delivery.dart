@@ -9,20 +9,19 @@ import 'app_process.dart';
 /// Opt-in **Android foreground-service background delivery** (§11.8, #13).
 ///
 /// Wake-from-killed is deliberately out of scope (it would need FCM/APNs device tokens — an
-/// anonymity leak). This instead keeps the app **process** alive with a persistent notification,
-/// so the existing main-isolate poller keeps doing its Tor `peek` in the background and firing
-/// local notifications (the "app alive" path in §11.8) — no push provider, no second Tor core.
+/// anonymity leak). This instead keeps the app **process** alive with a persistent notification, so
+/// the existing main-isolate poller keeps doing its Tor `peek` in the background and firing local
+/// notifications (the "app alive" path in §11.8) — no push provider, no second Tor core.
 ///
-/// The service task does no work of its own ([ForegroundTaskEventAction.nothing]); its only job
-/// is to raise the process to foreground priority so Android doesn't kill it. iOS cannot do this
-/// by design, so this is a no-op there. Everything is best-effort and guarded — a missing plugin
-/// or permission must never crash the app.
+/// The service task does no work of its own ([ForegroundTaskEventAction.nothing]); its only job is
+/// to raise the process to foreground priority so Android doesn't kill it. iOS cannot do this by
+/// design, so this is a no-op there. Everything is best-effort and guarded — a missing plugin or
+/// permission must never crash the app.
 ///
 /// **Swiping the app away keeps delivering.** The service is `stopWithTask: false`, and while this
 /// is on `MainActivity` keeps the Flutter engine — which runs the poller and posts notifications —
-/// alive when the screen goes ([AppProcess.setKeepAlive]). Before that, a swipe stopped the service
-/// and destroyed the engine, so nothing arrived until the app was reopened (S25, 2026-09-26). The
-/// way to stop everything is now **Exit** in the menu (issue #15).
+/// alive when the screen goes ([AppProcess.setKeepAlive]); otherwise a swipe would stop delivery
+/// until the app was reopened. The way to stop everything is **Exit** in the menu (issue #15).
 @pragma('vm:entry-point')
 void nightdropBackgroundCallback() {
   FlutterForegroundTask.setTaskHandler(_KeepAliveTaskHandler());
@@ -105,13 +104,12 @@ class BackgroundDelivery {
       FlutterForegroundTask.initCommunicationPort();
       FlutterForegroundTask.init(
         androidNotificationOptions: AndroidNotificationOptions(
-          // LOW, and not MIN: Android raises a foreground service's channel to LOW regardless
-          // (measured on the S25, 2026-09-26: a MIN channel was stored as importance 2). What the
-          // user CAN do is turn this one category off in the app's notification settings — on
+          // LOW, and not MIN: Android raises a foreground service's channel to LOW regardless. What
+          // the user CAN do is turn this one category off in the app's notification settings — on
           // Android 13+ the service keeps running without it, and message notifications are a
           // separate channel.
           // Named "…status", not "Background delivery": that is the in-app switch, and sharing the
-          // name sent a user to turn off delivery itself when they only meant to hide this. The id
+          // name sends a user to turn off delivery itself when they only meant to hide this. The id
           // is unchanged, so Android renames the existing channel and keeps the user's settings.
           channelId: 'nightdrop_background',
           channelName: 'Background delivery status',

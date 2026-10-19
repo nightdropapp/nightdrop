@@ -27,9 +27,9 @@ class MediaCache {
       };
 
   /// Called on every refresh of a chat's history: evict what the chat referenced last time and no
-  /// longer does — a burned, unsent or expired attachment. Its decrypted bytes stayed in memory
-  /// until logout, so a burned photo outlived its burn for the whole session (self-audit
-  /// 2026-10-13, round 6). The core deletes the files; this drops the copies held here.
+  /// longer does — a burned, unsent or expired attachment — so its decrypted bytes do not outlive
+  /// it in memory for the rest of the session. The core deletes the files; this drops the copies
+  /// held here.
   static void retainChat(String chatId, Set<String> live) {
     final previous = _keysByChat[chatId] ?? const <String>{};
     for (final key in previous.difference(live)) {

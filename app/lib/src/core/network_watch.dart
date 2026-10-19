@@ -4,10 +4,9 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 /// Notices when the device changes networks (Wi-Fi to mobile data, a new Wi-Fi), so the app can say
-/// that Tor is reconnecting. Nothing on screen used to: the onion address does not change with the
-/// network, so the "publishing" banner rightly stays away, but for a minute or two after a switch
-/// nothing reaches the relay or a contact, and a short-code join in that window just timed out
-/// (0.2 device pass, 2026-10-17).
+/// that Tor is reconnecting. The onion address does not change with the network, so the
+/// "publishing" banner rightly stays away, but for a minute or two after a switch nothing reaches
+/// the relay or a contact, and without a notice a short-code join in that window just times out.
 ///
 /// Detected by watching the device's own addresses — no platform channel, the same on every OS.
 class NetworkWatch extends ChangeNotifier {

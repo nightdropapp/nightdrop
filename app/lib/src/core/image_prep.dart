@@ -16,9 +16,9 @@ const int kGraphicQuality = 90;
 
 /// Turn a picture the user chose into what Night Drop sends: a JPEG of at most [kMaxImageSide],
 /// right way up, transparency on white, carrying **no metadata** — no EXIF (GPS position, camera
-/// make and model, time taken), no XMP, no colour profile, no comment (self-audit 2026-10-17, P1).
-/// The recipient's app draws only plain JPEGs (`core/src/node/media_kind.rs`), and the core strips
-/// any metadata segment again before sending, so this is the first of two layers, not the only one.
+/// make and model, time taken), no XMP, no colour profile, no comment. The recipient's app draws
+/// only plain JPEGs (`core/src/node/media_kind.rs`), and the core strips any metadata segment again
+/// before sending, so this is the first of two layers, not the only one.
 ///
 /// Decoded by its content, whatever its file name says. What the Dart decoder cannot read (HEIC
 /// from a phone camera set to "high efficiency", for one) goes through the platform's decoder.

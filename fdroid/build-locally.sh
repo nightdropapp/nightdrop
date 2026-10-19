@@ -120,10 +120,10 @@ apt-get -qy install sudo   # `fdroid build --on-server` expects sudo and uninsta
 # fails later in fdroidserver init_ndk_paths().
 chown -R vagrant "$ANDROID_HOME"
 sdk="sudo -u vagrant env ANDROID_HOME=$ANDROID_HOME HOME=$home_vagrant sdkmanager"
-# build-tools 36 is what AGP asks for. Gradle will not download it itself: since 2026-09-27 it
-# reports the package license "not accepted" against this image (whose licenses dir predates it),
-# while the fdroid sdkmanager installs it without complaint. Preinstalling it means Gradle finds it
-# present and never runs that check.
+# build-tools 36 is what AGP asks for. Gradle will not download it itself: it reports the package
+# license "not accepted" against this image (whose licenses dir predates it), while the fdroid
+# sdkmanager installs it without complaint. Preinstalling it means Gradle finds it present and never
+# runs that check.
 $sdk "platform-tools" "build-tools;31.0.0" "build-tools;36.0.0" >/dev/null
 if [ -n "$NDKVER" ] && [ ! -e "$ANDROID_HOME/.ndk-$NDKVER-installed" ]; then
     $sdk "ndk;$NDKVER"

@@ -280,10 +280,10 @@ class RustNightdropCore extends NightdropCore {
   /// Re-apply the saved cover-traffic preference to the freshly built core.
   Future<void> _restoreCoverTraffic() async {
     try {
-      // On by default for an identity set up since 2026-10-18 — its setup step saves "1" or "0"
-      // either way. A missing value is an install from before: that setup only wrote a "yes", so
-      // missing is either "declined" or "never asked", and it stays off rather than override a
-      // choice to save battery.
+      // On by default for an identity set up since 0.2 — its setup step saves "1" or "0" either
+      // way. A missing value is an install from before: that setup only wrote a "yes", so missing
+      // is either "declined" or "never asked", and it stays off rather than override a choice to
+      // save battery.
       if (await _secure.read(key: _kCoverTraffic) == '1') {
         await rust.setCoverTraffic(enabled: true);
       }
@@ -391,15 +391,14 @@ class RustNightdropCore extends NightdropCore {
   Future<void> _closeCore() async {
     // Drop the Rust `StreamSink` FIRST. Cancelling the Dart subscription waits for the stream to
     // close, and only dropping the sink closes it — so awaiting the cancel while the sink is still
-    // held in the `EVENTS` static waits for something that can never happen. That is a deadlock on
-    // every teardown path there is: the guard heal, the manual reset, logout and restore all come
-    // through here. Measured on a phone (2026-08-03): "Reset Tor connection" logged "closing the
-    // core" and then nothing, forever, with no error and a still-running old client.
+    // held in the `EVENTS` static waits for something that can never happen: a deadlock on every
+    // teardown path (the guard heal, the manual reset, logout and restore all come through here),
+    // with no error and the old client still running.
     //
     // Bounded as well as ordered: this is teardown, and no event-stream quirk is worth wedging it.
     // Teardown must not throw. This is often the first FFI call of a launch, so it is where a
-    // library that will not load surfaces, and it also runs from the catch above — where a
-    // second throw would escape past the handler that exists to report the first.
+    // library that will not load surfaces, and it also runs from the catch above — where a second
+    // throw would escape past the handler that exists to report the first.
     try {
       rust.unsubscribe();
     } catch (_) {}
@@ -423,29 +422,25 @@ class RustNightdropCore extends NightdropCore {
   /// plain re-bootstrap, because that reuses the same guards; only resetting them (keeping the
   /// `.onion` identity) breaks the loop. Runs at most once per launch.
   ///
-  /// **What counts as evidence, and what does not.** Two triggers have been removed from here
-  /// after being measured on hardware, and both were removed for the same reason: they inferred
-  /// "the guards must be bad" from something that was not evidence of that.
+  /// **What counts as evidence, and what does not.** Two tempting triggers are not used, because
+  /// neither is evidence that the guards are bad:
   ///
   ///  * `!onionReady()` — arti's aggregate onion-service state is *bootstrap progress*, not
-  ///    liveness. A phone with its descriptor on 8/8 HSDirs for both time periods, 4/4 introduction
-  ///    points and zero upload failures reported not-published for eight minutes (2026-08-03), so
-  ///    this destroyed a healthy guard set 2.5 minutes into every session.
-  ///  * arti's `bootstrap_status()` — `BlockageKind::CantReachTor` turns out to be unreachable in
-  ///    arti 0.43 (its `_` arm has no matching `ConnBlockage` variant), and the kinds that *are*
-  ///    reachable can't be acted on: `online` is derived from connections to relays, so a dead
-  ///    guard set and a dead network are indistinguishable, and rotating guards because the device
-  ///    is offline burns anonymity margin for someone else's problem.
+  ///    liveness: it can read not-published for minutes on a fully published service, and keyed
+  ///    off it the heal destroyed healthy guard sets.
+  ///  * arti's `bootstrap_status()` — `BlockageKind::CantReachTor` is unreachable in arti's code,
+  ///    and the kinds that *are* reachable can't be acted on: `online` is derived from connections
+  ///    to relays, so a dead guard set and a dead network look alike, and rotating guards because
+  ///    the device is offline burns anonymity margin for someone else's problem.
   ///
-  /// What survives is the one signal that is positive, end-to-end evidence rather than inference:
-  /// [`NightdropCore.directPathWedged`] — several sends failed and *neither* the direct path nor
-  /// the relay has ever succeeded this run. It is self-corroborating, because a working relay means
-  /// Tor works and the problem is the peer.
+  /// What remains is positive, end-to-end evidence: [`NightdropCore.directPathWedged`] — several
+  /// sends failed and *neither* the direct path nor the relay has succeeded this run. It is
+  /// self-corroborating, because a working relay means Tor works and the problem is the peer.
   ///
   /// The bar is high on purpose. Entry guards are meant to be sticky for weeks, and arti repairs a
-  /// bad set by itself: with a router dropping every packet to all four of a device's confirmed
-  /// guards, a cold start still reached `Running` and published in ~80 s by sampling a replacement
-  /// (2026-08-04). Anything automatic here has to beat that, and only user-visible failure does.
+  /// bad set by itself, sampling a replacement within a minute or two even when every confirmed
+  /// guard is unreachable. Anything automatic here has to beat that, and only user-visible failure
+  /// does.
   Future<void> _scheduleGuardHeal(String statePath, String key) async {
     if (!_tor || _guardHealDone) return;
     final core = _core;
@@ -476,11 +471,9 @@ class RustNightdropCore extends NightdropCore {
     final stateDir = await _torStateDir();
     if (stateDir == null) return; // no writable Tor state dir — nothing to reset
     _guardHealDone = true;
-    // Shut the core down BEFORE touching the guard files. `resetTorGuards` says so in its own doc
-    // ("Call this with the core shut down, then build a fresh core") and this called it the other
-    // way round: the live arti client can re-persist the guards we just deleted, so the heal
-    // quietly undoes itself and the next launch inherits the same wedged set. Seen on a desktop
-    // 2026-08-02, healing repeatedly with no improvement.
+    // Shut the core down BEFORE touching the guard files, as `resetTorGuards` requires: the live
+    // arti client can re-persist the guards we just deleted, so the heal would quietly undo itself
+    // and the next launch inherit the same wedged set.
     await _closeCore();
     await rust.resetTorGuards(stateDir: stateDir);
     _core = await rust.NightdropCore.newTor(
@@ -659,12 +652,11 @@ class RustNightdropCore extends NightdropCore {
   /// Set only by [dismissLoadError]: the user was shown the recovery screen, with the state file
   /// named as unreadable, and chose to set up a new identity anyway.
   ///
-  /// Without it, onboarding reached by any other route must not be able to displace state that is
-  /// sitting on disk. On 2026-09-20 repeated taps of the in-app Tor reconnect interleaved several
-  /// start() lifecycles; one of them cleared _booting while another was still in flight, leaving
+  /// Without it, onboarding reached by any other route must not be able to displace state sitting
+  /// on disk. Interleaved start() lifecycles (repeated taps of the in-app Tor reconnect) can leave
   /// identity == null with loadError == false, which _Root renders as OnboardingScreen —
-  /// indistinguishable from a fresh install. The identity was recoverable only because
-  /// _setAsideOldState renames rather than deletes.
+  /// indistinguishable from a fresh install. _setAsideOldState renames rather than deletes, so even
+  /// then the identity is recoverable.
   bool _abandonExistingStateApproved = false;
 
   static const _kBackedUp = 'nightdrop_backed_up';
@@ -1017,11 +1009,10 @@ class RustNightdropCore extends NightdropCore {
     //
     try {
       // INSIDE the try, deliberately. These are the first FFI calls of a launch, so a native
-      // library that will not load throws right here. Sitting outside, that throw skipped the
-      // finally below, `_booting` was never cleared, and the app stayed on the splash screen
-      // for ever with nothing on screen to say why — which is how a missing libc++_shared.so
-      // presented on a device, 2026-09-20. A load failure must reach the error path like any
-      // other, not silently stall the launch.
+      // library that will not load (a missing libc++_shared.so, say) throws right here. Outside,
+      // that throw would skip the finally below, `_booting` would never clear, and the app would
+      // stay on the splash screen for ever with nothing to say why. A load failure must reach the
+      // error path like any other.
       //
       // Diagnostics first, so a failure in the launch path itself is on the record.
       if (_diagEnabled) {
@@ -1132,14 +1123,13 @@ class RustNightdropCore extends NightdropCore {
   /// Move any persisted state out of the way before a **new** identity is created.
   ///
   /// The core restores from `persistPath` whenever that file exists — it has no other way to tell
-  /// "create" from "restore". So an unreadable state file, which is the exact reason the load-error
-  /// screen is on screen, made "set up a new identity" fail with "wrong key or corrupt store": the
-  /// recovery path blocked by the thing it exists to recover from. Found on a device, 2026-08-02,
-  /// straight after the same shape of bug in the sealed onion key.
+  /// "create" from "restore". So an unreadable state file, the exact reason the load-error screen
+  /// is showing, would make "set up a new identity" fail with "wrong key or corrupt store": the
+  /// recovery path blocked by the thing it exists to recover from.
   ///
   /// **Renamed, never deleted.** These bytes may be the user's only copy of an identity they are
-  /// abandoning under duress of a failed launch, possibly recoverable later with the right key.
-  /// The wipe removes the sidecars, so they never outlive a deliberate destruction.
+  /// abandoning after a failed launch, possibly recoverable later with the right key. The wipe
+  /// removes the sidecars, so they never outlive a deliberate destruction.
   Future<void> _setAsideOldState() async {
     // One stamp for both files, so it is obvious which key belongs to which state file.
     final stamp = DateTime.now().millisecondsSinceEpoch;
@@ -1597,23 +1587,23 @@ class RustNightdropCore extends NightdropCore {
       }
       await _secure.delete(key: _kStoreKeyName);
       // Read it back. A delete that *throws* is caught above; a delete that returns success and
-      // leaves the entry readable is not, and that is closer to the failure seen on a device — the
-      // key survived a wipe with nothing reported.
+      // leaves the entry readable is not, and a key surviving a wipe with nothing reported is the
+      // failure to rule out.
       //
-      // Be precise about the reach of this check, because it is easy to credit it with more.
-      // `read` goes to `SharedPreferencesImpl`'s IN-MEMORY map (`preferences.getString`), and the
-      // platform commits to disk asynchronously via `apply()`. So this catches a delete that
-      // did not take effect at all; it CANNOT see a delete that took effect in memory and never
-      // reached storage — process death during a wipe would leave the entry on disk with this
-      // check having passed. Closing that gap needs something that looks at the file.
+      // The reach of this check is narrower than it looks. `read` goes to `SharedPreferencesImpl`'s
+      // IN-MEMORY map (`preferences.getString`), and the platform commits to disk asynchronously
+      // via `apply()`. So this catches a delete that did not take effect at all; it CANNOT see a
+      // delete that took effect in memory and never reached storage — process death during a wipe
+      // would leave the entry on disk with this check having passed. Closing that gap needs
+      // something that looks at the file.
       if (await _secure.read(key: _kStoreKeyName) != null) {
         throw StateError('store key survived its delete');
       }
     });
     // Everything else this identity left in the keystore. A backup snooze date, a "backed up" flag
     // or an update-check time beside an app presenting itself as freshly installed says an identity
-    // was here (seen after a duress wipe on a phone, 2026-10-08); and a surviving "backed up" flag
-    // would make the *next* identity look backed up, so it would never be reminded to make one.
+    // was here; and a surviving "backed up" flag would make the *next* identity look backed up, so
+    // it would never be reminded to make one.
     await step('preferences', () async {
       for (final key in const [
         _kBackedUp,
@@ -1649,10 +1639,10 @@ class RustNightdropCore extends NightdropCore {
       // but removing the directory is what guarantees nothing is left behind.
       await step('arti state', () => rm(Directory('$dir/arti-state')));
       // Arti's *directory* cache — the Tor consensus and microdescriptors. Public documents, so
-      // unlike `arti-state` it holds no key, no address and no contact list, and it survived the
-      // wipe verified on a device 2026-08-08. It goes anyway: what it does carry is a modification
-      // time, and a wipe that leaves "Tor last ran at 14:26" behind an app that presents itself as
-      // freshly onboarded is a wipe with an asterisk. Costs a fresh consensus fetch on next launch.
+      // unlike `arti-state` it holds no key, no address and no contact list. It goes anyway: what
+      // it does carry is a modification time, and a wipe that leaves "Tor last ran at 14:26" behind
+      // an app that presents itself as freshly onboarded is a wipe with an asterisk. Costs a fresh
+      // consensus fetch on next launch.
       await step('tor dir cache', () => rm(Directory('$dir/arti-cache')));
       // Authorized-client files (#22) name one file per contact. They hold public keys, so nothing
       // secret, but the count is still a contact list and it has no reason to outlive the identity.

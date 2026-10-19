@@ -61,10 +61,10 @@ class MainActivity : FlutterActivity() {
                 // Reports *that* a capture happened. There is no access to the image, by design of
                 // the platform API and of this feature.
                 //
-                // Once per capture: on a Galaxy S23 (Android 15) every screenshot fired this twice,
-                // so the user and the contact each saw two notices for one capture (0.2 device
-                // pass, 2026-10-18; also in builds before that day). Nobody takes two screenshots
-                // within a second and a half, so a second call inside that is the same capture.
+                // Once per capture: some devices (a Galaxy S23 on Android 15) fire this twice per
+                // screenshot, and each call would be a notice to both sides. Nobody takes two
+                // screenshots within a second and a half, so a second call inside that is the same
+                // capture.
                 val now = android.os.SystemClock.elapsedRealtime()
                 if (now - lastScreenshotAt >= SCREENSHOT_DEBOUNCE_MS) {
                     lastScreenshotAt = now
@@ -176,11 +176,11 @@ class MainActivity : FlutterActivity() {
                     }
                     // An invite link carries a single-use pass: mark the copy sensitive, so the
                     // clipboard preview hides it and keyboards that honour the flag keep it out of
-                    // their history (self-audit 2026-10-17). The extra predates its API 33
+                    // their history. The extra predates its API 33
                     // constant and is ignored where unknown.
                     // The system share sheet, for an invite link: it goes straight to the app the
                     // user picks, never through the clipboard, which Samsung's keyboard keeps a
-                    // history of and One UI syncs to other devices (self-audit 2026-10-17, R9-6).
+                    // history of and One UI syncs to other devices.
                     "shareText" -> {
                         val send = Intent(Intent.ACTION_SEND).apply {
                             type = "text/plain"
@@ -220,8 +220,8 @@ class MainActivity : FlutterActivity() {
                     // "not F-Droid" — the honest default, since guessing F-Droid would silently
                     // deprive a sideloader of the only update signal they get.
                     "installerPackage" -> result.success(installerPackage())
-                    // "Block screenshots" (self-audit 2026-10-17), ON by default since 2026-10-18
-                    // (security settings start on; the user lowers them): FLAG_SECURE held for the
+                    // "Block screenshots", ON by default (security settings start on; the user
+                    // lowers them): FLAG_SECURE held for the
                     // whole life of the window, which also blocks screen recording and casting.
                     // Kept in Android's own preferences so it applies before any Dart runs.
                     "getBlockCapture" -> result.success(blockCapture())

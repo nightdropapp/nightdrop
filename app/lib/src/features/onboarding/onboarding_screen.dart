@@ -63,11 +63,11 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   /// Run the setup step ([SetupScreen]), apply what was chosen, then create the identity.
   ///
   /// Background delivery starts off — a messenger that quietly runs a service is not what this app
-  /// is for. Cover traffic starts on (2026-10-18: privacy settings start on, and the user chooses
-  /// to lower them); it costs some battery, which the switch says. Leaving the choices buried in a menu meant most people never made them, and for
-  /// background delivery the result was an app that looks broken: Android suspends the process
-  /// whenever it is off screen, so messages simply do not arrive until it is opened. Asking once,
-  /// here, is the difference between an informed "no" and never knowing.
+  /// is for. Cover traffic starts on (privacy settings start on, and the user chooses to lower
+  /// them); it costs some battery, which the switch says. Left buried in a menu, most people never
+  /// make these choices, and for background delivery the result is an app that looks broken:
+  /// Android suspends the process whenever it is off screen, so messages do not arrive until it is
+  /// opened. Asking once, here, is the difference between an informed "no" and never knowing.
   ///
   /// Decided **before** [NightdropCore.createIdentity], and applied before it too: creating the
   /// identity notifies listeners and `_Root` swaps this screen for the home screen. Nothing here

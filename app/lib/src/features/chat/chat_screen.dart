@@ -181,7 +181,7 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
 
   /// Android keeps the hold in the activity, and an activity rebuilt while this chat stays open
   /// (memory pressure, with the engine kept for background delivery) starts without it — so the
-  /// block would lapse silently (round 12, R12-1). Say it again whenever the app comes forward.
+  /// block would lapse silently. Say it again whenever the app comes forward.
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed && _holdingBlock) {
@@ -1573,11 +1573,10 @@ class _Bubble extends StatelessWidget {
                   ),
                 ],
                 // Sender delivery status: held on the relay, delivered, or expired unread.
-                // "sent" is included deliberately. It used to render NOTHING, so a message that
-                // had only been handed to the peer's onion looked identical to one they had
-                // actually received — and when a message was lost in flight (2026-08-02) the
-                // sender had no way to tell. Now it reads "Sent" until their device confirms
-                // that exact message, and only then "Delivered".
+                // "sent" is included deliberately: rendering nothing for it made a message only
+                // handed to the peer's onion look identical to one they had received, so a message
+                // lost in flight could not be told apart. It reads "Sent" until their device
+                // confirms that exact message, and only then "Delivered".
                 if (mine &&
                     !message.sending &&
                     (message.delivery == 'queued' ||
@@ -1598,9 +1597,8 @@ class _Bubble extends StatelessWidget {
                           'expired' => Icons.error_outline,
                           // Deliberately not a tick. A tick reads as "done", and this state means
                           // only that the peer's onion answered — the message can still be lost
-                          // there, which is exactly what happened on 2026-08-02. The core puts a
-                          // relay copy behind it if no receipt names it, so this resolves on its
-                          // own to "Held for delivery" and then "Delivered".
+                          // there. The core puts a relay copy behind it if no receipt names it, so
+                          // this resolves on its own to "Held for delivery" and then "Delivered".
                           'sent' => Icons.schedule,
                           _ => Icons.done_all,
                         },
@@ -2107,8 +2105,8 @@ class _Composer extends StatelessWidget {
               }
 
               // The tooltip may not trigger on long-press: a Tooltip wins that gesture on touch,
-              // so the burn menu never opened on phones (0.1.6 to 2026-10-17). Manual trigger
-              // keeps its hover text and screen-reader label.
+              // and the burn menu would never open on phones. Manual trigger keeps its hover text
+              // and screen-reader label.
               return Tooltip(
                 message: l10n.attachImageOrVideo,
                 triggerMode: TooltipTriggerMode.manual,

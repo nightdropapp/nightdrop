@@ -156,10 +156,10 @@ Future<void> _setDuress(BuildContext context, NightdropCore core) async {
 
 /// Ask for a wipe code and arm it, given an already-verified normal secret.
 ///
-/// Every slow step (each is a deliberately expensive key derivation, seconds on a phone) runs while
-/// its dialog is still open and showing a spinner, and the dialog only closes when the step is done.
-/// Done between dialogs instead, the screen went blank for seconds after each tap, which looked as
-/// though the flow had been abandoned (phone, 2026-10-09).
+/// Every slow step (each a deliberately expensive key derivation, seconds on a phone) runs while
+/// its dialog is still open and showing a spinner, and the dialog closes only when the step is
+/// done. Between dialogs instead, the screen goes blank for seconds after each tap, which looks as
+/// though the flow was abandoned.
 Future<void> _armDuress(BuildContext context, NightdropCore core, String current) async {
   final l10n = AppLocalizations.of(context)!;
   final messenger = ScaffoldMessenger.of(context);
@@ -169,8 +169,8 @@ Future<void> _armDuress(BuildContext context, NightdropCore core, String current
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(text)));
   // The navigator, not the caller's context, shows the dialogs: the screen that started this can be
-  // rebuilt away while a slow step runs, and with `context` the warning was once skipped without a
-  // sound (phone, 2026-10-08).
+  // rebuilt away while a slow step runs, and with `context` the warning could be skipped without a
+  // sound.
   final navigator = Navigator.of(context);
 
   // The new code is checked inside its own dialog: one that also opens the normal slot could never
@@ -322,8 +322,8 @@ Future<String?> _askNewDuress(BuildContext context, NightdropCore core) async {
             Navigator.of(context).pop(a);
           } else {
             // The error sits under the confirm field, which the keyboard hides. Focusing it scrolls
-            // it into view; without this, a press on the button with the second field empty did
-            // nothing anyone could see (phone, 2026-10-08).
+            // it into view; without this, a press on the button with the second field empty does
+            // nothing anyone can see.
             secondFocus.requestFocus();
           }
         }
@@ -621,13 +621,12 @@ Future<String?> _askNewSecret(BuildContext context,
 
 /// Keeps dialog-owned disposables alive for as long as the dialog's element is.
 ///
-/// `showDialog`'s future completes when the route is **popped**, not when it has finished
-/// animating out — so disposing a controller or focus node on the line after `await` tears it down
-/// while the dialog is still building, and the framework trips on the way out
-/// ("A TextEditingController was used after being disposed"). Assertions are stripped from release
-/// builds, so a shipped APK shows no red screen; it just half-performs whatever came next. That is
-/// how enabling an app lock aborted between deleting the keystore copy and writing the lock file
-/// (found on hardware 2026-08-08).
+/// `showDialog`'s future completes when the route is **popped**, not when it has finished animating
+/// out — so disposing a controller or focus node on the line after `await` tears it down while the
+/// dialog is still building, and the framework trips on the way out ("A TextEditingController was
+/// used after being disposed"). Assertions are stripped from release builds, so a shipped APK shows
+/// no red screen; it just half-performs whatever came next — such as enabling an app lock stopping
+/// between deleting the keystore copy and writing the lock file.
 ///
 /// Owning them here moves disposal to unmount, which happens after the exit animation.
 class _Owns extends StatefulWidget {

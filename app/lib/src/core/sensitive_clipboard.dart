@@ -4,13 +4,12 @@ import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
-/// Copying a secret (an invite link carries its single-use pass) without leaving it lying around
-/// (self-audit 2026-10-17, R8-5): on Android it is marked sensitive, so the system's clipboard
-/// preview hides it and keyboards that honour the flag (Gboard, among others) keep it out of their
-/// clipboard history; on iOS it stays on this device (no Universal Clipboard) and expires; and
-/// everywhere it is cleared after [clearAfter], if it is still what the clipboard holds —
-/// something copied since is never touched. Where there is a system share sheet (Android, iOS),
-/// [share] avoids the clipboard altogether.
+/// Copying a secret (an invite link carries its single-use pass) without leaving it lying around:
+/// on Android it is marked sensitive, so the system's clipboard preview hides it and keyboards that
+/// honour the flag (Gboard, among others) keep it out of their clipboard history; on iOS it stays
+/// on this device (no Universal Clipboard) and expires; and everywhere it is cleared after
+/// [clearAfter], if it is still what the clipboard holds — something copied since is never touched.
+/// Where there is a system share sheet (Android, iOS), [share] avoids the clipboard altogether.
 class SensitiveClipboard {
   SensitiveClipboard._();
 

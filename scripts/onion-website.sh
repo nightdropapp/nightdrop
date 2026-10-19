@@ -35,22 +35,19 @@ PROBE_PATH="${ONION_PROBE_PATH:-/update.json}"
 # Below this, a failed dial is treated as INCONCLUSIVE rather than dark. Reaching a genuinely
 # unreachable onion takes many seconds — fetching the descriptor from the HSDirs, then trying
 # introduction points — so a dial that gives up in a heartbeat did not observe the onion at all;
-# something local refused it. Counting those as darkness is what drove the restart counter to 10
-# (see the 'after 0s' entries in the journal), and every one of those restarts rotated the
-# introduction points and broke the clients it was meant to protect.
+# something local refused it. Counted as darkness, those drive pointless restarts, and every restart
+# rotates the introduction points and breaks the clients it was meant to protect.
 MIN_REAL_FAIL="${ONION_MIN_REAL_FAIL:-10}"
 #
-# STILL UNEXPLAINED, as of 2026-08-14: this onion goes genuinely dark for multi-minute windows,
-# often. Four days of journal show 19 dials that reached the SOCKS proxy and then timed out at the
-# full 120s, and every restart so far was driven by three of those in a row — real darkness, not
-# the false positives the rule above removes. Meanwhile tor logs no warning at all and its
-# heartbeat reports real clients arriving throughout (130, 158, 86 INTRODUCE2 cells per 6h), so
-# the service is up and serving while our own probe cannot reach it.
+# OPEN QUESTION: this onion has gone genuinely dark for multi-minute windows — dials that reach the
+# SOCKS proxy and then time out at the full 120s — while tor logs no warning and its heartbeat
+# reports real clients arriving throughout, so the service is up and serving while our own probe
+# cannot reach it.
 #
 # The probe shares the service's tor instance, so "our tor cannot dial our onion" and "the onion is
 # unreachable" are not distinguishable from here. Separating them needs a probe on an independent
-# tor client, which is what the relay watchdog does. Until that exists, a restart is treating a
-# symptom whose cause is unknown — so keep the sustained-darkness bar high rather than lowering it.
+# tor client, which is what the relay watchdog does. Until that exists, a restart treats a symptom
+# whose cause is unknown — so keep the sustained-darkness bar high rather than lowering it.
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO="$(cd "$SCRIPT_DIR/.." && pwd)"
@@ -91,9 +88,9 @@ DataDirectory $TORDATA
 HiddenServiceDir $HS
 HiddenServiceVersion 3
 HiddenServicePort 80 127.0.0.1:$PORT
-# Flood defences (2026-10-13 audit): proof-of-work only under load (clients without it, like the
-# app's update check, still get in, at lower priority during an attack); intro-point rate limits;
-# and one circuit may not hold more than 32 streams (a browser page uses a handful).
+# Flood defences: proof-of-work only under load (clients without it, like the app's update check,
+# still get in, at lower priority during an attack); intro-point rate limits; and one circuit may
+# not hold more than 32 streams (a browser page uses a handful).
 HiddenServicePoWDefensesEnabled 1
 HiddenServiceEnableIntroDoSDefense 1
 HiddenServiceMaxStreams 32
@@ -113,22 +110,16 @@ echo "Serving $WEB on http://127.0.0.1:$PORT (localhost only) ..."
 # Default: keep no logs (privacy). Opt in to request logging for a private visitor count by setting
 # NIGHTDROP_ONION_LOG=/path/to/log — then `scripts/stats.sh $NIGHTDROP_ONION_LOG` summarises visits.
 # Over Tor every request arrives from 127.0.0.1, so the log holds request counts, never client IPs.
-# nginx, NOT `python3 -m http.server`. Two independent reasons, both found the hard way on
-# 2026-08-14:
+# nginx, NOT `python3 -m http.server`, for two reasons:
 #
-#   * that module's server is single-threaded and answers one request at a time. The biggest file
-#     we publish is a ~45 MB APK that takes ~30 minutes over Tor, and for that whole window the
-#     site served nothing else — so users' downloads failed, and the watchdog's own self-dial for
-#     /update.json timed out at the full 120s and was scored as "the onion layer is dark". Three of
-#     those restarted the service, killing the download that was blocking it and rotating the
-#     introduction points on the way out. tor was innocent throughout: no warnings, and its
-#     heartbeat reported real clients arriving the whole time.
-#   * it ignores `Range` outright — a ranged request gets `200` and the entire file. The updater in
-#     `core/src/update.rs` sends `Range: bytes=N-`, keeps a `.part` file and resumes, and even has a
-#     branch that truncates when a 200 comes back to a ranged request. That branch was firing every
-#     time: **resume has never once worked in production**, so every interrupted 45 MB download
-#     started again from zero. nginx honours Range, which is what makes a half-hour transfer over
-#     flaky circuits finishable at all.
+#   * that module's server is single-threaded and answers one request at a time. The biggest
+#     files we publish take tens of minutes over Tor, and for that whole window the site serves
+#     nothing else — users' downloads fail, and the watchdog's own self-dial times out and is
+#     scored as "the onion layer is dark", restarting the service and killing the download.
+#   * it ignores `Range` — a ranged request gets `200` and the entire file. The updater in
+#     `core/src/update.rs` sends `Range: bytes=N-` and resumes a `.part` file; without Range
+#     every interrupted download starts again from zero. nginx honours Range, which is what makes
+#     a long transfer over flaky circuits finishable at all.
 #
 # Speed was never the reason — ~25 KB/s is the Tor circuit, and no server language changes that.
 #
@@ -173,12 +164,12 @@ http {
     autoindex off;
     # The same headers as the clear-web vhost (deploy/nginx-nightdrop.conf), less HSTS and
     # Onion-Location, which mean nothing here. Set at server level and never in a location: an
-    # add_header inside a location drops every inherited one (2026-10-13 audit).
+    # add_header inside a location drops every inherited one.
     add_header X-Content-Type-Options "nosniff" always;
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "no-referrer" always;
-    # No 'unsafe-inline' (dropped 2026-10-18, once the 0.2 pages were live): the pages have no inline
-    # script or style, and each also carries the same policy as a meta tag, with Trusted Types.
+    # No 'unsafe-inline': the pages have no inline script or style, and each also carries the same
+    # policy as a meta tag, with Trusted Types.
     add_header Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'; require-trusted-types-for 'script'; trusted-types 'none'" always;
     add_header Permissions-Policy "accelerometer=(), browsing-topics=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()" always;
     add_header Cross-Origin-Opener-Policy "same-origin" always;
@@ -236,11 +227,9 @@ fi
 
 # --- Self-dial watchdog ------------------------------------------------------------------------
 #
-# On 2026-08-05 this onion went unreachable for Tor Browser and for the phone while systemd
-# reported the unit active and serving, and nothing in the journal said otherwise. `Restart=always`
-# cannot recover that: nothing crashed. The relay had the identical failure and the identical
-# fix — do not trust a component's own account of its health, prove it end to end — so this does
-# the same thing, and for the same reason.
+# An onion can go unreachable for Tor Browser and phones while systemd reports the unit active and
+# serving, with nothing in the journal. `Restart=always` cannot recover that: nothing crashed. As
+# for the relay — do not trust a component's own account of its health, prove it end to end.
 #
 # Each cycle:
 #   * dial our own .onion through our own SocksPort. That exercises descriptor lookup, intro
@@ -251,9 +240,9 @@ fi
 #   * on failure, corroborate against the local HTTP server before blaming the onion layer. If the
 #     static server is the thing that died, that is a different fault with the same symptom.
 #
-# Known limitation, stated rather than papered over: a local network outage is indistinguishable
-# from a dark onion here, so it will eventually trigger a restart. That is cheap compared with the
-# failure this exists to catch — but it is why the threshold is sustained failure and not one miss.
+# Known limitation: a local network outage is indistinguishable from a dark onion here, so it will
+# eventually trigger a restart. That is cheap compared with the failure this exists to catch — but
+# it is why the threshold is sustained failure and not one miss.
 if [ -f "$HOSTFILE" ]; then
   ONION="$(cat "$HOSTFILE")"
   echo "watchdog: self-dialling http://$ONION$PROBE_PATH every ${PROBE_INTERVAL}s (dark after $DARK_LIMIT)" >&2
@@ -305,23 +294,19 @@ while :; do
     exit 1
   fi
 
-  # A failure only counts as darkness if the probe was actually in a position to observe it.
-  # Two ways it was not, and neither says anything about whether clients can reach us:
+  # A failure only counts as darkness if the probe was actually in a position to observe it. Two
+  # ways it was not, and neither says anything about whether clients can reach us:
   #
   #   * the SOCKS port is not accepting — tor is still starting, or has gone away. The probe never
   #     left the box.
   #   * the dial failed faster than a real one can. A dark onion is discovered slowly (HSDir fetch,
   #     then introduction attempts); an instant 000 is a local refusal wearing the same clothes.
   #
-  # This is the same mistake the relay watchdog made in its own way: evidence must be attributable
-  # to the thing being judged before it is spent on a restart.
-  # Someone is being served RIGHT NOW, so the onion is demonstrably reachable and our probe is
-  # what failed. This is the relay watchdog's "clients are still being served" veto, which this one
-  # never had — and its absence is expensive here: a 45 MB APK takes ~30 minutes over Tor and
-  # saturates the circuit, so the probe can time out three cycles running while the download it is
-  # about to kill is the very proof the service is up. Measured 2026-08-14: with a large download
-  # in flight, probes over Tor came back 000/119s and 200/1.3s in the same minute, while the same
-  # file over 127.0.0.1 answered in 0.3ms.
+  # Evidence must be attributable to the thing being judged before it is spent on a restart.
+  # Someone is being served RIGHT NOW, so the onion is demonstrably reachable and our probe is what
+  # failed — the relay watchdog's "clients are still being served" veto. A large download saturates
+  # the circuit for tens of minutes, so the probe can time out cycle after cycle while the download
+  # it would kill is the very proof the service is up.
   if [ "$(ss -tn state established "( sport = :$PORT )" 2>/dev/null | tail -n +2 | wc -l)" -gt 0 ]; then
     echo "nightdrop-onion: self-dial failed but the site is actively serving $(ss -tn state established "( sport = :$PORT )" 2>/dev/null | tail -n +2 | wc -l) connection(s) — reachable, so this says nothing about darkness (still ${fails}/${DARK_LIMIT})" >&2
     continue

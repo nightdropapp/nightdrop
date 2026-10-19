@@ -40,9 +40,9 @@ class SetupScreen extends StatefulWidget {
     this.backgroundDelivery = false,
   });
 
-  /// What each switch starts at. Cover traffic, a privacy setting, starts on (2026-10-18: security
-  /// settings start on, and the user chooses to lower them); background delivery starts off unless
-  /// already on (a preference that survived a reinstall).
+  /// What each switch starts at. Cover traffic, a privacy setting, starts on (security settings
+  /// start on, and the user chooses to lower them); background delivery starts off unless already
+  /// on (a preference that survived a reinstall).
   final bool coverTraffic;
   final bool backgroundDelivery;
 
