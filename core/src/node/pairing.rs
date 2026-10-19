@@ -187,16 +187,15 @@ impl Node {
             address: self.address(), // where the peer should reply (we may be unreachable-by-metadata)
             message: WireOlm::from_olm(&hello),
         };
-        // Held for delivery, not tried once. The first-contact Hello is the frame pairing depends on,
-        // and the joiner's Tor is often minutes old (a fresh install joins right after setup): a
-        // single attempt that reached nothing used to fail the join for good — the code already
-        // spent, the inviter never shown a request, and this side left waiting for an approval
-        // that could not come (phone, 2026-10-09). In `pending_control` it is saved with the state
-        // and retried until it lands.
+        // Held for delivery, not tried once. The first-contact Hello is the frame pairing depends
+        // on, and the joiner's Tor is often minutes old (a fresh install joins right after setup):
+        // a single attempt that reached nothing would fail the join for good — the code spent, the
+        // inviter never shown a request, this side waiting for an approval that cannot come. In
+        // `pending_control` it is saved with the state and retried until it lands.
         //
         // **Directly only, for everyone** (`optional-relay.md` §5): the pass gets it through the
-        // inviter's onion, so no relay is part of first contact, and one path is tested rather
-        // than two.
+        // inviter's onion, so no relay is part of first contact, and one path is tested rather than
+        // two.
         crate::diag!("pair: sending first-contact Hello to the peer");
         let handle = self.post_handle(&bundle.identity_key).unwrap_or_default();
         self.queue_pending_control(
@@ -340,9 +339,8 @@ impl Node {
     ///
     /// The relay round trips then run in [`service_invites`] **without** the core lock, on their
     /// own cadence: the poller runs this every [`RELAY_POLL_PAIRING`](crate::api) while an invite
-    /// is open. It used to run only after a whole mailbox drain round had finished, and with v2
-    /// polling fragments a round on a phone took over a minute — longer than a joiner waits — so
-    /// an Android inviter answered openers after the joiner had given up (S25, 2026-10-07).
+    /// is open. Tied to the mailbox drain instead, an inviter on a phone answered openers only
+    /// after a drain round of a minute or more — after the joiner had given up.
     pub(crate) fn invite_service_plan(&mut self) -> Option<InviteServicePlan> {
         let now = Instant::now();
         let before = self.pending_invites.len();
@@ -393,8 +391,7 @@ impl Node {
 
     /// The primary, our own extra relays and the directory's, **once each**. The signed directory
     /// lists the primary too, under the same address: without the check every rendezvous post and
-    /// take went to the same relay twice — a joiner's opener "posted to 2/2 relays" was two copies
-    /// on one relay (2026-10-07), the same doubling the drain plan already guards against.
+    /// take would go to the same relay twice, the same doubling the drain plan guards against.
     pub(crate) fn relay_set(&self) -> Vec<RelayClient> {
         let (primary, onions) = self.post_route(&self.my_relay_set());
         let mut relays: Vec<RelayClient> = primary.iter().cloned().collect();

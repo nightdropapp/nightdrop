@@ -297,8 +297,8 @@ fn the_relays_are_not_asked_when_the_site_answers() {
     let _ = asked.join();
 }
 
-/// The signed list names the primary too. Counted twice, every rendezvous post and take went to
-/// the same relay twice (a joiner's opener "posted to 2/2 relays", 2026-10-07).
+/// The signed list names the primary too. Counted twice, every rendezvous post and take would go to
+/// the same relay twice.
 #[test]
 fn the_primary_listed_again_by_the_directory_is_one_relay() {
     let mut n = node();
@@ -323,8 +323,8 @@ fn the_primary_listed_again_by_the_directory_is_one_relay() {
 
 #[test]
 fn a_rotated_list_key_is_adopted_and_the_old_one_refused_from_then_on() {
-    // Self-audit 2026-10-13, key-compromise plan: the list-signing key leaked, so the operator
-    // names a new one with the recovery key.
+    // The key-compromise plan: the list-signing key leaked, so the operator names a new one with
+    // the recovery key.
     use base64::Engine as _;
     let b64 = base64::engine::general_purpose::STANDARD;
     let net = MemoryNetwork::new();

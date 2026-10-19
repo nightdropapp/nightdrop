@@ -167,8 +167,7 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
         // after a first run (`docs/design/onion-key-at-rest.md`). Since that change, arti's
         // keystore is **Ephemeral** unless we hand it a saved key, so it persists nothing: without
         // this, the relaunch at step 3 mints a brand-new identity and A is simply a different
-        // service. This test asserted the address survived while guaranteeing it could not —
-        // it compiled, and failed on every run. Caught 2026-08-02.
+        // service, and the address could not survive.
         let key = a
             .onion_key_material()
             .expect("read back A's generated onion identity");
@@ -211,9 +210,8 @@ fn restricted_onion_admits_authorized_client_and_refuses_unauthorized() {
 
     // Give the restricted descriptor time to (re)publish. Informational only: `published()` rides
     // arti's `is_fully_reachable()`, which lags a live service by minutes (see `published` in
-    // transport/tor.rs; the relay's watchdog stopped trusting it for the same reason), and gating
-    // on it failed this test on every run of 2026-10-17/18 before B ever tried. Reaching A is the
-    // proof, and step 4 asserts it.
+    // transport/tor.rs; the relay's watchdog stopped trusting it for the same reason), so gating
+    // on it fails this test before B ever tries. Reaching A is the proof, and step 4 asserts it.
     for _ in 0..180 {
         if a.published() {
             break;
@@ -422,10 +420,9 @@ fn relay_is_reachable_over_tor() {
                 // it. We dial this onion on the relay's port, which it does not serve, so the
                 // healthy outcome here is the service refusing the stream — which arti reports as
                 // "Received an END cell with reason DONE", wrapped in text that mentions building a
-                // circuit. The old check keyed on "circuit" and so reported the exact success case
-                // as a failure. On 2026-08-02 that sent an hour of debugging at the network and the
-                // Tor stack while the real fault (the relay's descriptor not published for one time
-                // period) sat untouched. A control that lies is worse than no control at all.
+                // circuit. A check keyed on "circuit" reports that exact success as a failure, and
+                // sends debugging at the network while the real fault sits elsewhere. A control that
+                // lies is worse than no control at all.
                 //
                 // Reaching the service at all is the whole question, so anything that proves the
                 // rendezvous completed counts as reachable, however the stream then ended.
@@ -498,8 +495,7 @@ fn find_guards(dir: &std::path::Path) -> Option<std::path::PathBuf> {
 /// arti holds an exclusive on-disk lock on its state dir. If anything from the old core still
 /// holds it when the replacement bootstraps, arti logs "Another process has the lock on our state
 /// files" and proceeds **read-only** — so it cannot persist the fresh guards the heal just picked,
-/// the next launch inherits the same wedged set, and it heals again. That looped for an afternoon
-/// on a desktop, 2026-08-02.
+/// the next launch inherits the same wedged set, and it heals again, in a loop.
 ///
 /// The lock itself isn't observable from here, but its consequence is: a read-only client never
 /// rewrites `guards.json`. So this deletes that file exactly as the in-app heal does and asserts

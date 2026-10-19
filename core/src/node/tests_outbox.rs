@@ -227,8 +227,8 @@ impl Node {
 }
 
 /// A joiner whose Tor is minutes old can reach neither the inviter's onion nor the relay with its
-/// first Hello. That used to fail the join for good: the code spent, the inviter never shown a
-/// request (phone, 2026-10-09). The Hello is now held and retried until it lands.
+/// first Hello. Tried once, the join would fail for good: the code spent, the inviter never shown a
+/// request. The Hello is held and retried until it lands.
 #[test]
 fn a_hello_that_cannot_go_out_yet_is_held_and_arrives_later() {
     let net = MemoryNetwork::new();

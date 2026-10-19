@@ -135,7 +135,7 @@ fn utc_timestamp(t: std::time::SystemTime) -> String {
     )
 }
 
-/// Emit one diagnostic line. Prefer the [`diag!`](crate::diag) macro, which skips formatting
+/// Emit one diagnostic line. Prefer the [`diag!`](macro@crate::diag) macro, which skips formatting
 /// entirely when diagnostics are off.
 ///
 /// Redacts onion addresses as a last line of defense: error strings that bubble up here (e.g. a
@@ -168,10 +168,9 @@ pub fn emit_tor(line: &str) {
 }
 
 /// How many arti events of one shape (see [`event_shape`]) pass per [`TOR_WINDOW`] before the rest
-/// are counted instead of logged. A normal hour's busiest shape ("Spawning reactor") peaks at 88 a
-/// minute, so this cuts nothing real; arti's hspool, with every guard marked down, logged the same
-/// failure 28,000 times in under a minute on 2026-09-29, rotating the file twice and destroying the
-/// day's log it was meant to keep.
+/// are counted instead of logged. A normal hour's busiest shape peaks near 90 a minute, so this
+/// cuts nothing real; with every guard marked down, arti's hspool can log the same failure tens of
+/// thousands of times a minute, rotating the file and destroying the log it was meant to keep.
 const TOR_BURST: u32 = 100;
 const TOR_WINDOW: Duration = Duration::from_secs(60);
 
@@ -299,7 +298,6 @@ const LISTENER_SECRET_ARG: &str = "listener-secret=";
 /// secret to each bridge line, and arti's debug output quotes whole bridge lines (guard selection,
 /// bridge-descriptor downloads). It is what keeps other apps on an Android device off our loopback
 /// WebTunnel proxy, so it belongs in app-private storage, not in logcat or a pullable log file.
-/// Seen in a Windows debug run, 2026-09-30.
 fn redact_listener_secret(s: &str) -> std::borrow::Cow<'_, str> {
     if !s.contains(LISTENER_SECRET_ARG) {
         return std::borrow::Cow::Borrowed(s);
@@ -378,7 +376,7 @@ mod android {
     }
 }
 
-/// Emit a diagnostic line when diagnostics are enabled (see [`crate::diag`]).
+/// Emit a diagnostic line when diagnostics are enabled (see [`crate::diag`](mod@crate::diag)).
 ///
 /// Never pass identity keys, onion addresses, invite codes, slots, secret words, or display
 /// names — use `devlog!` for those, which never reaches a release build.

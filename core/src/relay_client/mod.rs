@@ -78,10 +78,10 @@ pub struct RelayLimits {
     /// most 16 KiB, then sealed). Only they may use [`small_reserve_bytes`](Self::small_reserve_bytes).
     pub small_blob_bytes: usize,
     /// The last part of `max_total_bytes`, kept for small blobs. Anyone may post, so a few
-    /// anonymous 150 MB junk blobs used to fill the relay and refuse every message for up to a day;
-    /// large blobs now stop short of this, so ordinary messages still get through a flood of them
-    /// (self-audit 2026-10-13, finding 4). A flood of *small* posts can still fill it — that needs
-    /// a cost on posting (proof of work), which is not built.
+    /// anonymous 150 MB junk blobs could fill the relay and refuse every message for up to a day;
+    /// large blobs stop short of this, so ordinary messages still get through a flood of them. A
+    /// flood of *small* posts can still fill it — that needs a cost on posting (proof of work),
+    /// which is not built.
     pub small_reserve_bytes: usize,
     /// Charged per stored blob on top of its length and handle: the entry's own bookkeeping (ids,
     /// timestamps, map slot) is real memory and real `queue.json`, and without it an empty blob
@@ -374,10 +374,9 @@ struct Stored {
 /// (`mbx:` + base64, `rdv:<slot>:<leg>`, `bkp:` + base64).
 pub const MAX_HANDLE_BYTES: usize = 128;
 
-/// Whether `handle` may be posted to: 1..=[`MAX_HANDLE_BYTES`] of `A-Z a-z 0-9 : _ - .`. Handles
-/// were unchecked, and neither they nor a stored entry's own bookkeeping counted against the
-/// relay's byte cap, so posts with huge handles or empty blobs filled memory and `queue.json`
-/// without limit (self-audit 2026-10-13, third round).
+/// Whether `handle` may be posted to: 1..=[`MAX_HANDLE_BYTES`] of `A-Z a-z 0-9 : _ - .`. Unchecked
+/// handles — and entries whose own bookkeeping did not count against the byte cap — would let posts
+/// with huge handles or empty blobs grow memory and `queue.json` without limit.
 pub fn valid_handle(handle: &str) -> bool {
     (1..=MAX_HANDLE_BYTES).contains(&handle.len())
         && handle
@@ -1941,8 +1940,8 @@ mod tests {
 
     #[test]
     fn empty_blobs_and_long_handles_cannot_grow_the_store_without_limit() {
-        // Self-audit 2026-10-13, third round: an empty blob counted 0 bytes and a handle counted
-        // nothing, so posts to fresh handles grew memory and queue.json past every cap.
+        // An empty blob must still count, and a handle too: otherwise posts to fresh handles grow
+        // memory and queue.json past every cap.
         let limits = RelayLimits {
             max_total_bytes: 10_000,
             entry_overhead_bytes: 512,
@@ -1965,8 +1964,8 @@ mod tests {
 
     #[test]
     fn a_flood_of_large_blobs_cannot_block_small_messages() {
-        // Self-audit 2026-10-13, finding 4: anyone can post, so large junk blobs filled the relay
-        // and every message after them was refused as "relay full" for up to a day.
+        // Anyone can post: large junk blobs must not fill the relay so that every message after
+        // them is refused as "relay full" for up to a day.
         let limits = RelayLimits {
             max_blob_bytes: 100,
             max_mailbox_blobs: 100,

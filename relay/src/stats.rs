@@ -1,13 +1,10 @@
-//! Opt-in traffic counters for diagnosing drops (`NIGHTDROP_RELAY_STATS=1`).
+//! Opt-in traffic counters for diagnosing drops (`NIGHTDROP_RELAY_STATS=1`): how many streams
+//! arrived, how many were refused and why, and what was asked of the store, around a spell of
+//! unreachability that nothing else logged could explain.
 //!
-//! The live relay went unreachable for ~15 minutes three times one night (2026-10-12/13) while a
-//! test relay on the same host and binary did not, and nothing it logged could say why. These
-//! counters show what the relay was doing around such a spell: how many streams arrived, how many
-//! it refused and why, and what was asked of the store.
-//!
-//! **Counts only.** Nothing here records a mailbox handle, message id, blob or its hash, an address,
-//! or anything else about who asked: every counter is a number summed over all clients and reset
-//! each interval. That keeps "no logs" true of everything that could tell clients apart
+//! **Counts only.** Nothing here records a mailbox handle, message id, blob or its hash, an
+//! address, or anything else about who asked: every counter is a number summed over all clients and
+//! reset each interval. That keeps "no logs" true of everything that could tell clients apart
 //! (ARCHITECTURE.md §1a); off by default, and printed only when the operator asks for it.
 
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};

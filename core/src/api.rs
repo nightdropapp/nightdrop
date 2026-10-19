@@ -1,15 +1,11 @@
-//! High-level surface — the only boundary the Flutter app sees (`ARCHITECTURE.md` §3).
-//! This is what `flutter_rust_bridge` mirrors into Dart; keep it small and coarse, and
-//! keep the DTOs in sync with `app/lib/src/core/models.dart`.
+//! High-level surface — the only boundary the Flutter app sees (`ARCHITECTURE.md` §3). This is what
+//! `flutter_rust_bridge` mirrors into Dart; keep it small and coarse, and keep the DTOs in sync
+//! with `app/lib/src/core/models.dart`.
 //!
-//! [`NightdropCore`] wraps a real [`Node`](crate::node::Node) (genuine identity, Olm
-//! sessions, framed messaging over a [`Transport`](crate::transport)). The cryptography
-//! and the wire protocol are real. Production cores run on a real transport (Tor/LAN/TCP)
-//! and hold `demo: None`. For the app's zero-config dev path and the unit tests there is an
-//! optional in-process fallback — see [`demo::Demo`] — that stands up auto-replying peers
-//! over a [`MemoryNetwork`]; it lives entirely in that module, so the shipped core carries no
-//! demo branches beyond a single `Option<Demo>`. Swapping the transport for Tor + relay does
-//! not change this surface.
+//! [`NightdropCore`] wraps a real [`Node`](crate::node::Node) (identity, Olm sessions, framed
+//! messaging over a [`Transport`](crate::transport)). Production cores run over Tor and hold `demo:
+//! None`; the dev path and the unit tests can use the in-process fallback in [`demo::Demo`], which
+//! stands up auto-replying peers over a [`MemoryNetwork`] and lives entirely in that module.
 
 mod demo;
 use demo::Demo;
@@ -73,16 +69,13 @@ static BACKGROUND: AtomicBool = AtomicBool::new(false);
 /// without keeping the steady-state relay cadence hot.
 static RELAY_POLL_NOW: AtomicBool = AtomicBool::new(true);
 
-/// How often the poller does a relay round-trip (a full Tor circuit exchange — the
-/// expensive part of the loop; the transport pump itself is a cheap local check).
-/// Online messages arrive over the direct Tor stream regardless, so the relay poll only
-/// bounds how quickly *offline/queued* mail shows up.
+/// How often the poller does a relay round-trip (a Tor circuit exchange per polling fragment — the
+/// expensive part of the loop; pumping the transport is a cheap local check). Online messages
+/// arrive over the direct stream regardless, so this only bounds how quickly offline mail shows up.
 ///
-/// Background is five minutes, the cadence `mailbox-handles.md` §5c/§8 costs the design at. It was
-/// 60 s while a round was a single request; with fragmented polling a round is one request per
-/// fragment (8–10), and 60 s rounds measured about 900 Tor requests an hour and 7.6% of a Galaxy
-/// S25's battery over 3.5 hours (2026-09-27). Opening the app polls at once regardless
-/// ([`RELAY_POLL_NOW`]), so waiting mail is never five minutes away for someone looking at it.
+/// Background is five minutes, the cadence `mailbox-handles.md` §5c/§8 costs the design at; a
+/// faster one multiplies every fragment's request and drains the battery. Opening the app polls at
+/// once ([`RELAY_POLL_NOW`]), so waiting mail is never five minutes away for someone looking at it.
 const RELAY_POLL_FOREGROUND: Duration = Duration::from_secs(15);
 const RELAY_POLL_BACKGROUND: Duration = Duration::from_secs(5 * 60);
 
@@ -90,20 +83,16 @@ const RELAY_POLL_BACKGROUND: Duration = Duration::from_secs(5 * 60);
 /// answering a joiner's SPAKE2 opener feels near-instant (pairing is a brief, attended flow).
 const RELAY_POLL_PAIRING: Duration = Duration::from_secs(2);
 
-/// How long [`NightdropCore::shutdown`] waits for the poller thread to actually exit before giving
-/// up and returning anyway.
+/// How long [`NightdropCore::shutdown`] waits for the poller thread to exit before returning
+/// anyway.
 ///
-/// Sized from measurement, not from the poll loop: waking the poller and getting it out of a relay
-/// round-trip takes milliseconds, but the exit then drops the **last** `Arc<Runtime>`, and shutting
-/// that runtime down unwinds every arti task on it — which is precisely the work that releases the
-/// on-disk state lock. `tor_smoke`'s guard-heal test measures ~3.2 s end to end (debug build,
-/// desktop, right after a bootstrap); a phone can be slower. An earlier 3 s bound expired 200 ms
-/// short of the real thing, which reported a false failure and, in the field, would have let a
-/// rebuild race the lock — so this leaves real headroom.
+/// Sized from measurement, not from the poll loop: the exit drops the **last** `Arc<Runtime>`, and
+/// shutting that runtime down unwinds every arti task — which is the work that releases the on-disk
+/// state lock. It takes about 3 s on a desktop after a bootstrap and can be slower on a phone; too
+/// short a bound lets a rebuild race the lock.
 ///
-/// It is *not* sized to the duress wipe. That path caps its own wait on the Dart side, because the
-/// part the wipe needs (the poller stopped, its last save done) is over long before the arti
-/// teardown finishes, and a coerced user must not watch a spinner for it.
+/// It is *not* sized to the duress wipe, which caps its own wait on the Dart side: what the wipe
+/// needs (the poller stopped, its last save done) is over long before the arti teardown finishes.
 const POLLER_EXIT_TIMEOUT: Duration = Duration::from_secs(8);
 
 /// How long [`NightdropCore::shutdown`] will try for the core lock before proceeding without it.
@@ -194,25 +183,19 @@ pub fn diag_note(line: String) {
 }
 
 /// Delete arti's entry-guard state under `state_dir` — but NOT the onion keystore, so the device
-/// keeps its stable `.onion`. The next Tor bootstrap then picks fresh entry guards. This is the
-/// recovery for a **wedged guard set** (guards that have churned out of the network): a client
-/// stuck on them can neither publish its own onion nor reach the relay, and a plain re-bootstrap
-/// reuses the same guards, so it can't recover on its own (§6). Call this with the core shut down,
-/// then build a fresh core. No-op if the file is absent.
+/// keeps its `.onion`. The next bootstrap picks fresh entry guards. This is the recovery for a
+/// **wedged guard set** (guards that have churned out of the network): a client stuck on them can
+/// neither publish its onion nor reach the relay, and a plain re-bootstrap reuses them (§6). Call
+/// with the core shut down, then build a fresh core. No-op if the file is absent.
 ///
-/// **`circuit_timeouts.json` is deliberately left alone.** It holds arti's *learned* circuit-build
-/// time distribution, which has nothing to do with which guards we use; deleting it dropped the
-/// replacement client onto conservative defaults until it re-measured, so a reset made the next
-/// several minutes slower — the opposite of the intent, and precisely when the network was already
-/// bad. It was being deleted only because it sits in the same directory.
+/// **`circuit_timeouts.json` is left alone.** It holds arti's learned circuit-build times, which
+/// have nothing to do with which guards we use; deleting it puts the new client on conservative
+/// defaults, slower exactly when the network is already bad.
 ///
-/// This is a **last resort**. Entry guards exist to bound the chance that a hostile relay ever
-/// becomes our entry, so they are meant to be sticky for weeks; C-tor keeps one for months.
-/// Rotating them spends real anonymity margin, and anything that can cause unreachability can
-/// force rotation. arti already recovers from a single unreachable guard on its own — measured
-/// 2026-08-03: it added a fresh guard to the sample 0.7 s after the failure and had it usable 79 s
-/// later, without discarding the persisted set. Only reach for this when the client is stuck in a
-/// way that persists (see [`NightdropCore::direct_path_wedged`]).
+/// A **last resort**: guards are meant to be sticky for weeks, since rotating them spends anonymity
+/// margin, and anything that can cause unreachability could then force rotation. arti recovers from
+/// a single unreachable guard on its own; use this only when the client stays stuck (see
+/// [`NightdropCore::direct_path_wedged`]).
 pub fn reset_tor_guards(state_dir: String) {
     let dir = std::path::Path::new(&state_dir)
         .join("arti-state")
@@ -344,8 +327,8 @@ pub struct Contact {
     /// offering a burn that silently lands as a permanent message is the one failure this
     /// feature must not have.
     pub peer_supports_burn: Option<bool>,
-    /// The Night Drop version the peer last announced (`Frame::Version`, e.g. `"0.1.27"`). `None`
-    /// means they have not said: a build older than 0.1.27, or no announce received yet.
+    /// The Night Drop version the peer last announced (`Frame::Version`, e.g. `"0.2.0"`). `None`
+    /// means they have not said: an older build, or no announcement received yet.
     pub peer_app_version: Option<String>,
     /// Whether opt-in server storage (§6) is actually working: `false` when it is enabled but the
     /// last send couldn't reach any relay to store the copy (the message still reached the peer
@@ -449,16 +432,14 @@ pub struct ChatMessage {
     ///
     /// * `""` — n/a (incoming or system).
     /// * `"sent"` — handed to the peer's onion, which answered. **Not** a claim that their device
-    ///   has it: the frame can still be lost there. Transient — if no receipt names it within
-    ///   `RECEIPT_TIMEOUT` the core puts a relay copy behind it and it becomes `"queued"`.
+    ///   has it. Transient: with no receipt within `RECEIPT_TIMEOUT`, the core puts a relay copy
+    ///   behind it and it becomes `"queued"`.
     /// * `"queued"` — held on a relay until they collect it.
-    /// * `"waiting"` — held on this device: no relay connects us, and they were offline. Sent
+    /// * `"waiting"` — held on this device: no relay connects us and they were offline. Sent
     ///   directly once they are online (`docs/design/optional-relay.md` §4); never expires.
-    /// * `"delivered"` — **only** state that means arrival, and only ever set by a
+    /// * `"delivered"` — the **only** state that means arrival, set only by a
     ///   [`Frame::Delivered`](crate::wire::Frame::Delivered) naming this message. A dial
-    ///   succeeding, a message arriving from them, and their relay `Ack` all used to set it; each
-    ///   means "they are alive", which is not the same thing and was wrong often enough to lose a
-    ///   message in the field (2026-08-02).
+    ///   succeeding, a message from them, or their relay `Ack` mean "they are alive", not this.
     /// * `"expired"` — sat queued past the relay's 24h TTL uncollected (§11.3).
     pub delivery: String,
     /// Random per-message token shared by both sides (rides inside the wire frame), so an
@@ -782,10 +763,8 @@ impl Inner {
             // confirmed (so a launch tells nobody we are online, `ANNOUNCE_ONLINE_ON_START`), and
             // re-sent on later ticks until it lands.
             //
-            // Tell pre-existing chats that this build can burn. Done here rather than at startup
-            // so the transport has had a chance to warm up —
-            // a chat paired before the feature shipped would otherwise never hear it, leaving
-            // burn unavailable for precisely the contacts someone already talks to.
+            // That this build can burn: here rather than at startup, so the transport has warmed
+            // up; a chat paired before the feature shipped would otherwise never hear it.
             self.me.announce_burns();
             // Our app version (`Frame::Version`), same cadence and the same guard.
             self.me.announce_version();
@@ -1018,21 +997,14 @@ impl NightdropCore {
         ))
     }
 
-    /// Real core over the **local-network (LAN / Wi-Fi) transport** — a Briar-style offline path
-    /// for when there is no internet, or Tor is blocked, but paired devices share a network (§6).
-    /// Binds a listener on `port` (`0` = an ephemeral port) across all interfaces and advertises
-    /// this machine's detected LAN IP, so a peer on the same network reaches us with no public
-    /// address or port-forwarding. The canonical flow is QR pairing in the same room; frames then
-    /// flow directly, end-to-end encrypted and fixed-size padded, over the LAN.
+    /// A core over the **LAN-only transport** (`transport::lan`): plain TCP on the local network,
+    /// no Tor. Kept for the device integration tests, which need two real cores talking over
+    /// sockets; the app's same-Wi-Fi path is Nearby (`docs/design/nearby.md`), which runs beside
+    /// Tor instead of replacing it.
     ///
-    /// `relay_addr` is optional (offline LANs usually have none). Persistence (`persist_path` +
-    /// base64 `persist_key`) behaves exactly as in [`new_tor`](Self::new_tor): restore if the file
-    /// exists, else create + save a fresh identity. Because a LAN address changes between runs, on
-    /// restore we announce the new address to contacts in-band (§5c) so they can still reach us —
-    /// pass a **fixed** `port` for a more stable address.
-    ///
-    /// Anonymity note: LAN traffic is **not** anonymized (a local observer sees two IPs talking);
-    /// only the content is encrypted. This is a censorship/blackout fallback, not a Tor replacement.
+    /// Binds `port` (`0` = ephemeral) on all interfaces and advertises the detected LAN IP.
+    /// `relay_addr` is optional; persistence (`persist_path` + base64 `persist_key`) behaves as in
+    /// [`new_tor`](Self::new_tor). Not anonymized: a local observer sees two IPs talking.
     pub fn new_lan(
         port: u16,
         relay_addr: Option<String>,
@@ -1109,17 +1081,14 @@ impl NightdropCore {
                 (Some(path), Some(key)) => Some((path, decode_store_key(&key)?)),
                 _ => None,
             };
-            // Only when an identity is actually being restored. Creating a NEW identity means a new
-            // address, so a sealed key left on disk belongs to an identity being abandoned — and
-            // reading it there is not merely pointless, it is a trap: it will not unseal under the
-            // new store key, and `read_onion_key` fails hard on that (rightly — see its doc). The
-            // failure then lands on the one path the user has left, so "set up a new identity" on
-            // the load-error screen could not recover the app from inside. Found on a device,
-            // 2026-08-02, after a wipe left the file behind. The stale file is overwritten below,
-            // once the fresh identity has a key of its own to seal.
+            // Only when an identity is actually being restored. A NEW identity means a new address,
+            // so a sealed key left on disk belongs to an identity being abandoned; it will not
+            // unseal under the new store key, and `read_onion_key` fails hard on that (see its doc)
+            // — which would land on "set up a new identity", the one way off the load-error screen.
+            // The stale file is overwritten below, once the fresh identity has a key of its own.
             // Restoring an identity, or creating one? The state file is the only signal — the same
-            // one the node itself uses below — and it decides both whether a sealed onion key may
-            // be read and whether arti's on-disk keystore may still speak for us.
+            // one the node uses below — and it decides both whether a sealed onion key may be read
+            // and whether arti's on-disk keystore may still speak for us.
             let restoring = persist
                 .as_ref()
                 .is_some_and(|(path, _)| std::path::Path::new(path).exists());
@@ -1227,9 +1196,10 @@ impl NightdropCore {
             // the SAME `.onion` — otherwise the peer's stored address is stale and unreachable.
             let (state, bkey) = Node::open_backup(&blob, &password)?;
             // The identity the backup carries (0.1.29 on) goes straight to arti. A backup from
-            // 0.1.15 or earlier carries arti's keystore files instead, which are written to disk
-            // for arti to read once. One from 0.1.16–0.1.28 carries neither, so arti mints a new
-            // address and the startup announcement tells contacts (`docs/advisories/…-backups-lost-the-onion-address.md`).
+            // 0.1.15 or earlier carries arti's keystore files instead, written to disk for arti to
+            // read once. One from 0.1.16–0.1.28 carries neither, so arti mints a new address and
+            // the startup announcement tells contacts
+            // (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`).
             let identity = state
                 .onion_identity
                 .as_deref()
@@ -1297,16 +1267,15 @@ impl NightdropCore {
         }
     }
 
-    /// Recover from an opt-in **server backup** on a fresh device (§7c / #9): bootstrap Tor,
-    /// fetch the opaque blob from the relay by its password-derived handle, decrypt it with the
-    /// user's recovery `password`, and rebuild identity + chats — persisted under `persist_key`
-    /// so it survives future restarts. The relay counterpart of [`restore_backup_tor`](Self::restore_backup_tor).
+    /// Recover from an opt-in **server backup** on a fresh device (§7c): bootstrap Tor, fetch the
+    /// opaque blob from the relay by its password-derived handle, decrypt it with the recovery
+    /// `password`, and rebuild identity and chats, persisted under `persist_key`. The relay
+    /// counterpart of [`restore_backup_tor`](Self::restore_backup_tor).
     ///
-    /// The backup blob does not carry into a *pre-bootstrap* onion keystore here (the relay is
-    /// only reachable once Tor is up), so this device comes back on a **new** `.onion`; the
-    /// startup address-rotation announcement (#11) then tells contacts the new address. Note: the
-    /// relay copy is drained on fetch, so an unsuccessful attempt (e.g. wrong password) consumes
-    /// it — the same "lose the password, lose the backup" contract as create.
+    /// The relay is reachable only once Tor is up, so this device bootstraps before it has the
+    /// backup's onion key and comes back on a **new** `.onion`; the startup address announcement
+    /// tells contacts. The relay copy is taken on fetch and put back if restoring it fails; a wrong
+    /// password derives a different handle and finds nothing.
     pub fn restore_server_backup_tor(
         password: String,
         state_dir: Option<String>,
@@ -1373,24 +1342,17 @@ impl NightdropCore {
     /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock.
     ///
     /// Call this before building a second core over the same `state_dir` — restoring a backup and
-    /// the guard heal both do exactly that, and arti refuses to launch a second onion service while
-    /// the first instance still holds the lock. Dropping the core is **not** enough on its own: the
-    /// poller thread holds handles on the same state, so the lock would still be held when the new
-    /// instance tried to start.
-    ///
-    /// Nor is *asking* the poller to stop enough, which is what this used to do. The poller
-    /// snapshots [`RelayClient`]s and drains them off the core lock (§1.5.2), and on Tor each clone
-    /// carries an `Arc<TorClient>` + the tokio runtime — so a poller still inside a drain keeps
-    /// arti's lock alive past the teardown. The replacement client then logs "Another process has
-    /// the lock on our state files" and runs **read-only**: it cannot persist the fresh guards a
-    /// heal just picked, so the next heal inherits the same wedged set and heals again, forever.
-    /// Seen looping all afternoon on a desktop, 2026-08-02.
+    /// the guard heal both do — because arti will not launch a second onion service while the first
+    /// holds the lock. Dropping the core is not enough, and neither is *asking* the poller to stop:
+    /// it drains relays off the core lock (§1.5.2), and each relay client on Tor holds an
+    /// `Arc<TorClient>` and the runtime, so a poller inside a drain keeps the lock alive. The
+    /// replacement client then runs **read-only** and cannot persist the guards a heal just picked,
+    /// so the heal repeats forever.
     ///
     /// So: stop the poller, tear the transport down (which also aborts an in-flight relay dial —
-    /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to actually
-    /// exit. The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this same path runs the duress
-    /// wipe, where hanging the app is worse than the bug being fixed; on expiry it says so in the
-    /// diagnostics and carries on.
+    /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to exit.
+    /// The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this path also runs the duress wipe,
+    /// where hanging is worse; on expiry it says so in the diagnostics and carries on.
     ///
     /// Idempotent; the core stays readable afterwards but can no longer send or receive.
     ///
@@ -1400,11 +1362,6 @@ impl NightdropCore {
         shutdown_core(&self.inner, self.poller.as_ref());
     }
 
-    /// Acquire the inner lock, **recovering from poisoning** (§1.5.3). If some thread panicked
-    /// while holding the guard, the mutex is poisoned; without recovery every subsequent FFI call
-    /// would `unwrap`-panic, bricking the core for the rest of the session. We take the guard
-    /// anyway (`into_inner`): the worst case is one operation left partial state behind, which is
-    /// far better than an app that is permanently unresponsive until restart.
     /// Send the entries an API call queued and is waiting on ([`Node::take_caller_outbox`]), with
     /// the lock released, then record what happened. `Err` if any of them reached neither the peer
     /// nor a relay — what the call used to return when it dialled inline, under the lock.
@@ -1429,6 +1386,9 @@ impl NightdropCore {
         Ok(())
     }
 
+    /// Acquire the inner lock, **recovering from poisoning** (§1.5.3): a thread that panicked while
+    /// holding it must not make every later FFI call panic too. One operation may have left partial
+    /// state behind, which is far better than a core that answers nothing until restart.
     fn lock(&self) -> std::sync::MutexGuard<'_, Inner> {
         self.inner.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -1454,14 +1414,11 @@ impl NightdropCore {
     }
 
     /// Whether the **direct** onion-to-onion path looks wedged: several sends in a row have failed
-    /// to reach a peer and none has ever succeeded this run.
+    /// to reach a peer and none has succeeded this run.
     ///
-    /// The companion to [`onion_ready`](Self::onion_ready), and the half that was missing. That one
-    /// only asks whether *our* service published; a device can do that perfectly while being unable
-    /// to reach anybody, because every circuit it builds dies in its guard set. Seen on a phone
-    /// (2026-08-03): descriptor uploaded 8/8, and simultaneously 417 circuit builds with 61 hard
-    /// timeouts and `Unable to build circuit to introduction point`. By the old health check that
-    /// device was fine, so nothing healed and every message silently went by relay instead.
+    /// The companion to [`onion_ready`](Self::onion_ready), which only asks whether *our* service
+    /// published: a device can publish perfectly while every circuit it builds to anyone else dies
+    /// in its guard set, and then every message silently goes by relay.
     pub fn direct_path_wedged(&self) -> bool {
         self.lock().me.direct_path_wedged()
     }
@@ -1573,10 +1530,9 @@ impl NightdropCore {
 
     /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
     /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
-    /// `nightdrop-relay authorize-client <name> <key>`. arti presents the private half whenever this
-    /// device dials that relay, so after authorization the private relay becomes reachable. Asking
-    /// again returns the same key; it is kept in the sealed store across restarts. Only meaningful on the Tor transport; errors otherwise. Generating a key
-    /// for a public relay is harmless but unnecessary.
+    /// `nightdrop-relay authorize-client <name> <key>`; arti presents the private half whenever
+    /// this device dials that relay. Asking again returns the same key, kept in the sealed store.
+    /// Only meaningful on the Tor transport; harmless for a public relay.
     pub fn create_relay_access_key(&self, relay_onion: String) -> Result<String> {
         let onion = relay_onion.trim();
         let mut g = self.lock();
@@ -1604,11 +1560,11 @@ impl NightdropCore {
     /// Ask our onion site whether a newer release exists (`crate::update`).
     ///
     /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
-    /// the site did not respond. Both are silence, never a warning — a user who is taught to
-    /// dismiss update notices will dismiss the one that matters.
+    /// the site did not respond. Both are silence, never a warning — a user taught to dismiss
+    /// update notices will dismiss the one that matters.
     ///
-    /// Pass the app's own version (the pubspec string, `"0.1.17+403"`, is fine — the build suffix
-    /// is ignored). Call it at most daily; it is a network round trip, not a getter.
+    /// Pass the app's own version (the pubspec string, `"0.2.0+416"`, is fine — the build suffix is
+    /// ignored). Call it at most daily; it is a network round trip, not a getter.
     pub fn check_for_update(&self, current_version: String) -> Option<AppUpdate> {
         // Take a transport handle under the lock, then DROP the lock before any network I/O. A
         // Tor fetch bounded at 30s would otherwise pin the core lock for 30s and freeze every
@@ -2055,13 +2011,11 @@ impl NightdropCore {
     }
 
     /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
+    /// Fire-and-forget from the UI's point of view; a chat that no longer exists is ignored.
     ///
-    /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which
-    /// is undetectable. Making them visible is the honest trade. Fire-and-forget from the UI's point
-    /// of view; a chat that no longer exists is silently ignored.
-    ///
-    /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
-    /// not imply otherwise.
+    /// Called only where blocking is off (it is on by default on Android) or impossible. Only
+    /// Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must not
+    /// imply otherwise.
     pub fn report_screenshot(&self, contact_id: String) -> Result<()> {
         let mut g = self.lock();
         g.me.report_screenshot(&contact_id);
@@ -2079,9 +2033,9 @@ impl NightdropCore {
         Ok(())
     }
 
-    /// Tell the core which Night Drop version this is (the pubspec form, `"0.1.27+412"`), so it
-    /// can announce it to contacts (`Frame::Version`). The core crate does not know the app's
-    /// version; until this is called nothing is announced. Safe to call on every launch.
+    /// Tell the core which Night Drop version this is (the pubspec form, `"0.2.0+416"`), so it can
+    /// announce it to contacts (`Frame::Version`). Until this is called nothing is announced. Safe
+    /// to call on every launch.
     pub fn set_app_version(&self, version: String) -> Result<()> {
         self.lock().me.set_app_version(&version);
         Ok(())
@@ -2796,16 +2750,12 @@ fn shutdown_core(inner: &Arc<Mutex<Inner>>, poller: Option<&Arc<StopSignal>>) {
     if let Some(poller) = poller {
         poller.stop();
     }
-    // Close the transport early if we can — that flips the Tor transport's closing flag, which
-    // cuts short a relay dial the poller may be sitting in.
+    // Close the transport early if we can — that flips the Tor transport's closing flag, which cuts
+    // short a relay dial the poller may be sitting in.
     //
-    // **Try**, never block. This was `self.lock()`, and that made the whole "bounded" promise
-    // a lie: the poller holds the core lock across a tick, and a tick contains peer dials
-    // (PEER_DIAL_TIMEOUT) and relay round-trips (RELAY_DIAL_TIMEOUT), so on a device whose
-    // circuits are timing out the lock is held for minutes. Measured on a phone, 2026-08-03:
-    // the user tapped "Reset Tor connection", `shutdown` blocked here, and nothing happened at
-    // all — no teardown, no reset, no rebuild, no error. The wait below was bounded and
-    // irrelevant, because control never reached it.
+    // **Try**, never block: the poller holds the core lock across a tick, and a tick contains peer
+    // dials and relay round-trips, so on a device whose circuits time out the lock can be held for
+    // minutes. Blocking here would leave "Reset Tor connection" doing nothing at all.
     let closed_early = try_close_transport(inner, LOCK_TRY_TIMEOUT);
     if let Some(poller) = poller {
         if !poller.wait_for_exit(POLLER_EXIT_TIMEOUT) {
@@ -2875,13 +2825,10 @@ type LiveCore = (
 /// Shut down, and wait for, any Tor core an earlier UI left running in this process, before a new
 /// one bootstraps over the same state directory.
 ///
-/// On Android the process outlives its UI. Swipe the app away and the activity and its Flutter
-/// engine are destroyed while the process lives on; the next launch is a fresh engine with no
-/// reference to the old core, so it cannot call `shutdown()` on it. Dropping the old core only
-/// *asks* its poller to stop, and the poller keeps arti's state lock until it finishes a tick that
-/// can be tens of seconds of Tor dials. A launch inside that window failed with "State already
-/// locked", which the app reads as an unreadable state file: the recovery screen, and "Try again"
-/// failing identically until the old poller let go. Seen on the S25, 2026-09-26.
+/// On Android the process outlives its UI: swiping the app away destroys the Flutter engine while
+/// the process lives on, so the next launch has no reference to the old core and cannot call
+/// `shutdown()` on it. Its poller keeps arti's state lock until it finishes a tick, and a launch in
+/// that window fails with "State already locked", which the app reads as an unreadable state file.
 #[cfg(any(feature = "tor", test))]
 fn retire_previous_tor_core() {
     let previous = LIVE_TOR_CORE
@@ -2918,12 +2865,6 @@ fn register_tor_core(inner: &Arc<Mutex<Inner>>, poller: &Arc<StopSignal>) {
         Some((Arc::downgrade(inner), Arc::clone(poller), abort));
 }
 
-/// Background poll loop (real mode): pump the transport often (cheap, local), hit the
-/// relay on a timed cadence (expensive: one Tor round-trip per poll).
-///
-/// The thread holds an [`ExitGuard`] for its whole life, so [`NightdropCore::shutdown`] can wait
-/// for it to *finish* rather than merely asking it to — see that method for why the difference
-/// matters (arti's state lock, and the guard heal that healed forever).
 /// Record a finished outbox round under the lock, and tell the UI about any chat it changed.
 fn apply_outbox_round(inner: &Mutex<Inner>, finished: Vec<crate::node::Finished>) {
     let affected = {
@@ -2942,15 +2883,20 @@ fn apply_outbox_round(inner: &Mutex<Inner>, finished: Vec<crate::node::Finished>
     }
 }
 
+/// Background poll loop (real mode): pump the transport often (cheap, local), hit the relay on a
+/// timed cadence (expensive: one Tor round-trip per poll).
+///
+/// The thread holds an [`ExitGuard`] for its whole life, so [`NightdropCore::shutdown`] can wait
+/// for it to *finish* rather than merely ask it to (see that method: arti's state lock).
 fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
     thread::spawn(move || {
         let _exit = ExitGuard::new(Arc::clone(&stop));
         // Fire immediately on startup so offline mail is fetched as the app opens.
         let mut last_relay: Option<std::time::Instant> = None;
         // The relay drain in flight, on its own thread. A drain is many sequential Tor requests
-        // (one per polling fragment, `mailbox.rs`), and a cold round took two minutes on a phone —
-        // run inline, every message composed meanwhile sat "held" until it finished (2026-09-27).
-        // Off this thread, sends keep going every tick while it runs.
+        // (one per polling fragment, `mailbox.rs`) and a cold round can take minutes on a phone;
+        // run inline, every message composed meanwhile would wait for it. Off this thread, sends
+        // keep going every tick.
         let mut drain_job: Option<thread::JoinHandle<RelayHarvest>> = None;
         // Answering a joiner's short-code opener (§5b): its own job on the pairing cadence, off the
         // lock, independent of the drain — a drain round of isolated fragment circuits can outlast
@@ -3063,12 +3009,10 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
                         Some(thread::spawn(move || crate::node::fetch_directory(&plan)));
                 }
             }
-            // Same three phases for OUTBOUND messages, and for the same reason — more so, in fact.
-            // A send is a peer dial (up to PEER_DIAL_TIMEOUT) plus, on failure, a relay post per
-            // target (up to RELAY_DIAL_TIMEOUT each), and it used to run inside `apply_tick` with
-            // the core lock held. On a device whose circuits time out that pins the lock for
-            // minutes, which stalls every UI read *and* the teardown itself — so the app could not
-            // be reset precisely when it was most broken (phone, 2026-08-03).
+            // Same three phases for OUTBOUND messages, for the same reason: a send is a peer dial
+            // (up to PEER_DIAL_TIMEOUT) plus, on failure, a relay post per target (up to
+            // RELAY_DIAL_TIMEOUT each). Under the core lock that stalls every UI read and the
+            // teardown itself, so the app could not be reset when it was most broken.
             let mut sent = {
                 let plan = {
                     let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
@@ -3094,10 +3038,9 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
             };
             // Delivery receipts and relay acks for what that tick received, sent only now: the
             // "message" event is already out, so the notification does not wait on them, and the
-            // lock is free, so neither does anything else. A receipt is a peer dial and, when that
-            // fails, a relay post — ~45 s on a phone in Doze (2026-09-28), all of it spent before
-            // the notification while they were sent inline. On this thread rather than a spawned
-            // one so nothing outlives the poller holding the transport (see the teardown below).
+            // lock is free. A receipt is a peer dial and, when that fails, a relay post — tens of
+            // seconds on a phone in Doze. On this thread rather than a spawned one, so nothing
+            // outlives the poller holding the transport (see the teardown below).
             for s in receipts {
                 s.execute();
             }
@@ -3250,9 +3193,8 @@ pub(crate) fn parse_invite(payload: &str) -> Result<(String, PreKeyBundle)> {
     ))
 }
 
-/// The short-code word list: 64 words, four distinct per code (15.2M codes, ~24 bits; three
-/// online guesses per invite ≈ 1 in 5 million). Was 16 words (43,680 codes, ~1 in 14,600) until
-/// 2026-10-13 (self-audit, second round). Plain, easy to say and spell, no silent letters or
+/// The short-code word list: 64 words, four distinct per code (15.2M codes, ~24 bits; three online
+/// guesses per invite ≈ 1 in 5 million). Plain, easy to say and spell, no silent letters or
 /// regional spellings, and **no two share their first three letters**, so a typo cannot land on
 /// another valid word (pinned by `short_code_words_are_distinct_by_prefix`). Only the inviter's
 /// generator reads this list: a joiner types what it is shown, so changing it breaks nothing.
@@ -3322,7 +3264,7 @@ mod tests {
     use super::*;
 
     /// The background cadence is what the mailbox design is costed at; a faster one multiplies
-    /// every fragment's request (2026-09-27: 60 s rounds, ~900 Tor requests an hour).
+    /// every fragment's request.
     #[test]
     fn background_relay_polling_runs_at_the_designed_cadence() {
         const { assert!(RELAY_POLL_BACKGROUND.as_secs() == 300) };
@@ -3351,8 +3293,8 @@ mod tests {
         }
     }
 
-    /// A drain is many sequential Tor requests; a cold round took two minutes on a phone, and with
-    /// the drain inline every message composed meanwhile waited for it (2026-09-27).
+    /// A drain is many sequential Tor requests; with the drain inline, every message composed
+    /// meanwhile waited for it.
     #[test]
     fn a_message_goes_out_while_a_relay_drain_is_stuck() {
         let (block, entered) = (
@@ -3534,13 +3476,9 @@ mod tests {
         assert_eq!(status(&a, &lost_id), "delivered");
     }
 
-    /// A slow send must not hold the core lock. This is the property the whole plan/execute/apply
-    /// split exists for, so it is asserted directly rather than inferred from where the code sits.
-    ///
-    /// The dial used to run inside `apply_tick`, under the lock. A dial that hangs — a dead peer,
-    /// a dead relay, a device whose circuits are timing out — therefore froze every other caller
-    /// for as long as it took: UI reads, and the teardown itself, which is how "Reset Tor
-    /// connection" came to do nothing at all on a wedged phone (2026-08-03).
+    /// A slow send must not hold the core lock. This is the property the plan/execute/apply split
+    /// exists for, so it is asserted directly rather than inferred from where the code sits: a dial
+    /// that hangs under the lock freezes UI reads and the teardown itself.
     #[test]
     fn a_slow_send_does_not_hold_the_core_lock() {
         // A transport whose send blocks until released, standing in for a dial into a black hole.
@@ -3712,9 +3650,8 @@ mod tests {
     }
 
     /// A received message must be surfaced before its delivery receipt goes out. The receipt is a
-    /// dial back to the sender and, when that fails, a relay post; it used to be sent inside
-    /// `pump`, under the lock and before `apply_tick` emitted, so the notification waited for all
-    /// of it — ~45 s on a phone in Doze whose dial back failed (2026-09-28).
+    /// dial back to the sender and, when that fails, a relay post; sent before the emit, the
+    /// notification waited for all of it.
     #[test]
     fn a_received_message_is_surfaced_before_its_receipt_is_sent() {
         // Same black-hole dial as above: `send` blocks until released once armed.
@@ -3820,13 +3757,9 @@ mod tests {
         );
     }
 
-    /// `shutdown` must not block on the core lock, however long someone else holds it.
-    ///
-    /// It used to take the lock outright, and the poller holds that lock for a whole tick —
-    /// including peer dials and relay round-trips. On a phone whose circuits were timing out
-    /// (2026-08-03) the user tapped "Reset Tor connection" and *nothing happened*: shutdown was
-    /// parked on the lock, so the teardown, the guard reset and the rebuild never ran, and no
-    /// error was reported. The bounded wait that followed was irrelevant — control never got there.
+    /// `shutdown` must not block on the core lock, however long someone else holds it. The poller
+    /// holds that lock for a whole tick, including peer dials and relay round-trips; blocked there,
+    /// "Reset Tor connection" would do nothing at all and report no error.
     #[test]
     fn shutdown_does_not_block_on_a_held_core_lock() {
         let net = MemoryNetwork::new();
@@ -3948,13 +3881,12 @@ mod tests {
         releaser.join().unwrap();
     }
 
-    // Device bug, 2026-08-02. A wipe left `onion-key.sealed` behind; the next identity had a new
-    // store key, so the file would not unseal; and because start-up read it unconditionally, the
-    // hard failure hit *every* path — including "set up a new identity", the only way off the
-    // load-error screen. The app could not be recovered from inside.
+    // A wipe that leaves `onion-key.sealed` behind: the next identity has a new store key, so the
+    // file will not unseal, and reading it unconditionally at start-up fails *every* path —
+    // including "set up a new identity", the only way off the load-error screen.
     //
     // The restore path must still fail loudly (silently minting a new address strands every
-    // contact), so this pins both halves, not just the one that broke.
+    // contact), so this pins both halves.
     #[test]
     fn a_stale_onion_key_blocks_a_restore_but_never_a_new_identity() {
         let dir = std::env::temp_dir().join(format!("nd-onion-{}", rand::random::<u64>()));

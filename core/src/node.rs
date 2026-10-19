@@ -28,10 +28,10 @@ const RELAY_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 
 /// Whether this device tells every contact it has just come online, by re-sending its standing
 /// announcements (burn support, app version, address) on each launch instead of only when they
-/// change (`optional-relay.md` §4). **Off (decided 2026-10-05, made real 2026-10-09):** it would
-/// tell every contact when we open the app. On, a contact holding messages for a direct-only
-/// device flushes them as soon as it hears from it, rather than at its next retry. Kept as one
-/// switch so turning it on later is a one-line change; `node/tests_announce.rs` runs both.
+/// change (`optional-relay.md` §4). **Off**: it would tell every contact when we open the app. On,
+/// a contact holding messages for a direct-only device flushes them as soon as it hears from it,
+/// rather than at its next retry. One switch, so turning it on later is a one-line change;
+/// `node/tests_announce.rs` runs both.
 pub(crate) const ANNOUNCE_ONLINE_ON_START: bool = false;
 
 /// Retry backoff for a contact with no relay route, so held frames go only direct
@@ -48,9 +48,8 @@ const HELD_RETRY_CAP_BACKGROUND_SECS: u64 = 15 * 60;
 const MIN_PEER_VERSION: (u32, u32) = (0, 2);
 
 /// Whether to tell a contact still on 0.1.x, once, in the format its app can read, that we have
-/// updated and they need to (the maintainer, 2026-10-10: "keep that safeguard for a few versions").
-/// **Remove after 0.4**, with [`wire::encode_legacy`]: by then a contact still on 0.1 has been
-/// unreachable for several releases.
+/// updated and they need to. **Remove after 0.4**, with [`wire::encode_legacy`]: by then a contact
+/// still on 0.1 has been unreachable for several releases.
 const SEND_UPGRADE_NOTICE: bool = true;
 
 /// The note in our own chat after the upgrade notice went out ([`Node::send_upgrade_notices`]),
@@ -118,7 +117,7 @@ const MARK_VERIFIED: &[u8] = b"nightdrop/ctl/verified/v1";
 const MARK_UNVERIFIED: &[u8] = b"nightdrop/ctl/unverified/v1";
 /// The peer's build understands burn messages (`Frame::Burns`).
 const MARK_BURNS_V1: &[u8] = b"nightdrop/ctl/burns/v1";
-/// Prefix of a [`Frame::Version`] plaintext; the app version follows it (`"...:0.1.27"`).
+/// Prefix of a [`Frame::Version`] plaintext; the app version follows it (`"...:0.2.0"`).
 const MARK_VERSION_PREFIX: &[u8] = b"nightdrop/ctl/version/v1:";
 /// Prefix of a [`Frame::ClientKeySealed`] plaintext; the client key follows it.
 const MARK_CLIENT_KEY_PREFIX: &[u8] = b"nightdrop/ctl/client-key/v1:";
@@ -378,8 +377,8 @@ fn queue_on_relays(
     // (`mailbox.rs`, `post_group`). A no-op off Tor.
     let group = mailbox::post_group(contact_id);
     let mut copies = Vec::new();
-    // Each refusal is logged: "at least one relay took it" hid a copy that missed the relay the
-    // recipient was actually polling (2026-10-11).
+    // Each refusal is logged: "at least one relay took it" can hide a copy that missed the relay
+    // the recipient actually polls.
     let mut tried = 0usize;
     if let Some(primary) = primary {
         tried += 1;
@@ -985,9 +984,9 @@ pub struct Node {
     nearby_address: Option<std::net::SocketAddrV4>,
     /// Nearby announcements on their way, by contact, with the sequence that went out.
     nearby_announced: HashMap<String, u64>,
-    /// This build's app version (`"0.1.27"`), set by the app via
-    /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
-    /// announced until then: a guessed version would be worse than none.
+    /// This build's app version (`"0.2.0"`), set by the app via
+    /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until
+    /// set, and nothing is announced until then: a guessed version would be worse than none.
     app_version: Option<String>,
     /// Contacts told our app version this run, or being told, with the version that went out (see
     /// [`Node::announce_version`]). Like [`burns_announced`](Self::burns_announced).
@@ -1031,12 +1030,12 @@ pub struct Node {
     /// Set whenever an inbound frame mutated state (including silent control frames like Ack),
     /// so the driver refreshes/persists the UI even when no user message was produced.
     dirty: bool,
-    /// Outstanding short-code invites this device is hosting (§5b). Each holds the SPAKE2
-    /// secret words and the pre-key/onion payload to hand out; the background poller answers a
-    /// joiner's SPAKE2 opener from these (see [`service_invites`](crate::node::service_invites)).
-    /// **Persisted** (`export_pending_invites`), so a code survives a core rebuild or restart within
-    /// its TTL — a rebuild mid-pairing used to leave the joiner waiting on an inviter that had
-    /// forgotten the code (`ARCHITECTURE.md` §5b).
+    /// Outstanding short-code invites this device is hosting (§5b). Each holds the SPAKE2 secret
+    /// words and the pre-key/onion payload to hand out; the background poller answers a joiner's
+    /// SPAKE2 opener from these (see [`service_invites`](crate::node::service_invites)).
+    /// **Persisted** (`export_pending_invites`), so a code survives a core rebuild or restart
+    /// within its TTL instead of leaving the joiner waiting on an inviter that forgot it
+    /// (`ARCHITECTURE.md` §5b).
     pending_invites: Vec<PendingInvite>,
     /// Our own address as of the last persisted state (empty for a brand-new node). Compared
     /// against the live transport address on startup: if the onion changed (e.g. a rebuilt Tor
@@ -1044,17 +1043,15 @@ pub struct Node {
     restored_address: String,
     /// Hashes of the **sealed frames** we've already processed, whichever way they reached us.
     ///
-    /// De-duplicates a message a sender fanned out to several relays (#17), including the case
-    /// where one relay was down when its sibling was drained — and, because it spans both intake
-    /// paths, the copy that arrives directly *and* on the relay. That happens on every message
-    /// once server storage is on, and the second copy is the same Olm ciphertext, whose message
-    /// key the first decrypt already consumed: it cannot decrypt, and before this it took the rest
-    /// of the drain down with it (see [`apply_relay_harvest`](Self::apply_relay_harvest)).
+    /// De-duplicates a message a sender fanned out to several relays (#17), and — because it spans
+    /// both intake paths — the copy that arrives directly *and* on the relay, as every message does
+    /// once server storage is on. The second copy is the same Olm ciphertext whose message key the
+    /// first decrypt consumed: it cannot decrypt, and must not take the rest of the drain down with
+    /// it (see [`apply_relay_harvest`](Self::apply_relay_harvest)).
     ///
     /// Hashed over the frame *inside* the relay envelope, so the same frame matches whether it
-    /// arrived wrapped or not. A re-sent message is re-sealed and so hashes differently — that is
-    /// what the id-level dedup in `process_frame` is for. Bounded (cleared past a cap); in-memory
-    /// only.
+    /// arrived wrapped or not. A re-sent message is re-sealed and hashes differently — that is what
+    /// the id-level dedup in `process_frame` is for. Bounded (cleared past a cap); in-memory only.
     seen_frames: std::collections::HashSet<[u8; 32]>,
     /// Reachability of **our own** advertised extra relays (`my_relays`, #17), keyed by address,
     /// as observed on the last relay drain. `false` = that relay (e.g. one the
@@ -1083,13 +1080,13 @@ pub struct Node {
     /// seals + stores them "queued" and defers the network here so composing never blocks the UI
     /// on a dial. The poller drains this via [`plan_pending_sends`](Self::plan_pending_sends),
     /// attempting direct-peer delivery with relay fallback. In-memory only, and drained on the very
-    /// next poll tick (~80 ms), so a restart in that window just leaves the message "queued" — the
-    /// same recovery profile as [`pending_relay`](Self::pending_relay).
+    /// next poll tick (~80 ms), so a restart in that window just leaves the message "queued" and
+    /// the held queue ([`held`](Self::held)) or the receipt sweep sends it again.
     pending_sends: Vec<PendingRelaySend>,
     /// Authenticated control frames that reached neither the peer nor any relay when sent (arti
     /// still cold, or the relay briefly unreachable): `Closed` signals (chat deletes, §11.6) and
     /// screenshot notices ([`report_screenshot`](Self::report_screenshot)). Unlike
-    /// [`pending_relay`](Self::pending_relay) these are **chat-independent** — a deleted chat is
+    /// [`pending_sends`](Self::pending_sends) these are **chat-independent** — a deleted chat is
     /// already gone — so they carry their own recipient + sealed bytes and are retried by the poller
     /// until a relay accepts a copy. **Persisted** (each is a one-shot the peer must eventually see),
     /// so the retry survives a restart mid-outage; re-delivery is idempotent (the peer's ratchet rejects
@@ -1105,11 +1102,11 @@ pub struct Node {
     outbox: Vec<Outbound>,
     /// Delivery receipts and relay acks for messages this tick received, sealed under the lock and
     /// waiting for the poller to send them **after** it has surfaced those messages and released
-    /// the lock. Sent inline instead, they held back the "message" event — and so the notification
-    /// — for a whole failed direct dial plus the relay fallback: ~45 s on a phone in Doze
-    /// (2026-09-28). Drained by [`Node::take_receipt_sends`]; empty on synchronous transports, which
-    /// still send inline. In memory only: a receipt lost to a restart is recovered by the sender's
-    /// relay retry, which is receipted again when it lands.
+    /// the lock. Sent inline, they would hold back the "message" event — and the notification — for
+    /// a failed direct dial plus the relay fallback, tens of seconds on a phone in Doze. Drained by
+    /// [`Node::take_receipt_sends`]; empty on synchronous transports, which still send inline. In
+    /// memory only: a receipt lost to a restart is recovered by the sender's relay retry, which is
+    /// receipted again when it lands.
     receipt_sends: Vec<DetachedSend>,
     /// Shared default relays learned from the operator-signed **relay directory** (§3.1): fetched
     /// daily from our onion site (a relay is asked only when the site cannot be reached), verified
@@ -1162,13 +1159,10 @@ pub struct Node {
 /// so the **blocking** part can run without it. Built by [`Node::plan_pending_sends`], consumed by
 /// [`execute_sends`], applied by [`Node::apply_send_outcomes`].
 ///
-/// This is the same three-phase split the relay drain uses (§1.5.2), for the same reason and then
-/// some. A send does a peer dial (up to `PEER_DIAL_TIMEOUT`) and, on failure, a relay post per
-/// target (up to `RELAY_DIAL_TIMEOUT` each) — and all of that used to happen inside `apply_tick`,
-/// i.e. **holding the core lock**. On a healthy network nobody notices. On a device whose circuits
-/// are timing out it means the lock is held for minutes, and everything else queues behind it: UI
-/// reads, and — measured on a phone, 2026-08-03 — the teardown itself, so "Reset Tor connection"
-/// did nothing at all. The app was least able to recover exactly when it most needed to.
+/// The same three-phase split the relay drain uses (§1.5.2): a send does a peer dial (up to
+/// `PEER_DIAL_TIMEOUT`) and, on failure, a relay post per target (up to `RELAY_DIAL_TIMEOUT` each).
+/// Under the core lock, on a device whose circuits time out, that held everything else for minutes
+/// — UI reads and the teardown itself, so the app could not recover when it most needed to.
 pub(crate) struct SendPlan {
     transport: Arc<dyn Transport>,
     items: Vec<PlannedSend>,
@@ -1256,11 +1250,10 @@ pub(crate) fn execute_sends(plan: &SendPlan) -> SendOutcomes {
 /// One already-sealed control frame to deliver **with no core lock held** — a single-frame
 /// [`Node::deliver`] (direct dial, relay fallback) whose routing was snapshotted under the lock.
 ///
-/// For frames sent from a **UI call** rather than the poller, where the caller is waiting on the
-/// result. The burn-view receipt is the case that needed it: sent inline, it dialled the peer while
-/// holding the lock, *after* the countdown had started — so the reveal took as long as a Tor dial
-/// (plus a relay post when the peer was offline) to appear, and arrived with that time already gone
-/// from its timer. Taken with [`Node::take_detached_sends`]; best-effort, nothing retries it.
+/// For frames sent from a **UI call** rather than the poller, where the caller waits on the result.
+/// The burn-view receipt is the case: sent inline, it dialled the peer while holding the lock
+/// *after* the countdown started, so the reveal appeared a Tor dial late with that time already
+/// gone from its timer. Taken with [`Node::take_detached_sends`]; best-effort, nothing retries it.
 pub(crate) struct DetachedSend {
     transport: Arc<dyn Transport>,
     primary: Option<RelayClient>,
@@ -1492,11 +1485,10 @@ pub(crate) fn run_outbox(sends: Vec<Outbound>) -> Vec<Finished> {
 /// A message handed to the peer's onion but not yet confirmed by a [`Frame::Delivered`] naming it
 /// (see [`Node::awaiting_receipt`]).
 ///
-/// A successful dial only means their service answered. The frame can still be lost — that is
-/// exactly what happened on 2026-08-02, when a core was torn down mid-flight and the message
-/// vanished with the sender's side showing it as sent. Once this has gone unconfirmed for
-/// [`RECEIPT_TIMEOUT`](crate::node::messaging::RECEIPT_TIMEOUT), the poller re-queues the message on
-/// the relay so it survives the peer being offline, restarted or rebuilt.
+/// A successful dial only means their service answered; the frame can still be lost (a core torn
+/// down mid-flight, say). Once this has gone unconfirmed for
+/// [`RECEIPT_TIMEOUT`](crate::node::messaging::RECEIPT_TIMEOUT), the poller re-queues the message
+/// on the relay so it survives the peer being offline, restarted or rebuilt.
 pub(crate) struct AwaitingReceipt {
     contact_id: String,
     msg_id: String,
@@ -1504,7 +1496,6 @@ pub(crate) struct AwaitingReceipt {
     since: u64,
 }
 
-/// A sent message awaiting a relay to accept its store-and-forward copy (see [`Node::pending_relay`]).
 /// One frame in the held queue ([`Node::held`]).
 pub(crate) struct HeldSend {
     contact_id: String,
@@ -1516,6 +1507,8 @@ pub(crate) struct HeldSend {
     in_flight: bool,
 }
 
+/// A message composed on an asynchronous transport, waiting for the poller to send it off the lock
+/// (see [`Node::pending_sends`]).
 pub(crate) struct PendingRelaySend {
     contact_id: String,
     msg_id: String,
@@ -1692,10 +1685,10 @@ impl Node {
     pub fn set_media_store(&mut self, dir: String, key: StoreKey) {
         std::fs::create_dir_all(&dir).ok();
         // The media store sits beside the state file, in the app's data dir: make that owner-only.
-        // On desktop it was created 0755, so other users on the machine could list it and read the
+        // A world-readable dir (desktop default 0755) let other users list it and read the
         // contacts' onion client keys (.auth) — how many contacts, and when they changed. With the
-        // dir at 0700 nothing beneath it is reachable, whatever each file's own mode (self-audit
-        // 2026-10-13, round 5). Android's is private already; Windows ACLs are per-user.
+        // dir at 0700 nothing beneath it is reachable, whatever each file's own mode. Android's is
+        // private already; Windows ACLs are per-user.
         if let Some(data_dir) = std::path::Path::new(&dir).parent() {
             let _ = create_private_dir(data_dir);
         }
@@ -1891,8 +1884,8 @@ impl Node {
             .get(contact_id)
             .map(|c| c.peer_address.clone())
             .unwrap_or_default();
-        // Its attachments go with it: sealed files and any decrypted copy. They were left on disk,
-        // unreferenced but readable by anyone holding the store key (self-audit 2026-10-13, round 6).
+        // Its attachments go with it: sealed files and any decrypted copy, which would otherwise
+        // stay on disk unreferenced but readable by anyone holding the store key.
         let media: Vec<String> = self
             .chats
             .get(contact_id)
@@ -2041,7 +2034,7 @@ impl Node {
         self.app_version.as_deref()
     }
 
-    /// Record this build's app version (the pubspec form, `"0.1.27+412"`, is accepted; the build
+    /// Record this build's app version (the pubspec form, `"0.2.0+416"`, is accepted; the build
     /// number is dropped). A changed version re-announces to every chat.
     pub fn set_app_version(&mut self, version: &str) {
         let version = version.split('+').next().unwrap_or("").trim().to_string();
@@ -2112,8 +2105,8 @@ impl Node {
                 .map_or(0, |d| d.as_millis() as u64);
             self.capture_block_seq = now_ms.max(self.capture_block_seq + 1);
             // What any chat holds may be an older value still in flight: tell every chat again.
-            // (Leaving `told_block` let a quick off-then-on skip a chat whose "off" had not been
-            // confirmed yet, which then landed and stuck — 0.2 device pass.)
+            // Keeping `told_block` would let a quick off-then-on skip a chat whose "off" was not
+            // confirmed yet, which could then land and stick.
             for chat in self.chats.values_mut() {
                 chat.told_block = None;
             }
@@ -2194,15 +2187,14 @@ impl Node {
 
     /// Report that the user took a **screenshot** of this chat (#1), to both sides of it.
     ///
-    /// Screenshots are deliberately *allowed* — blocking them only pushes people to photograph the
-    /// screen, which we cannot see at all — so the honest alternative is to make them visible. Logs
-    /// a local note (so the user knows what their peer was told) and sends the peer a
-    /// [`Screenshot`](Frame::Screenshot) frame — direct if they're reachable, else queued on the
-    /// relay for their next drain, else held in `pending_control` for the poller to retry. The
-    /// capture itself never fails; only the notice is retried.
+    /// Happens only where screenshots are not blocked (the user turned blocking off, or the
+    /// platform cannot block). Logs a local note (so the user knows what their peer was told) and
+    /// sends the peer a [`Screenshot`](Frame::Screenshot) frame — direct if they're reachable, else
+    /// queued on the relay, else held in `pending_control` for the poller to retry. The capture
+    /// itself never fails; only the notice is retried.
     ///
-    /// Every screenshot is reported; there is no dedupe flag, because the *count* and *timing* are
-    /// the informative part.
+    /// Every screenshot is reported, with no dedupe: the *count* and *timing* are the informative
+    /// part.
     pub fn report_screenshot(&mut self, contact_id: &str) {
         self.report_capture(contact_id, false);
     }
@@ -2238,8 +2230,8 @@ impl Node {
 
     /// Allow (or stop allowing) screenshots in this chat on this phone although the contact blocks
     /// them. Their block is a request this app honours by default; the user may override it per
-    /// chat — keeping a screenshot as evidence of abuse is the case that matters (round 12, 2026-10-18)
-    /// — and the contact is always told. Returns whether anything changed.
+    /// chat — keeping a screenshot as evidence of abuse is the case that matters — and the contact
+    /// is always told. Returns whether anything changed.
     pub fn set_capture_override(&mut self, contact_id: &str, allow: bool) -> bool {
         let Some(chat) = self.chats.get_mut(contact_id) else {
             return false;
@@ -2837,7 +2829,7 @@ impl Node {
             chat.client_key = Some(secret);
             self.dirty = true;
         }
-        // Sealed on the pair's session, so only the real contact can set it (finding 5).
+        // Sealed on the pair's session, so only the real contact can set it.
         let marker = [MARK_CLIENT_KEY_PREFIX, client_key.as_bytes()].concat();
         let Some((_, frame)) = self.authed_control(contact, &marker, |from, message| {
             Frame::ClientKeySealed { from, message }
@@ -2847,11 +2839,11 @@ impl Node {
         let _ = self.deliver(peer_address, contact, &frame);
     }
 
-    /// This device's client access key for a **private** relay's onion (restricted discovery, §3.2),
-    /// as the public `descriptor:x25519:…` string to give the relay operator. Minted on the first
-    /// request and inserted into arti's keystore, which presents it on every connect to that onion;
-    /// a repeat request returns the **same** key, since the operator authorized that one and a new
-    /// one would lock this device out. Kept in the sealed store and re-inserted at startup.
+    /// This device's client access key for a **private** relay's onion (restricted discovery,
+    /// §3.2), as the public `descriptor:x25519:…` string to give the relay operator. Minted on the
+    /// first request and inserted into arti's keystore, which presents it on every connect to that
+    /// onion; a repeat request returns the **same** key, since the operator authorized that one and
+    /// a new one would lock this device out. Kept in the sealed store and re-inserted at startup.
     /// `None` on transports without restricted discovery (tests, LAN); `Some(Err)` if the onion
     /// won't parse or key generation fails.
     pub(crate) fn relay_access_key(&mut self, relay_onion: &str) -> Option<Result<String>> {
@@ -3441,10 +3433,10 @@ impl Node {
     }
 
     /// Whether to send the optional standing announcements (burn support, the v2 mailbox
-    /// contribution). Before Tor is up every one of them costs a failed dial and a failed relay post
-    /// and is retried anyway, so they wait for the onion to publish — or for
-    /// [`ANNOUNCE_FALLBACK`] after start, because `published()` has been measured reading false on
-    /// a published service, and gating on it alone would leave a pair on v1 mailboxes for good.
+    /// contribution). Before Tor is up each one costs a failed dial and a failed relay post and is
+    /// retried anyway, so they wait for the onion to publish — or for [`ANNOUNCE_FALLBACK`] after
+    /// start, because `published()` can read false on a published service, and gating on it alone
+    /// could leave a pair on v1 mailboxes for good.
     pub(crate) fn announce_ready(&self) -> bool {
         self.transport.published() || self.started.elapsed() >= ANNOUNCE_FALLBACK
     }
@@ -3788,15 +3780,11 @@ const RENDEZVOUS_POLL: Duration = Duration::from_millis(500);
 
 /// How long the joiner keeps trying to get its opener onto *some* relay before giving up, and how
 /// long it waits between rounds. A flaky Tor path can take many circuit attempts to reach the
-/// relay's onion (the relay may take dozens to publish its own descriptor), so one failed round is
-/// not "unreachable" — only a full window of failures is.
+/// relay's onion, so one failed round is not "unreachable" — only a full window of failures is.
 ///
-/// Two minutes, because that is how long a brand-new Tor state takes to reach the relay at all:
-/// measured on a phone (2026-10-09), a fresh identity's first relay round failed outright and the
-/// next, two and a half minutes after Tor started, succeeded. Joining straight after creating an
-/// identity — what a new user does — fell inside that window, and 45 s gave up on it every time.
-/// Four minutes since 2026-10-17: two was right at that edge, and the 0.2 device pass hit it twice
-/// (fresh desktop identities, and a phone just switched to mobile data).
+/// Four minutes: a brand-new Tor state takes about two to reach the relay at all, and joining
+/// straight after creating an identity — what a new user does — falls inside that, as does a phone
+/// that has just switched networks.
 #[cfg(not(test))]
 const POST_ESTABLISH_TIMEOUT: Duration = Duration::from_secs(240);
 #[cfg(test)]
@@ -3989,10 +3977,10 @@ pub fn run_join_handshake(
 pub(crate) const MAX_NAME_CHARS: usize = 64;
 
 /// A contact's self-chosen name, made safe to show: control and invisible formatting characters
-/// removed (bidi overrides and isolates, zero-width characters, tag characters), runs of
-/// whitespace collapsed, and at most [`MAX_NAME_CHARS`] kept. The name arrives from the contact
-/// and was stored as sent, so it could reorder the text around it, hide characters, or fill the
-/// screen (self-audit 2026-10-13, finding 7). Empty → [`DEFAULT_NAME`].
+/// removed (bidi overrides and isolates, zero-width characters, tag characters), runs of whitespace
+/// collapsed, and at most [`MAX_NAME_CHARS`] kept. The name arrives from the contact, so unchecked
+/// it could reorder the text around it, hide characters, or fill the screen. Empty →
+/// [`DEFAULT_NAME`].
 pub(crate) fn clean_display_name(raw: &str) -> String {
     fn invisible(c: char) -> bool {
         c.is_control()

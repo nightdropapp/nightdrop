@@ -1,10 +1,9 @@
-//! Bounds on what a contact's frames may carry (self-audit 2026-10-13, trust-boundary inventory;
-//! `docs/trust-boundaries.md`).
+//! Bounds on what a contact's frames may carry (`docs/trust-boundaries.md`).
 //!
-//! Frames from a paired contact are authenticated, but nothing bounded their size: an address, a
-//! message id or a text could be as large as a frame (~134 MB), stored in the sealed state and
-//! rewritten on every save, which a hostile contact could use to make the app crawl or fill the disk.
-//! These are the limits; every value that arrives from outside and is kept goes through one.
+//! Frames from a paired contact are authenticated, but that does not bound their size: an address,
+//! a message id or a text could be as large as a frame (~134 MB), stored in the sealed state and
+//! rewritten on every save, which a hostile contact could use to make the app crawl or fill the
+//! disk. These are the limits; every value that arrives from outside and is kept goes through one.
 
 /// Longest message text kept (text, edit, burn), in bytes. Longer arrives truncated, marked; this
 /// side refuses to send longer, so a real message is never cut silently.
@@ -21,8 +20,7 @@ pub(crate) const MAX_ADDRESS_BYTES: usize = 128;
 
 /// Messages one contact may add to this device in a rolling day, and attachment bytes. Each item is
 /// already bounded; this bounds how many, so a hostile contact cannot fill the disk or make every
-/// save re-seal an ever larger state (self-audit 2026-10-17, P10). Far above real use: ten
-/// largest-size videos a day still fit.
+/// save re-seal an ever larger state. Far above real use: ten largest-size videos a day still fit.
 pub(crate) const MAX_MESSAGES_PER_DAY: u32 = 5_000;
 pub(crate) const MAX_MEDIA_BYTES_PER_DAY: u64 = 1024 * 1024 * 1024;
 const DAY_SECS: u64 = 24 * 60 * 60;

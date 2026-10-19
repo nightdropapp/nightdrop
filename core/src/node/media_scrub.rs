@@ -1,18 +1,17 @@
-//! Remove what a video says about where, when and on what it was recorded, before it is sent
-//! (self-audit 2026-10-17, P1).
+//! Remove what a video says about where, when and on what it was recorded, before it is sent.
 //!
 //! Phones write the recording's GPS position (MP4 `©xyz`, QuickTime
-//! `com.apple.quicktime.location.ISO6709`), the device make and model, the software version and
-//! the exact recording time into the file, and Night Drop used to send videos byte for byte. A
-//! contact — or anyone a contact forwards it to — learned where the sender was standing.
+//! `com.apple.quicktime.location.ISO6709`), the device make and model, the software version and the
+//! exact recording time into the file. Sent byte for byte, a contact — or anyone a contact forwards
+//! it to — learns where the sender was standing.
 //!
 //! **Edited in place, never remuxed.** A metadata box becomes padding of the same size (`free` in
 //! ISO base media, `Void` in Matroska, `JUNK` in AVI) with its contents zeroed, and timestamps in
 //! headers are zeroed. Nothing moves, so the sample offsets that point into the file stay right and
 //! the picture and sound are bit for bit what was recorded; players skip padding by design.
 //!
-//! **Fails closed.** A file whose container cannot be walked far enough to find its metadata is
-//! not sent: the cost is a refused attachment, never a leaked location.
+//! **Fails closed.** A file whose container cannot be walked far enough to find its metadata is not
+//! sent: the cost is a refused attachment, never a leaked location.
 
 /// What [`scrub_video`] did.
 #[derive(Debug, PartialEq, Eq)]

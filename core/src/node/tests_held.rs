@@ -325,11 +325,11 @@ fn the_online_signal_decides_whether_a_launch_flushes_what_contacts_hold() {
     }
 }
 
-/// Seen with a direct-only phone (2026-10-10): the joiner started the private-mailbox agreement at
-/// pairing, before any relay route existed. (From 0.2 a pair's mailbox comes from the `Hello`
-/// instead, so no agreement runs at pairing at all.) The direct-only side never answers one, so once it was
-/// seen alive the joiner's chat said it was "on an older version". No agreement starts without a
-/// relay route, and an unanswered one left over from before says nothing about the contact's app.
+/// A joiner must not start the private-mailbox agreement at pairing before any relay route exists.
+/// (From 0.2 a pair's mailbox comes from the `Hello`, so no agreement runs at pairing at all.) The
+/// direct-only side never answers one, so once it was seen alive the joiner's chat would say it was
+/// "on an older version". No agreement starts without a relay route, and an unanswered one left
+/// over from before says nothing about the contact's app.
 #[test]
 fn a_direct_only_contact_gets_no_mailbox_agreement_and_is_never_called_old() {
     for direct_only_inviter in [false, true] {

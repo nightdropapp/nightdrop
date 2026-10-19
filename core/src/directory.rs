@@ -20,14 +20,15 @@ use base64::Engine as _;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 
-/// The operator's Ed25519 directory-signing **public** key, baked into the app. The app trusts
-/// only relay lists signed by the matching private key.
+/// The operator's Ed25519 directory-signing **public** key, baked into the app. The app trusts only
+/// relay lists signed by the matching private key (or a key it names in a recovery-signed rotation,
+/// `keyroll.rs`).
 ///
-/// This is the **Night Drop deployment** key; the operator holds the matching private key offline,
-/// on a USB stick and on no machine (since 2026-10-13; `MAINTENANCE.md` §11.5), and uses it to `nightdrop-relay sign-directory`
-/// the relay list. To run your **own** deployment, `nightdrop-relay gen-directory-key` mints a fresh
-/// pair — paste its public key here and rebuild the app. An all-zero key means "no directory
-/// configured" and verifies nothing (the feature stays inert until a real key is baked in).
+/// This is the **Night Drop deployment** key; the operator holds the private key offline, on a USB
+/// stick and on no machine (`MAINTENANCE.md` §11.5), and uses it to `nightdrop-relay
+/// sign-directory` the relay list. To run your **own** deployment, `nightdrop-relay
+/// gen-directory-key` mints a fresh pair — paste its public key here and rebuild the app. An
+/// all-zero key means "no directory configured" and verifies nothing.
 pub const DIRECTORY_PUBKEY: [u8; 32] = [
     58, 150, 15, 87, 0, 138, 17, 48, 22, 62, 118, 173, 244, 82, 23, 184, 147, 31, 160, 136, 101,
     61, 145, 225, 209, 136, 253, 4, 131, 143, 195, 240,

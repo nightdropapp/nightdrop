@@ -71,11 +71,10 @@ fn install_arti_tracing() {
 
 /// Per-`connect()` chatter with no diagnostic value, dropped before it reaches the log.
 ///
-/// Every relay request opens a fresh stream, and arti logs both of these each time — so while a
-/// short-code invite is outstanding (rendezvous polling every 2s, several requests per poll) they
-/// arrive in a steady stream and bury everything else. Filtered by message rather than by lowering
-/// `arti_client`/`tor_dirmgr` to `info`, because their debug output is precisely what explains a
-/// stuck bootstrap, which is what this log exists for. Seen flooding a device log 2026-08-02.
+/// Every relay request opens a fresh stream and arti logs both of these each time, so while a
+/// short-code invite is outstanding (rendezvous polling every 2 s) they bury everything else.
+/// Filtered by message rather than by lowering `arti_client`/`tor_dirmgr` to `info`, because their
+/// debug output is what explains a stuck bootstrap.
 const ARTI_NOISE: [&str; 2] = [
     "Attempted to bootstrap twice; ignoring",
     "It appears we have the lock on our state files",
@@ -142,9 +141,9 @@ const IDLE_TIMEOUT: Duration = Duration::from_secs(90);
 /// never meets this; it exists so a silent stream cannot sit on our onion for good.
 const INBOUND_IDLE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Streams one circuit may hold open to our onion at once. arti's default is 65,535; a contact
-/// uses one warm stream, plus a few while a send overlaps a reconnect. The relay's limit, for the
-/// same reason (self-audit 2026-10-13 R3, 2026-10-17 P6).
+/// Streams one circuit may hold open to our onion at once. arti's default is 65,535; a contact uses
+/// one warm stream, plus a few while a send overlaps a reconnect. The relay's limit, for the same
+/// reason.
 const INBOUND_STREAMS_PER_CIRCUIT: u32 = 16;
 
 /// Introduction requests each of a device's introduction points passes on: per second, and the
@@ -181,11 +180,11 @@ const PEER_DIAL_TIMEOUT: Duration = Duration::from_secs(15);
 /// poller) loop over their own schedule, each iteration a fresh, individually-bounded attempt.
 const RELAY_DIAL_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Cap how long a **connected** relay exchange — or a peer send — may go without moving a byte. Without it, a circuit
-/// that stalls after the connect hangs the calling thread for good — and that thread is the poller,
-/// which then drains, sends and retries nothing for the rest of the run (hit on a Galaxy S25,
-/// 2026-09-26: a message sat "Held for delivery" while the log went silent). A stall bound, not a
-/// total one, so a legitimately large blob (up to the relay's 150 MB) still completes.
+/// Cap how long a **connected** relay exchange — or a peer send — may go without moving a byte.
+/// Without it, a circuit that stalls after the connect hangs the calling thread for good, and that
+/// thread is the poller, which then drains, sends and retries nothing for the rest of the run. A
+/// stall bound, not a total one, so a legitimately large blob (up to the relay's 150 MB) still
+/// completes.
 const RELAY_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// Write `bytes`, failing if any chunk makes no progress within `stall`.
@@ -246,9 +245,8 @@ type OutStreams = Arc<Mutex<HashMap<Address, (DataStream, Instant)>>>;
 /// its Hello, a contact's Address or RelaySet frame — and arti dials whatever it is given, routing
 /// a plain hostname or IP through an exit node. A crafted invite or contact could therefore make
 /// this app send pairing frames (our identity key and onion in their clear routing fields) or relay
-/// requests over clearnet TCP, readable by the exit operator (self-audit 2026-10-13, round 5). Only
-/// onions are ever meant to be dialed, so nothing else is. The address is not echoed: diagnostics
-/// never name one.
+/// requests over clearnet TCP, readable by the exit operator. Only onions are ever meant to be
+/// dialed, so nothing else is. The address is not echoed: diagnostics never name one.
 fn require_onion(addr: &str) -> Result<()> {
     HsId::from_str(addr).map(|_| ()).map_err(|_| {
         anyhow::anyhow!("refusing to dial a peer or relay that is not an onion address")
@@ -680,14 +678,12 @@ impl Transport for TorTransport {
     ///
     /// **Monotonic within a run.** A published descriptor stays valid on the HSDirs for hours, so
     /// once we have seen the service reachable, a later dip in arti's aggregate state does not mean
-    /// peers can no longer find us — it usually means an introduction point is being replaced. This
-    /// used to un-publish us on every such dip, which told the user "others can't pair with you yet"
-    /// about a service that was serving fine.
+    /// peers can no longer find us — it usually means an introduction point is being replaced.
+    /// Un-publishing on every such dip would tell the user "others can't pair with you yet" about a
+    /// service that serves fine.
     ///
-    /// The state is logged on every **change**, because getting this boolean wrong was expensive:
-    /// a device measured on 2026-08-03 published 8/8 HSDirs on both time periods with 4/4 good IPTs
-    /// and zero upload failures, and still reported not-ready for eight minutes. Only transitions
-    /// are logged, so this is a handful of lines per session, not a poll-rate firehose.
+    /// The state is logged on every **change** (a handful of lines per session), because this
+    /// boolean has read wrong for minutes on a fully published service before.
     fn published(&self) -> bool {
         let state = self._service.status().state();
         let ready = state.is_fully_reachable()
@@ -1115,11 +1111,9 @@ fn keystore_is_on_disk(state_dir: Option<&str>, nickname: &str, have_saved_key: 
 ///       ArtiPath("hss/nightdrop/ipts/k_hss_ntor+…"). Regenerating.
 /// ```
 ///
-/// — and rebuilds the set from nothing, so every launch spends time at "no good IPTs" before it is
-/// reachable again. Introduced by the move to the in-memory keystore (`onion-key-at-rest.md`) and
-/// found in a device log on 2026-08-02. Removing the stale record makes the fresh start honest and
-/// silences a real bug report we were causing. The address is unaffected — that is the identity
-/// key, which we hold sealed; these are per-introduction-point keys, regenerated by design.
+/// — and rebuilds the set from nothing, so every launch spends time at "no good IPTs". Removing the
+/// stale record makes the fresh start honest. The address is unaffected — that is the identity key,
+/// which we hold sealed; these are per-introduction-point keys, regenerated by design.
 fn forget_stale_ipts(state_dir: Option<&str>, nickname: &str) {
     let Some(base) = state_dir else {
         return;
@@ -1323,16 +1317,13 @@ fn spawn_webtunnel_proxy(runtime: &Runtime, state_dir: Option<&str>) -> Result<O
 ///
 /// It cannot be per-run. `apply_bridges` appends it to the bridge line as `listener-secret=`, and
 /// arti persists a bridge's pluggable-transport settings — that secret included — into its own
-/// `state/guards.json`, then reuses the stored copy on the next start. So a freshly minted secret
-/// stops matching the moment the core restarts: arti dials our listener with the persisted, now
-/// stale secret, `Access::Secret` refuses it, and the bridge is marked down and stays down.
+/// `state/guards.json`, then reuses the stored copy on the next start. A fresh secret would stop
+/// matching the moment the core restarts: arti dials our listener with the stale one,
+/// `Access::Secret` refuses it, and the bridge is marked down for good (`No usable guards. Rejected
+/// 1/1 as down`). A desktop harness that starts the core once never sees this.
 ///
-/// Found on a device 2026-09-20, where the first in-app "reconnect" killed WebTunnel for good
-/// (`No usable guards. Rejected 1/1 as down`). A desktop harness never sees it, because it only
-/// ever starts the core once.
-///
-/// The secret only gates *local* access to the loopback proxy, so persisting it costs nothing:
-/// it never leaves the device and lives in app-private storage, mode 0600.
+/// The secret only gates *local* access to the loopback proxy, so persisting it costs nothing: it
+/// never leaves the device and lives in app-private storage, mode 0600.
 #[cfg(feature = "webtunnel")]
 fn listener_secret(state_dir: Option<&str>) -> String {
     use rand::RngCore;
@@ -1506,9 +1497,9 @@ async fn write_frame<W: futures::AsyncWrite + Unpin>(w: &mut W, frame: &[u8]) ->
 /// [`InboundBudget`]); `try_recv` releases it when the core takes the frame.
 ///
 /// `idle` bounds the wait for the next frame to start ([`INBOUND_IDLE_TIMEOUT`]); `stall` bounds
-/// each wait for more of a frame already announced ([`RELAY_STALL_TIMEOUT`], the sender's own
-/// write stall). Without them, anyone who can reach our onion could open streams and leave them
-/// silent for good (self-audit 2026-10-17, P6).
+/// each wait for more of a frame already announced ([`RELAY_STALL_TIMEOUT`], the sender's own write
+/// stall). Without them, anyone who can reach our onion could open streams and leave them silent
+/// for good.
 async fn read_frame<R: AsyncReadExt + Unpin>(
     r: &mut R,
     budget: &InboundBudget,
@@ -1550,9 +1541,9 @@ async fn read_frame<R: AsyncReadExt + Unpin>(
 mod bridge_tests {
     use super::*;
 
-    /// The listener secret must survive a core restart. arti persists it into `guards.json` as
-    /// part of the bridge's PT settings and dials us with that stored copy, so a per-run secret is
-    /// refused on the second start and the bridge is marked down for good (device, 2026-09-20).
+    /// The listener secret must survive a core restart. arti persists it into `guards.json` as part
+    /// of the bridge's PT settings and dials us with that stored copy, so a per-run secret is
+    /// refused on the second start and the bridge is marked down for good.
     #[cfg(feature = "webtunnel")]
     #[test]
     fn listener_secret_is_stable_across_restarts() {
@@ -1761,7 +1752,7 @@ mod circuit_closed_tests {
     use super::*;
     use arti_client::ErrorKind;
 
-    /// The chain clients logged (2026-10-05/06), minus our own context.
+    /// The error chain clients log for this case, minus our own context.
     const SEEN: &str = "Protocol error while launching a data stream: Protocol error while \
                         launching a data stream: Problem building circuit 4.172, while begin \
                         stream: Stream not connected";
@@ -1828,7 +1819,7 @@ mod stall_tests {
             .unwrap()
     }
 
-    // The poller hung for good on exactly this (device, 2026-09-26).
+    // Without this bound the poller hung for good on exactly this.
     #[test]
     fn a_stalled_relay_exchange_fails_instead_of_hanging() {
         let stall = Duration::from_millis(100);
@@ -1942,8 +1933,8 @@ mod stall_tests {
 mod timeout_floor_tests {
     use super::*;
 
-    // Without it arti's learned timeout ratcheted below real build times and disabled guard after
-    // guard until the desktop app had none left (2026-09-27).
+    // Without it arti's learned timeout ratchets below real build times and disables guard after
+    // guard until none are left.
     #[test]
     fn every_client_config_carries_the_circuit_timeout_floor() {
         let mut builder = TorClientConfigBuilder::default();
@@ -1961,7 +1952,7 @@ mod timeout_floor_tests {
 mod onion_only_tests {
     #[test]
     fn only_v3_onions_are_ever_dialed() {
-        // Self-audit 2026-10-13, round 5: arti dials a plain host through an exit.
+        // arti dials a plain host through an exit; only onions may be dialled.
         let relay = "bzcqxuxwvtmrmvprsoscnronkjf5wknfuj5ozxiq5fr6qowvnkwrwwad.onion";
         assert!(super::require_onion(relay).is_ok());
         let mut bad_checksum = relay.to_string();

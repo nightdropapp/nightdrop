@@ -4268,11 +4268,11 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// Ask our onion site whether a newer release exists (`crate::update`).
   ///
   /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
-  /// the site did not respond. Both are silence, never a warning — a user who is taught to
-  /// dismiss update notices will dismiss the one that matters.
+  /// the site did not respond. Both are silence, never a warning — a user taught to dismiss
+  /// update notices will dismiss the one that matters.
   ///
-  /// Pass the app's own version (the pubspec string, `"0.1.17+403"`, is fine — the build suffix
-  /// is ignored). Call it at most daily; it is a network round trip, not a getter.
+  /// Pass the app's own version (the pubspec string, `"0.2.0+416"`, is fine — the build suffix is
+  /// ignored). Call it at most daily; it is a network round trip, not a getter.
   Future<AppUpdate?> checkForUpdate({required String currentVersion}) =>
       RustLib.instance.api.crateApiNightdropCoreCheckForUpdate(
           that: this, currentVersion: currentVersion);
@@ -4317,10 +4317,9 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
 
   /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
   /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
-  /// `nightdrop-relay authorize-client <name> <key>`. arti presents the private half whenever this
-  /// device dials that relay, so after authorization the private relay becomes reachable. Asking
-  /// again returns the same key; it is kept in the sealed store across restarts. Only meaningful on the Tor transport; errors otherwise. Generating a key
-  /// for a public relay is harmless but unnecessary.
+  /// `nightdrop-relay authorize-client <name> <key>`; arti presents the private half whenever
+  /// this device dials that relay. Asking again returns the same key, kept in the sealed store.
+  /// Only meaningful on the Tor transport; harmless for a public relay.
   Future<String> createRelayAccessKey({required String relayOnion}) =>
       RustLib.instance.api.crateApiNightdropCoreCreateRelayAccessKey(
           that: this, relayOnion: relayOnion);
@@ -4350,14 +4349,11 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       .crateApiNightdropCoreDeleteChat(that: this, contactId: contactId);
 
   /// Whether the **direct** onion-to-onion path looks wedged: several sends in a row have failed
-  /// to reach a peer and none has ever succeeded this run.
+  /// to reach a peer and none has succeeded this run.
   ///
-  /// The companion to [`onion_ready`](Self::onion_ready), and the half that was missing. That one
-  /// only asks whether *our* service published; a device can do that perfectly while being unable
-  /// to reach anybody, because every circuit it builds dies in its guard set. Seen on a phone
-  /// (2026-08-03): descriptor uploaded 8/8, and simultaneously 417 circuit builds with 61 hard
-  /// timeouts and `Unable to build circuit to introduction point`. By the old health check that
-  /// device was fine, so nothing healed and every message silently went by relay instead.
+  /// The companion to [`onion_ready`](Self::onion_ready), which only asks whether *our* service
+  /// published: a device can publish perfectly while every circuit it builds to anyone else dies
+  /// in its guard set, and then every message silently goes by relay.
   Future<bool> directPathWedged() =>
       RustLib.instance.api.crateApiNightdropCoreDirectPathWedged(
         that: this,
@@ -4519,13 +4515,11 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
           that: this, contactId: contactId);
 
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
+  /// Fire-and-forget from the UI's point of view; a chat that no longer exists is ignored.
   ///
-  /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which
-  /// is undetectable. Making them visible is the honest trade. Fire-and-forget from the UI's point
-  /// of view; a chat that no longer exists is silently ignored.
-  ///
-  /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
-  /// not imply otherwise.
+  /// Called only where blocking is off (it is on by default on Android) or impossible. Only
+  /// Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must not
+  /// imply otherwise.
   Future<void> reportScreenshot({required String contactId}) => RustLib
       .instance.api
       .crateApiNightdropCoreReportScreenshot(that: this, contactId: contactId);
@@ -4603,9 +4597,9 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
       RustLib.instance.api.crateApiNightdropCoreSendMessage(
           that: this, contactId: contactId, text: text);
 
-  /// Tell the core which Night Drop version this is (the pubspec form, `"0.1.27+412"`), so it
-  /// can announce it to contacts (`Frame::Version`). The core crate does not know the app's
-  /// version; until this is called nothing is announced. Safe to call on every launch.
+  /// Tell the core which Night Drop version this is (the pubspec form, `"0.2.0+416"`), so it can
+  /// announce it to contacts (`Frame::Version`). Until this is called nothing is announced. Safe
+  /// to call on every launch.
   Future<void> setAppVersion({required String version}) => RustLib.instance.api
       .crateApiNightdropCoreSetAppVersion(that: this, version: version);
 
@@ -4705,24 +4699,17 @@ class NightdropCoreImpl extends RustOpaque implements NightdropCore {
   /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock.
   ///
   /// Call this before building a second core over the same `state_dir` — restoring a backup and
-  /// the guard heal both do exactly that, and arti refuses to launch a second onion service while
-  /// the first instance still holds the lock. Dropping the core is **not** enough on its own: the
-  /// poller thread holds handles on the same state, so the lock would still be held when the new
-  /// instance tried to start.
-  ///
-  /// Nor is *asking* the poller to stop enough, which is what this used to do. The poller
-  /// snapshots [`RelayClient`]s and drains them off the core lock (§1.5.2), and on Tor each clone
-  /// carries an `Arc<TorClient>` + the tokio runtime — so a poller still inside a drain keeps
-  /// arti's lock alive past the teardown. The replacement client then logs "Another process has
-  /// the lock on our state files" and runs **read-only**: it cannot persist the fresh guards a
-  /// heal just picked, so the next heal inherits the same wedged set and heals again, forever.
-  /// Seen looping all afternoon on a desktop, 2026-08-02.
+  /// the guard heal both do — because arti will not launch a second onion service while the first
+  /// holds the lock. Dropping the core is not enough, and neither is *asking* the poller to stop:
+  /// it drains relays off the core lock (§1.5.2), and each relay client on Tor holds an
+  /// `Arc<TorClient>` and the runtime, so a poller inside a drain keeps the lock alive. The
+  /// replacement client then runs **read-only** and cannot persist the guards a heal just picked,
+  /// so the heal repeats forever.
   ///
   /// So: stop the poller, tear the transport down (which also aborts an in-flight relay dial —
-  /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to actually
-  /// exit. The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this same path runs the duress
-  /// wipe, where hanging the app is worse than the bug being fixed; on expiry it says so in the
-  /// diagnostics and carries on.
+  /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to exit.
+  /// The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this path also runs the duress wipe,
+  /// where hanging is worse; on expiry it says so in the diagnostics and carries on.
   ///
   /// Idempotent; the core stays readable afterwards but can no longer send or receive.
   ///

@@ -325,10 +325,10 @@ impl Node {
             let bytes = base64::engine::general_purpose::STANDARD
                 .decode(f.data.as_bytes())
                 .map_err(|_| anyhow::anyhow!("bad onion-key encoding"))?;
-            // The path comes from the backup, which an attacker can craft: `join` follows `..`
-            // and an absolute path replaces `root` outright, so an unchecked one wrote anywhere
-            // the user can write — an autostart entry on desktop (self-audit 2026-10-13,
-            // finding 2). Only plain relative components, as `collect_onion_keys` produces.
+            // The path comes from the backup, which an attacker can craft: `join` follows `..` and
+            // an absolute path replaces `root` outright, so an unchecked one could write anywhere
+            // the user can — an autostart entry on desktop. Only plain relative components, as
+            // `collect_onion_keys` produces.
             let dest = keystore_dest(&root, &f.path)?;
             if let Some(parent) = dest.parent() {
                 std::fs::create_dir_all(parent)?;
@@ -746,8 +746,8 @@ impl Node {
             anyhow::anyhow!("no server backup found (expired or wrong password?)")
         })?;
         // `take` removed the relay's copy. If restoring it fails (a damaged or newer-format blob),
-        // put it back, or a failed attempt would destroy the only server backup (self-audit
-        // 2026-10-17, R8-3). A wrong password never gets here: it derives a different handle.
+        // put it back, or a failed attempt would destroy the only server backup. A wrong password
+        // never gets here: it derives a different handle.
         Self::restore_from_backup(&blob, password, transport).inspect_err(|_| {
             let _ = relay.post(&handle, &blob, SERVER_BACKUP_DEFAULT_TTL);
         })
@@ -784,7 +784,7 @@ fn chat_from_persisted(
     Chat {
         contact: Contact {
             id: chat.contact_id.clone(),
-            // Names stored before they were cleaned on receipt are cleaned here (finding 7).
+            // Names stored before they were cleaned on receipt are cleaned here.
             their_name: super::clean_display_name(&chat.their_name),
             my_name: chat.my_name.clone(),
             remote_storage: chat.remote_storage,

@@ -910,10 +910,10 @@ impl Transport for StaleStream {
     }
 }
 
-/// The 2026-09-30 Windows ↔ phone case: Alice's message went to the relay, Bob drained it, and his
-/// receipt went into a connection to Alice that was already dead. `send` reported success, so the
-/// relay fallback never ran and Alice's message stayed "Held for delivery". The receipt must dial
-/// fresh, fail, and reach her through the relay instead.
+/// Alice's message went to the relay, Bob drained it, and his receipt went into a connection to
+/// Alice that was already dead. `send` reports success there, so the relay fallback would never run
+/// and Alice's message would stay "Held for delivery". The receipt must dial fresh, fail, and reach
+/// her through the relay instead.
 #[test]
 fn a_receipt_is_not_lost_in_a_dead_kept_open_connection() {
     receipt_survives_a_dead_connection(true);

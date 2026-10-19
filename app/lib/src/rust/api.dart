@@ -46,25 +46,19 @@ Future<void> diagNote({required String line}) =>
     RustLib.instance.api.crateApiDiagNote(line: line);
 
 /// Delete arti's entry-guard state under `state_dir` — but NOT the onion keystore, so the device
-/// keeps its stable `.onion`. The next Tor bootstrap then picks fresh entry guards. This is the
-/// recovery for a **wedged guard set** (guards that have churned out of the network): a client
-/// stuck on them can neither publish its own onion nor reach the relay, and a plain re-bootstrap
-/// reuses the same guards, so it can't recover on its own (§6). Call this with the core shut down,
-/// then build a fresh core. No-op if the file is absent.
+/// keeps its `.onion`. The next bootstrap picks fresh entry guards. This is the recovery for a
+/// **wedged guard set** (guards that have churned out of the network): a client stuck on them can
+/// neither publish its onion nor reach the relay, and a plain re-bootstrap reuses them (§6). Call
+/// with the core shut down, then build a fresh core. No-op if the file is absent.
 ///
-/// **`circuit_timeouts.json` is deliberately left alone.** It holds arti's *learned* circuit-build
-/// time distribution, which has nothing to do with which guards we use; deleting it dropped the
-/// replacement client onto conservative defaults until it re-measured, so a reset made the next
-/// several minutes slower — the opposite of the intent, and precisely when the network was already
-/// bad. It was being deleted only because it sits in the same directory.
+/// **`circuit_timeouts.json` is left alone.** It holds arti's learned circuit-build times, which
+/// have nothing to do with which guards we use; deleting it puts the new client on conservative
+/// defaults, slower exactly when the network is already bad.
 ///
-/// This is a **last resort**. Entry guards exist to bound the chance that a hostile relay ever
-/// becomes our entry, so they are meant to be sticky for weeks; C-tor keeps one for months.
-/// Rotating them spends real anonymity margin, and anything that can cause unreachability can
-/// force rotation. arti already recovers from a single unreachable guard on its own — measured
-/// 2026-08-03: it added a fresh guard to the sample 0.7 s after the failure and had it usable 79 s
-/// later, without discarding the persisted set. Only reach for this when the client is stuck in a
-/// way that persists (see [`NightdropCore::direct_path_wedged`]).
+/// A **last resort**: guards are meant to be sticky for weeks, since rotating them spends anonymity
+/// margin, and anything that can cause unreachability could then force rotation. arti recovers from
+/// a single unreachable guard on its own; use this only when the client stays stuck (see
+/// [`NightdropCore::direct_path_wedged`]).
 Future<void> resetTorGuards({required String stateDir}) =>
     RustLib.instance.api.crateApiResetTorGuards(stateDir: stateDir);
 
@@ -230,11 +224,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Ask our onion site whether a newer release exists (`crate::update`).
   ///
   /// `None` means **no answer, say nothing**: either this transport has no anonymized path, or
-  /// the site did not respond. Both are silence, never a warning — a user who is taught to
-  /// dismiss update notices will dismiss the one that matters.
+  /// the site did not respond. Both are silence, never a warning — a user taught to dismiss
+  /// update notices will dismiss the one that matters.
   ///
-  /// Pass the app's own version (the pubspec string, `"0.1.17+403"`, is fine — the build suffix
-  /// is ignored). Call it at most daily; it is a network round trip, not a getter.
+  /// Pass the app's own version (the pubspec string, `"0.2.0+416"`, is fine — the build suffix is
+  /// ignored). Call it at most daily; it is a network round trip, not a getter.
   Future<AppUpdate?> checkForUpdate({required String currentVersion});
 
   /// Join from a scanned QR payload (pre-authorized, §5a):
@@ -266,10 +260,9 @@ abstract class NightdropCore implements RustOpaqueInterface {
 
   /// Generate this device's **access key** for a PRIVATE relay (restricted discovery, §3.2).
   /// Returns the public `descriptor:x25519:…` string to give the relay operator, who runs
-  /// `nightdrop-relay authorize-client <name> <key>`. arti presents the private half whenever this
-  /// device dials that relay, so after authorization the private relay becomes reachable. Asking
-  /// again returns the same key; it is kept in the sealed store across restarts. Only meaningful on the Tor transport; errors otherwise. Generating a key
-  /// for a public relay is harmless but unnecessary.
+  /// `nightdrop-relay authorize-client <name> <key>`; arti presents the private half whenever
+  /// this device dials that relay. Asking again returns the same key, kept in the sealed store.
+  /// Only meaningful on the Tor transport; harmless for a public relay.
   Future<String> createRelayAccessKey({required String relayOnion});
 
   /// Enable an **opt-in server backup** (§7c invariant): post an opaque, password-encrypted
@@ -294,14 +287,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<void> deleteChat({required String contactId});
 
   /// Whether the **direct** onion-to-onion path looks wedged: several sends in a row have failed
-  /// to reach a peer and none has ever succeeded this run.
+  /// to reach a peer and none has succeeded this run.
   ///
-  /// The companion to [`onion_ready`](Self::onion_ready), and the half that was missing. That one
-  /// only asks whether *our* service published; a device can do that perfectly while being unable
-  /// to reach anybody, because every circuit it builds dies in its guard set. Seen on a phone
-  /// (2026-08-03): descriptor uploaded 8/8, and simultaneously 417 circuit builds with 61 hard
-  /// timeouts and `Unable to build circuit to introduction point`. By the old health check that
-  /// device was fine, so nothing healed and every message silently went by relay instead.
+  /// The companion to [`onion_ready`](Self::onion_ready), which only asks whether *our* service
+  /// published: a device can publish perfectly while every circuit it builds to anyone else dies
+  /// in its guard set, and then every message silently goes by relay.
   Future<bool> directPathWedged();
 
   /// Download the published build **for this device** over Tor and write it to `dest_path`,
@@ -395,21 +385,14 @@ abstract class NightdropCore implements RustOpaqueInterface {
   static Future<NightdropCore> newInstance() =>
       RustLib.instance.api.crateApiNightdropCoreNew();
 
-  /// Real core over the **local-network (LAN / Wi-Fi) transport** — a Briar-style offline path
-  /// for when there is no internet, or Tor is blocked, but paired devices share a network (§6).
-  /// Binds a listener on `port` (`0` = an ephemeral port) across all interfaces and advertises
-  /// this machine's detected LAN IP, so a peer on the same network reaches us with no public
-  /// address or port-forwarding. The canonical flow is QR pairing in the same room; frames then
-  /// flow directly, end-to-end encrypted and fixed-size padded, over the LAN.
+  /// A core over the **LAN-only transport** (`transport::lan`): plain TCP on the local network,
+  /// no Tor. Kept for the device integration tests, which need two real cores talking over
+  /// sockets; the app's same-Wi-Fi path is Nearby (`docs/design/nearby.md`), which runs beside
+  /// Tor instead of replacing it.
   ///
-  /// `relay_addr` is optional (offline LANs usually have none). Persistence (`persist_path` +
-  /// base64 `persist_key`) behaves exactly as in [`new_tor`](Self::new_tor): restore if the file
-  /// exists, else create + save a fresh identity. Because a LAN address changes between runs, on
-  /// restore we announce the new address to contacts in-band (§5c) so they can still reach us —
-  /// pass a **fixed** `port` for a more stable address.
-  ///
-  /// Anonymity note: LAN traffic is **not** anonymized (a local observer sees two IPs talking);
-  /// only the content is encrypted. This is a censorship/blackout fallback, not a Tor replacement.
+  /// Binds `port` (`0` = ephemeral) on all interfaces and advertises the detected LAN IP.
+  /// `relay_addr` is optional; persistence (`persist_path` + base64 `persist_key`) behaves as in
+  /// [`new_tor`](Self::new_tor). Not anonymized: a local observer sees two IPs talking.
   static Future<NightdropCore> newLan(
           {required int port,
           String? relayAddr,
@@ -489,13 +472,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<void> reportScreenRecording({required String contactId});
 
   /// Report a **screenshot** of this chat (#1) — log it locally and tell the peer.
+  /// Fire-and-forget from the UI's point of view; a chat that no longer exists is ignored.
   ///
-  /// Screenshots stay allowed: blocking them just moves people to photographing the screen, which
-  /// is undetectable. Making them visible is the honest trade. Fire-and-forget from the UI's point
-  /// of view; a chat that no longer exists is silently ignored.
-  ///
-  /// Only Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must
-  /// not imply otherwise.
+  /// Called only where blocking is off (it is on by default on Android) or impossible. Only
+  /// Android 14+ can detect a screenshot, so a peer's silence proves nothing — the UI must not
+  /// imply otherwise.
   Future<void> reportScreenshot({required String contactId});
 
   /// Restore a core from a password-encrypted backup file (§7). `listen_addr` +
@@ -531,16 +512,15 @@ abstract class NightdropCore implements RustOpaqueInterface {
           persistPath: persistPath,
           persistKey: persistKey);
 
-  /// Recover from an opt-in **server backup** on a fresh device (§7c / #9): bootstrap Tor,
-  /// fetch the opaque blob from the relay by its password-derived handle, decrypt it with the
-  /// user's recovery `password`, and rebuild identity + chats — persisted under `persist_key`
-  /// so it survives future restarts. The relay counterpart of [`restore_backup_tor`](Self::restore_backup_tor).
+  /// Recover from an opt-in **server backup** on a fresh device (§7c): bootstrap Tor, fetch the
+  /// opaque blob from the relay by its password-derived handle, decrypt it with the recovery
+  /// `password`, and rebuild identity and chats, persisted under `persist_key`. The relay
+  /// counterpart of [`restore_backup_tor`](Self::restore_backup_tor).
   ///
-  /// The backup blob does not carry into a *pre-bootstrap* onion keystore here (the relay is
-  /// only reachable once Tor is up), so this device comes back on a **new** `.onion`; the
-  /// startup address-rotation announcement (#11) then tells contacts the new address. Note: the
-  /// relay copy is drained on fetch, so an unsuccessful attempt (e.g. wrong password) consumes
-  /// it — the same "lose the password, lose the backup" contract as create.
+  /// The relay is reachable only once Tor is up, so this device bootstraps before it has the
+  /// backup's onion key and comes back on a **new** `.onion`; the startup address announcement
+  /// tells contacts. The relay copy is taken on fetch and put back if restoring it fails; a wrong
+  /// password derives a different handle and finds nothing.
   static Future<NightdropCore> restoreServerBackupTor(
           {required String password,
           String? stateDir,
@@ -605,9 +585,9 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<List<ChatMessage>> sendMessage(
       {required String contactId, required String text});
 
-  /// Tell the core which Night Drop version this is (the pubspec form, `"0.1.27+412"`), so it
-  /// can announce it to contacts (`Frame::Version`). The core crate does not know the app's
-  /// version; until this is called nothing is announced. Safe to call on every launch.
+  /// Tell the core which Night Drop version this is (the pubspec form, `"0.2.0+416"`), so it can
+  /// announce it to contacts (`Frame::Version`). Until this is called nothing is announced. Safe
+  /// to call on every launch.
   Future<void> setAppVersion({required String version});
 
   /// Tell the core the app moved to/from the background. Backgrounded, the poller slows
@@ -683,24 +663,17 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// [`crate::node::Node::close_transport`]), releasing Tor's on-disk state lock.
   ///
   /// Call this before building a second core over the same `state_dir` — restoring a backup and
-  /// the guard heal both do exactly that, and arti refuses to launch a second onion service while
-  /// the first instance still holds the lock. Dropping the core is **not** enough on its own: the
-  /// poller thread holds handles on the same state, so the lock would still be held when the new
-  /// instance tried to start.
-  ///
-  /// Nor is *asking* the poller to stop enough, which is what this used to do. The poller
-  /// snapshots [`RelayClient`]s and drains them off the core lock (§1.5.2), and on Tor each clone
-  /// carries an `Arc<TorClient>` + the tokio runtime — so a poller still inside a drain keeps
-  /// arti's lock alive past the teardown. The replacement client then logs "Another process has
-  /// the lock on our state files" and runs **read-only**: it cannot persist the fresh guards a
-  /// heal just picked, so the next heal inherits the same wedged set and heals again, forever.
-  /// Seen looping all afternoon on a desktop, 2026-08-02.
+  /// the guard heal both do — because arti will not launch a second onion service while the first
+  /// holds the lock. Dropping the core is not enough, and neither is *asking* the poller to stop:
+  /// it drains relays off the core lock (§1.5.2), and each relay client on Tor holds an
+  /// `Arc<TorClient>` and the runtime, so a poller inside a drain keeps the lock alive. The
+  /// replacement client then runs **read-only** and cannot persist the guards a heal just picked,
+  /// so the heal repeats forever.
   ///
   /// So: stop the poller, tear the transport down (which also aborts an in-flight relay dial —
-  /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to actually
-  /// exit. The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this same path runs the duress
-  /// wipe, where hanging the app is worse than the bug being fixed; on expiry it says so in the
-  /// diagnostics and carries on.
+  /// see [`TorTransport::make_relay_dialer`]), then **wait, bounded**, for the poller to exit.
+  /// The wait is capped at [`POLLER_EXIT_TIMEOUT`] because this path also runs the duress wipe,
+  /// where hanging is worse; on expiry it says so in the diagnostics and carries on.
   ///
   /// Idempotent; the core stays readable afterwards but can no longer send or receive.
   ///
@@ -843,16 +816,14 @@ class ChatMessage {
   ///
   /// * `""` — n/a (incoming or system).
   /// * `"sent"` — handed to the peer's onion, which answered. **Not** a claim that their device
-  ///   has it: the frame can still be lost there. Transient — if no receipt names it within
-  ///   `RECEIPT_TIMEOUT` the core puts a relay copy behind it and it becomes `"queued"`.
+  ///   has it. Transient: with no receipt within `RECEIPT_TIMEOUT`, the core puts a relay copy
+  ///   behind it and it becomes `"queued"`.
   /// * `"queued"` — held on a relay until they collect it.
-  /// * `"waiting"` — held on this device: no relay connects us, and they were offline. Sent
+  /// * `"waiting"` — held on this device: no relay connects us and they were offline. Sent
   ///   directly once they are online (`docs/design/optional-relay.md` §4); never expires.
-  /// * `"delivered"` — **only** state that means arrival, and only ever set by a
+  /// * `"delivered"` — the **only** state that means arrival, set only by a
   ///   [`Frame::Delivered`](crate::wire::Frame::Delivered) naming this message. A dial
-  ///   succeeding, a message arriving from them, and their relay `Ack` all used to set it; each
-  ///   means "they are alive", which is not the same thing and was wrong often enough to lose a
-  ///   message in the field (2026-08-02).
+  ///   succeeding, a message from them, or their relay `Ack` mean "they are alive", not this.
   /// * `"expired"` — sat queued past the relay's 24h TTL uncollected (§11.3).
   final String delivery;
 
@@ -1015,8 +986,8 @@ class Contact {
   /// feature must not have.
   final bool? peerSupportsBurn;
 
-  /// The Night Drop version the peer last announced (`Frame::Version`, e.g. `"0.1.27"`). `None`
-  /// means they have not said: a build older than 0.1.27, or no announce received yet.
+  /// The Night Drop version the peer last announced (`Frame::Version`, e.g. `"0.2.0"`). `None`
+  /// means they have not said: an older build, or no announcement received yet.
   final String? peerAppVersion;
 
   /// Whether opt-in server storage (§6) is actually working: `false` when it is enabled but the

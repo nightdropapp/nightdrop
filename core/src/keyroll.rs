@@ -1,8 +1,8 @@
-//! Rotating a signing key that released apps carry (self-audit 2026-10-13, key-compromise plan).
+//! Rotating a signing key that released apps carry.
 //!
 //! The update manifest and the relay list are each signed by a key whose public half is baked into
-//! every released app. Baked in alone, it could never change: a leaked key would sign forever, and a
-//! lost one would end updates for every install. So each purpose ships **two** public keys:
+//! every released app. Baked in alone, it could never change: a leaked key would sign forever, and
+//! a lost one would end updates for every install. So each purpose ships **two** public keys:
 //!
 //! * the **signing** key, which signs every manifest or list (its secret lives offline, on a USB
 //!   stick, and is plugged in only to sign);
@@ -12,8 +12,9 @@
 //! The app trusts the newest signing key it has been shown with a valid rotation, and **remembers
 //! it** ([`Trust`], kept in the sealed store). Once it has seen sequence `n`, an older key — the
 //! baked one included — is refused, so whoever holds a leaked old key cannot roll it back. Every
-//! later manifest or list carries the rotation, so an app that missed it learns it on its next fetch.
-//! A rotation's signature binds the purpose, so one for the relay list can never move the update key.
+//! later manifest or list carries the rotation, so an app that missed it learns it on its next
+//! fetch. A rotation's signature binds the purpose, so one for the relay list can never move the
+//! update key.
 //!
 //! What this cannot do: survive the recovery key itself leaking. That key is the root; keep it
 //! offline and apart.
@@ -73,8 +74,8 @@ pub struct Rotation {
 /// Kept **with its rotation signature** and re-verified every time it is used: it comes back from
 /// the state file and from backups, and a backup can be someone else's file. A bare `seq`/`key`
 /// would let a crafted backup pin a bogus key with a huge sequence, after which every real manifest
-/// and relay list is refused for good (self-audit 2026-10-17, P9). One without a valid signature —
-/// including those written before the signature was kept — is ignored, falling back to the baked key.
+/// and relay list is refused for good. One without a valid signature is ignored, falling back to
+/// the baked key.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct Trust {
     pub seq: u64,

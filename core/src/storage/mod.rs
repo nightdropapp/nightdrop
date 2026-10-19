@@ -177,18 +177,14 @@ pub struct PersistedChat {
     /// a chat without one simply mints a fresh key and re-announces it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_key: Option<String>,
-    /// Whether the local user has **approved** this chat, or it is still an inbound request awaiting
-    /// approval (`ARCHITECTURE.md` §5 — authorization before first message).
+    /// Whether the local user has **approved** this chat, or it is still an inbound request
+    /// awaiting approval (`ARCHITECTURE.md` §5 — authorization before first message). A pending
+    /// request is a chat and is saved like any other, so restore must not assume every saved chat
+    /// was approved: that would promote a stranger's request to a contact on the next restart.
     ///
-    /// Added 2026-08-02, after a device test. This field did not exist, and restore hardcoded
-    /// `authorized: true` on the reasoning that "persisted chats were authorized before saving" —
-    /// which is simply not so, since a pending request is a chat and is saved like any other. So a
-    /// stranger's unapproved request was **promoted to an approved contact by the next restart**,
-    /// with no approval ever given: exactly the invariant this app is supposed to hold.
-    ///
-    /// `default = "yes"`, not `#[serde(default)]`. A missing field means a state file written before
-    /// this existed, and defaulting those to `false` would demote every real contact on an upgrade
-    /// to a request the user has to re-approve. Files written from now on carry the truth.
+    /// `default = "yes"`, not `#[serde(default)]`. A missing field means a state file written
+    /// before this existed, and defaulting those to `false` would demote every real contact on an
+    /// upgrade to a request the user has to re-approve.
     #[serde(default = "yes")]
     pub authorized: bool,
     /// Our 32-byte contribution to the chat's v2 mailbox secret, base64 (`mailbox-handles.md`).
@@ -387,12 +383,10 @@ pub struct PersistedPass {
 
 /// A short-code invite this device is hosting, persisted so it survives a **core rebuild**.
 ///
-/// It used to live only in memory, and a rebuild is not rare: the guard heal does one, so does
-/// "Reset Tor connection", so does a restore. The inviter's screen kept showing a code that
-/// nothing was listening for any more, so the joiner got "the inviter never answered" and the
-/// blame landed on the wrong side. Observed on 2026-08-03 with two fresh identities, where it is
-/// worst — a new identity's first descriptor publish is slow enough that the 150 s heal reliably
-/// fires *during* pairing, so the people most likely to hit it are new users on their first try.
+/// A rebuild is not rare — the guard heal, "Reset Tor connection" and a restore each do one, and a
+/// new identity's slow first publish makes the heal likely *during* pairing. In memory only, the
+/// inviter's screen would keep showing a code nothing listens for any more, and the joiner would be
+/// told the inviter never answered.
 ///
 /// The secret words are moderate-entropy and live at most [`SHORT_CODE_TTL`]; they sit inside the
 /// same sealed state file as the ratchet sessions, so this adds no new class of at-rest secret.
@@ -695,12 +689,12 @@ mod tests {
 }
 
 /// Make the app's data folder readable by this user only (0700), on Unix. Its files are sealed, but
-/// a world-readable folder (Flutter creates it with the default umask: 0755) still showed other
+/// a world-readable folder (Flutter creates it with the default umask: 0755) still shows other
 /// accounts the state file's size, one file per contact under `client-auth/` (their public onion
-/// keys: how many contacts, and linkable), and the media folder's counts and times (self-audit
-/// 2026-10-17, round 10). A restrictive folder covers everything in it, including files created
-/// before this ran; the Linux runner also sets umask 077 for what comes after. Best effort: a
-/// failure leaves the folder as it was, which is no worse than before.
+/// keys: how many contacts, and linkable), and the media folder's counts and times. A restrictive
+/// folder covers everything in it, including files created before this ran; the Linux runner also
+/// sets umask 077 for what comes after. Best effort: a failure leaves the folder as it was, which
+/// is no worse than before.
 pub fn restrict_dir(dir: &std::path::Path) {
     #[cfg(unix)]
     {

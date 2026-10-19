@@ -1,11 +1,9 @@
 //! What an attachment is allowed to claim to be, and what a decrypted one may be opened as.
 //!
-//! An attachment's `kind` and `mime` arrive from the contact, and used to reach the filesystem
-//! and the OS unchecked: the app named the decrypted file after the last segment of the mime and
-//! handed it to the system by extension. A contact could send a "video" as `video/bat` (Windows
-//! ran it on tap), `video/html` or `video/m3u` (the browser or player then fetched the
-//! contact's URL over clearnet, revealing the recipient's IP), or put `\` in it to place the
-//! file outside the cache on Windows. Self-audit 2026-10-13, finding 1.
+//! An attachment's `kind` and `mime` arrive from the contact. Trusted, they decide how the OS opens
+//! the file: a "video" sent as `video/bat` runs on tap on Windows, `video/html` or `video/m3u`
+//! makes the browser or player fetch the contact's URL over clearnet (revealing the recipient's
+//! IP), and a `\` in it places the file outside the cache on Windows.
 //!
 //! Two rules close it:
 //!
@@ -16,11 +14,11 @@
 //!   that container ([`video_ext`]). A player sniffs content, so a trusted extension on a
 //!   playlist would still leak; checking the bytes is what makes the name honest.
 //!
-//! And one for what the app itself draws (self-audit 2026-10-17, P2): an image or a video's preview
-//! is decoded in-process, by whichever of the engine's decoders the bytes select (GIF, WebP, BMP,
-//! ICO, HEIF…), as soon as the chat is open — the place messengers' zero-click bugs live. Every
-//! sender re-encodes to JPEG, so only a plain JPEG of sane size is handed over for drawing
-//! ([`displayable_image`]); anything else shows as unavailable.
+//! And one for what the app itself draws: an image or a video's preview is decoded in-process, by
+//! whichever of the engine's decoders the bytes select (GIF, WebP, BMP, ICO, HEIF…), as soon as the
+//! chat is open — the place messengers' zero-click bugs live. Every sender re-encodes to JPEG, so
+//! only a plain JPEG of sane size is handed over for drawing ([`displayable_image`]); anything else
+//! shows as unavailable.
 
 /// Mime types an attachment may carry, per kind. Matches what the app sends (`_mimeFor` in
 /// `chat_screen.dart`); images are re-encoded to JPEG except GIFs.

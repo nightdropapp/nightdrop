@@ -22,9 +22,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 
 /// Argon2id cost for a **user-chosen** secret: 64 MiB, 3 passes — about 3.4× the memory and 5× the
-/// work of the crate default (19 MiB, 2 passes) used for random backup passwords. Measured at about
-/// 0.14 s per unlock on a Galaxy S25 and 0.13 s on a desktop (`docs/design/app-lock.md` §7). Persisted per lock so these can be raised later
-/// without stranding an existing lock file.
+/// work of the crate default (19 MiB, 2 passes) used for random backup passwords. About 0.14 s per
+/// unlock on a recent phone and on a desktop (`docs/design/app-lock.md` §7). Persisted per lock so
+/// these can be raised later without stranding an existing lock file.
 const M_COST_KIB: u32 = 64 * 1024;
 const T_COST: u32 = 3;
 const P_COST: u32 = 1;
@@ -182,7 +182,7 @@ fn write(dir: &str, lock: &LockV2) -> Result<()> {
     write_bytes(dir, &serde_json::to_vec(lock)?)
 }
 
-/// [`write`] for raw bytes (also how a failed duress arm restores the previous file).
+/// [`write`](fn@write) for raw bytes (also how a failed duress arm restores the previous file).
 fn write_bytes(dir: &str, bytes: &[u8]) -> Result<()> {
     std::fs::create_dir_all(dir).ok();
     crate::storage::write_atomic(&path(dir), bytes)
@@ -190,8 +190,8 @@ fn write_bytes(dir: &str, bytes: &[u8]) -> Result<()> {
 
 /// The largest costs a lock file may ask for: 1 GiB, 16 passes, 8 lanes — far above what this app
 /// writes, so a later increase still fits. The costs come from the file, and a file someone else
-/// wrote could otherwise make every unlock try to allocate terabytes and crash (self-audit
-/// 2026-10-17, R8-4); such a file reads as damaged instead.
+/// wrote could otherwise make every unlock try to allocate terabytes and crash; such a file reads
+/// as damaged instead.
 const MAX_M_COST_KIB: u32 = 1024 * 1024;
 const MAX_T_COST: u32 = 16;
 const MAX_P_COST: u32 = 8;
@@ -363,11 +363,11 @@ pub fn unlock(dir: &str, secret: &str) -> Result<Opened> {
 }
 
 /// Failed unlocks, beside the lock file: how many in a row, and when the last one was. It holds no
-/// secret. Persisted so the wait survives the app being force-closed (self-audit 2026-10-13, round
-/// 5): the screen's own 0.5–5 s delay reset on every restart, so someone holding an unlocked phone
-/// could try every 4-digit PIN in hours. This still does nothing against an offline attack on a
-/// copy of the lock file (`docs/design/app-lock.md` §2), and someone who can set the phone's clock
-/// forward can shorten a wait; it is a brake on guessing at the screen, which is the PIN's threat.
+/// secret. Persisted so the wait survives the app being force-closed — a delay that reset on every
+/// restart would let someone holding an unlocked phone try every 4-digit PIN in hours. This does
+/// nothing against an offline attack on a copy of the lock file (`docs/design/app-lock.md` §2), and
+/// someone who can set the phone's clock forward can shorten a wait; it is a brake on guessing at
+/// the screen, which is the PIN's threat.
 pub const ATTEMPTS_FILE: &str = "store-key.attempts";
 
 #[derive(Serialize, Deserialize, Default)]
@@ -462,7 +462,7 @@ pub fn destroy(dir: &str) -> Result<()> {
 mod tests {
     #[test]
     fn wrong_attempts_are_throttled_across_restarts_and_cleared_by_success() {
-        // Self-audit 2026-10-13, round 5.
+        // Wrong attempts are throttled across restarts.
         let dir = std::env::temp_dir().join(format!("nd-lock-throttle-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
@@ -644,10 +644,9 @@ mod tests {
 
     #[test]
     fn a_v2_lock_written_before_the_armed_flag_still_opens() {
-        // Regression (field report, 2026-08-01): `armed` was added to v2 as a required field, so
-        // every lock file written by the previous build stopped deserializing — and the user was
-        // told their correct PIN was wrong, with no way back in. Adding a field to a format version
-        // that already shipped must never be able to do that.
+        // A field added to a format version that already shipped must be optional: made required,
+        // every lock file written by the previous build would stop deserializing, and the user
+        // would be told their correct PIN was wrong, with no way back in.
         let dir = tmpdir();
         let key: StoreKey = [13u8; 32];
         set_passphrase(&dir, &key, "normal secret here").unwrap();

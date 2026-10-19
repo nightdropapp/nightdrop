@@ -174,14 +174,10 @@ fn state_survives_a_restart_via_encrypted_storage() {
     std::fs::remove_file(&path).ok();
 }
 
-// The invariant above, across a restart — which is where it was being lost. Found on a device
-// (2026-08-02): a request arrived on the desktop, the app restarted minutes later, and the chat
-// came back as an ordinary approved contact. Nobody ever approved it. `PersistedChat` had no
-// `authorized` field and restore hardcoded `true`, on a comment's assumption that only approved
-// chats were ever saved — but a pending request is a chat, and is saved like any other.
-//
-// So a stranger's Hello plus any restart was enough to become a contact, and the peer stayed
-// stuck on "waiting for the other person to accept" while their messages were being accepted.
+// The invariant above, across a restart. A pending request is a chat and is saved like any other,
+// so restore must not assume every saved chat was approved: a stranger's Hello plus any restart
+// would then be enough to become a contact, while the peer stayed on "waiting for the other person
+// to accept".
 #[test]
 fn a_pending_request_is_still_pending_after_a_restart() {
     let net = MemoryNetwork::new();
@@ -425,7 +421,7 @@ fn password_backup_round_trips_and_rejects_wrong_password() {
 }
 
 /// A restore that fails after `take` has removed the relay's copy must put it back: otherwise one
-/// failed attempt destroys the only server backup (self-audit 2026-10-17, R8-3).
+/// failed attempt destroys the only server backup.
 #[test]
 fn a_failed_server_restore_leaves_the_backup_on_the_relay() {
     let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
@@ -1090,9 +1086,8 @@ fn approving_twice_does_not_resend_approval() {
     assert_eq!(approvals, 1, "second approval must not resend");
 }
 
-/// Seen on the S23, 2026-10-11: the approval came twice (a direct copy that looked lost, then the
-/// relay copy put behind it) and the joiner showed "Your chat request was approved" twice. Only
-/// the approval that ends the wait is shown; a repeat changes nothing.
+/// The approval can arrive twice (a direct copy that looked lost, then the relay copy put behind
+/// it). Only the approval that ends the wait is shown; a repeat changes nothing.
 #[test]
 fn an_approval_that_arrives_twice_is_shown_once() {
     let net = MemoryNetwork::new();
@@ -1277,7 +1272,7 @@ fn media_round_trips_e2e_and_is_sealed_at_rest() {
 
 /// What the app draws is decoded in-process, so a contact's image reaches it only as a plain JPEG:
 /// a PNG (or anything else) sent as an "image" is stored but never handed over for drawing, while
-/// the same chat's real JPEG is (self-audit 2026-10-17, P2).
+/// the same chat's real JPEG is.
 #[test]
 fn only_a_plain_jpeg_is_handed_to_the_app_to_draw() {
     let key: StoreKey = [9u8; 32];
@@ -1677,10 +1672,9 @@ fn a_screen_recording_is_reported_to_both_sides_as_its_own_kind() {
 
 #[test]
 fn re_pairing_an_approved_chat_echoes_the_approval() {
-    // Field report (2026-08-01): pairing again with a contact who had already approved us left the
-    // joiner stuck on "waiting for the other person to accept", while the inviter showed a live
-    // chat and no request — because the inviter's chat was *already* authorized, so `authorize()`
-    // (the only thing that sends the approval echo) never ran.
+    // Pairing again with a contact who had already approved us must still send the approval echo:
+    // the inviter's chat is *already* authorized, so `authorize()` (the only thing that sends it)
+    // does not run, and the joiner would wait for an approval that never comes.
     let net = MemoryNetwork::new();
     let mut inviter = Node::new(Box::new(net.endpoint("inviter")));
     inviter.set_require_authorization(true);
@@ -1770,10 +1764,9 @@ fn last_seen_tracks_authenticated_contact_including_silent_acks() {
 
 #[test]
 fn screenshot_notice_survives_an_offline_peer_via_the_relay() {
-    // Field report (2026-08-01): a screenshot taken while the peer's client was closed never
-    // reached them once they reopened it. The notice is only useful if it survives the peer being
-    // offline — that is the normal case, not an edge case, since the capturer has no idea whether
-    // the other side is running.
+    // A screenshot taken while the peer's client is closed must reach them once they reopen it. The
+    // notice is only useful if it survives the peer being offline — the normal case, since the
+    // capturer has no idea whether the other side is running.
     let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
     let relay = RelayClient::new(relay_addr.to_string());
     let net = MemoryNetwork::new();
@@ -1977,10 +1970,9 @@ impl crate::transport::Transport for AuthSpyTransport {
 
 #[test]
 fn deleting_a_chat_and_logging_out_forget_the_peer_in_both_directions() {
-    // Field finding (2026-08-02): arti stores our client key for a restricted onion in a directory
-    // *named after the peer's onion address*. Nothing removed it, so deleted chats — and wiped
-    // identities — left a recoverable contact list on disk. Nine such directories had accumulated
-    // on the dev desktop, four of them from a single day's re-pairings.
+    // arti stores our client key for a restricted onion in a directory *named after the peer's
+    // onion address*. Deleted chats and wiped identities must remove it, or they leave a
+    // recoverable contact list on disk.
     let net = MemoryNetwork::new();
     let revoked = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     let forgotten = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -2145,12 +2137,8 @@ fn per_peer_client_keys_survive_a_restart() {
     std::fs::remove_file(&path).ok();
 }
 
-/// "Sent" must mean the peer actually has it — the point of `Frame::Delivered`.
-///
-/// Before this, a direct send stopped at "sent" forever: the only ack was the coarse `Ack`, sent
-/// only on a relay drain, and nothing promoted a directly-delivered message at all. The UI drew no
-/// badge for "sent", so a message that had merely been *dialled* looked exactly like one that had
-/// arrived. On 2026-08-02 one was lost when the core was torn down mid-flight and read as sent.
+/// "Sent" must mean the peer actually has it — the point of `Frame::Delivered`. A message that has
+/// merely been *dialled* must not look like one that arrived: a core torn down mid-flight loses it.
 #[test]
 fn a_direct_message_is_only_delivered_once_the_peer_receipts_it() {
     let net = MemoryNetwork::new();
@@ -2305,12 +2293,9 @@ fn a_dropped_relay_message_is_not_acked_as_delivered() {
     );
 }
 
-/// A successful dial is not delivery, and nothing but a receipt naming the message may say it is.
-///
-/// Three things used to claim it without evidence: a direct send succeeding, a message arriving
-/// from the peer, and their relay `Ack`. All three mean only "they are alive" — which is exactly
-/// what the message lost on 2026-08-02 looked like from the sender's side, right up until it turned
-/// out the peer never had it.
+/// A successful dial is not delivery, and nothing but a receipt naming the message may say it is. A
+/// direct send succeeding, a message arriving from the peer and their relay `Ack` all mean only
+/// "they are alive" — which is what a lost message looks like from the sender's side.
 #[test]
 fn nothing_but_a_receipt_marks_a_message_delivered() {
     let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
@@ -2486,9 +2471,9 @@ fn an_unacknowledged_message_is_re_queued_on_the_relay_and_deduped_on_arrival() 
 /// The direct path is "wedged" only when this device can reach **nothing** — never because one
 /// contact happens to be offline.
 ///
-/// This is the client-side health signal the guard heal was missing. A phone (2026-08-03) published
-/// its own descriptor to 8/8 HSDirs while 245 circuit builds died in its guard set, so `onion_ready`
-/// said healthy, no heal ever fired, and every message went by relay instead — silently, forever.
+/// The client-side health signal the guard heal needs: a device can publish its own descriptor to
+/// every HSDir while every circuit it builds to anyone else dies in its guard set, so `onion_ready`
+/// says healthy and every message silently goes by relay.
 ///
 /// The discriminator is the relay: it is dialled over the *same* Tor path, so a relay that answers
 /// proves the circuits work. Each case gets its own node because the signals are deliberately
@@ -2612,11 +2597,10 @@ fn a_private_relay_access_key_is_stable_and_survives_a_restart() {
     );
 }
 
-/// Found on two Linux devices, 2026-10-11: a message handed to a peer whose app was frozen (the
-/// Android app freezer does the same) sat unread in its connection; with no receipt, the sweep put a
-/// relay copy behind it. Editing or unsending it then recalled every relay copy and called that
-/// invisible, but the direct copy was still on its way: the peer showed the draft and the unsent
-/// message. A message that was ever handed directly can only be edited or unsent out loud.
+/// A message handed to a peer whose app is frozen (the Android app freezer, a suspended desktop)
+/// sits unread in its connection; with no receipt, the sweep puts a relay copy behind it. Recalling
+/// every relay copy then does not make an edit or unsend invisible — the direct copy is still on
+/// its way. A message that was ever handed directly can only be edited or unsent out loud.
 #[test]
 fn edit_and_unsend_of_a_message_also_handed_directly_reach_the_peer_despite_a_full_recall() {
     let relay_addr = RelayServer::spawn("127.0.0.1:0").unwrap();
@@ -2673,9 +2657,9 @@ fn edit_and_unsend_of_a_message_also_handed_directly_reach_the_peer_despite_a_fu
     );
 }
 
-/// Seen 2026-10-11: a message typed right after changing the timer landed above the timer notice
-/// on the peer's side, because the poller sends queued control frames on another thread than
-/// messages. The timer frame now goes to the caller, which sends it before returning.
+/// A message typed right after changing the timer must not land above the timer notice on the
+/// peer's side: the poller sends queued control frames on another thread than messages, so the
+/// timer frame goes to the caller, which sends it before returning.
 #[test]
 fn a_timer_change_is_sent_by_the_caller_not_left_for_the_poller() {
     let net = MemoryNetwork::new();

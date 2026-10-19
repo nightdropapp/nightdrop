@@ -86,9 +86,9 @@ fn main() -> anyhow::Result<()> {
         Some("revoke-client") => return revoke_client(&args[2..]),
         Some("list-clients") => return list_clients(),
         None => {}
-        // Anything else — `--help` included — prints usage and stops. It used to fall through and
-        // start a relay, on `relay-state/` in the current directory: run from the repo root, a
-        // second process on the production state (2026-10-17; BUILD_AND_DEPLOY.md forbids it).
+        // Anything else — `--help` included — prints usage and stops, rather than falling through
+        // and starting a relay on `relay-state/` in the current directory: run from the repo root,
+        // that would be a second process on the production state (BUILD_AND_DEPLOY.md forbids it).
         Some(_) => {
             eprintln!("{USAGE}");
             std::process::exit(2);
@@ -187,25 +187,22 @@ fn main() -> anyhow::Result<()> {
         let last_served = Arc::new(AtomicU64::new(0));
 
         // Self-healing watchdog. arti keeps this process alive even when its descriptor publisher
-        // or introduction points wedge (observed after multi-day uptime: the process runs, the
-        // onion goes dark, clients get "could not reach relay"). `Restart=always` can't recover
-        // that — nothing crashed. So we prove reachability ourselves and exit when the onion has
-        // been *demonstrably* dark long enough to warrant a fresh start; systemd then restarts us,
+        // or introduction points wedge (after multi-day uptime: the process runs, the onion goes
+        // dark, clients get "could not reach relay"). `Restart=always` can't recover that — nothing
+        // crashed. So we prove reachability ourselves and exit when the onion has been
+        // *demonstrably* dark long enough to warrant a fresh start; systemd then restarts us,
         // re-establishing intro points and republishing the descriptor.
         //
-        // Reachability is proved TWO ways each cycle, because each one is blind to a failure the
-        // other catches (the reasoning lives on `Cycle::verdict`):
-        //   1. an end-to-end self-dial over Tor — the only thing that actually answers "can a
-        //      client reach this relay", but it resolves us under a single time period, so it is
-        //      blind to a descriptor that made it onto one HsDir ring and not the other;
+        // Reachability is proved TWO ways each cycle, because each is blind to a failure the other
+        // catches (the reasoning lives on `Cycle::verdict`):
+        //   1. an end-to-end self-dial over Tor — the only thing that answers "can a client reach this
+        //      relay", but it resolves us under one time period, so it cannot see a descriptor that made
+        //      it onto one HsDir ring and not the other;
         //   2. the publisher's own `DegradedUnreachable`, which is exactly that ring check.
         //
-        // What this watchdog no longer asks is `is_fully_reachable()`. That is arti's summary of
-        // its bootstrap PROGRESS and is wrong in both directions: on 2026-08-02 this relay read
-        // healthy for ~90 minutes while every client timed out, and it reads false on services
-        // that are serving perfectly — which is what put the systemd restart counter in the
-        // thirties. But it was also carrying (2) inside it, so replacing it with (1) alone would
-        // have quietly dropped a true signal; hence both, with the aggregate itself read narrowly.
+        // `is_fully_reachable()` is not asked: it summarises arti's bootstrap PROGRESS and is wrong
+        // in both directions — healthy while every client times out, and false on services that
+        // serve perfectly, which fed restart loops.
         {
             let probe_client = client.clone();
             let probe_onion = onion.clone();
@@ -472,17 +469,12 @@ async fn serve_stream(stream: DataStream, core: Arc<RelayCore>) -> anyhow::Resul
 
 /// How long each watchdog signal has been continuously bad — **one clock per signal**.
 ///
-/// [`Cycle::verdict`] is careful that a veto may only be spent against the signal it actually
-/// explains: `served_since_dark` is checked *after* `publisher_dark` so that clients reaching us
-/// over the ring that IS published can never excuse the ring that is not. A single shared clock
-/// defeated that from outside the function — an `Inconclusive` cycle cleared the accumulated
-/// darkness no matter which signal had established it.
-///
-/// Observed on the dev relay 2026-08-08: the publisher's darkness climbed 0s → 302s → 604s and was
-/// reset to 0s by a "clients are still being served" cycle, over and over, for six hours. The
-/// threshold was never reachable, so the restart the watchdog exists to perform could not happen
-/// while any client was still being served — which is exactly the state a one-sided outage
-/// produces, since everyone on the good ring is served throughout.
+/// [`Cycle::verdict`] is careful that a veto may only be spent against the signal it explains:
+/// `served_since_dark` is checked *after* `publisher_dark`, so clients reaching us over the ring
+/// that IS published can never excuse the ring that is not. A single shared clock defeats that from
+/// outside the function: a "clients are still being served" cycle would reset the publisher's
+/// darkness every time, so a one-sided outage — which serves everyone on the good ring throughout —
+/// could never reach the restart threshold.
 #[derive(Default)]
 struct DarkClocks {
     /// Since when the descriptor has been missing from one of the two HsDir rings.
@@ -578,9 +570,8 @@ impl Cycle {
         // Something IS wrong — but if our own Tor client cannot use the network, that one fact
         // explains BOTH of the signals below: a dial cannot complete without a working client, and
         // neither can a descriptor upload. Restarting cannot fix someone else's outage, and doing
-        // it in a loop while the box is offline is the "reset because the device is OFFLINE"
-        // mistake that cost real anonymity margin the last time it was made. So this veto outranks
-        // both signals, and is the only one that does.
+        // it in a loop while the box is offline rotates introduction points and spends anonymity
+        // margin for nothing. So this veto outranks both signals, and is the only one that does.
         if self.client_unusable.is_some() {
             return Verdict::Inconclusive("our own Tor client is unusable");
         }
@@ -590,12 +581,9 @@ impl Cycle {
         // published is exactly what a one-sided outage looks like from the inside, which is why the
         // self-dial cannot see this case (it resolves us under one time period, its own).
         //
-        // This is the signal the old `is_fully_reachable()` check was accidentally carrying, and
-        // losing it would have been a real regression: it is what fired on this relay at 09:46 on
-        // 2026-08-05, when it sat at 8/8 HSDirs on period 20670 and 0/2 on 20669. Read narrowly —
-        // only `DegradedUnreachable`, never the aggregate's opinion of "fully reachable" — it has
-        // no false positives from IPT churn, because `Bootstrapping` and `Recovering` (the states
-        // that produced the old thrashing) are matched *ahead* of it and can only ever mask it.
+        // Read narrowly — only `DegradedUnreachable`, never the aggregate's opinion of "fully
+        // reachable" — it has no false positives from IPT churn, because `Bootstrapping` and
+        // `Recovering` are matched *ahead* of it and can only ever mask it.
         if self.publisher_dark {
             return self.escalate("the descriptor is missing from one of the two HsDir rings");
         }
@@ -634,19 +622,15 @@ async fn probe_self<R: tor_rtcompat::Runtime>(
     // A freshly isolated client per probe, because arti's onion-service client caches a fetched
     // descriptor per (service, client isolation). Reusing the main client would let probe after
     // probe be answered out of that cache — and "clients can no longer look us up" is exactly the
-    // failure being hunted, so a probe that skips the lookup cannot see it. A new isolation gets a
-    // new cache entry, which forces a real HSDir fetch. It shares the bootstrapped internals, so
-    // this costs a circuit, not a second Tor client. (Confirmed by tracing: four probes produced
-    // four `HS desc fetch` lines, one apiece.)
+    // failure being hunted. A new isolation forces a real HSDir fetch; it shares the bootstrapped
+    // internals, so this costs a circuit, not a second Tor client.
     //
-    // KNOWN LIMIT, worth stating rather than overclaiming: a probe looks the service up under the
-    // ONE time period its own consensus says is current, exactly as a co-located client would. A
-    // service published for one period but not the other is therefore only caught while the
-    // *broken* period is the one being looked up — which is the case that matters (that is what
-    // "clients found nothing" means), but a distant client whose consensus points at the other
-    // period can be stranded during a rollover window without this seeing it. arti exposes no
-    // per-period publication state to check instead, and the daily rollover bounds how long such a
-    // one-sided outage can hide from a probe running every few minutes.
+    // KNOWN LIMIT: a probe looks the service up under the ONE time period its own consensus says is
+    // current, as a co-located client would. A service published for one period but not the other
+    // is caught only while the *broken* period is the one being looked up; a distant client on the
+    // other period can be stranded during a rollover window unseen. arti exposes no per-period
+    // publication state to check instead, and the daily rollover bounds how long such an outage can
+    // hide.
     let probe = client.isolated_client();
     let exchange = async {
         let mut stream = probe
@@ -700,9 +684,9 @@ const MIN_LINE_RATE: u64 = 256;
 
 /// Bytes all streams together may hold in partly read request lines. `max_line_bytes` bounds one
 /// line (~200 MB, so a full media post fits), but up to [`MAX_CONCURRENT_STREAMS`] streams could
-/// each grow one at once — far past this machine's memory, and anyone may connect (self-audit
-/// 2026-10-13, finding 4). Two or three maximal posts fit at a time; a stream that would go past
-/// it is refused, and the client's retry gets through once the others finish.
+/// each grow one at once — far past this machine's memory, and anyone may connect. Two or three
+/// maximal posts fit at a time; a stream that would go past it is refused, and the client's retry
+/// gets through once the others finish.
 const MAX_LINE_BYTES_IN_FLIGHT: usize = 512 * 1024 * 1024;
 
 static LINE_BYTES_IN_FLIGHT: std::sync::atomic::AtomicUsize =
@@ -757,9 +741,9 @@ where
     let mut budget = LineBudget(0);
     let started = Instant::now();
     loop {
-        // A stream that stops sending, or drips, holds one of MAX_CONCURRENT_STREAMS slots; with
-        // no limit, a few idle streams could keep everyone else out for good (self-audit
-        // 2026-10-13, third round). Clients open one stream per request and send it at once.
+        // A stream that stops sending, or drips, holds one of MAX_CONCURRENT_STREAMS slots; with no
+        // limit, a few idle streams could keep everyone else out for good. Clients open one stream
+        // per request and send it at once.
         let elapsed = started.elapsed();
         if elapsed > grace && (buf.len() as f64) < min_rate as f64 * elapsed.as_secs_f64() {
             return Err(std::io::Error::new(
@@ -975,25 +959,22 @@ const RELAY_INTRO_BURST: u32 = 200;
 const PROBE_INTERVAL: Duration = Duration::from_secs(5 * 60);
 /// Cap on a single self-dial, and deliberately far larger than a probe should ever need.
 ///
-/// Measured on a healthy relay over six consecutive probes: 3.4s, 3.5s, 14.1s, 20.3s, 40.6s,
-/// 56.8s. A full HSDir lookup plus introduction and rendezvous is simply high-variance, and each
-/// probe pays for all of it (see [`probe_self`] on why it must). A tight cap here would not detect
-/// a real outage any sooner — `WATCHDOG_MAX_DARK` sets that — it would only manufacture failures on
-/// a relay that is fine, and each one is a step toward a restart that strands clients. So the cap
-/// exists to stop a hung dial from wedging the loop, nothing more; it stays well under
-/// `PROBE_INTERVAL` so cycles cannot overlap.
+/// A full HSDir lookup plus introduction and rendezvous is high-variance — seconds to about a
+/// minute on a healthy relay — and each probe pays for all of it (see [`probe_self`]). A tight cap
+/// would not detect a real outage sooner (`WATCHDOG_MAX_DARK` sets that); it would only manufacture
+/// failures on a relay that is fine, each a step toward a restart that strands clients. So the cap
+/// only stops a hung dial from wedging the loop; it stays well under `PROBE_INTERVAL` so cycles
+/// cannot overlap.
 const PROBE_TIMEOUT: Duration = Duration::from_secs(180);
 /// How long the onion may stay *demonstrably* dark before the watchdog exits for a fresh restart.
 /// Several probes' worth, so a single unlucky circuit can't trigger it. A restart rotates the
 /// introduction points and strands clients holding the old descriptor, so it is worth being slow
-/// and sure: the cost of restarting a relay that was fine is real, while a relay that is genuinely
-/// dark is already stranding everyone.
+/// and sure: restarting a relay that was fine has a real cost, while one that is genuinely dark is
+/// already stranding everyone.
 ///
-/// The margin is not theoretical. A freshly launched relay was measured failing its very first
-/// probe outright — a full 180s timeout, five minutes after launch, with the descriptor evidently
-/// still settling — and then reaching itself in 4.8s and 3.9s on the two cycles that followed. One
-/// early failure like that is normal and must not cost a restart; only a spell that outlives
-/// several probes means anything.
+/// A freshly launched relay can fail its very first probe outright while its descriptor settles,
+/// then reach itself in seconds on the next cycles; one early failure like that must not cost a
+/// restart.
 const WATCHDOG_MAX_DARK: Duration = Duration::from_secs(15 * 60);
 
 /// Consecutive unhealthy (sustained-unreachable) restart cycles after which the guard state is
@@ -1043,7 +1024,7 @@ fn relay_onion_config(nickname: HsNickname, auth_dir: &str) -> anyhow::Result<On
     builder.num_intro_points(RELAY_INTRO_POINTS);
     // arti's default lets one rendezvous circuit hold 65,535 streams, so a single client could fill
     // all MAX_CONCURRENT_STREAMS slots. A client opens one stream per request and runs only a few
-    // at once; past this the circuit is torn down (self-audit 2026-10-13, third round).
+    // at once; past this the circuit is torn down.
     builder.max_concurrent_streams_per_circuit(RELAY_STREAMS_PER_CIRCUIT);
     builder.rate_limit_at_intro(Some(TokenBucketConfig::new(
         RELAY_INTRO_RATE,
@@ -1138,7 +1119,7 @@ fn tor_config(base: &str) -> anyhow::Result<TorClientConfig> {
     let mut builder = TorClientConfigBuilder::from_directories(&state, &cache);
     builder.storage().permissions().dangerously_trust_everyone();
     // Without it the learned circuit timeout ratchets below real build times and arti disables
-    // guard after guard (this relay: 38 of 60, 2026-09-27) — see the constant's docs.
+    // guard after guard — see the constant's docs.
     builder.override_net_params().insert(
         "cbtmintimeout".to_string(),
         nightdrop::transport::CIRCUIT_TIMEOUT_FLOOR_MS,
@@ -1264,7 +1245,7 @@ mod tests {
 
     #[test]
     fn idle_and_dripping_streams_are_cut_and_prompt_ones_are_not() {
-        // Self-audit 2026-10-13, third round: a stream that sent nothing held a slot forever.
+        // A stream that sent nothing must not hold a slot forever.
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_time()
             .build()
@@ -1294,8 +1275,8 @@ mod tests {
 
     #[test]
     fn concurrent_request_lines_share_one_memory_budget() {
-        // Self-audit 2026-10-13, finding 4. Margins are wide so other tests reading small lines in
-        // parallel cannot flip the outcome.
+        // The shared line budget. Margins are wide so other tests reading small lines in parallel
+        // cannot flip the outcome.
         let half = MAX_LINE_BYTES_IN_FLIGHT / 2;
         let mut a = LineBudget(0);
         assert!(a.grow(half), "one large line fits");
@@ -1389,11 +1370,9 @@ mod tests {
 
     #[test]
     fn a_descriptor_missing_from_one_hsdir_ring_is_dark_even_though_the_self_dial_succeeds() {
-        // The case the self-dial structurally cannot see, and the one that actually restarted this
-        // relay at 09:46 on 2026-08-05 (8/8 HSDirs on one period, 0/2 on the other). The probe
-        // looks the service up under its own time period, so it reaches us over the ring that IS
-        // published while clients on the other ring find nothing. Losing this signal when the old
-        // is_fully_reachable() check was removed would have been a silent regression.
+        // The case the self-dial structurally cannot see: published on one period's HsDir ring and
+        // not the other. The probe looks the service up under its own time period, so it reaches us
+        // over the ring that IS published while clients on the other ring find nothing.
         let cycle = Cycle {
             publisher_dark: true,
             ..healthy(WATCHDOG_MAX_DARK)
@@ -1417,13 +1396,11 @@ mod tests {
 
     #[test]
     fn a_served_client_cannot_reset_the_clock_on_a_half_published_descriptor() {
-        // The bug this split fixes, and it was live on the dev relay for six hours on 2026-08-08.
-        // `verdict` already refuses to let the served-clients veto excuse `publisher_dark` — but
-        // the clock lived outside `verdict`, and an Inconclusive cycle wiped it whatever had set
-        // it. So a relay alternating between "missing from one ring" and "a client got served"
-        // reset to 0s every other cycle and could never reach the restart threshold. Which is not
-        // an edge case: a one-sided outage serves everyone on the good ring the whole time, so
-        // that alternation IS the failure, not a distraction from it.
+        // One clock per signal. `verdict` refuses to let the served-clients veto excuse
+        // `publisher_dark` — but with the clock outside `verdict`, an Inconclusive cycle wiped it
+        // whatever had set it, so a relay alternating between "missing from one ring" and "a client
+        // got served" never reached the restart threshold. That alternation IS a one-sided outage:
+        // it serves everyone on the good ring the whole time.
         let start = Instant::now();
         let mut clocks = DarkClocks::default();
 
@@ -1475,11 +1452,10 @@ mod tests {
     #[test]
     fn an_unusable_tor_client_excuses_the_ring_check_too_and_never_restarts() {
         // The one veto that outranks BOTH signals, because it explains both: a descriptor upload
-        // needs a working Tor client every bit as much as a dial does. Getting this order wrong
-        // means a box that is merely offline restarts itself in a loop — repeatedly rotating its
-        // introduction points, and on the third cycle wiping its entry guards — over an outage no
-        // restart can fix. That is the "reset because the device is OFFLINE" mistake, and it is
-        // worth a test precisely because the code reads fine either way.
+        // needs a working Tor client as much as a dial does. In the wrong order, a box that is
+        // merely offline restarts itself in a loop — rotating its introduction points and, on the
+        // third cycle, wiping its entry guards — over an outage no restart can fix. Worth a test
+        // because the code reads fine either way.
         let offline = Cycle {
             publisher_dark: true,
             dial_failed: true,

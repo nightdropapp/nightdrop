@@ -52,15 +52,13 @@ pub type AbortHandle = Arc<dyn Fn() + Send + Sync>;
 /// Floor for arti's learned circuit-build timeout, in milliseconds (the `cbtmintimeout` network
 /// parameter, whose consensus value is 10).
 ///
-/// Why: arti learns the timeout from the builds it sees complete, and a build it abandons is never
-/// seen — so on a fast link the estimate only ratchets down. Measured 2026-09-27 on the dev PC: the
-/// desktop app had learned 472 ms and the relay 449 ms against a median build of ~405 ms, so a third
-/// or more of builds were abandoned. Each abandoned build past the first hop is charged to its guard
-/// as an indeterminate failure (`tor-circmgr` `build.rs`), and past 70% the guard is disabled — for
-/// good, on disk. The desktop app reached 55 of 60 guards disabled and 0 usable: stuck at 85%
-/// bootstrap, its onion never published, unreachable to every contact. Short-lived clients on the
-/// same machine were unaffected because they never learn a timeout. A floor of two seconds stops the
-/// spiral and costs nothing on a healthy build; slower links still learn a higher value above it.
+/// arti learns the timeout from the builds it sees complete, and a build it abandons is never seen
+/// — so on a fast link the estimate only ratchets down, below the real median build time. Each
+/// abandoned build past the first hop is charged to its guard as an indeterminate failure
+/// (`tor-circmgr` `build.rs`), and past 70% the guard is disabled — for good, on disk. A
+/// long-running client can end with every guard disabled, stuck at 85% bootstrap with its onion
+/// never published. A floor of two seconds stops the spiral and costs nothing on a healthy build;
+/// slower links still learn a higher value above it.
 pub const CIRCUIT_TIMEOUT_FLOOR_MS: i32 = 2000;
 
 /// One endpoint on an anonymity network. Frames are opaque, already-encrypted bytes
@@ -81,8 +79,8 @@ pub trait Transport: Send + Sync {
     ///
     /// For the frames that get no answer of their own, where that silent loss is permanent:
     /// delivery receipts. A message is covered by its receipt (no receipt in 30 s puts a relay copy
-    /// behind it); a receipt is covered by nothing, so a lost one left the sender's message on "Held
-    /// for delivery" for good (a Windows ↔ phone test, 2026-09-30).
+    /// behind it); a receipt is covered by nothing, so a lost one would leave the sender's message
+    /// on "Held for delivery" for good.
     ///
     /// Defaults to `send`, which is already this for transports that keep nothing open.
     fn send_fresh(&self, peer: &str, frame: &[u8]) -> Result<()> {
@@ -92,13 +90,13 @@ pub trait Transport: Send + Sync {
     /// Non-blocking receive of the next inbound `(sender_address, frame)`, if any.
     fn try_recv(&self) -> Option<(Address, Vec<u8>)>;
 
-    /// Whether our address is published/reachable so peers can actually reach us. For Tor this
-    /// is false for the ~1–3 min after launch while the onion descriptor (re)publishes; other
+    /// Whether our address is published/reachable so peers can actually reach us. For Tor this is
+    /// false for the ~1–3 min after launch while the onion descriptor (re)publishes; other
     /// transports are reachable immediately (default `true`).
     ///
     /// This is a **UI-facing** question ("can others pair with me yet") and nothing more. It is
-    /// deliberately not used to decide that anything is broken: it was measured reading false on a
-    /// fully published service, and a guard heal keyed off it destroyed healthy guard sets.
+    /// deliberately not used to decide that anything is broken: it can read false on a fully
+    /// published service, and a guard heal keyed off it would destroy healthy guard sets.
     fn published(&self) -> bool {
         true
     }

@@ -241,9 +241,9 @@ pub enum Frame {
     /// `node::announce_client_key`.
     ClientKey { from: String, client_key: String },
     /// [`ClientKey`](Frame::ClientKey), sealed on the pair's session (`message` decrypts to
-    /// `nightdrop/ctl/client-key/v1:` + the key). The plaintext frame's `from` was believed as
-    /// sent, so anyone able to deliver a frame could replace a contact's onion key and cut their
-    /// direct path (self-audit 2026-10-13, finding 5); receivers now act only on this one.
+    /// `nightdrop/ctl/client-key/v1:` + the key). The plaintext frame's `from` is only a claim, so
+    /// acting on it would let anyone able to deliver a frame replace a contact's onion key and cut
+    /// their direct path; receivers act only on this one.
     ClientKeySealed { from: String, message: WireOlm },
     /// An image/video (or other) attachment, **E2E-encrypted** on the session. The encrypted
     /// payload is a packed envelope of (transfer_id, kind, mime, raw bytes) — see
@@ -286,17 +286,16 @@ pub enum Frame {
     /// this frame carries, so the sender may finally call it delivered.
     ///
     /// Distinct from [`Ack`](Frame::Ack), which says only "I drained your mailbox" and names no
-    /// message. That coarse signal cannot express what a device test on 2026-08-02 produced: a
-    /// message was lost when the core was torn down mid-flight while the *next* one arrived
-    /// normally. Anything meaning "everything up to now" would have marked the lost one delivered
-    /// too. Olm decrypts out of order and a gap does not block later messages, so arrival of a
-    /// later frame is genuinely no evidence about an earlier one — only a receipt naming the id is.
+    /// message. A message can be lost (a core torn down mid-flight) while the *next* one arrives
+    /// normally, so anything meaning "everything up to now" would mark the lost one delivered too.
+    /// Olm decrypts out of order and a gap does not block later messages, so arrival of a later
+    /// frame is no evidence about an earlier one — only a receipt naming the id is.
     ///
     /// The encrypted payload **is** the message id, sealed on the session like any control frame,
     /// so a forgery or replay cannot mark anything delivered. Never receipted itself (no loops).
     ///
     /// Appended at the end because variant order is wire-visible. A peer too old to know this
-    /// variant simply ignores it and keeps working off `Ack` alone.
+    /// variant ignores it and keeps working off `Ack` alone.
     Delivered { from: String, message: WireOlm },
 }
 

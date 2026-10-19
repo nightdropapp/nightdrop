@@ -5,10 +5,9 @@
 //! ## Why this exists
 //!
 //! The Android build comes from F-Droid and updates itself. The **AppImage does not** — it is a
-//! file on disk, and a user who downloaded one in 2026-08 is still running it today unless they
-//! went looking. That is how a stale download link left people on 0.1.15 without the onion-identity
-//! fix for three days (`docs/advisories/2026-08-05-linux-download-pinned-to-0.1.15.md`). A user who
-//! cannot tell they are running a superseded build cannot act on a security fix.
+//! file on disk, and a user who downloaded one is still running it until they go looking
+//! (`docs/advisories/2026-08-05-linux-download-pinned-to-0.1.15.md`). A user who cannot tell they
+//! are running a superseded build cannot act on a security fix.
 //!
 //! ## What it must not become
 //!
@@ -16,12 +15,11 @@
 //! smallest one that works:
 //!
 //! * **Over Tor, to an onion, always.** [`Transport::onion_get`] has no clearnet path; a transport
-//!   that cannot fetch anonymously returns `None` and we skip the check entirely rather than
-//!   reaching for anything else (§6, and the ClosedTransport DNS leak that taught us to say so).
+//!   that cannot fetch anonymously returns `None` and we skip the check rather than reach for
+//!   anything else (§6).
 //! * **The request carries nothing.** A plain `GET` of one static file, no version, no identifier,
-//!   no cookie, no varying header. The server cannot distinguish one user from another, or a
-//!   first check from a hundredth — it sees an anonymous request for a public file, which is what
-//!   any visitor to the site makes. The comparison happens **here**, on the device.
+//!   no cookie, no varying header. The server cannot tell one user from another, or a first check
+//!   from a hundredth. The comparison happens **here**, on the device.
 //! * **It answers a question, it does not act.** The check returns a struct; the UI shows a
 //!   notice; the user chooses. Nothing is fetched as a result of the check itself, and nothing is
 //!   ever executed. [`download`] runs only on an explicit tap, writes only after the published
@@ -29,8 +27,9 @@
 //! * **Failure is silence.** The site being down, Tor being slow, or the JSON being malformed are
 //!   all "no answer", never a warning. A user must not learn to dismiss update warnings.
 //!
-//! The onion address self-authenticates — a v3 `.onion` *is* an ed25519 public key, so reaching
-//! it proves we reached the site and not an impostor, with no certificate authority involved.
+//! The onion address self-authenticates — a v3 `.onion` *is* an ed25519 public key, so reaching it
+//! proves we reached the site and not an impostor. That the site is honest is what the manifest
+//! signature ([`UPDATE_PUBKEY`]) adds.
 
 use serde::Deserialize;
 
@@ -54,11 +53,10 @@ pub const UPDATE_PORT: u16 = 80;
 /// once announced a version before its builds were there (`CLAUDE.md`, "Website").
 pub const MANIFEST_PATH: &str = "/update.json";
 
-/// Cap on reaching the site for the manifest. Far larger than it "should" need, for the reason
-/// measured on the relay watchdog the same day: onion connect latency on a healthy network ranged
-/// 3.4s to 56.8s, and a cold start can exceed even that. A tight cap here does not fail faster in
-/// any useful sense — it just turns a slow circuit into "no update exists", which is the one
-/// answer this feature must never give wrongly.
+/// Cap on reaching the site for the manifest. Far larger than it "should" need: onion connect
+/// latency on a healthy network ranges from a few seconds to about a minute, and a cold start can
+/// exceed that. A tight cap would just turn a slow circuit into "no update exists", the one answer
+/// this feature must never give wrongly.
 pub const FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(180);
 
 /// Cap on downloading a build. Tens of megabytes over Tor is genuinely slow; this is a stop for a
@@ -84,16 +82,15 @@ pub struct UpdateDownload {
     pub sha256: String,
 }
 
-/// The release-signing **public** key the manifest must be signed with (self-audit 2026-10-13,
-/// finding 3). Reaching our onion proves we reached our server, not that the server is honest:
-/// before signing, a compromised site host could serve a malicious AppImage or installer with a
-/// matching hash and the app would call it verified. Android had the OS signature check; desktop
-/// had nothing else.
+/// The release-signing **public** key the manifest must be signed with. Reaching our onion proves
+/// we reached our server, not that the server is honest: without a signature, a compromised site
+/// host could serve a malicious AppImage or installer with a matching hash and the app would call
+/// it verified. Android has the OS signature check; desktop has nothing else.
 ///
 /// The private half signs `update.json` at publish time only (`scripts/gen-update-manifest.sh`,
-/// `nightdrop-relay sign-update`), so it can live off the web host; its location is in
+/// `nightdrop-relay sign-update`), so it lives off the web host; its location is in
 /// `MAINTENANCE.md` (credentials). **Permanent like [`UPDATE_ONION`]:** released apps carry it, so
-/// replacing it strands every install's update check until they update by hand.
+/// replacing it needs a recovery-signed rotation (`keyroll.rs`).
 pub const UPDATE_PUBKEY: [u8; 32] = [
     142, 43, 7, 83, 82, 52, 133, 133, 234, 127, 220, 233, 8, 171, 216, 149, 222, 99, 1, 95, 213,
     169, 252, 216, 32, 143, 32, 36, 72, 135, 13, 85,
@@ -249,12 +246,12 @@ pub struct UpdateManifest {
     pub linux: std::collections::HashMap<String, UpdateDownload>,
     #[serde(default)]
     pub windows: std::collections::HashMap<String, UpdateDownload>,
-    /// Unix seconds after which this manifest is no longer believed (self-audit 2026-10-17). A
-    /// compromised site host cannot sign a manifest, but it could keep serving an old one, so a
-    /// security release would never be offered (a freeze); with an expiry that stops working, and
-    /// the check reports a failure instead of "up to date". Required: a signed manifest without one
-    /// (and one exists, in this file's tests) is refused. `scripts/gen-update-manifest.sh` sets it,
-    /// so the manifest must be re-signed before it lapses even when nothing is released.
+    /// Unix seconds after which this manifest is no longer believed. A compromised site host cannot
+    /// sign a manifest, but it could keep serving an old one, so a security release would never be
+    /// offered (a freeze); with an expiry that stops working, and the check reports a failure
+    /// instead of "up to date". Required: a signed manifest without one is refused.
+    /// `scripts/gen-update-manifest.sh` sets it, so the manifest must be re-signed before it lapses
+    /// even when nothing is released.
     #[serde(default)]
     pub expires: u64,
 }
@@ -298,7 +295,7 @@ pub struct UpdateStatus {
 
 /// Ask the onion site what the current release is and compare it with `current_version`.
 ///
-/// `current_version` accepts the pubspec form (`"0.1.17+403"`); the build metadata is ignored.
+/// `current_version` accepts the pubspec form (`"0.2.0+416"`); the build metadata is ignored.
 /// Returns `Ok(None)` when the transport cannot fetch anonymously — the caller does nothing.
 pub fn check(transport: &dyn Transport, current_version: &str) -> Result<Option<UpdateStatus>> {
     check_trusting(transport, current_version, None).map(|o| o.map(|(s, _)| s))
@@ -362,20 +359,16 @@ pub fn check_trusting(
 /// signal available: Android picked one ABI's native library at install time, and this *is* that
 /// library asking.
 ///
-/// It is not the universal build, even though one file running everywhere is tempting: the per-ABI
-/// build is well under half the size (0.1.28: 49 MB for arm64-v8a against 129 MB universal), which
-/// over Tor is the difference between a slow download and one that risks [`DOWNLOAD_TIMEOUT`].
-/// The universal APK used to be refused outright too — it kept the bare base versionCode (403)
-/// below the per-ABI builds' `base*10 + abi`, so Android read it as a downgrade — but since 0.1.18
-/// it takes slot 4 above all three (`app/android/app/build.gradle.kts`), so that reason is gone.
+/// Not the universal build: the per-ABI build is well under half the size, which over Tor is the
+/// difference between a slow download and one that risks [`DOWNLOAD_TIMEOUT`]. (The universal APK
+/// takes versionCode slot 4, above all three per-ABI builds — `app/android/app/build.gradle.kts` —
+/// so it would install; size is the reason.)
 ///
-/// **It does cost one bit of distinguishability**, and that is a deliberate trade rather than an
-/// oversight: the download path now tells the site which of the published ABIs this device runs.
-/// It is accepted because the thing that must not become a beacon is the *recurring* check, which
-/// is unchanged and still byte-identical for every install (see
-/// `the_request_is_identical_for_every_install`). A download is rare, user-initiated, and already
-/// tells the site far more by simply happening. The alternative — a build that cannot install —
-/// is not a privacy win.
+/// **It costs one bit of distinguishability**, deliberately: the download tells the site which
+/// published ABI this device runs. Accepted because what must not become a beacon is the
+/// *recurring* check, which stays byte-identical for every install (see
+/// `the_request_is_identical_for_every_install`); a download is rare, user-initiated, and already
+/// tells the site more by happening. A build that cannot install is not a privacy win.
 pub fn native_abi() -> &'static str {
     match std::env::consts::ARCH {
         "aarch64" => "arm64-v8a",
@@ -391,9 +384,9 @@ pub fn native_abi() -> &'static str {
 /// The build that belongs on **this** machine: its platform's section of the manifest, and the
 /// Android ABI ([`native_abi`]) or desktop CPU architecture within it.
 ///
-/// The platform is the OS this core was compiled for. It used to be implied — the manifest only
-/// had Android builds — so on a PC `native_abi` answered `"x86_64"`, which is also an Android ABI,
-/// and desktop users were handed the Android x86_64 APK.
+/// The platform is the OS this core was compiled for. It must be explicit: `"x86_64"` is also an
+/// Android ABI, and a PC looking itself up in the Android section would be handed the Android
+/// x86_64 APK.
 pub fn native_build() -> Build {
     if cfg!(target_os = "android") {
         Build {
@@ -452,10 +445,9 @@ pub fn download(
     // Streamed here, never to `dest`. `dest` is the path the caller will make reachable, so a file
     // must not appear there until it has passed — and the scratch name is what makes that possible
     // without holding the whole build in memory.
-    // A stable, hash-keyed slot rather than a name unique per attempt: resuming needs to find
-    // what the last attempt left. Two downloads must still never share it, which is why
-    // `NightdropCore::download_update` is single-flight — that guard is now load-bearing rather
-    // than defence in depth.
+    // A stable, hash-keyed slot rather than a name unique per attempt: resuming needs to find what
+    // the last attempt left. Two downloads must never share it, which is why
+    // `NightdropCore::download_update` is single-flight.
     let part = part_path(dest, &entry.sha256);
     sweep_stale_parts(dest, &part);
     let resume_from = std::fs::metadata(&part).map(|m| m.len()).unwrap_or(0);
@@ -661,12 +653,10 @@ impl ResponseHead {
 /// and resumes, and a leftover from another build can never be resumed into this one
 /// ([`sweep_stale_parts`] removes those).
 ///
-/// Stable means two concurrent downloads of one build would share the file. They once did (the
-/// banner and the menu are two entry points to one operation), back when the name was unique per
-/// attempt — and even then the first to finish renamed its file into place while the second, whose
-/// file descriptor survives a rename, carried on writing into the *published* file, after
-/// verification. So [`crate::api::NightdropCore::download_update`] is single-flight, and with a
-/// shared slot that guard is what keeps a download whole.
+/// Two concurrent downloads of one build would share the file, and the second — whose descriptor
+/// survives the first one's rename — could keep writing into the *published* file after
+/// verification. So [`crate::api::NightdropCore::download_update`] is single-flight, and that guard
+/// is what keeps a download whole.
 fn part_path(dest: &std::path::Path, sha256: &str) -> std::path::PathBuf {
     let tag: String = sha256
         .chars()
@@ -753,8 +743,8 @@ fn sha256_hex(bytes: &[u8]) -> String {
 }
 
 /// Compare two versions, ignoring build metadata on either side.
-/// Refuse a download that is not strictly newer than `current` (self-audit 2026-10-13, second
-/// round: a replayed older signed manifest must not become a downgrade).
+/// Refuse a download that is not strictly newer than `current`: a replayed older signed manifest
+/// must not become a downgrade.
 pub fn ensure_newer(current: Option<&str>, latest: &str) -> Result<()> {
     let Some(current) = current else {
         anyhow::bail!("this build's version is not known yet; try again in a moment");
@@ -837,11 +827,11 @@ pub fn body_of(response: &[u8]) -> Result<&[u8]> {
 
 #[cfg(test)]
 mod tests {
-    // ---- Signed manifest (self-audit 2026-10-13, finding 3) ----
+    // ---- Signed manifest ----
 
-    /// What `scripts/gen-update-manifest.sh` wrote with the real signing key (2026-10-13). Pins
-    /// that [`UPDATE_PUBKEY`] is the key the publish step signs with: if they ever diverge, every
-    /// app silently stops seeing updates, and this fails first.
+    /// What `scripts/gen-update-manifest.sh` wrote with the real signing key. Pins that
+    /// [`UPDATE_PUBKEY`] is the key the publish step signs with: if they ever diverge, every app
+    /// silently stops seeing updates, and this fails first.
     const SIGNED_BY_RELEASE_KEY: &str = r#"{"latest":"0.2.0","signed":{"payload":"eyJsYXRlc3QiOiIwLjIuMCJ9","sig":"Y+C+fhJ/rjYWc8W2r3SAUWHZAJoDYQA5hcea0TFRREKSLf9gI8n42EPFcBdXWbGGditAOTX1AFvNqO7bkE2fDA=="}}"#;
 
     /// `payload` with an expiry a week ahead added, as the publish step writes one.
@@ -875,7 +865,7 @@ mod tests {
 
     #[test]
     fn a_rotated_signing_key_is_learned_and_the_old_one_refused() {
-        // Self-audit 2026-10-13, key-compromise plan.
+        // The key-compromise plan.
         use base64::Engine as _;
         let b64 = base64::engine::general_purpose::STANDARD;
         let (old_sk, _) = generate_update_key();
@@ -1022,7 +1012,7 @@ mod tests {
 
     #[test]
     fn the_pubspec_build_suffix_is_ignored_on_both_sides() {
-        // The app knows itself as "0.1.17+403" (kAppVersion is the whole pubspec string). If the
+        // The app knows itself as "0.2.0+416" (kAppVersion is the whole pubspec string). If the
         // suffix were compared as part of the version, every user would be told to update forever.
         assert!(!compare("0.1.17+403", "0.1.17").update_available);
         assert!(compare("0.1.17+403", "0.1.18").update_available);
@@ -1238,10 +1228,10 @@ mod tests {
         assert_eq!(b.platform, "android");
     }
 
-    /// The bug this pins: on a PC, `"x86_64"` was looked up in the Android section, which
-    /// publishes the Android x86_64 APK under exactly that key, so Linux and Windows users were
-    /// handed an APK. A desktop must fetch its own section's file, and must not fall back to the
-    /// APK when its section is missing (manifests from before 0.1.27 have none).
+    /// On a PC, `"x86_64"` must not be looked up in the Android section, which publishes the
+    /// Android x86_64 APK under exactly that key. A desktop fetches its own section's file, and
+    /// must not fall back to the APK when its section is missing (manifests from before 0.1.27 have
+    /// none).
     #[cfg(not(target_os = "android"))]
     #[test]
     fn a_desktop_never_downloads_the_android_x86_64_apk() {

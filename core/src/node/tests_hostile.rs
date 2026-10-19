@@ -1,8 +1,8 @@
-//! A hostile peer against a real paired node (self-audit 2026-10-13, step 2 of the plan in
-//! `docs/trust-boundaries.md`). Everything else in the suite runs trusted code against itself; here
-//! the other side replays, forges, oversizes and mutates, and the victim must stay sound: no panic, no
-//! new contacts, no change to another contact's chat, nothing kept past its bound, and the genuine
-//! conversation still working afterwards.
+//! A hostile peer against a real paired node (`docs/trust-boundaries.md`). Everything else in the
+//! suite runs trusted code against itself; here the other side replays, forges, oversizes and
+//! mutates, and the victim must stay sound: no panic, no new contacts, no change to another
+//! contact's chat, nothing kept past its bound, and the genuine conversation still working
+//! afterwards.
 use super::*;
 use crate::transport::{MemoryNetwork, Transport};
 use rand::{Rng, SeedableRng};
@@ -381,9 +381,9 @@ fn hostile_plaintexts_sealed_by_a_real_contact_stay_within_every_bound() {
     let _ = std::fs::remove_dir_all(&base);
 }
 
-/// A contact can add only so much in a day (`limits::Allowance`): past the allowance their
-/// messages are dropped and the chat gets one notice (self-audit 2026-10-17, P10). Dropped ones are
-/// queued for a receipt by the same line as kept ones, so the sender stops re-sending them.
+/// A contact can add only so much in a day (`limits::Allowance`): past the allowance their messages
+/// are dropped and the chat gets one notice. Dropped ones are queued for a receipt by the same line
+/// as kept ones, so the sender stops re-sending them.
 #[test]
 fn a_flooding_contact_is_cut_off_at_the_daily_allowance_with_one_notice() {
     let mut s = scene();

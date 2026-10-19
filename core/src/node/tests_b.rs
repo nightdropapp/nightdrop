@@ -2204,12 +2204,12 @@ fn the_peer_version_survives_a_restart() {
 
 /// Each distinct opener is one online guess at the code, so an invite answers at most
 /// `MAX_OPENERS_PER_INVITE` of them and is then retired. Without the cap a relay operator — who
-/// sees the slot's mailbox — could post guesses until one opened the payload, and the code's
-/// secret is only about 15 bits. Re-posts of the *same* opener are not new guesses and are
-/// answered again, which is what keeps a real joiner's retries working.
+/// sees the slot's mailbox — could post guesses until one opened the payload. Re-posts of the
+/// *same* opener are not new guesses and are answered again, which keeps a real joiner's retries
+/// working.
 /// A joiner re-posts its opener while it waits, so an inviter that looks late finds many copies of
-/// one opener. They are one guess and get one answer: a phone answered twelve copies one relay round
-/// trip at a time, and the joiner gave up before the last (S25, 2026-10-07).
+/// one opener. They are one guess and get one answer; answering each copy a relay round trip at a
+/// time outlasts the joiner.
 #[test]
 fn re_posted_copies_of_one_opener_get_one_answer() {
     let live = RelayServer::spawn("127.0.0.1:0").unwrap().to_string();
@@ -2401,9 +2401,8 @@ fn texts(node: &Node, cid: &str) -> Vec<String> {
     node.messages(cid).into_iter().map(|m| m.text).collect()
 }
 
-/// Forward-only (decided 2026-10-11): turning the timer on deletes nothing that was already there,
-/// on either device, whoever turned it on. It used to delete the whole history older than the
-/// timer on both sides, notices included, so either person could wipe the other's copy.
+/// Forward-only: turning the timer on deletes nothing that was already there, on either device,
+/// whoever turned it on. Otherwise either person could wipe the other's copy of the history.
 #[test]
 fn turning_the_timer_on_never_deletes_the_history_before_it() {
     let (_net, mut alice, mut bob, alice_contact, bob_contact) = pair_with_old_history();
@@ -2502,8 +2501,8 @@ fn the_timer_in_effect_is_the_last_change_at_or_before_a_message() {
 
 #[test]
 fn a_contact_cannot_choose_how_an_attachment_is_opened() {
-    // Self-audit 2026-10-13, finding 1: the file handed to the OS was named after the contact's
-    // mime, so "video/bat" ran on Windows and "video/html" / "video/m3u" fetched over clearnet.
+    // The file handed to the OS must not be named after the contact's mime: "video/bat" would run
+    // on Windows and "video/html" / "video/m3u" would fetch over clearnet.
     let key: StoreKey = [7u8; 32];
     let base = std::env::temp_dir().join(format!("nightdrop-ext-{}", std::process::id()));
     let net = MemoryNetwork::new();
@@ -2539,8 +2538,7 @@ fn a_contact_cannot_choose_how_an_attachment_is_opened() {
 
 #[test]
 fn a_contacts_kind_and_mime_are_sanitised_on_receipt() {
-    // Self-audit 2026-10-13, finding 1: what a contact claims an attachment is never reaches
-    // the store as sent.
+    // What a contact claims an attachment is never reaches the store as sent.
     let key: StoreKey = [9u8; 32];
     let dir = std::env::temp_dir().join(format!("nightdrop-mime-{}", std::process::id()));
     let net = MemoryNetwork::new();
@@ -2582,8 +2580,8 @@ fn a_contacts_kind_and_mime_are_sanitised_on_receipt() {
 
 #[test]
 fn forged_unsealed_control_frames_change_nothing_for_an_established_contact() {
-    // Self-audit 2026-10-13, finding 5: `CodeInUse` and `ClientKey` carried only a claimed `from`,
-    // so anyone able to deliver a frame could close a chat or replace a contact's onion key.
+    // `CodeInUse` and `ClientKey` carry only a claimed `from` unsealed, so acting on them would let
+    // anyone able to deliver a frame close a chat or replace a contact's onion key.
     let base = std::env::temp_dir().join(format!("nightdrop-forge-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
     let alice_auth = base.join("alice");
@@ -2660,7 +2658,7 @@ fn forged_unsealed_control_frames_change_nothing_for_an_established_contact() {
 
 #[test]
 fn a_contacts_display_name_is_cleaned() {
-    // Self-audit 2026-10-13, finding 7.
+    // Contact names are cleaned on receipt and on restore.
     use super::{clean_display_name, MAX_NAME_CHARS};
     assert_eq!(clean_display_name("  Alice   Smith "), "Alice Smith");
     assert_eq!(clean_display_name("Al\u{202E}ecila"), "Alecila");
@@ -2685,7 +2683,7 @@ fn a_contacts_display_name_is_cleaned() {
 #[cfg(unix)]
 #[test]
 fn the_data_dir_and_state_file_are_owner_only() {
-    // Self-audit 2026-10-13, round 5: on desktop the data dir was 0755 and the state file 0644.
+    // The desktop data dir must be 0700 and the state file 0600, not the default 0755/0644.
     use std::os::unix::fs::PermissionsExt as _;
     let base = std::env::temp_dir().join(format!("nightdrop-perms-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);
@@ -2712,8 +2710,8 @@ fn the_data_dir_and_state_file_are_owner_only() {
 
 #[test]
 fn deleting_a_chat_or_burning_media_removes_every_copy_on_disk() {
-    // Self-audit 2026-10-13, round 6: delete_chat left the chat's sealed attachments on disk, and
-    // burn/unsend/disappearing removed only the sealed file, not a decrypted copy opened in a player.
+    // Deleting a chat removes its sealed attachments, and burn/unsend/disappearing remove a
+    // decrypted copy opened in a player too, not only the sealed file.
     let key: StoreKey = [9u8; 32];
     let base = std::env::temp_dir().join(format!("nightdrop-forget-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&base);

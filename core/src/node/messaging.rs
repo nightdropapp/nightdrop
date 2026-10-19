@@ -234,17 +234,15 @@ impl Node {
     /// [`RECEIPT_TIMEOUT`]. Returns the contact ids whose messages changed status.
     ///
     /// A successful dial means the peer's onion service answered — not that their app processed the
-    /// frame. On 2026-08-02 a core was torn down mid-flight and the message simply vanished: the
-    /// sender's side said sent, the receiver never had it, and nothing asked again. Now nothing is
-    /// trusted until a [`Frame::Delivered`] names it, and when none arrives the message goes to the
-    /// relay, where it survives the peer being offline, restarted, or rebuilt.
+    /// frame; a core torn down mid-flight loses it with the sender's side saying "sent". So nothing
+    /// is trusted until a [`Frame::Delivered`] names it, and when none arrives the message goes to
+    /// the relay, where it survives the peer being offline, restarted or rebuilt.
     ///
     /// Runs **once** per message: the retry moves it to "queued", and from there the ordinary relay
     /// lifecycle owns it (drained → receipted → "delivered", or reaped at 24h → "expired"). A peer
-    /// that already has the message discards the copy as a duplicate and receipts it, which is what
-    /// settles the sender. A peer too old to send receipts never confirms, so each of its messages
-    /// takes one relay copy — a duplicate on their screen, which is the safe direction to be wrong
-    /// in and the reason receipts exist.
+    /// that already has the message discards the copy as a duplicate and receipts it. A peer too
+    /// old to send receipts never confirms, so each of its messages takes one relay copy — a
+    /// duplicate on their screen, the safe direction to be wrong in.
     ///
     /// Media is not covered: its id lives inside the encrypted envelope, so it carries no receipt
     /// to wait for (`ARCHITECTURE.md`, delivery receipts).
@@ -273,10 +271,9 @@ impl Node {
             //
             // Never a burn message. The copy below is an ordinary `Frame::Message`, and the
             // recipient's burn tombstone clears the id that would mark it a duplicate — so a burn
-            // that was revealed and deleted while its receipt was slow (Doze has taken ~45 s,
-            // longer than RECEIPT_TIMEOUT) would come back as a permanent message. Re-sending it
-            // as a burn would resurrect it instead. A lost burn stays lost: that is the direction
-            // this feature has to fail in (`docs/design/burn-messages.md`).
+            // revealed and deleted while its receipt was slow (Doze can take longer than
+            // RECEIPT_TIMEOUT) would come back as a permanent message. A lost burn stays lost: that
+            // is the direction this feature has to fail in (`docs/design/burn-messages.md`).
             let Some(text) = chat
                 .history
                 .iter()
@@ -340,22 +337,19 @@ impl Node {
     }
 
     /// Whether the direct path looks **wedged**: several sends in a row have failed to reach a peer
-    /// and not one has ever succeeded this run.
+    /// and not one has succeeded this run.
     ///
-    /// This is the client-side counterpart to "our onion won't publish". A device can publish its
-    /// own descriptor perfectly while being unable to *reach* anybody — 417 circuit builds, 61
-    /// timeouts and `Unable to build circuit to introduction point`, all through a handful of guard
-    /// channels opened at startup and never replaced (observed on a phone, 2026-08-03). Nothing
-    /// noticed, because the only health signal was our own publication, so the app fell back to the
-    /// relay for every message, indefinitely, and called that healthy.
+    /// The client-side counterpart to "our onion won't publish": a device can publish its
+    /// descriptor perfectly while every circuit it builds to anyone else fails through a handful of
+    /// guard channels never replaced, and then every message silently goes by relay while the app
+    /// calls itself healthy.
     ///
     /// Two guards keep this from firing on an ordinary offline contact. `direct_ever_succeeded`:
-    /// once *any* direct send has worked this run the path is demonstrably fine. And
-    /// `relay_ever_succeeded`, which is the stronger one — the relay is dialled over the **same
-    /// Tor path**, so a relay that answers proves our circuits work and an unreachable peer is
-    /// their problem, not ours. Without it, one offline contact plus three messages on a fresh
-    /// launch would provoke a pointless teardown. Only when nothing at all answers — no peer, no
-    /// relay — after [`DIRECT_WEDGED_THRESHOLD`] tries is this device the suspect.
+    /// once *any* direct send has worked this run the path is fine. And `relay_ever_succeeded`, the
+    /// stronger one — the relay is dialled over the **same Tor path**, so a relay that answers
+    /// proves our circuits work and an unreachable peer is their problem. Only when nothing at all
+    /// answers — no peer, no relay — after [`DIRECT_WEDGED_THRESHOLD`] tries is this device the
+    /// suspect.
     pub(crate) fn direct_path_wedged(&self) -> bool {
         !self.direct_ever_succeeded
             && !self.relay_ever_succeeded
@@ -706,8 +700,8 @@ impl Node {
     }
 
     /// Apply a fetch's result. A site list that verifies, newer or not, counts as success: the next
-    /// fetch is a day away. Otherwise the relays' answers are used (every build up to 0.1.27 asked
-    /// them on every poll) and the site is tried again after the retry interval.
+    /// fetch is a day away. Otherwise the relays' answers are used and the site is tried again
+    /// after the retry interval.
     pub(crate) fn finish_directory_fetch(
         &mut self,
         result: DirectoryFetchResult,
@@ -801,7 +795,7 @@ impl Node {
         self.finish_edit(contact_id, msg_id, new_text, recalled)
     }
 
-    /// First half of [`edit_message`](Self::edit_message), under the lock: check the message may
+    /// First half of `edit_message`, under the lock: check the message may
     /// be edited and change it locally. For a message still queued on relays it hands back the
     /// copies to recall — a network round, for the caller to run without the lock — before
     /// [`finish_edit`](Self::finish_edit) can know which path the edit takes.
@@ -845,7 +839,7 @@ impl Node {
         Ok(Some(self.recall_plan(contact_id, copies)))
     }
 
-    /// Second half of [`edit_message`](Self::edit_message), under the lock again. `recalled` is
+    /// Second half of `edit_message`, under the lock again. `recalled` is
     /// whether every queued copy was recalled (`None`: the message was not queued).
     ///
     /// Path 1: all copies recalled — the old text can never be delivered, so post the new text as
@@ -924,7 +918,7 @@ impl Node {
     }
 
     /// Unsend ("delete for both") one of our earlier text messages — same eligibility as
-    /// [`edit_message`](Self::edit_message) (queued, or within [`EDIT_WINDOW`]). The local
+    /// `edit_message` (queued, or within [`EDIT_WINDOW`]). The local
     /// copy becomes a "deleted" tombstone (`kind = "deleted"`, empty text); the peer converges:
     ///
     /// * **Still queued + receipt held**: recall the undelivered blob — the peer never receives
@@ -942,7 +936,7 @@ impl Node {
         self.finish_unsend(contact_id, msg_id, recalled)
     }
 
-    /// First half of [`unsend_message`](Self::unsend_message), under the lock: the same checks and
+    /// First half of `unsend_message`, under the lock: the same checks and
     /// hand-off as [`begin_edit`](Self::begin_edit). Nothing changes locally yet: which change it is
     /// (gone, or a tombstone) depends on the recall.
     pub(crate) fn begin_unsend(
@@ -978,7 +972,7 @@ impl Node {
         Ok(Some(self.recall_plan(contact_id, copies)))
     }
 
-    /// Second half of [`unsend_message`](Self::unsend_message), under the lock again.
+    /// Second half of `unsend_message`, under the lock again.
     pub(crate) fn finish_unsend(
         &mut self,
         contact_id: &str,
@@ -1138,8 +1132,8 @@ impl Node {
             }
         }
         // Nothing about where, when or on what it was taken leaves this device: a video's metadata
-        // boxes become padding, a photo keeps only its coding segments (media_scrub.rs, self-audit
-        // 2026-10-17 P1). A video preview that will not clean is dropped, not the video.
+        // boxes become padding, a photo keeps only its coding segments (media_scrub.rs). A video
+        // preview that will not clean is dropped, not the video.
         let (cleaned, cleaned_thumb, mime) = if !clean {
             (data.to_vec(), thumb.to_vec(), mime)
         } else if kind == "video" {
@@ -1340,8 +1334,8 @@ impl Node {
 
     /// Decrypt a stored image (a photo, or a video's preview) for the app to draw.
     ///
-    /// The app decodes these in-process, so only a plain JPEG of sane size leaves here; the engine's
-    /// other decoders never see a contact's bytes (media_kind.rs, self-audit 2026-10-17 P2).
+    /// The app decodes these in-process, so only a plain JPEG of sane size leaves here; the
+    /// engine's other decoders never see a contact's bytes (media_kind.rs).
     pub fn media_bytes(&self, media_id: &str) -> Result<Vec<u8>> {
         let bytes = self.media_plain(media_id)?;
         if !super::media_kind::displayable_image(&bytes) {
@@ -1351,20 +1345,20 @@ impl Node {
         Ok(bytes)
     }
 
-    /// Decrypt a stored attachment to a plaintext file and return its path (for opening a video
-    /// in the system player without copying the bytes through the FFI boundary).
+    /// Decrypt a stored attachment to a plaintext file and return its path (for opening a video in
+    /// the system player without copying the bytes through the FFI boundary).
     ///
     /// The plaintext lands in an **app-private, owner-only** scratch dir (§1.4) — a sibling of the
     /// sealed store, not the world-readable system temp — under an unguessable id. It is swept on
     /// the next launch ([`set_media_store`](Self::set_media_store)) and on logout
     /// ([`clear_open_cache`](Self::clear_open_cache)); the residual exposure is the interval a
-    /// decrypted file exists on disk while (and briefly after) the external player holds it, plus
-    /// the case of a crash before the next-launch sweep. Documented in `website/limits.html`.
+    /// decrypted file exists while (and briefly after) the player holds it, plus a crash before the
+    /// next sweep. Documented in `website/limits.html`.
     ///
     /// Only a recognised video container is written, and its extension comes from its own bytes
-    /// ([`media_kind::video_ext`](super::media_kind::video_ext)). `_suggested_ext` is ignored: the
-    /// app used to pass the contact's mime here, which let a contact choose how the OS opened the
-    /// file (self-audit 2026-10-13, finding 1). Kept in the signature so the bridge is unchanged.
+    /// ([`media_kind::video_ext`](super::media_kind::video_ext)). `_suggested_ext` is ignored — a
+    /// contact's mime must not choose how the OS opens the file — and kept in the signature so the
+    /// bridge is unchanged.
     pub fn media_to_file(&self, media_id: &str, _suggested_ext: &str) -> Result<String> {
         if !is_media_id(media_id) {
             anyhow::bail!("not a media id");
@@ -1383,11 +1377,9 @@ impl Node {
         Ok(path.to_string_lossy().into_owned())
     }
 
-    /// Delete an attachment for good: its sealed file, and any decrypted copy `media_to_file`
-    /// left in the open-cache for a player. Burn expiry, unsend and the disappearing timer used to
-    /// remove only the sealed file, so a burned video that had been opened stayed on disk in the
-    /// clear until the next launch swept the cache — days, on a desktop left running (self-audit
-    /// 2026-10-13, round 6).
+    /// Delete an attachment for good: its sealed file, and any decrypted copy `media_to_file` left
+    /// in the open-cache for a player. Otherwise a burned video that had been opened would stay on
+    /// disk in the clear until the next launch swept the cache.
     pub(crate) fn forget_media(&self, id: &str) {
         if !is_media_id(id) {
             return;
@@ -1436,13 +1428,11 @@ impl Node {
             .map(|(id, c)| (id.clone(), c.alive_count))
             .collect();
         while let Some((from_address, bytes)) = self.transport.try_recv() {
-            // Skip what we cannot parse, exactly as the relay drain does. This used to be `?`,
-            // which aborted the whole pump — and with it that tick's relay harvest and send
-            // bookkeeping — over one frame. A peer running a NEWER build is the ordinary way to
-            // meet an unknown frame: every new control frame added to `Frame` is undecodable to
-            // everyone who has not updated yet, so a version skew must cost that frame and
-            // nothing else. (`Frame::Captures` shipped after 0.1.19 and is announced to every open
-            // chat at launch, so 0.1.19 peers meet one on the direct path routinely.)
+            // Skip what we cannot parse, exactly as the relay drain does, rather than abort the
+            // whole pump — and with it that tick's relay harvest and send bookkeeping — over one
+            // frame. A peer on a NEWER build is the ordinary way to meet an unknown frame (every
+            // new control frame is undecodable to everyone who has not updated), so a version skew
+            // must cost that frame and nothing else.
             let Ok(frame) = wire::decode(&bytes) else {
                 // From a contact still on 0.1 (an older wire version): say so in that chat, and
                 // hold what we send them until they update.
@@ -1482,9 +1472,8 @@ impl Node {
             self.heard_from(&id);
         }
         // Per-message delivery receipts for anything that arrived over the DIRECT path. Without
-        // these a directly-sent message reached "sent" and stopped there forever — no frame ever
-        // promoted it — so the sender's UI showed a plain bubble that meant "we dialled their onion
-        // successfully", while looking exactly like a message that had arrived (2026-08-02).
+        // them a directly-sent message would stop at "sent" — "we dialled their onion" — looking
+        // exactly like one that arrived.
         //
         // The handlers themselves record what they accepted, *after* decrypting it (see
         // `Node::pending_receipts`) — the caller cannot: half these frames keep their id inside the
@@ -1530,8 +1519,8 @@ impl Node {
             relays.push((None, primary.clone()));
         }
         // Each relay once. The signed directory normally lists the primary itself, so without this
-        // every round polled the one relay twice under two names — double the requests, and with
-        // fragments double the onion connections (seen on a phone, 2026-09-26).
+        // every round would poll that relay twice under two names — double the requests and onion
+        // connections.
         let primary_addr = primary.as_ref().and_then(|p| p.addr().map(str::to_string));
         let mut seen: Vec<&str> = primary_addr.iter().map(String::as_str).collect();
         for addr in &onions {
@@ -1674,16 +1663,14 @@ impl Node {
     ///
     /// Best-effort by design: a receipt that cannot be delivered must never fail the receive it
     /// belongs to — the message *has* arrived, and the only casualty is the sender's badge, which
-    /// stays at "sent". That is the honest failure direction. Falls back to the relay like any
-    /// control frame, so a peer who has gone offline still learns their message landed.
+    /// stays at "sent". Falls back to the relay like any control frame, so a peer who has gone
+    /// offline still learns their message landed.
     ///
     /// The first receipt to each peer goes over a **fresh** connection. Nothing confirms a receipt,
-    /// so one written into a connection kept open from earlier traffic, whose other end has gone,
-    /// was lost without an error, and the relay fallback never ran: the sender's message sat on
-    /// "Held for delivery" for good (2026-09-30). A fresh dial to a gone peer fails, and the receipt
-    /// goes to the relay. Later receipts to the same peer in this batch take the ordinary send, which
-    /// reuses the connection the first one opened if it got through, so a burst of messages costs
-    /// one extra dial, not one per message.
+    /// so one written into a kept-open connection whose other end has gone is lost without an error
+    /// and the relay fallback never runs, leaving the sender on "Held for delivery". A fresh dial
+    /// to a gone peer fails, and the receipt goes to the relay. Later receipts in this batch reuse
+    /// the connection the first one opened, so a burst costs one extra dial, not one per message.
     pub(crate) fn send_receipts(&mut self, receipts: &[(String, String)]) {
         let mut proven: Vec<&str> = Vec::new();
         for (from, msg_id) in receipts {
@@ -1858,13 +1845,12 @@ impl Node {
     /// Tell every established contact our address where it has not confirmed the current one.
     ///
     /// Compared per chat against what that contact confirmed ([`Chat::told_address`]), not against
-    /// the address we last persisted: [`announce_address_if_changed`](Self::announce_address_if_changed)
-    /// can only see a change against that baseline, so a change it missed was never repaired: a
-    /// file-backup restore from 0.1.16–0.1.28 came back on a new onion without announcing it, and
-    /// the save that followed made the new address the baseline
-    /// (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`). Until 0.2 this sent to
-    /// everyone on every launch, which told every contact when we came online; now a launch sends
-    /// nothing unless something changed ([`ANNOUNCE_ONLINE_ON_START`]).
+    /// the address we last persisted: a change
+    /// [`announce_address_if_changed`](Self::announce_address_if_changed) missed — such as a
+    /// 0.1.16–0.1.28 backup restore that came back on a new onion
+    /// (`docs/advisories/2026-10-07-backups-lost-the-onion-address.md`) — would otherwise become
+    /// the baseline and never be repaired. A launch sends nothing unless something changed
+    /// ([`ANNOUNCE_ONLINE_ON_START`]).
     pub fn reannounce_address(&mut self) {
         if !self.announce_ready() {
             return;
@@ -2073,7 +2059,7 @@ impl Node {
         if let Some((peer_address, frame)) = outgoing {
             // For the caller to send before it returns (`api::set_disappearing`), not for the
             // poller: a message typed right after would otherwise go out first and land above the
-            // notice on the peer's side (seen 2026-10-11).
+            // notice on the peer's side.
             let _ = self.deliver_with(
                 &peer_address,
                 contact_id,
@@ -2321,9 +2307,9 @@ impl Node {
 /// Whether `id` can be a media id: what [`store_media`](Node::store_media) generates
 /// (`random_password`: `A-Z`, `2-9`, dashes). Every path built from a media id goes through this,
 /// because ids also arrive from backups and restored history, which an attacker can craft: an id
-/// with `/`, `\` or `..` in it would read, write or delete files outside the media store
-/// (self-audit 2026-10-13, finding 2). Deliberately looser than the generator (any `A-Z0-9-`) so
-/// it never strands real media; what matters is that no path character gets through.
+/// with `/`, `\` or `..` in it would read, write or delete files outside the media store.
+/// Deliberately looser than the generator (any `A-Z0-9-`) so it never strands real media; what
+/// matters is that no path character gets through.
 pub(crate) fn is_media_id(id: &str) -> bool {
     !id.is_empty()
         && id.len() <= 64

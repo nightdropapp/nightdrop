@@ -359,11 +359,10 @@ impl Node {
                     return Ok(None);
                 }
                 // They updated. A build can ignore a marker it does not know yet still confirm the
-                // frame, so what we "told" an older build may never have registered (seen in the
-                // 0.2 device pass: Block screenshots announced to a build without the marker).
-                // Tell the new build again.
+                // frame, so what we "told" an older build may never have registered. Tell the new
+                // build again.
                 // Each change makes us send our announcements again, so it counts against the daily
-                // allowance: a contact flipping versions cannot use us as an amplifier (R12-2).
+                // allowance: a contact flipping versions cannot use us as an amplifier.
                 let updated = chat.contact.peer_app_version.is_some() && within_allowance(chat, 0);
                 if updated {
                     chat.told_captures = None;
@@ -510,8 +509,8 @@ impl Node {
                 devlog!("[nightdrop] received approval from {from} (code='{code}')");
                 if let Some(chat) = self.chats.get(&from) {
                     // Only the approval that ends the wait is news. The frame can arrive twice (a
-                    // direct copy that looked lost, then the relay copy behind it: S23, 2026-10-11)
-                    // and is unauthenticated besides, so a repeat must change nothing on screen.
+                    // direct copy that looked lost, then the relay copy behind it) and is
+                    // unauthenticated besides, so a repeat must change nothing on screen.
                     let was_waiting = super::messaging::awaiting_approval(chat);
                     self.clear_system_notices(&from, &["await_approval"]);
                     if let Some(chat) = self.chats.get_mut(&from).filter(|_| was_waiting) {
@@ -525,12 +524,11 @@ impl Node {
                     // edited while we waited. (`Approved` is unauthenticated, but this only sends
                     // our own set on our session with them, which a forger cannot read.)
                     self.announce_relay_set_to(&from);
-                    // What we announced when we joined (capability, capture block, burns,
+                    // What we announced when we joined (capability, capture block, nearby, burns,
                     // version) went out before the inviter had read our request, and an inviter
-                    // that gets a frame from someone it does not know yet drops it — while our side
-                    // counted it delivered and never sent it again (0.2 device pass: the S23's
-                    // version and capability never reached the contact it joined). Approval is the
-                    // first moment they certainly know us: tell them again.
+                    // drops a frame from someone it does not know yet — while our side counted it
+                    // delivered and never sent it again. Approval is the first moment they
+                    // certainly know us: tell them again.
                     if was_waiting {
                         if let Some(chat) = self.chats.get_mut(&from) {
                             chat.told_captures = None;
@@ -558,8 +556,7 @@ impl Node {
                 // Unauthenticated (`from` is a claim), so it may only end a request that is still
                 // waiting — the one case the inviter sends it, refusing before it ever writes to
                 // the session. Once anything has arrived on our session the chat is established and
-                // ignores it; else anyone who could deliver a frame could close any chat
-                // (self-audit 2026-10-13, finding 5).
+                // ignores it; else anyone who could deliver a frame could close any chat.
                 let waiting = self
                     .chats
                     .get(&from)
@@ -733,8 +730,8 @@ impl Node {
                             return Ok(None);
                         }
                         chat.peer_block_seq = seq;
-                        // A change costs a save and a platform call here: counted against the
-                        // daily allowance, so flipping it cannot be a flood (round 12, R12-3).
+                        // A change costs a save and a platform call here: counted against the daily
+                        // allowance, so flipping it cannot be a flood.
                         if chat.contact.peer_blocks_capture == Some(on)
                             || !within_allowance(chat, 0)
                         {
@@ -743,8 +740,8 @@ impl Node {
                         chat.contact.peer_blocks_capture = Some(on);
                         // They ask again while our user's override stands: the override stays (a
                         // harasser toggling must not be able to cancel a victim's choice to keep
-                        // evidence — round 14), and they are told again, so the request is never
-                        // ignored silently (round 13).
+                        // evidence), and they are told again, so the request is never ignored
+                        // silently.
                         let now = crate::api::now_secs();
                         let retell = on
                             && chat.contact.capture_override
@@ -812,8 +809,8 @@ impl Node {
                     return Ok(None);
                 }
                 // ONLY the named message. Not "everything older": a message can be lost while a
-                // later one arrives (a core torn down mid-flight, 2026-08-02), and promoting its
-                // neighbours would restore the very lie this frame exists to end.
+                // later one arrives (a core torn down mid-flight), and promoting its neighbours
+                // would restore the very lie this frame exists to end.
                 //
                 // `t:` marks an attachment, identified by the `transfer_id` both sides hold — the
                 // id media has instead of a `msg_id`.
@@ -929,9 +926,9 @@ impl Node {
                 Ok(Some((from, String::new())))
             }
             Frame::ClientKey { .. } => {
-                // The unsealed form: its `from` is only a claim, so acting on it let anyone who
-                // could deliver a frame replace a contact's onion key (self-audit 2026-10-13,
-                // finding 5). Still decoded, so a pre-fix 0.2 test build's frame is not an error.
+                // The unsealed form: its `from` is only a claim, so acting on it would let anyone
+                // who could deliver a frame replace a contact's onion key. Still decoded, so an
+                // early 0.2 test build's frame is not an error.
                 crate::diag!("onion-auth: ignored an unsealed client key");
                 Ok(None)
             }
@@ -973,8 +970,8 @@ impl Node {
                     crypto::decrypt(&mut chat.session, &olm)?
                 };
                 let (transfer_id, kind, mime, size, mut thumb) = unpack_media_incoming(&envelope)?;
-                // A preview is a small JPEG (320 px); anything bigger is not one, and was stored
-                // unbounded (self-audit 2026-10-17). Dropped, not the placeholder.
+                // A preview is a small JPEG (320 px); anything bigger is not one. Dropped, not the
+                // placeholder.
                 if thumb.len() > super::limits::MAX_THUMB_BYTES {
                     thumb.clear();
                 }
