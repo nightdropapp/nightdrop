@@ -1015,13 +1015,25 @@ impl TorTransport {
                     }
                     // stale (peer closed it / circuit gone): drop and reconnect.
                 }
-                let mut s = tokio::time::timeout(
-                    PEER_DIAL_TIMEOUT,
-                    client.connect((peer2.as_str(), NIGHTDROP_PORT)),
-                )
-                .await
-                .map_err(|_| anyhow::anyhow!("peer dial timed out"))?
-                .context("dial peer onion")?;
+                // One retry for a circuit that died under the stream being opened, as for relay
+                // requests (`relay_dialer_with`): nothing was sent, and arti builds or picks
+                // another circuit. Both attempts share PEER_DIAL_TIMEOUT.
+                let connect = async {
+                    let target = (peer2.as_str(), NIGHTDROP_PORT);
+                    match client.connect(target).await {
+                        Err(e) if circuit_closed_under_stream(&e) => {
+                            crate::diag!(
+                                "peer: circuit closed while opening a stream — retrying once"
+                            );
+                            client.connect(target).await
+                        }
+                        other => other,
+                    }
+                };
+                let mut s = tokio::time::timeout(PEER_DIAL_TIMEOUT, connect)
+                    .await
+                    .map_err(|_| anyhow::anyhow!("peer dial timed out"))?
+                    .context("dial peer onion")?;
                 write_frame(&mut s, &frame).await?;
                 Ok(s)
             };
