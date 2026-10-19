@@ -114,8 +114,9 @@ const POLLER_EXIT_TIMEOUT: Duration = Duration::from_secs(8);
 /// second attempt, after the poller has exited, almost always gets it.
 const LOCK_TRY_TIMEOUT: Duration = Duration::from_millis(750);
 
-/// Cover traffic (#4), opt-in and off by default. A process-wide flag like `BACKGROUND`: the poller
-/// reads it every tick, so toggling it takes effect without restarting anything.
+/// Cover traffic (#4). A process-wide flag like `BACKGROUND`: the poller reads it every tick, so
+/// toggling it takes effect without restarting anything. False until the app sets it from the
+/// user's saved choice, which setup starts on for a new identity that uses a relay.
 static COVER_TRAFFIC: AtomicBool = AtomicBool::new(false);
 
 /// Mean gap between cover posts. Intervals are drawn from an **exponential** distribution around
@@ -2519,7 +2520,8 @@ pub fn check_bridge(line: String) -> Option<String> {
     check_bridge_line(&line).err()
 }
 
-/// Turn **cover traffic** (#4) on or off. Off by default, and deliberately opt-in: it costs the
+/// Turn **cover traffic** (#4) on or off. Setup starts it on for a new identity that uses a relay
+/// (security settings start on; the user can lower them), and it can be turned off: it costs the
 /// user battery and bandwidth continuously, and costs whoever runs the relay — usually a
 /// volunteer — the load of carrying dummy mail.
 ///

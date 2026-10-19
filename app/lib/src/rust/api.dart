@@ -167,7 +167,8 @@ Future<FetchedBridges> fetchBridges({String? country}) =>
 Future<String?> checkBridge({required String line}) =>
     RustLib.instance.api.crateApiCheckBridge(line: line);
 
-/// Turn **cover traffic** (#4) on or off. Off by default, and deliberately opt-in: it costs the
+/// Turn **cover traffic** (#4) on or off. Setup starts it on for a new identity that uses a relay
+/// (security settings start on; the user can lower them), and it can be turned off: it costs the
 /// user battery and bandwidth continuously, and costs whoever runs the relay — usually a
 /// volunteer — the load of carrying dummy mail.
 ///
