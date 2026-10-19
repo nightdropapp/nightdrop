@@ -135,6 +135,15 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   never imply otherwise. The app-switcher preview is suppressed outright on Android 13+
   (`setRecentsScreenshotEnabled`); on older releases that suppression is best-effort. Design:
   `docs/design/screenshot-transparency.md`.
+- **Nearby ("Also connect on the same Wi-Fi") is not anonymous.** *(Known limit, by design;
+  from 0.2.1, off by default.)* A chat where both people turn it on sends its frames straight
+  between the devices whenever they share a local network. Each learns the other's local address,
+  and anyone on that network (its owner, a café's router, another guest) can see that the two
+  devices talk and how much — never what, since frames stay end-to-end encrypted and padded. The
+  per-chat tokens that open a local connection travel in clear on that network, so someone there
+  can replay them to waste connections or drop traffic; a dropped message falls back to Tor and the
+  relay. The app connects only to a private address the contact announced, in its own subnet.
+  Design: `docs/design/nearby.md`.
 - **What a relay can still link about your mailboxes.** *(Known limit.)* Through 0.1.25 offline
   mail went to a handle that was a static hash of the recipient's identity key, so a relay (or
   whoever seizes one) could tell that deposits from different senders, on different days, were for

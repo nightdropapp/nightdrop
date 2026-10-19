@@ -397,6 +397,12 @@ class MockNightdropCore extends NightdropCore {
   }
 
   @override
+  Future<void> setNearby(String contactId, bool on) async {
+    _contacts.firstWhere((c) => c.id == contactId).nearby = on;
+    notifyListeners();
+  }
+
+  @override
   Future<void> setRemoteStorage(String contactId, bool enabled) async {
     await _fakeWork();
     final c = _contacts.firstWhere((c) => c.id == contactId);

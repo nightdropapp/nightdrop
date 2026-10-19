@@ -80,6 +80,13 @@ impl Node {
                     told_captures: chat.told_captures,
                     told_block: chat.told_block,
                     peer_block_seq: chat.peer_block_seq,
+                    nearby_token: chat.nearby_token.clone(),
+                    nearby_seq: chat.nearby_seq,
+                    told_nearby_seq: chat.told_nearby_seq,
+                    peer_nearby_on: chat.peer_nearby_on,
+                    peer_nearby_at: chat.peer_nearby.as_ref().map(|(at, _)| at.to_string()),
+                    peer_nearby_token: chat.peer_nearby.as_ref().map(|(_, t)| t.clone()),
+                    peer_nearby_seq: chat.peer_nearby_seq,
                     own_key_pending: chat.own_key_pending.as_ref().map(super::encode_secret),
                     peer_wire_old: chat.peer_wire_old,
                     told_upgrade: chat.told_upgrade,
@@ -582,6 +589,12 @@ impl Node {
         rand::Rng::fill(&mut rand::thread_rng(), &mut salt);
         let mut key = crate::storage::derive_key(password, &salt)?;
         let mut state = self.export(&key);
+        // Nearby is this device's network: a restore elsewhere starts with it off, and the bumped
+        // sequence tells the contact so (`docs/design/nearby.md` §7).
+        for chat in state.chats.iter_mut().filter(|c| c.nearby_token.is_some()) {
+            chat.nearby_token = None;
+            chat.nearby_seq += 1;
+        }
         if full {
             state.media = self.collect_media();
         } else {
@@ -783,6 +796,9 @@ fn chat_from_persisted(
             peer_captures_silent: chat.peer_captures_silent,
             peer_blocks_capture: chat.peer_blocks_capture,
             capture_override: chat.capture_override,
+            nearby: false, // these three are filled in `contacts()` from the chat
+            peer_nearby: false,
+            nearby_connected: false,
             peer_relays: Vec::new(), // filled in `contacts()` from `relay_set`
             peer_supports_burn: chat.peer_supports_burn,
             peer_app_version: chat.peer_app_version.clone(),
@@ -847,6 +863,27 @@ fn chat_from_persisted(
         told_captures: chat.told_captures,
         told_block: chat.told_block,
         peer_block_seq: chat.peer_block_seq,
+        nearby_token: chat
+            .nearby_token
+            .clone()
+            .filter(|t| crate::transport::nearby::valid_token(t)),
+        nearby_seq: chat.nearby_seq,
+        told_nearby_seq: chat.told_nearby_seq,
+        peer_nearby_on: chat.peer_nearby_on,
+        // Checked as on receipt: a stored address is still only ever a private one.
+        peer_nearby: match (&chat.peer_nearby_at, &chat.peer_nearby_token) {
+            (Some(at), Some(token)) => at
+                .parse::<std::net::SocketAddrV4>()
+                .ok()
+                .filter(|a| {
+                    crate::transport::nearby::is_private(*a.ip())
+                        && crate::transport::nearby::valid_port(a.port())
+                })
+                .filter(|_| crate::transport::nearby::valid_token(token))
+                .map(|a| (a, token.clone())),
+            _ => None,
+        },
+        peer_nearby_seq: chat.peer_nearby_seq,
         own_key_pending: chat
             .own_key_pending
             .as_deref()

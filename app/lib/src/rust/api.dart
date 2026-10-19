@@ -661,6 +661,11 @@ abstract class NightdropCore implements RustOpaqueInterface {
   /// Set the local user's display name within one chat (§4).
   Future<void> setMyName({required String contactId, required String name});
 
+  /// Turn "Also connect on the same Wi-Fi" on or off for one chat (`docs/design/nearby.md`). Off by
+  /// default: it shows the contact this device's local address, and anyone on that network that
+  /// the two devices talk. The contact is told; the local path is used once they turn it on too.
+  Future<void> setNearby({required String contactId, required bool enabled});
+
   /// Replace our relay list. At most [`RelayFeatures::max_relays`] entries; blank and repeated
   /// onions are dropped. Contacts are told the new set (E2E), a removed relay is still drained
   /// for 24 h, and an empty list makes this device direct only. Persists at once; the frames go
@@ -979,6 +984,13 @@ class Contact {
   /// ([`set_capture_override`](NightdropCore::set_capture_override)); the peer is told.
   final bool captureOverride;
 
+  /// Nearby (`docs/design/nearby.md`): whether we turned "Also connect on the same Wi-Fi" on for
+  /// this chat ([`set_nearby`](NightdropCore::set_nearby)), whether they did, and whether a frame
+  /// went over the local network either way in the last two minutes.
+  final bool nearby;
+  final bool peerNearby;
+  final bool nearbyConnected;
+
   /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
   /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
   final List<String> peerRelays;
@@ -1053,6 +1065,9 @@ class Contact {
     this.peerCapturesSilent,
     this.peerBlocksCapture,
     required this.captureOverride,
+    required this.nearby,
+    required this.peerNearby,
+    required this.nearbyConnected,
     required this.peerRelays,
     required this.peerRelayState,
     required this.serverStorageAvailable,
@@ -1080,6 +1095,9 @@ class Contact {
       peerCapturesSilent.hashCode ^
       peerBlocksCapture.hashCode ^
       captureOverride.hashCode ^
+      nearby.hashCode ^
+      peerNearby.hashCode ^
+      nearbyConnected.hashCode ^
       peerRelays.hashCode ^
       peerRelayState.hashCode ^
       serverStorageAvailable.hashCode ^
@@ -1109,6 +1127,9 @@ class Contact {
           peerCapturesSilent == other.peerCapturesSilent &&
           peerBlocksCapture == other.peerBlocksCapture &&
           captureOverride == other.captureOverride &&
+          nearby == other.nearby &&
+          peerNearby == other.peerNearby &&
+          nearbyConnected == other.nearbyConnected &&
           peerRelays == other.peerRelays &&
           peerRelayState == other.peerRelayState &&
           serverStorageAvailable == other.serverStorageAvailable &&

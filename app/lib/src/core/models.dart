@@ -60,6 +60,9 @@ class Contact {
     this.peerCapturesSilent,
     this.peerBlocksCapture,
     this.captureOverride = false,
+    this.nearby = false,
+    this.peerNearby = false,
+    this.nearbyConnected = false,
     this.peerSupportsBurn,
     this.peerRelays = const [],
     this.peerRelayState = 'relays',
@@ -121,6 +124,13 @@ class Contact {
 
   /// The user allows screenshots in this chat although the peer blocks them (the peer was told).
   bool captureOverride;
+
+  /// Nearby (docs/design/nearby.md): "Also connect on the same Wi-Fi" is on here ([nearby]), on
+  /// their side ([peerNearby]), and a message went over the local network in the last two minutes
+  /// ([nearbyConnected]). Off by default; it is used only when both turn it on.
+  bool nearby;
+  bool peerNearby;
+  bool nearbyConnected;
 
   /// Whether the peer's build understands burn messages.
   ///

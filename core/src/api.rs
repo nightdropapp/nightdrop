@@ -319,6 +319,12 @@ pub struct Contact {
     /// Whether the user chose to allow screenshots in this chat although the peer blocks them
     /// ([`set_capture_override`](NightdropCore::set_capture_override)); the peer is told.
     pub capture_override: bool,
+    /// Nearby (`docs/design/nearby.md`): whether we turned "Also connect on the same Wi-Fi" on for
+    /// this chat ([`set_nearby`](NightdropCore::set_nearby)), whether they did, and whether a frame
+    /// went over the local network either way in the last two minutes.
+    pub nearby: bool,
+    pub peer_nearby: bool,
+    pub nearby_connected: bool,
     /// The onions in the peer's relay set (`Frame::RelaySet`); whether it also includes the Night
     /// Drop relay is in [`peer_relay_state`](Self::peer_relay_state).
     pub peer_relays: Vec<String>,
@@ -789,6 +795,8 @@ impl Inner {
             self.me.reannounce_captures();
             // And whether we block captures.
             self.me.reannounce_block();
+            // Nearby: listen or stop, notice a new local address, tell whoever has not heard.
+            self.me.nearby_tick();
             // v2 mailbox handles (`mailbox-handles.md`): offer our contribution to every chat not
             // yet confirmed. Once per run per chat, retried while undelivered — the same shape as
             // the burn announce, and the heal for a lost agreement frame.
@@ -1152,9 +1160,12 @@ impl NightdropCore {
             let mut me = match restore {
                 Some((path, key)) => {
                     let state = crate::storage::load_from_file(path, key)?;
-                    Node::restore(&state, Box::new(transport), key)?
+                    Node::restore(&state, crate::transport::nearby::over_tor(transport), key)?
                 }
-                None => fresh_identity(Box::new(transport), initial_relays),
+                None => fresh_identity(
+                    crate::transport::nearby::over_tor(transport),
+                    initial_relays,
+                ),
             };
             me.set_require_authorization(true);
             if let Some(sd) = &state_dir {
@@ -1249,7 +1260,8 @@ impl NightdropCore {
                 RelayClient::with_dialer_for(onion.clone(), transport.make_relay_dialer(onion))
             });
             // Rebuild the node from the same decrypted state (pickles decrypt with bkey).
-            let mut me = Node::restore(&state, Box::new(transport), &bkey)?;
+            let mut me =
+                Node::restore(&state, crate::transport::nearby::over_tor(transport), &bkey)?;
             me.set_require_authorization(true);
             if let Some(sd) = &state_dir {
                 me.set_tor_state_dir(sd.clone());
@@ -1329,7 +1341,11 @@ impl NightdropCore {
                 relay_addr.clone(),
                 transport.make_relay_dialer(relay_addr),
             );
-            let mut me = Node::restore_from_server(&relay, &password, Box::new(transport))?;
+            let mut me = Node::restore_from_server(
+                &relay,
+                &password,
+                crate::transport::nearby::over_tor(transport),
+            )?;
             me.set_require_authorization(true);
             if let Some(sd) = &state_dir {
                 me.set_tor_state_dir(sd.clone());
@@ -2092,6 +2108,17 @@ impl NightdropCore {
     pub fn set_capture_override(&self, contact_id: String, allow: bool) -> Result<()> {
         let mut g = self.lock();
         if g.me.set_capture_override(&contact_id, allow) {
+            g.save();
+        }
+        Ok(())
+    }
+
+    /// Turn "Also connect on the same Wi-Fi" on or off for one chat (`docs/design/nearby.md`). Off by
+    /// default: it shows the contact this device's local address, and anyone on that network that
+    /// the two devices talk. The contact is told; the local path is used once they turn it on too.
+    pub fn set_nearby(&self, contact_id: String, enabled: bool) -> Result<()> {
+        let mut g = self.lock();
+        if g.me.set_nearby(&contact_id, enabled) {
             g.save();
         }
         Ok(())

@@ -1366,6 +1366,84 @@ abstract class AppLocalizations {
   /// **'Allow and tell them'**
   String get captureOverrideConfirm;
 
+  /// Chat menu: turn on the local-network path for this chat (docs/design/nearby.md).
+  ///
+  /// In en, this message translates to:
+  /// **'Also connect on the same Wi-Fi'**
+  String get nearbyOnMenu;
+
+  /// Chat menu: turn the local-network path off for this chat.
+  ///
+  /// In en, this message translates to:
+  /// **'Stop connecting on the same Wi-Fi'**
+  String get nearbyOffMenu;
+
+  /// Dialog title before turning the local-network path on.
+  ///
+  /// In en, this message translates to:
+  /// **'Also connect on the same Wi-Fi?'**
+  String get nearbyTitle;
+
+  /// Dialog body explaining what the local-network path reveals.
+  ///
+  /// In en, this message translates to:
+  /// **'When you are both on the same Wi-Fi, messages go straight between your devices instead of through Tor: faster, and it works without the internet.\n\nIt is not anonymous. Your contact learns your device\'s address on that network, and anyone on the network can see that your two devices are talking (never what you say). Messages stay end-to-end encrypted.\n\nIt is used only once they turn it on too. Turn it off at any time from this menu.'**
+  String get nearbyBody;
+
+  /// Dialog button that turns the local-network path on.
+  ///
+  /// In en, this message translates to:
+  /// **'Turn on'**
+  String get nearbyConfirm;
+
+  /// One line: the contact turned the local-network path on; we have not.
+  ///
+  /// In en, this message translates to:
+  /// **'They\'d like to also connect on the same Wi-Fi'**
+  String get nearbyAskedSummary;
+
+  /// Full text behind nearbyAskedSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'This person turned on \"Also connect on the same Wi-Fi\" for this chat. If you turn it on too, messages go straight between your devices whenever you share a network. Your contact would learn your device\'s address on that network, and anyone on it could see that your devices are talking. It stays off unless you turn it on from the chat menu.'**
+  String get nearbyAskedBanner;
+
+  /// One line: we turned the local-network path on; the contact has not.
+  ///
+  /// In en, this message translates to:
+  /// **'Same Wi-Fi: waiting for them to turn it on'**
+  String get nearbyWaitingSummary;
+
+  /// Full text behind nearbyWaitingSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'You turned on \"Also connect on the same Wi-Fi\". It is used once they turn it on too. Until then everything goes through Tor as usual.'**
+  String get nearbyWaitingBanner;
+
+  /// One line: both turned it on, but the devices are not reachable on one local network.
+  ///
+  /// In en, this message translates to:
+  /// **'Same Wi-Fi: on, not on the same network now'**
+  String get nearbyApartSummary;
+
+  /// Full text behind nearbyApartSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'You both turned on \"Also connect on the same Wi-Fi\", but your devices are not on the same network right now, so messages go through Tor. When you share a network, they go straight between your devices. Anyone on that network can see that your devices are talking, never what you say.'**
+  String get nearbyApartBanner;
+
+  /// One line: messages go over the local network.
+  ///
+  /// In en, this message translates to:
+  /// **'Same Wi-Fi: connected directly'**
+  String get nearbyConnectedSummary;
+
+  /// Full text behind nearbyConnectedSummary.
+  ///
+  /// In en, this message translates to:
+  /// **'Messages in this chat are going straight between your devices over the Wi-Fi you share, not through Tor. They stay end-to-end encrypted, but anyone on this network can see that your devices are talking. Turn it off from the chat menu to go back to Tor only.'**
+  String get nearbyConnectedBanner;
+
   /// One line when the user overrode the contact's block in this chat.
   ///
   /// In en, this message translates to:

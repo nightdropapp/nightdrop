@@ -16,6 +16,7 @@ use crate::Result;
 pub mod client_auth;
 pub(crate) mod inbound;
 pub mod lan;
+pub mod nearby;
 pub mod tcp;
 
 #[cfg(feature = "tor")]
@@ -270,6 +271,24 @@ pub trait Transport: Send + Sync {
     fn onion_identity(&self) -> Option<[u8; 64]> {
         None
     }
+
+    /// Nearby (`docs/design/nearby.md`): the chats with "Also connect on the same Wi-Fi" on, by
+    /// peer address. An empty map stops listening. Only [`nearby::NearbyTransport`] acts on it.
+    fn set_nearby(&self, _routes: HashMap<String, nearby::NearbyRoute>) {}
+
+    /// Where this device listens for nearby contacts on the local network, while it does.
+    fn nearby_address(&self) -> Option<std::net::SocketAddrV4> {
+        None
+    }
+
+    /// Whether a frame went to or came from `peer` over the local network in the last two minutes.
+    fn nearby_reachable(&self, _peer: &str) -> bool {
+        false
+    }
+
+    /// Check, in the background, the nearby routes not heard from lately (the token exchange only,
+    /// no message), so the chat can say whether the local path works before anything is sent.
+    fn nearby_probe(&self) {}
 }
 
 /// The inert transport a node is left with after [`crate::node::Node::close_transport`]: it

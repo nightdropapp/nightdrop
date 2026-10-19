@@ -113,6 +113,22 @@ pub struct PersistedChat {
     pub told_block: Option<bool>,
     #[serde(default)]
     pub peer_block_seq: u64,
+    /// Nearby (`docs/design/nearby.md` §7): our token while it is on, the sequences, and the
+    /// peer's side (`"ipv4:port"` and token while they listen).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub nearby_token: Option<String>,
+    #[serde(default)]
+    pub nearby_seq: u64,
+    #[serde(default)]
+    pub told_nearby_seq: u64,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub peer_nearby_on: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_nearby_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub peer_nearby_token: Option<String>,
+    #[serde(default)]
+    pub peer_nearby_seq: u64,
     /// Pairing passes in waiting (`optional-relay.md` §5), base64. Joiner: our own client secret for
     /// the inviter's onion, installed in place of their QR pass once they accept. Inviter: the
     /// joiner's client key for our onion and their reply pass, both unused until Accept.

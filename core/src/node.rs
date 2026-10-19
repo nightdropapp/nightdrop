@@ -132,6 +132,9 @@ const MARK_CAPTURES_SILENT: &[u8] = b"nightdrop/ctl/captures-silent/v1";
 /// a quick off-then-on that arrives out of order (relay and direct race) settle on the last one. A
 /// build that predates it decrypts an unknown marker and ignores the frame.
 const MARK_CAPTURE_BLOCK_PREFIX: &[u8] = b"nightdrop/ctl/capture-block/v1:";
+/// Nearby (`docs/design/nearby.md` §4), on `Frame::Captures`: `<seq>:0`, `<seq>:1`, or
+/// `<seq>:1:<ipv4>:<port>:<token>`.
+const MARK_NEARBY_PREFIX: &[u8] = b"nightdrop/ctl/nearby/v1:";
 
 /// Dev-only logging. Identity keys, invite codes, and decrypted display names must never
 /// reach release logs (Android's logcat persists them for any `adb`-connected observer);
@@ -762,6 +765,16 @@ struct Chat {
     /// The sequence of the last capture-block announcement we accepted from them (persisted), so an
     /// older one arriving late is ignored.
     peer_block_seq: u64,
+    /// Nearby (`docs/design/nearby.md`): the token we gave this chat while "Also connect on the
+    /// same Wi-Fi" is on (`None` = off), the sequence of what we announce (bumped on every change,
+    /// 0 = never used) and the one the peer confirmed. Persisted.
+    nearby_token: Option<String>,
+    nearby_seq: u64,
+    told_nearby_seq: u64,
+    /// Their side, as they last announced it: on, and where they listen with their token.
+    peer_nearby_on: bool,
+    peer_nearby: Option<(std::net::SocketAddrV4, String)>,
+    peer_nearby_seq: u64,
     /// Pairing passes in waiting (`optional-relay.md` §5). Joiner: our own client secret for the
     /// inviter's onion, installed in place of their QR pass once their `RelaySet` proves they
     /// accepted. Inviter: the joiner's client key for our onion and their reply pass, both held
@@ -853,6 +866,9 @@ impl Chat {
                 peer_captures_silent: None,
                 peer_blocks_capture: None,
                 capture_override: false,
+                nearby: false,
+                peer_nearby: false,
+                nearby_connected: false,
                 peer_relays: Vec::new(),
                 peer_supports_burn: None,
                 peer_app_version: None,
@@ -888,6 +904,12 @@ impl Chat {
             told_captures: None,
             told_block: None,
             peer_block_seq: 0,
+            nearby_token: None,
+            nearby_seq: 0,
+            told_nearby_seq: 0,
+            peer_nearby_on: false,
+            peer_nearby: None,
+            peer_nearby_seq: 0,
             own_key_pending: None,
             peer_key_pending: None,
             pass_pending: None,
@@ -959,6 +981,10 @@ pub struct Node {
     /// When we last re-told a contact that our override of their block stands (unix seconds; in
     /// memory): at most once an hour, so their toggling cannot fill our held-control queue.
     override_retold: HashMap<String, u64>,
+    /// Where we last saw ourselves listening for nearby contacts (in memory): a change re-announces.
+    nearby_address: Option<std::net::SocketAddrV4>,
+    /// Nearby announcements on their way, by contact, with the sequence that went out.
+    nearby_announced: HashMap<String, u64>,
     /// This build's app version (`"0.1.27"`), set by the app via
     /// [`set_app_version`](Self::set_app_version) — the core crate does not know it. `None` until set, and nothing is
     /// announced until then: a guessed version would be worse than none.
@@ -1362,6 +1388,8 @@ pub(crate) enum Announce {
     Captures,
     /// The capture-block value that went out.
     Block(bool),
+    /// The nearby sequence that went out.
+    Nearby(u64),
     UpgradeNotice,
 }
 
@@ -1561,6 +1589,7 @@ mod mailbox;
 mod media_kind;
 mod media_scrub;
 mod messaging;
+mod nearby;
 mod pairing;
 pub(crate) use pairing::InviteExtras;
 
@@ -1596,6 +1625,8 @@ impl Node {
             captures_announced: HashMap::new(),
             block_announced: HashMap::new(),
             override_retold: HashMap::new(),
+            nearby_address: None,
+            nearby_announced: HashMap::new(),
             upgrade_notice_in_flight: std::collections::HashSet::new(),
             app_version: None,
             version_announced: HashMap::new(),
@@ -2707,6 +2738,7 @@ impl Node {
                     Announce::Block(sent) if Some(sent) == current_block => {
                         chat.told_block = Some(sent)
                     }
+                    Announce::Nearby(seq) => chat.told_nearby_seq = chat.told_nearby_seq.max(seq),
                     // Not while they are outdated: their old app discarded it, so they are told
                     // again once they update.
                     Announce::Version if version.is_some() && !chat.outdated() => {
@@ -2724,6 +2756,11 @@ impl Node {
                 }
                 self.dirty = true;
             }
+            if let Announce::Nearby(seq) = kind {
+                if self.nearby_announced.get(contact_id) == Some(&seq) {
+                    self.nearby_announced.remove(contact_id);
+                }
+            }
             return;
         }
         match kind {
@@ -2737,6 +2774,10 @@ impl Node {
             Announce::Block(sent) => {
                 self.block_announced.get(contact_id) == Some(&sent)
                     && self.block_announced.remove(contact_id).is_some()
+            }
+            Announce::Nearby(seq) => {
+                self.nearby_announced.get(contact_id) == Some(&seq)
+                    && self.nearby_announced.remove(contact_id).is_some()
             }
         };
     }
@@ -3445,6 +3486,11 @@ impl Node {
                 }
                 .to_string();
                 dto.peer_outdated = c.outdated();
+                dto.nearby = c.nearby_token.is_some();
+                dto.peer_nearby = c.peer_nearby_on;
+                dto.nearby_connected = dto.nearby
+                    && c.peer_nearby.is_some()
+                    && self.transport.nearby_reachable(&c.peer_address);
                 dto.server_storage_available =
                     !self.relays.is_empty() && c.relay_set.as_ref().is_some_and(|s| !s.is_empty());
                 dto
@@ -4047,6 +4093,8 @@ mod tests_held;
 mod tests_hostile;
 #[cfg(test)]
 mod tests_mailbox;
+#[cfg(test)]
+mod tests_nearby;
 #[cfg(test)]
 mod tests_outbox;
 #[cfg(test)]

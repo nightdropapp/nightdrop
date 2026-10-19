@@ -48,7 +48,13 @@ These define the product. Do not violate them, and flag any change that would:
   (the `moat` crate, 0.1.28) fetches WebTunnel bridges from the Tor Project directly, because it
   exists for when Tor is blocked. It runs only after a consent dialog saying it is not through Tor
   and that nothing goes to Night Drop, and it may reach only the CDN fronts and
-  `bridges.torproject.org`. Do not add another direct path without the same explicit decision.
+  `bridges.torproject.org`. **Second approved exception** (decided 2026-10-18): **Nearby**,
+  "Also connect on the same Wi-Fi" (`docs/design/nearby.md`): off by default and turned on **per
+  chat by both people**, it sends that chat's frames over the local network instead of Tor while
+  both are on one network, after a dialog saying what it reveals (each learns the other's local
+  address; anyone on the network sees that the devices talk). It may only connect to a private
+  address the contact itself announced end to end, in our own subnet. Do not add another direct
+  path without the same explicit decision.
 - **Backups are user-owned secrets.** The backup password is randomly generated, shown once, never
   persisted, and zeroized when its window closes. The server-stored backup (opt-in, default 24h /
   max 36h) holds an opaque encrypted blob only and never receives the password; losing it means
@@ -656,17 +662,16 @@ on a re-pair (new session) exactly like `verified`.
 - **Transport is pluggable:** Tor is the default implementation of the `Transport`
   trait; the interface allows adding other anonymity layers (I2P, Snowflake, etc.)
   where Tor is network-blocked.
-- **Offline / local-network path (`transport::lan`):** a Briar-style **LAN transport** for when
-  there is no internet, or Tor is blocked, but paired devices share a network (same room, same
-  Wi-Fi, a field hotspot). It advertises the device's detected LAN IP so a peer dials it directly;
-  pairing by QR in the same room needs no discovery step, and the existing in-band address rotation
-  (§5c) keeps the endpoint fresh as DHCP changes it. Content stays end-to-end encrypted + padded, so
-  a local observer sees only that two IPs talk, never what — but LAN is **not anonymized**, so it is
-  a censorship/blackout fallback, not a Tor replacement. Constructor: `NightdropCore::new_lan`.
-  **Deliberately no auto-discovery beacon:** broadcasting a raw identity key on the LAN would leak
-  presence + a stable identity (violating the anonymity invariant); privacy-preserving discovery
-  (a rotating per-contact token, Briar-style) and a Bluetooth path (needs platform channels) are
-  tracked follow-ups, as is the app-level "Local Wi-Fi mode" toggle.
+- **Nearby — the same-Wi-Fi path (`transport::nearby`, `node/nearby.rs`, 0.2.1):** per chat and
+  opt-in on both sides (§1a's second exception), a chat's frames go device to device over the local
+  network when both are on one, with Tor behind every send. `NearbyTransport` wraps the Tor
+  transport and keeps the onion as the address; each side announces its local `ip:port` and a
+  per-chat token on `Frame::Captures`, a local connection opens with a token exchange both ways,
+  and only private addresses in our own subnet are dialled or answered. Content stays end-to-end
+  encrypted and padded, so a local observer sees only that two devices talk — it is **not
+  anonymized**. **No discovery beacon:** nothing is broadcast; an address is learned only from the
+  contact. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
+  (`transport::lan`, `NightdropCore::new_lan`) remains only for the device integration tests.
 - **Metadata protection — fixed-size framing:** every `Frame` is length-prefixed and
   **zero-padded to a fixed size bucket** (`core/src/wire::encode`, `WIRE_VERSION` 2) before it
   touches the transport, so a passive observer can't use frame length to distinguish a short text,

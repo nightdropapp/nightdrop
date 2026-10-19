@@ -375,6 +375,7 @@ impl Node {
                     // And forget that this run already told them, or the retry skips them.
                     self.captures_announced.remove(&from);
                     self.block_announced.remove(&from);
+                    self.forget_nearby_told(&from);
                 }
                 Ok(Some((from, String::new())))
             }
@@ -539,6 +540,7 @@ impl Node {
                         }
                         self.captures_announced.remove(&from);
                         self.block_announced.remove(&from);
+                        self.forget_nearby_told(&from);
                         self.burns_announced.remove(&from);
                         self.version_announced.remove(&from);
                         self.announce_captures_to(&from);
@@ -708,6 +710,11 @@ impl Node {
                 };
                 let visible = match crypto::decrypt(&mut chat.session, &olm) {
                     Ok(pt) if pt == MARK_CAPTURES_VISIBLE => true,
+                    // Nearby (`docs/design/nearby.md` §4): where they listen on the local network.
+                    Ok(pt) if pt.starts_with(MARK_NEARBY_PREFIX) => {
+                        let changed = self.receive_nearby(&from, &pt[MARK_NEARBY_PREFIX.len()..]);
+                        return Ok(changed.then(|| (from, String::new())));
+                    }
                     Ok(pt) if pt == MARK_CAPTURES_SILENT => false,
                     // Their "Block screenshots": our app blocks captures while their chat is open.
                     // A standing property like the rest of this frame: no history entry. Carries a
@@ -1200,7 +1207,7 @@ impl Node {
 
 /// Whether a contact's message may be kept, counting it against their daily allowance
 /// ([`limits::Allowance`]). Over the allowance it is dropped, and the chat gets one notice per day.
-fn within_allowance(chat: &mut Chat, media_bytes: u64) -> bool {
+pub(super) fn within_allowance(chat: &mut Chat, media_bytes: u64) -> bool {
     use super::limits::{Admit, OVER_ALLOWANCE_NOTICE};
     match chat.allowance.admit(crate::api::now_secs(), media_bytes) {
         Admit::Yes => true,

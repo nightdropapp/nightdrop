@@ -773,6 +773,53 @@ class AppLocalizationsEn extends AppLocalizations {
   String get captureOverrideConfirm => 'Allow and tell them';
 
   @override
+  String get nearbyOnMenu => 'Also connect on the same Wi-Fi';
+
+  @override
+  String get nearbyOffMenu => 'Stop connecting on the same Wi-Fi';
+
+  @override
+  String get nearbyTitle => 'Also connect on the same Wi-Fi?';
+
+  @override
+  String get nearbyBody =>
+      'When you are both on the same Wi-Fi, messages go straight between your devices instead of through Tor: faster, and it works without the internet.\n\nIt is not anonymous. Your contact learns your device\'s address on that network, and anyone on the network can see that your two devices are talking (never what you say). Messages stay end-to-end encrypted.\n\nIt is used only once they turn it on too. Turn it off at any time from this menu.';
+
+  @override
+  String get nearbyConfirm => 'Turn on';
+
+  @override
+  String get nearbyAskedSummary =>
+      'They\'d like to also connect on the same Wi-Fi';
+
+  @override
+  String get nearbyAskedBanner =>
+      'This person turned on \"Also connect on the same Wi-Fi\" for this chat. If you turn it on too, messages go straight between your devices whenever you share a network. Your contact would learn your device\'s address on that network, and anyone on it could see that your devices are talking. It stays off unless you turn it on from the chat menu.';
+
+  @override
+  String get nearbyWaitingSummary =>
+      'Same Wi-Fi: waiting for them to turn it on';
+
+  @override
+  String get nearbyWaitingBanner =>
+      'You turned on \"Also connect on the same Wi-Fi\". It is used once they turn it on too. Until then everything goes through Tor as usual.';
+
+  @override
+  String get nearbyApartSummary =>
+      'Same Wi-Fi: on, not on the same network now';
+
+  @override
+  String get nearbyApartBanner =>
+      'You both turned on \"Also connect on the same Wi-Fi\", but your devices are not on the same network right now, so messages go through Tor. When you share a network, they go straight between your devices. Anyone on that network can see that your devices are talking, never what you say.';
+
+  @override
+  String get nearbyConnectedSummary => 'Same Wi-Fi: connected directly';
+
+  @override
+  String get nearbyConnectedBanner =>
+      'Messages in this chat are going straight between your devices over the Wi-Fi you share, not through Tor. They stay end-to-end encrypted, but anyone on this network can see that your devices are talking. Turn it off from the chat menu to go back to Tor only.';
+
+  @override
   String get captureOverrideSummary =>
       'You allow screenshots here; they were told';
 

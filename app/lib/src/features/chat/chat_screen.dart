@@ -215,6 +215,32 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
     await core.setCaptureOverride(contact.id, !contact.captureOverride);
   }
 
+  /// "Also connect on the same Wi-Fi" (docs/design/nearby.md): turning it on says first what it
+  /// reveals; turning it off needs no confirmation.
+  Future<void> _toggleNearby(Contact contact) async {
+    final core = NightdropScope.of(context);
+    final l10n = AppLocalizations.of(context)!;
+    if (!contact.nearby) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(l10n.nearbyTitle),
+          content: SingleChildScrollView(child: Text(l10n.nearbyBody)),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(context).pop(false),
+                child: Text(l10n.cancel)),
+            FilledButton(
+                onPressed: () => Navigator.of(context).pop(true),
+                child: Text(l10n.nearbyConfirm)),
+          ],
+        ),
+      );
+      if (ok != true || !mounted) return;
+    }
+    await core.setNearby(contact.id, !contact.nearby);
+  }
+
   /// We are on direct only (`optional-relay.md` §3): said once in each chat.
   bool _directOnly = false;
 
@@ -920,6 +946,8 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       _confirmDelete(contact);
                     case 'capture':
                       _toggleCaptureOverride(contact);
+                    case 'nearby':
+                      _toggleNearby(contact);
                   }
                 },
                 itemBuilder: (context) => [
@@ -944,6 +972,11 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                         contact.captureOverride
                             ? l10n.captureOverrideOffMenu
                             : l10n.captureOverrideOnMenu),
+                  if (!awaitingApproval)
+                    _menuItem(
+                        'nearby',
+                        contact.nearby ? Icons.wifi_off : Icons.wifi,
+                        contact.nearby ? l10n.nearbyOffMenu : l10n.nearbyOnMenu),
                   const PopupMenuDivider(),
                   _menuItem('delete', Icons.delete_outline,
                       l10n.deleteThisChatTooltip),
@@ -992,6 +1025,25 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                       : contact.captureOverride
                           ? l10n.captureOverrideBanner
                           : l10n.peerBlocksCaptureBanner,
+                ),
+              // Nearby: a banner whenever either side has it on (docs/design/nearby.md §3).
+              if (contact.nearby || contact.peerNearby)
+                _CompactNotice(
+                  icon: contact.nearbyConnected ? Icons.wifi : Icons.wifi_find,
+                  summary: !contact.nearby
+                      ? l10n.nearbyAskedSummary
+                      : !contact.peerNearby
+                          ? l10n.nearbyWaitingSummary
+                          : contact.nearbyConnected
+                              ? l10n.nearbyConnectedSummary
+                              : l10n.nearbyApartSummary,
+                  detail: !contact.nearby
+                      ? l10n.nearbyAskedBanner
+                      : !contact.peerNearby
+                          ? l10n.nearbyWaitingBanner
+                          : contact.nearbyConnected
+                              ? l10n.nearbyConnectedBanner
+                              : l10n.nearbyApartBanner,
                 ),
               // 0.2 cannot talk to 0.1 at all; that notice replaces the older mailbox one.
               if (contact.peerOutdated)
