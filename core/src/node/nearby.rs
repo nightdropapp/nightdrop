@@ -97,6 +97,14 @@ impl Node {
         self.transport.nearby_probe();
         let address = self.transport.nearby_address();
         if address != self.nearby_address {
+            crate::diag!(
+                "nearby: our local address {} → re-announcing",
+                if address.is_some() {
+                    "changed"
+                } else {
+                    "is gone (no usable local network)"
+                }
+            );
             self.nearby_address = address;
             let seq = now_ms();
             for chat in self.chats.values_mut().filter(|c| c.nearby_token.is_some()) {
@@ -159,6 +167,14 @@ impl Node {
             return;
         };
         let marker = [MARK_NEARBY_PREFIX, body.as_bytes()].concat();
+        crate::diag!(
+            "nearby: telling a contact: {}",
+            match body.split(':').count() {
+                2 if body.ends_with(":0") => "off",
+                2 => "on, but no local network right now",
+                _ => "on, listening",
+            }
+        );
         if let Some((addr, frame)) = self.authed_control(contact_id, &marker, |from, message| {
             Frame::Captures { from, message }
         }) {
@@ -178,6 +194,9 @@ impl Node {
     /// anything changed, for the UI.
     pub(super) fn receive_nearby(&mut self, from: &str, body: &[u8]) -> bool {
         let Some(peer) = parse_body(body) else {
+            crate::diag!(
+                "nearby: ignored a contact's announcement (malformed, public address or low port)"
+            );
             return false;
         };
         let Some(chat) = self.chats.get_mut(from) else {
@@ -200,6 +219,17 @@ impl Node {
                     .to_string(),
             ));
         }
+        crate::diag!(
+            "nearby: a contact turned it {}",
+            match (&peer.on, &peer.at) {
+                (false, _) => "off".to_string(),
+                (true, None) => "on, but has no local network right now".to_string(),
+                (true, Some((at, _))) => format!(
+                    "on, listening on {}",
+                    crate::transport::nearby::network_of(*at.ip())
+                ),
+            }
+        );
         chat.peer_nearby_on = peer.on;
         chat.peer_nearby = peer.at;
         self.dirty = true;

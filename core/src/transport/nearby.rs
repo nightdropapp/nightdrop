@@ -127,9 +127,16 @@ impl<T: Transport> NearbyTransport<T> {
     }
 
     fn start_listening(&self) -> Option<Listening> {
-        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+        let listener = match TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)) {
+            Ok(l) => l,
+            Err(e) => {
+                crate::diag!("nearby: could not listen: {}", e.kind());
+                return None;
+            }
+        };
         listener.set_nonblocking(true).ok()?;
         let port = listener.local_addr().ok()?.port();
+        crate::diag!("nearby: listening on port {port}");
         let stop = Arc::new(AtomicBool::new(false));
         let (shared, tx, halt) = (Arc::clone(&self.shared), self.tx.clone(), Arc::clone(&stop));
         thread::spawn(move || {
@@ -143,11 +150,17 @@ impl<T: Transport> NearbyTransport<T> {
                         let (shared, tx, halt) =
                             (Arc::clone(&shared), tx.clone(), Arc::clone(&halt));
                         thread::spawn(move || {
-                            let _ = serve(stream, &shared, &tx, &halt);
+                            if let Err(e) = serve(stream, &shared, &tx, &halt) {
+                                crate::diag!("nearby: incoming connection ended: {e}");
+                            }
                             shared.connections.fetch_sub(1, Ordering::AcqRel);
                         });
                     }
-                    Ok(_) => {} // IPv6, or not from our local network: dropped unanswered
+                    // IPv6, or not from our local network: dropped unanswered.
+                    Ok((_, from)) => crate::diag!(
+                        "nearby: refused a connection from {} (not one of our local networks)",
+                        net_of(&from)
+                    ),
                     Err(_) => thread::sleep(ACCEPT_POLL),
                 }
             }
@@ -169,6 +182,10 @@ impl<T: Transport> NearbyTransport<T> {
             Ok(())
         })();
         self.shared.record(peer, result.is_ok());
+        match &result {
+            Ok(()) => crate::diag!("nearby: sent {} bytes over the local network", frame.len()),
+            Err(e) => crate::diag!("nearby: local send failed after connecting ({e}); using Tor"),
+        }
         result
     }
 }
@@ -191,12 +208,34 @@ impl Shared {
         else {
             anyhow::bail!("no nearby route");
         };
-        anyhow::ensure!(self.on_our_network(*addr.ip()), "not on the same network");
+        if !self.on_our_network(*addr.ip()) {
+            crate::diag!(
+                "nearby: contact listens on {}, ours are [{}]: not the same network, using Tor",
+                net_of_ip(*addr.ip()),
+                self.local_ips()
+                    .into_iter()
+                    .map(net_of_ip)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            );
+            anyhow::bail!("not on the same network");
+        }
         // Only from here is a connection attempted, and only its failure starts the back-off
         // ([`RETRY_AFTER`]): a send with no route yet must not hold off the first real attempt.
         let attempt = Self::exchange(addr, &their_token, &our_token);
-        if attempt.is_err() {
-            self.record(peer, false);
+        match &attempt {
+            Ok(_) => crate::diag!(
+                "nearby: connected to the contact at {}",
+                net_of_ip(*addr.ip())
+            ),
+            Err(e) => {
+                crate::diag!(
+                    "nearby: could not reach the contact at {} ({e}); using Tor, retrying in {}s",
+                    net_of_ip(*addr.ip()),
+                    RETRY_AFTER.as_secs()
+                );
+                self.record(peer, false);
+            }
         }
         attempt
     }
@@ -318,7 +357,12 @@ fn serve(
             }
         }
     }
-    let (onion, theirs) = found.ok_or_else(|| anyhow::anyhow!("unknown token"))?;
+    let (onion, theirs) = found.ok_or_else(|| {
+        anyhow::anyhow!(
+            "unknown token (not a contact with Nearby on, or they have not told us yet)"
+        )
+    })?;
+    crate::diag!("nearby: a contact connected locally");
     stream.write_all(theirs.as_bytes())?;
     stream.write_all(b"\n")?;
     stream.flush()?;
@@ -340,6 +384,31 @@ fn serve(
 
 fn preamble(token: &str) -> Vec<u8> {
     [PREAMBLE, token.as_bytes(), b"\n"].concat()
+}
+
+/// A local address as the diagnostics may show it: its network, never the host (`192.168.4.*`,
+/// `172.16.*.*`, `10.*.*.*`), which is what matters for "the same network" and says nothing more.
+/// [`net_of_ip`] for the node's diagnostics.
+pub fn network_of(ip: Ipv4Addr) -> String {
+    net_of_ip(ip)
+}
+
+fn net_of_ip(ip: Ipv4Addr) -> String {
+    let o = ip.octets();
+    match o {
+        [10, ..] => "10.*.*.*".into(),
+        [192, 168, c, _] => format!("192.168.{c}.*"),
+        [127, ..] => "127.*.*.*".into(),
+        [a, b, ..] if is_private(ip) => format!("{a}.{b}.*.*"),
+        _ => "a public address".into(),
+    }
+}
+
+fn net_of(addr: &SocketAddr) -> String {
+    match addr {
+        SocketAddr::V4(a) => net_of_ip(*a.ip()),
+        SocketAddr::V6(_) => "an IPv6 address".into(),
+    }
 }
 
 /// Constant-time equality for two tokens of the expected length.
@@ -510,6 +579,7 @@ impl<T: Transport> Transport for NearbyTransport<T> {
             (false, true) => {
                 if let Some(l) = listening.take() {
                     l.stop.store(true, Ordering::Relaxed);
+                    crate::diag!("nearby: stopped listening (no chat has it on)");
                 }
             }
             _ => {}
@@ -526,7 +596,30 @@ impl<T: Transport> Transport for NearbyTransport<T> {
     }
 
     fn set_local_addresses(&self, interfaces: Vec<(String, Ipv4Addr)>) {
-        *self.shared.interfaces.lock().unwrap() = Some(interfaces);
+        let changed = self.shared.interfaces.lock().unwrap().as_ref() != Some(&interfaces);
+        *self.shared.interfaces.lock().unwrap() = Some(interfaces.clone());
+        if changed {
+            let listed: Vec<String> = interfaces
+                .iter()
+                .map(|(name, ip)| {
+                    let use_ = if !self.shared.is_local(*ip) {
+                        "not private"
+                    } else if interface_rank(name).is_none() {
+                        "never used"
+                    } else {
+                        "usable"
+                    };
+                    format!("{name} {} ({use_})", net_of_ip(*ip))
+                })
+                .collect();
+            crate::diag!(
+                "nearby: interfaces [{}]; announcing {}",
+                listed.join(", "),
+                self.shared
+                    .local_ip()
+                    .map_or("nothing".to_string(), net_of_ip)
+            );
+        }
     }
 
     fn nearby_probe(&self) {
@@ -822,6 +915,15 @@ mod tests {
         ] {
             assert_eq!(interface_rank(never), None, "{never}");
         }
+    }
+
+    #[test]
+    fn diagnostics_show_the_network_never_the_host() {
+        let ip = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        assert_eq!(net_of_ip(ip("192.168.88.94")), "192.168.88.*");
+        assert_eq!(net_of_ip(ip("10.20.30.40")), "10.*.*.*");
+        assert_eq!(net_of_ip(ip("172.20.1.9")), "172.20.*.*");
+        assert_eq!(net_of_ip(ip("8.8.8.8")), "a public address");
     }
 
     #[test]
