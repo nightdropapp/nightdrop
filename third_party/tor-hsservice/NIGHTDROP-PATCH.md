@@ -51,6 +51,15 @@ the app ran was not honoured until a restart.
   that holds the mock HSDirs' responses so a change can be made mid-upload. Unpatched it uploads 16
   times, not 24: the third round never happens.
 
+**Upstream:** reported via anonticket 2026-10-12, public and assigned to an arti maintainer by
+2026-10-14; the report links the patch and test (commit `80807d91`, branch
+`arti-descriptor-dirty-race` on GitHub — keep that branch, the report points at it). On 2026-10-19
+an arti maintainer replied that this is what `tor-dirpublish` is meant to handle, and that they may
+migrate the onion-service publisher to it (checking its retry schedule first). So the upstream fix
+may arrive as a different publisher rather than this patch: keep the patch until an arti release
+fixes the race, and before dropping it read that release's publisher and run this test's scenario
+against it (§5's rule).
+
 ## Third fix: one failed upload to a new HSDir read as a whole ring missing (2026-10-11)
 
 **Why:** an upload round goes only to the HSDirs whose descriptor is dirty, but its results
