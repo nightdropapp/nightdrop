@@ -633,6 +633,12 @@ abstract class NightdropCore implements RustOpaqueInterface {
   Future<void> setDisappearing(
       {required String contactId, required BigInt secs});
 
+  /// The device's network interfaces, as `"name=ipv4"` strings (Dart's `NetworkInterface.list`),
+  /// for Nearby: the core announces the best one — Wi-Fi or this phone's own hotspot, never
+  /// mobile data or a VPN — and recognises a contact on any of them. Malformed entries are
+  /// skipped; at most 64 are kept. Cheap; call it whenever the interfaces may have changed.
+  Future<void> setLocalAddresses({required List<String> interfaces});
+
   /// Give a contact a nickname that only you see (`contact-naming.md`). Never sent, so a peer
   /// can neither read it nor set it; empty clears it. This is the answer to a contact list of
   /// identical "Anon"s — the peer's own name is their choice, and may be missing or duplicated.

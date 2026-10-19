@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:io' show Directory, File, FileSystemEntity, Platform;
+import 'dart:io' show Directory, File, FileSystemEntity, InternetAddressType, NetworkInterface, Platform;
 
 import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' show AnyhowException;
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -516,8 +516,35 @@ class RustNightdropCore extends NightdropCore {
   @override
   void dispose() {
     _events?.cancel();
+    _interfaceTimer?.cancel();
     rust.unsubscribe();
     super.dispose();
+  }
+
+  /// Tells the core the device's network interfaces every [_interfaceEvery], for Nearby
+  /// (docs/design/nearby.md): the core's own guess sees only the default route, which on a phone
+  /// sharing its connection is mobile data rather than the hotspot.
+  Timer? _interfaceTimer;
+  static const _interfaceEvery = Duration(seconds: 30);
+
+  void _watchInterfaces() {
+    _interfaceTimer ??= Timer.periodic(_interfaceEvery, (_) => _pushInterfaces());
+    _pushInterfaces();
+  }
+
+  Future<void> _pushInterfaces() async {
+    final core = _core;
+    if (core == null) return;
+    try {
+      final list = await NetworkInterface.list(
+          includeLoopback: false, includeLinkLocal: true, type: InternetAddressType.IPv4);
+      await core.setLocalAddresses(interfaces: [
+        for (final i in list)
+          for (final a in i.addresses) '${i.name}=${a.address}',
+      ]);
+    } catch (_) {
+      // Best-effort: without a list the core falls back to the default route.
+    }
   }
 
   @override
@@ -992,8 +1019,10 @@ class RustNightdropCore extends NightdropCore {
   Future<void>? _startInFlight;
 
   @override
-  Future<void> start() => _startInFlight ??=
-      _start().whenComplete(() => _startInFlight = null);
+  Future<void> start() => _startInFlight ??= _start().whenComplete(() {
+        _startInFlight = null;
+        _watchInterfaces();
+      });
 
   /// The first [start] of this process, for [startOnce]. A later explicit [start] or [retryStart]
   /// (after a failure) still runs; only the launch path coalesces onto this one.

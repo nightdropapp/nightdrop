@@ -287,6 +287,11 @@ pub trait Transport: Send + Sync {
     /// Check, in the background, the nearby routes not heard from lately (the token exchange only,
     /// no message), so the chat can say whether the local path works before anything is sent.
     fn nearby_probe(&self) {}
+
+    /// The device's network interfaces and their IPv4 addresses, as the app lists them (Dart's
+    /// `NetworkInterface.list`). Nearby uses them to announce the right address — the hotspot or
+    /// Wi-Fi, not mobile data — and to recognise a contact on any of our local networks.
+    fn set_local_addresses(&self, _interfaces: Vec<(String, std::net::Ipv4Addr)>) {}
 }
 
 /// The inert transport a node is left with after [`crate::node::Node::close_transport`]: it

@@ -76,6 +76,10 @@ struct Shared {
     budget: InboundBudget,
     connections: AtomicUsize,
     ip_source: IpSource,
+    /// The device's interfaces and their IPv4 addresses, as the app last listed them
+    /// ([`Transport::set_local_addresses`]). Preferred over `ip_source`, which only sees the
+    /// default route: on a phone sharing its connection that is mobile data, not the hotspot.
+    interfaces: Mutex<Option<Vec<(String, Ipv4Addr)>>>,
     /// Loopback counts as a local network (tests only).
     allow_loopback: bool,
 }
@@ -113,6 +117,7 @@ impl<T: Transport> NearbyTransport<T> {
                 budget: InboundBudget::with_limit(INBOUND_BUDGET_BYTES),
                 connections: AtomicUsize::new(0),
                 ip_source,
+                interfaces: Mutex::new(None),
                 allow_loopback,
             }),
             listening: Mutex::new(None),
@@ -186,10 +191,7 @@ impl Shared {
         else {
             anyhow::bail!("no nearby route");
         };
-        let ours = self
-            .local_ip()
-            .ok_or_else(|| anyhow::anyhow!("no local network"))?;
-        anyhow::ensure!(same_subnet(ours, *addr.ip()), "not on the same network");
+        anyhow::ensure!(self.on_our_network(*addr.ip()), "not on the same network");
         // Only from here is a connection attempted, and only its failure starts the back-off
         // ([`RETRY_AFTER`]): a send with no route yet must not hold off the first real attempt.
         let attempt = Self::exchange(addr, &their_token, &our_token);
@@ -245,8 +247,39 @@ impl Shared {
             .is_some_and(|t| t.elapsed() < within)
     }
 
+    /// The address we announce: the best-ranked usable interface the app listed (see
+    /// [`interface_rank`]), else the default route's address.
     fn local_ip(&self) -> Option<Ipv4Addr> {
-        (self.ip_source)().filter(|ip| self.is_local(*ip))
+        let listed = self.interfaces.lock().unwrap().clone();
+        match listed {
+            Some(list) => list
+                .into_iter()
+                .filter(|(_, ip)| self.is_local(*ip))
+                .filter_map(|(name, ip)| interface_rank(&name).map(|rank| (rank, ip)))
+                .min_by_key(|(rank, _)| *rank)
+                .map(|(_, ip)| ip),
+            None => (self.ip_source)().filter(|ip| self.is_local(*ip)),
+        }
+    }
+
+    /// Every local address we could be reached on, for the same-network checks: a contact on our
+    /// hotspot shares that interface's subnet, not the announced one's, if they differ.
+    fn local_ips(&self) -> Vec<Ipv4Addr> {
+        let listed = self.interfaces.lock().unwrap().clone();
+        match listed {
+            Some(list) => list
+                .into_iter()
+                .filter(|(name, ip)| self.is_local(*ip) && interface_rank(name).is_some())
+                .map(|(_, ip)| ip)
+                .collect(),
+            None => self.local_ip().into_iter().collect(),
+        }
+    }
+
+    fn on_our_network(&self, peer: Ipv4Addr) -> bool {
+        self.local_ips()
+            .into_iter()
+            .any(|ours| same_subnet(ours, peer))
     }
 
     fn is_local(&self, ip: Ipv4Addr) -> bool {
@@ -255,7 +288,7 @@ impl Shared {
 
     /// A connection is answered only from a local address in our own subnet.
     fn admits_source(&self, from: Ipv4Addr) -> bool {
-        self.is_local(from) && self.local_ip().is_some_and(|ours| same_subnet(ours, from))
+        self.is_local(from) && self.on_our_network(from)
     }
 }
 
@@ -337,6 +370,29 @@ pub fn same_subnet(a: Ipv4Addr, b: Ipv4Addr) -> bool {
 /// A port a nearby announcement may name ([`MIN_PORT`]).
 pub fn valid_port(port: u16) -> bool {
     port >= MIN_PORT
+}
+
+/// How suitable an interface is for nearby contacts, by its name: lower is better, `None` never.
+/// Wi-Fi and the phone's own hotspot first, then wired; never mobile data (a carrier's private
+/// range is not a network anyone nearby shares), VPNs, or virtual bridges.
+pub fn interface_rank(name: &str) -> Option<u8> {
+    let n = name.to_ascii_lowercase();
+    const NEVER: [&str; 14] = [
+        "lo", "rmnet", "ccmni", "v4-", "tun", "tap", "ppp", "wg", "utun", "dummy", "docker",
+        "veth", "virbr", "vboxnet",
+    ];
+    if NEVER.iter().any(|p| n.starts_with(p)) || n.starts_with("br-") || n.starts_with("podman") {
+        return None;
+    }
+    const WIFI: [&str; 7] = ["wlan", "swlan", "ap", "softap", "wl", "wi-fi", "wifi"];
+    const WIRED: [&str; 4] = ["eth", "en", "ethernet", "usb"];
+    if WIFI.iter().any(|p| n.starts_with(p)) {
+        Some(0)
+    } else if WIRED.iter().any(|p| n.starts_with(p)) {
+        Some(1)
+    } else {
+        Some(2)
+    }
 }
 
 /// A token as the announcement carries it: exactly [`TOKEN_CHARS`] base64url characters.
@@ -467,6 +523,10 @@ impl<T: Transport> Transport for NearbyTransport<T> {
 
     fn nearby_reachable(&self, peer: &str) -> bool {
         self.shared.reachable_recently(peer, REACHABLE_FOR)
+    }
+
+    fn set_local_addresses(&self, interfaces: Vec<(String, Ipv4Addr)>) {
+        *self.shared.interfaces.lock().unwrap() = Some(interfaces);
     }
 
     fn nearby_probe(&self) {
@@ -704,6 +764,64 @@ mod tests {
             same_subnet(p("172.16.4.1"), p("172.16.9.9"))
                 && !same_subnet(p("172.16.4.1"), p("172.17.4.1"))
         );
+    }
+
+    #[test]
+    fn the_hotspot_or_wifi_interface_is_announced_not_mobile_data() {
+        let net = MemoryNetwork::new();
+        let t = NearbyTransport::with_ip_source(net.endpoint("a.onion"), || None, false);
+        let ip = |s: &str| s.parse::<Ipv4Addr>().unwrap();
+        // A phone sharing its connection: the carrier's private range on rmnet, the hotspot on
+        // swlan0, a VPN on tun0.
+        t.set_local_addresses(vec![
+            ("rmnet_data0".into(), ip("10.120.4.9")),
+            ("tun0".into(), ip("10.8.0.2")),
+            ("swlan0".into(), ip("192.168.212.1")),
+        ]);
+        assert_eq!(t.shared.local_ip(), Some(ip("192.168.212.1")));
+        assert!(
+            t.shared.on_our_network(ip("192.168.212.57")),
+            "a phone on our hotspot"
+        );
+        assert!(
+            !t.shared.on_our_network(ip("10.120.4.200")),
+            "not over mobile data"
+        );
+        // A laptop on Ethernet and Wi-Fi: both count as our networks, Wi-Fi is announced.
+        t.set_local_addresses(vec![
+            ("enp3s0".into(), ip("192.168.1.20")),
+            ("wlp2s0".into(), ip("192.168.50.4")),
+        ]);
+        assert_eq!(t.shared.local_ip(), Some(ip("192.168.50.4")));
+        assert!(t.shared.on_our_network(ip("192.168.1.77")));
+        // Nothing usable: no address at all.
+        t.set_local_addresses(vec![("rmnet0".into(), ip("10.1.1.1"))]);
+        assert_eq!(t.shared.local_ip(), None);
+    }
+
+    #[test]
+    fn interfaces_are_ranked_by_name() {
+        assert_eq!(interface_rank("wlan0"), Some(0));
+        assert_eq!(interface_rank("swlan0"), Some(0));
+        assert_eq!(interface_rank("ap0"), Some(0));
+        assert_eq!(interface_rank("Wi-Fi"), Some(0));
+        assert_eq!(interface_rank("eno1"), Some(1));
+        assert_eq!(interface_rank("Ethernet 2"), Some(1));
+        for never in [
+            "lo",
+            "rmnet_data1",
+            "ccmni0",
+            "v4-rmnet0",
+            "tun0",
+            "ppp0",
+            "wg0",
+            "docker0",
+            "br-1a2b",
+            "podman1",
+            "veth9",
+        ] {
+            assert_eq!(interface_rank(never), None, "{never}");
+        }
     }
 
     #[test]

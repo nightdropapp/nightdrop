@@ -2078,6 +2078,23 @@ impl NightdropCore {
         Ok(())
     }
 
+    /// The device's network interfaces, as `"name=ipv4"` strings (Dart's `NetworkInterface.list`),
+    /// for Nearby: the core announces the best one — Wi-Fi or this phone's own hotspot, never
+    /// mobile data or a VPN — and recognises a contact on any of them. Malformed entries are
+    /// skipped; at most 64 are kept. Cheap; call it whenever the interfaces may have changed.
+    pub fn set_local_addresses(&self, interfaces: Vec<String>) -> Result<()> {
+        let parsed: Vec<(String, std::net::Ipv4Addr)> = interfaces
+            .iter()
+            .filter_map(|e| {
+                let (name, ip) = e.rsplit_once('=')?;
+                Some((name.chars().take(64).collect(), ip.trim().parse().ok()?))
+            })
+            .take(64)
+            .collect();
+        self.lock().me.set_local_addresses(parsed);
+        Ok(())
+    }
+
     /// Tell the core whether this device blocks captures ("Block screenshots"), so contacts' apps
     /// block them too while our chat is open there. Safe to call on every launch and on each change:
     /// a chat is sent the value only when it differs from what that chat confirmed.

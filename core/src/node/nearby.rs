@@ -168,6 +168,12 @@ impl Node {
         }
     }
 
+    /// The device's interfaces, from the app ([`crate::transport::Transport::set_local_addresses`]).
+    /// A different announced address is noticed, and re-announced, on the next tick.
+    pub fn set_local_addresses(&mut self, interfaces: Vec<(String, Ipv4Addr)>) {
+        self.transport.set_local_addresses(interfaces);
+    }
+
     /// A contact's nearby announcement (already decrypted and authenticated). Returns whether
     /// anything changed, for the UI.
     pub(super) fn receive_nearby(&mut self, from: &str, body: &[u8]) -> bool {
