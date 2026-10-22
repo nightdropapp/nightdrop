@@ -212,6 +212,10 @@ footer .muted { font-size: 0.9rem; }
   padding: 2px 8px;
   margin-left: 8px;
   vertical-align: middle;
+  /* One unit: when it does not fit after the title it moves to the next line whole, rather than
+     breaking "by | design" across two. */
+  display: inline-block;
+  white-space: nowrap;
 }
 .card h3 .pill.scope { background: #e0b341; }
 .backlink { display: inline-block; margin-top: 8px; color: var(--muted); }
