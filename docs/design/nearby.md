@@ -1,6 +1,6 @@
 # Design — Nearby: a chat that also connects over the same Wi-Fi (and, later, Bluetooth)
 
-**Status:** Wi-Fi (§1–§9) agreed 2026-10-18 and being built for 0.2.1. Bluetooth (§10) is design only.
+**Status:** Wi-Fi (§1–§9) agreed 2026-10-18 and being built for 0.2.2 (0.2.1 was a security-only release). Bluetooth (§10) is design only.
 **Decided by:** the maintainer, 2026-10-18: "give [the LAN transport] a screen to allow it through
 Wi-Fi/Bluetooth"; opt-in **per chat**, off by default, both sides must turn it on, used only when
 both are on the same network, Tor stays the default, a banner while it is on; Wi-Fi now, Bluetooth
@@ -120,7 +120,7 @@ Plain TCP sockets: Android (INTERNET only; Android 17's local-network permission
 before 0.3 targets it), Linux, Windows (the firewall may prompt on first listen). The listener and
 dialer are Rust (§1a: transport stays in the core).
 
-## 10. Bluetooth (design only, not in 0.2.1)
+## 10. Bluetooth (design only, not in 0.2.2)
 
 * **Why it is harder:** the radio is owned by the platform. On Android the core cannot open an
   RFCOMM or L2CAP socket itself; Kotlin opens it and passes bytes through a platform channel to the

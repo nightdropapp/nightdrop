@@ -136,7 +136,7 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   (`setRecentsScreenshotEnabled`); on older releases that suppression is best-effort. Design:
   `docs/design/screenshot-transparency.md`.
 - **Nearby ("Also connect on the same Wi-Fi") is not anonymous.** *(Known limit, by design;
-  from 0.2.1, off by default.)* A chat where both people turn it on sends its frames straight
+  from 0.2.2, off by default.)* A chat where both people turn it on sends its frames straight
   between the devices whenever they share a local network. Each learns the other's local address,
   and anyone on that network (its owner, a café's router, another guest) can see that the two
   devices talk and how much — never what, since frames stay end-to-end encrypted and padded. The

@@ -662,7 +662,7 @@ on a re-pair (new session) exactly like `verified`.
 - **Transport is pluggable:** Tor is the default implementation of the `Transport`
   trait; the interface allows adding other anonymity layers (I2P, Snowflake, etc.)
   where Tor is network-blocked.
-- **Nearby — the same-Wi-Fi path (`transport::nearby`, `node/nearby.rs`, 0.2.1):** per chat and
+- **Nearby — the same-Wi-Fi path (`transport::nearby`, `node/nearby.rs`, 0.2.2):** per chat and
   opt-in on both sides (§1a's second exception), a chat's frames go device to device over the local
   network when both are on one, with Tor behind every send. `NearbyTransport` wraps the Tor
   transport and keeps the onion as the address; each side announces its local `ip:port` and a
