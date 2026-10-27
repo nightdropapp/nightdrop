@@ -60,8 +60,10 @@ make app-test         # builds the core, then all Flutter tests — includes
 cd app && flutter analyze lib test integration_test    # must be "No issues found"
 flutter build linux --debug                            # catches CMake/plugin breakage
 NIGHTDROP_APP_ID=app.nightdrop.integration XDG_DATA_HOME=$(mktemp -d) \
-  xvfb-run -a flutter test integration_test -d linux   # full onboarding→pair→chat flow
-                                                       # against the REAL Rust core
+  xvfb-run -a flutter test integration_test/app_flow_test.dart -d linux
+                                 # full onboarding→pair→chat flow against the REAL Rust core.
+                                 # Name the file: media_privacy_test.dart is a phone-only test
+                                 # that waits for files pushed over adb (its header says how).
 ```
 
 The integration test is the only thing that exercises the real widget tree against the
