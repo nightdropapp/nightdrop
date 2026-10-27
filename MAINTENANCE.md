@@ -131,7 +131,9 @@ An upgrade means: change `app/.fvmrc`, migrate Android build changes (AGP/Gradle
 F-Droid reproducibility byte for byte (§11), smoke-test on a device, and update every machine that
 builds a release (the Windows VM has its own SDK). History: 2026-09-20 stayed on 3.44.6 (no
 security fixes); 2026-10-05 moved to 3.47.6 for 0.1.28 (3.47.2 updated the engine's libpng; we
-decode images contacts send).
+decode images contacts send); 2026-10-27 moved to 3.47.8 for 0.2.1 (its Dart 3.13.7 updates
+BoringSSL and distrusts the compromised eMudhra intermediates, GHSA-frr6-h895-5pxp — `dart:io`
+TLS, which the app does not use today, since all its traffic goes through the core).
 
 ---
 
