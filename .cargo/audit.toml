@@ -16,4 +16,11 @@ ignore = [
   # at compile time by pwd-grp (arti's fs-mistrust); it generates code and never runs in the app.
   # Reviewed 2026-10-17. Re-check both whenever arti is bumped.
   "RUSTSEC-2024-0436",
+  # RUSTSEC-2026-0387 — crypto-bigint 0.5.5 has non-constant-time operations. It is in Cargo.lock only
+  # through elliptic-curve 0.13, which ssh-key-fork-arti (via arti's tor-key-forge) lists for its
+  # optional p256/p384/p521 ECDSA key support; those features are off. `cargo tree -i crypto-bigint
+  # --workspace --all-features --target all` finds it in no build, so no Night Drop binary contains
+  # it. The fix (>=0.7.6) is semver-incompatible with elliptic-curve 0.13. Reviewed 2026-10-27.
+  # Re-check whenever arti is bumped.
+  "RUSTSEC-2026-0387",
 ]
