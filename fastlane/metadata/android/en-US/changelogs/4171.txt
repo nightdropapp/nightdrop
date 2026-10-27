@@ -1,0 +1,3 @@
+Night Drop 0.2.1 is a security update, recommended for everyone.
+
+It stops trusting certificate authorities that were compromised in October, in the parts of the app that make secure connections (bridges and the built-in TLS library), and fixes timing weaknesses in a cryptographic helper library. Nothing changes in how you use the app.
