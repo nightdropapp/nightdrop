@@ -586,6 +586,33 @@ the Rust core and two C++ plugins needed glibc 2.38–2.39, which 22.04 (2.35) d
   another bare desktop runtime (all four passed on 2026-10-07, build from 7306cee). Run it on every release AppImage; after a release that fixes a
   catalog failure, comment `/retest` on the catalog PR.
 
+### 11.8 Releasing from a branch, and traps met on 0.2.1
+
+0.2.1 (2026-10-27) was a security-only release cut from `v0.2.0` on `release/0.2.1`, in a worktree,
+while `main` held unreleased work; the branch was merged back after publishing. Each of these cost
+a round:
+
+- **`~/.bashrc` exports `PROJECT_ROOT` as the main checkout**, so a build script run from the
+  worktree builds `main`, and `build-appimage.sh` writes its AppImage into the **live**
+  `website/applications/`. Set `PROJECT_ROOT=<worktree>` on every release command.
+- **`gen-update-manifest.sh` reads the version from the tree it lives in**, not from
+  `PROJECT_ROOT`: run from `main` it signed a manifest saying `latest: 0.2.0` over the 0.2.1 files,
+  live for about ten minutes (harmless: nothing newer was offered). Run the worktree's copy, check
+  `latest`, then copy its `website/update.json` into the live tree. Check a manifest with the
+  core's `update::parse_manifest` before it goes live.
+- **A debug build in the same tree poisons the AppImage.** `flutter build linux --debug` leaves
+  `kernel_blob.bin` in `app/build/flutter_assets`, a release build keeps it, and it names the
+  builder's home, so `build-appimage.sh` refuses to package. `flutter clean` first (copy any APK
+  out of `app/build` before).
+- **`key.properties` is only in the main checkout.** A worktree's universal APK build needs a
+  temporary copy (it is gitignored; delete it after) or the key stick; `scripts/sign-apk.sh` can
+  run from the main checkout, since signing does not depend on the tree.
+- **After a Flutter change, the Windows VM's plugin links go stale**: CMake reports every
+  `ephemeral/.plugin_symlinks/<plugin>/windows` as "not an existing directory" although the targets
+  exist. `flutter clean` in the VM, then rebuild.
+- **`gh` may be logged in as another account.** Publish as `nightdropapp` without switching the
+  global login: `GH_TOKEN=$(gh auth token -u nightdropapp) gh release create …`.
+
 ---
 
 ## 12. The website, publishing, and update.json
