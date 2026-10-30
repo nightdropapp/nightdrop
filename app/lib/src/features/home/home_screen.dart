@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io' show Platform;
 
 import 'package:flutter/material.dart';
 
@@ -445,9 +446,10 @@ Future<void> _burnReceiptSettings(BuildContext context, NightdropCore core) asyn
 }
 
 /// "Block screenshots": on by default (security settings start on, and the user chooses to lower
-/// them). On, it stops screenshots, screen recording and casting of the app on this phone. Turned
-/// off, captures are allowed and the contact is told about each one (a photo of the screen gets
-/// past any block either way).
+/// them). How far it reaches depends on the platform ([CaptureBlock]), and the dialog says which:
+/// everything on Android and Windows, only recording on iOS, a request on macOS. Turned off,
+/// captures are allowed and, where the device can tell, the contact is told about each one (a photo
+/// of the screen gets past any block either way).
 Future<void> _blockCaptureSettings(BuildContext context) async {
   final l10n = AppLocalizations.of(context)!;
   final on = await ScreenshotDetector.blockCapture();
@@ -456,7 +458,12 @@ Future<void> _blockCaptureSettings(BuildContext context) async {
     context: context,
     builder: (context) => AlertDialog(
       title: Text(l10n.blockCaptureTitle),
-      content: Text(l10n.blockCaptureBody),
+      content: Text(switch (ScreenshotDetector.blockKind) {
+        CaptureBlock.recordingOnly => l10n.blockCaptureBodyIos,
+        CaptureBlock.partial => l10n.blockCaptureBodyMac,
+        _ when Platform.isWindows => l10n.blockCaptureBodyWindows,
+        _ => l10n.blockCaptureBody,
+      }),
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
@@ -475,7 +482,11 @@ Future<void> _blockCaptureSettings(BuildContext context) async {
   // Contacts' apps block captures in our chat too while it is on.
   if (context.mounted) await NightdropScope.of(context).setCaptureBlock(turnOn);
   messenger.showSnackBar(SnackBar(
-    content: Text(turnOn ? l10n.blockCaptureOn : l10n.blockCaptureOff),
+    content: Text(!turnOn
+        ? l10n.blockCaptureOff
+        : ScreenshotDetector.blockKind == CaptureBlock.full
+            ? l10n.blockCaptureOn
+            : l10n.blockCaptureOnLimited),
   ));
 }
 

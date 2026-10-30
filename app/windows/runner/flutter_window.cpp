@@ -14,6 +14,17 @@ constexpr UINT kTrayMessage = WM_APP + 1;
 constexpr UINT kMenuOpen = 1;
 constexpr UINT kMenuQuit = 2;
 
+// "Block screenshots" lives here rather than in Dart's storage so it applies before the window is
+// first shown. Per-user, like the app.
+constexpr wchar_t kSettingsKey[] = L"Software\\Night Drop";
+constexpr wchar_t kBlockCaptureValue[] = L"BlockCapture";
+
+// Windows 10 2004+: the window is left out of captures entirely (they show what is behind it).
+// Older SDK headers lack the constant.
+#ifndef WDA_EXCLUDEFROMCAPTURE
+#define WDA_EXCLUDEFROMCAPTURE 0x00000011
+#endif
+
 // Sent to every top-level window when Explorer (and with it the notification area) restarts; the
 // icon has to be added again.
 UINT TaskbarCreatedMessage() {
@@ -84,6 +95,37 @@ bool FlutterWindow::OnCreate() {
         }
       });
 
+  // Before the first frame is shown, so no capture ever sees it unblocked.
+  ApplyCaptureBlock();
+  screenshots_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "app.nightdrop/screenshots",
+          &flutter::StandardMethodCodec::GetInstance());
+  screenshots_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const std::string& method = call.method_name();
+        const auto* on = std::get_if<bool>(call.arguments());
+        if (method == "getBlockCapture") {
+          result->Success(flutter::EncodableValue(BlockCapture()));
+        } else if (method == "setBlockCapture") {
+          SetBlockCapture(on != nullptr && *on);
+          ApplyCaptureBlock();
+          result->Success();
+        } else if (method == "holdBlock") {
+          held_by_chat_ = on != nullptr && *on;
+          ApplyCaptureBlock();
+          result->Success();
+        } else if (method == "canDetect" || method == "isRecording") {
+          // Windows gives an app no way to know it is being captured.
+          result->Success(flutter::EncodableValue(false));
+        } else {
+          result->NotImplemented();
+        }
+      });
+
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     // Started at login into the tray: stay hidden. Dart shows the window itself if the tray
     // turns out not to be wanted (desktop_window.dart), so it can never be left with no way in.
@@ -103,6 +145,7 @@ bool FlutterWindow::OnCreate() {
 void FlutterWindow::OnDestroy() {
   RemoveTrayIcon();
   window_channel_ = nullptr;
+  screenshots_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -224,5 +267,38 @@ void FlutterWindow::ShowTrayMenu() {
     ShowFromTray();
   } else if (chosen == kMenuQuit) {
     ::DestroyWindow(GetHandle());
+  }
+}
+
+bool FlutterWindow::BlockCapture() {
+  DWORD value = 1;  // on unless the user turned it off (security settings start on)
+  DWORD size = sizeof(value);
+  ::RegGetValueW(HKEY_CURRENT_USER, kSettingsKey, kBlockCaptureValue,
+                 RRF_RT_REG_DWORD, nullptr, &value, &size);
+  return value != 0;
+}
+
+void FlutterWindow::SetBlockCapture(bool on) {
+  HKEY key;
+  if (::RegCreateKeyExW(HKEY_CURRENT_USER, kSettingsKey, 0, nullptr, 0,
+                        KEY_SET_VALUE, nullptr, &key,
+                        nullptr) != ERROR_SUCCESS) {
+    return;
+  }
+  const DWORD value = on ? 1 : 0;
+  ::RegSetValueExW(key, kBlockCaptureValue, 0, REG_DWORD,
+                   reinterpret_cast<const BYTE*>(&value), sizeof(value));
+  ::RegCloseKey(key);
+}
+
+void FlutterWindow::ApplyCaptureBlock() {
+  HWND hwnd = GetHandle();
+  if (BlockCapture() || held_by_chat_) {
+    // Before Windows 10 2004 the exclusion is refused; the window then shows black instead.
+    if (!::SetWindowDisplayAffinity(hwnd, WDA_EXCLUDEFROMCAPTURE)) {
+      ::SetWindowDisplayAffinity(hwnd, WDA_MONITOR);
+    }
+  } else {
+    ::SetWindowDisplayAffinity(hwnd, WDA_NONE);
   }
 }

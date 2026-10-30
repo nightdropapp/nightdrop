@@ -213,6 +213,50 @@ void main() {
     ScreenshotDetector.canBlockForTest = null;
   });
 
+  // iOS: no screenshot block, but the chat is hidden while recorded, and the banner says only that.
+  testWidgets('on iOS a contact\'s block is held and described as recording-only', (tester) async {
+    final holds = <bool>[];
+    ScreenshotDetector.blockKindForTest = CaptureBlock.recordingOnly;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('app.nightdrop/screenshots'), (call) async {
+      if (call.method == 'holdBlock') holds.add(call.arguments as bool);
+      return null;
+    });
+    final (core, _) = await pumpChat(tester);
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    core.contacts.first.peerBlocksCapture = true;
+    core.notifyListeners();
+    await tester.pump();
+    expect(holds, [true]);
+    expect(find.text(l10n.peerBlocksCaptureRecordingSummary), findsOneWidget);
+    expect(find.text(l10n.peerBlocksCaptureSummary), findsNothing,
+        reason: 'must not claim screenshots are blocked');
+    ScreenshotDetector.blockKindForTest = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('app.nightdrop/screenshots'), null);
+  });
+
+  // macOS: the block is held (best effort) but the chat still says it is up to the reader.
+  testWidgets('on macOS a contact\'s block is held but not claimed', (tester) async {
+    final holds = <bool>[];
+    ScreenshotDetector.blockKindForTest = CaptureBlock.partial;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+        const MethodChannel('app.nightdrop/screenshots'), (call) async {
+      if (call.method == 'holdBlock') holds.add(call.arguments as bool);
+      return null;
+    });
+    final (core, _) = await pumpChat(tester);
+    final l10n = await AppLocalizations.delegate.load(const Locale('en'));
+    core.contacts.first.peerBlocksCapture = true;
+    core.notifyListeners();
+    await tester.pump();
+    expect(holds, [true]);
+    expect(find.text(l10n.peerBlocksCaptureUnenforcedSummary), findsOneWidget);
+    ScreenshotDetector.blockKindForTest = null;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(const MethodChannel('app.nightdrop/screenshots'), null);
+  });
+
   // The honesty default: where the platform cannot report screenshots — desktop, Android below 14,
   // and this test host — `canDetect` must be false, so no UI can claim a protection that isn't
   // there. A silent capture is the normal case, not an error case.

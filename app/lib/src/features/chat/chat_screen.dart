@@ -1015,16 +1015,21 @@ class _ChatScreenState extends State<ChatScreen> with WidgetsBindingObserver {
                   icon: contact.captureOverride
                       ? Icons.lock_open_outlined
                       : Icons.screenshot_monitor_outlined,
-                  summary: !ScreenshotDetector.canBlockCapture
-                      ? l10n.peerBlocksCaptureUnenforcedSummary
-                      : contact.captureOverride
-                          ? l10n.captureOverrideSummary
-                          : l10n.peerBlocksCaptureSummary,
-                  detail: !ScreenshotDetector.canBlockCapture
-                      ? l10n.peerBlocksCaptureUnenforcedBanner
-                      : contact.captureOverride
-                          ? l10n.captureOverrideBanner
-                          : l10n.peerBlocksCaptureBanner,
+                  summary: contact.captureOverride && ScreenshotDetector.canBlockCapture
+                      ? l10n.captureOverrideSummary
+                      : switch (ScreenshotDetector.blockKind) {
+                          CaptureBlock.full => l10n.peerBlocksCaptureSummary,
+                          CaptureBlock.recordingOnly => l10n.peerBlocksCaptureRecordingSummary,
+                          _ => l10n.peerBlocksCaptureUnenforcedSummary,
+                        },
+                  detail: contact.captureOverride && ScreenshotDetector.canBlockCapture
+                      ? l10n.captureOverrideBanner
+                      : switch (ScreenshotDetector.blockKind) {
+                          CaptureBlock.full => l10n.peerBlocksCaptureBanner,
+                          CaptureBlock.recordingOnly => l10n.peerBlocksCaptureRecordingBanner,
+                          CaptureBlock.partial => l10n.peerBlocksCapturePartialBanner,
+                          CaptureBlock.none => l10n.peerBlocksCaptureUnenforcedBanner,
+                        },
                 ),
               // Nearby: a banner whenever either side has it on (docs/design/nearby.md §3).
               if (contact.nearby || contact.peerNearby)

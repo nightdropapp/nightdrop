@@ -28,7 +28,7 @@ So screenshots were **allowed and made visible** instead. The user chose this fr
 **Changed 2026-10-18:** "Block screenshots" (Android, `FLAG_SECURE`, added 2026-10-17) is now **on
 by default**, by the maintainer's rule that security settings start on and users choose to lower
 them. The notice described here applies once the user turns blocking off (and on platforms that
-cannot block, such as desktop). The arguments above still hold for why it is not the *only* layer:
+cannot block, such as Linux; see "Other platforms" below). The arguments above still hold for why it is not the *only* layer:
 a photo of the screen gets past any block, so the notice is what a contact relies on when the
 sender allowed captures.
 
@@ -39,8 +39,8 @@ conversation. Now each app tells its contacts whether it blocks (a capture-block
 settles on the newest; announced on change, re-sent to every chat on a change, on a contact's
 update, and by a joiner once approved), and the contact's app blocks captures
 while that chat is open, whatever its own setting (`holdBlock` → FLAG_SECURE on Android), saying
-"They block screenshots of this chat". Where the platform cannot block (desktop), the chat says the
-contact asked and that it is up to the reader. This is cooperative: a modified app can ignore it,
+"They block screenshots of this chat". Where the platform cannot block (Linux), or can only ask
+(macOS), the chat says the contact asked and that it is up to the reader. This is cooperative: a modified app can ignore it,
 and a photo of the screen gets past any block.
 
 **The user may override it per chat** (round 12, 2026-10-18): a harasser could otherwise turn on
@@ -59,6 +59,46 @@ The **Recents thumbnail** is the opposite case and *is* blocked — Android snap
 backgrounding with no user intent behind it, and that image sits in the task switcher for anyone who
 opens it. `FLAG_SECURE` is therefore held only while backgrounded (`MainActivity.onPause` →
 `onResume`), which is what makes deliberate screenshots keep working.
+
+**Other platforms (2026-10-29).** Asked for so that screen sharing and streams (OBS, Discord, Teams)
+do not show Night Drop. Each platform reaches a different distance, named by `CaptureBlock` in
+`screenshot_detector.dart`, and the setting dialog and the chat banner say which; the setting is
+kept natively on each platform so it applies before the first frame, and is on by default
+everywhere it exists:
+
+| Platform | Mechanism | Reach |
+| --- | --- | --- |
+| Android | `FLAG_SECURE` | full: screenshots, recording, casting come out black |
+| Windows | `SetWindowDisplayAffinity(WDA_EXCLUDEFROMCAPTURE)`, `WDA_MONITOR` before Windows 10 2004 (`windows/runner/flutter_window.cpp`; setting in `HKCU\Software\Night Drop\BlockCapture`) | full: the window is left out of every capture, which shows what is behind it |
+| iOS | a cover view while `UIScreen.isCaptured` / `sceneCaptureState` (`AppDelegate.swift`) | recording, mirroring and AirPlay only: iOS has no screenshot block, so screenshots stay reported |
+| macOS | `NSWindow.sharingType = .none` (`MainFlutterWindow.swift`) | a request: older capture APIs honour it, ScreenCaptureKit on recent macOS may not, so the chat still says it is up to the reader |
+| Linux | none | X11 lets any client read the screen; Wayland's screencast portal has no opt-out for a window. The only protection is sharing a single window rather than the screen |
+
+The iOS and macOS code is written to the same channel contract but **not yet built or run** (no Mac
+in the build setup).
+
+**Verified on Windows (2026-10-29),** Windows 11 25H2 VM (build 26200), release build of the runner:
+with the setting at its default, a GDI screen capture taken inside the guest (`CopyFromScreen`, the
+path screenshot tools use) showed the wallpaper where the Night Drop window was, while the VM's
+real display, captured from the host, showed the window; with `BlockCapture` set to 0 the same
+capture showed the window. Then through **OBS Studio 33.0.1** (portable, driven over obs-websocket),
+with Night Drop in front:
+
+| OBS source | Block on (default) | Block off |
+| --- | --- | --- |
+| Display Capture, DXGI duplication | wallpaper where the window is | window shown |
+| Display Capture, Windows Graphics Capture | wallpaper where the window is | window shown |
+| Window Capture, Windows Graphics Capture | no frame at all | window shown |
+| Window Capture, BitBlt | solid black | window shown |
+
+Not yet checked by hand: the toggle and a contact's hold at runtime (the same `ApplyCaptureBlock`
+call, reached through the channel), and Discord or Teams.
+
+**Linux checked the same day,** Ubuntu 24.04.5 VM, GNOME on Wayland, the 0.2.1 AppImage, OBS 30.0.2
+through the screencast portal: a **screen** capture shows Night Drop as on the real display; a
+**window** capture of a terminal that Night Drop fully covered shows only the terminal. So on
+Wayland, sharing a single window is the protection, and sharing the screen has none. X11 was not
+tried.
 
 ## 3. The signal
 

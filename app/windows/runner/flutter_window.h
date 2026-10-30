@@ -41,6 +41,16 @@ class FlutterWindow : public Win32Window {
   // (lib/src/desktop/desktop_window.dart).
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
 
+  // `app.nightdrop/screenshots`: "Block screenshots" (lib/src/core/screenshot_detector.dart).
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> screenshots_channel_;
+
+  // Leave the window out of every capture while [BlockCapture] or a chat holds the block.
+  void ApplyCaptureBlock();
+  static bool BlockCapture();
+  static void SetBlockCapture(bool on);
+  // A chat whose contact has "Block screenshots" on is open (Dart's `holdBlock`).
+  bool held_by_chat_ = false;
+
   void ShowFromTray();
   void AddTrayIcon();
   void RemoveTrayIcon();

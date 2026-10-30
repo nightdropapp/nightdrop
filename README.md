@@ -107,12 +107,13 @@ clippy` and `flutter analyze` clean; `MAINTENANCE.md` §3 is the loop). The curr
   rendezvous seal, so a *harvest-now-decrypt-later* adversary must break **both** SPAKE2 and
   ML-KEM. Scoped deliberately: it protects the **rendezvous payload**, a true hybrid that never
   weakens the classical guarantee. The QR path never crosses the network, so it is not wrapped.
-- **Screenshots and screen recording** (0.2): **blocked by default** on Android. A contact who
+- **Screenshots and screen recording** (0.2): **blocked by default** on Android, and on Windows,
+  where the window is left out of screenshots, screen sharing and streams. A contact who
   blocks them has them blocked in their chat on your phone too, and the chat says so; you can
   still allow screenshots in one chat (to keep evidence of abuse, for instance), and they are told.
   With blocking off, the other person is *told* when you take a screenshot (Android 14+) or record
-  the screen (Android 15+). Cooperative by construction — a camera, a modified app or a desktop
-  gets past it — and the UI never implies otherwise
+  the screen (Android 15+). Cooperative by construction — a camera, a modified app or a Linux
+  desktop gets past it — and the UI never implies otherwise
   ([`docs/design/screenshot-transparency.md`](docs/design/screenshot-transparency.md)).
 - **App lock + duress wipe**: a lock code to open the app, and a **separate code that wipes**
   identity and history instead of unlocking.

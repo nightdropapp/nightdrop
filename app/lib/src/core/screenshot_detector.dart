@@ -30,12 +30,27 @@ class ScreenshotDetector {
   @visibleForTesting
   static bool? supportedForTest;
 
-  /// "Block screenshots" needs Android's FLAG_SECURE; iOS has no equivalent, so it is not offered.
-  static bool get canBlockCapture => canBlockForTest ?? (!kIsWeb && Platform.isAndroid);
+  /// What "Block screenshots" can do on this platform; see [CaptureBlock].
+  static CaptureBlock get blockKind {
+    if (blockKindForTest != null) return blockKindForTest!;
+    if (canBlockForTest != null) return canBlockForTest! ? CaptureBlock.full : CaptureBlock.none;
+    if (kIsWeb) return CaptureBlock.none;
+    if (Platform.isAndroid || Platform.isWindows) return CaptureBlock.full;
+    if (Platform.isIOS) return CaptureBlock.recordingOnly;
+    if (Platform.isMacOS) return CaptureBlock.partial;
+    return CaptureBlock.none; // Linux: X11 and Wayland give an app no way to opt out
+  }
 
-  /// Lets a test stand in for an Android phone here.
+  /// Whether "Block screenshots" is offered and a contact's block is held here at all.
+  static bool get canBlockCapture => blockKind != CaptureBlock.none;
+
+  /// Lets a test stand in for an Android phone ([CaptureBlock.full]) or a Linux desktop.
   @visibleForTesting
   static bool? canBlockForTest;
+
+  /// Lets a test stand in for a specific platform.
+  @visibleForTesting
+  static CaptureBlock? blockKindForTest;
 
   /// Whether this device can report screenshots at all (Android 14+). Cached after the first call:
   /// the answer is a platform constant.
@@ -111,7 +126,8 @@ class ScreenshotDetector {
     _onRecording = null;
   }
 
-  /// Whether "Block screenshots" is on (Android only; on unless the user turned it off).
+  /// Whether "Block screenshots" is on (on unless the user turned it off; false where it is not
+  /// offered).
   static Future<bool> blockCapture() async {
     if (!canBlockCapture) return false;
     try {
@@ -122,7 +138,7 @@ class ScreenshotDetector {
   }
 
   /// Block captures while a chat whose contact asked for it is open, whatever our own setting
-  /// (Android; elsewhere there is nothing to hold, see [canBlockCapture]). Released when it closes.
+  /// (where [canBlockCapture]; elsewhere there is nothing to hold). Released when it closes.
   static Future<void> holdBlock(bool hold) async {
     if (!canBlockCapture) return;
     try {
@@ -135,4 +151,24 @@ class ScreenshotDetector {
     if (!canBlockCapture) return;
     await _channel.invokeMethod<void>('setBlockCapture', on);
   }
+}
+
+/// How far "Block screenshots" reaches on a platform. Each native side holds the setting itself, so
+/// it applies before any Dart runs: `MainActivity.kt`, `windows/runner/flutter_window.cpp`,
+/// `macos/Runner/MainFlutterWindow.swift`, `ios/Runner/AppDelegate.swift`.
+enum CaptureBlock {
+  /// Nothing can be blocked (Linux: neither X11 nor Wayland lets a window opt out of capture).
+  none,
+
+  /// Screenshots, recording, casting and streaming are all blocked: Android's `FLAG_SECURE`, and
+  /// Windows' `WDA_EXCLUDEFROMCAPTURE`, which leaves the window out of every capture.
+  full,
+
+  /// iOS: no screenshot block exists, so screenshots are only reported; while the screen is
+  /// recorded, mirrored or AirPlayed the app covers its own contents.
+  recordingOnly,
+
+  /// macOS: the window asks to be left out (`NSWindow.sharingType = .none`); older capture APIs
+  /// honour it, but ScreenCaptureKit on recent macOS may not. A request, not a guarantee.
+  partial,
 }

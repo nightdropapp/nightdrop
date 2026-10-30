@@ -767,7 +767,7 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get captureOverrideBody =>
-      'This person asked that this chat not be captured. You can still allow screenshots and screen recording of it on your phone — to keep evidence of abuse, for instance. They will be told that you did, and told about each screenshot you take.';
+      'This person asked that this chat not be captured. You can still allow screenshots and screen recording of it on this device — to keep evidence of abuse, for instance. They will be told that you did, and told about each screenshot you take.';
 
   @override
   String get captureOverrideConfirm => 'Allow and tell them';
@@ -825,14 +825,14 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get captureOverrideBanner =>
-      'This person blocks screenshots, but you allowed them in this chat on your phone. They were told, and they are told about each screenshot you take. Block them again from the chat menu.';
+      'This person blocks screenshots, but you allowed them in this chat on this device. They were told, and they are told about each screenshot you take. Block them again from the chat menu.';
 
   @override
   String get peerBlocksCaptureSummary => 'They block screenshots of this chat';
 
   @override
   String get peerBlocksCaptureBanner =>
-      'This person turned on Block screenshots, so Night Drop blocks screenshots, screen recording and casting here too while this chat is open. A photo of the screen still gets past it.';
+      'This person turned on Block screenshots, so Night Drop blocks screenshots, screen recording, casting and screen sharing here too while this chat is open. A photo of the screen still gets past it.';
 
   @override
   String get peerBlocksCaptureUnenforcedSummary =>
@@ -841,6 +841,34 @@ class AppLocalizationsEn extends AppLocalizations {
   @override
   String get peerBlocksCaptureUnenforcedBanner =>
       'This person turned on Block screenshots. This device can\'t block screenshots or screen recording, so it\'s up to you to respect that: don\'t capture this chat.';
+
+  @override
+  String get blockCaptureBodyWindows =>
+      'When on, Night Drop\'s window is left out of every screenshot, screen recording, screen share and stream on this computer (OBS, Discord, Teams, the Snipping Tool and the like): they show what is behind it instead. You still see it as usual. Your contacts\' Night Drop blocks them too in their chat with you, where their device can.\n\nOn by default. Turn it off to show the window when you share or stream your screen. Windows can\'t tell Night Drop about a capture, so your contacts are not told. A photo of the screen gets past any block.';
+
+  @override
+  String get blockCaptureBodyMac =>
+      'When on, Night Drop asks macOS to leave its window out of screenshots, screen recordings and screen sharing on this Mac. Many capture tools respect that, but recent versions of macOS let some screen recorders and sharing apps capture it anyway, so treat it as a request, not a guarantee. Your contacts\' Night Drop blocks them too in their chat with you, where their device can.\n\nOn by default. Your contacts are not told about captures on a Mac. A photo of the screen gets past any block.';
+
+  @override
+  String get blockCaptureBodyIos =>
+      'iOS doesn\'t let apps block screenshots. When this is on, Night Drop hides its contents while the screen is being recorded, mirrored or shared over AirPlay. Screenshots still work, and your contacts are told about each one. The app switcher never shows its contents either way. Your contacts\' Night Drop blocks captures too in their chat with you, where their device can.\n\nOn by default. Turn it off to allow recording: your contacts are then told when you record with a chat open. A photo of the screen gets past any block.';
+
+  @override
+  String get blockCaptureOnLimited =>
+      'Turned on, within what this device allows.';
+
+  @override
+  String get peerBlocksCaptureRecordingSummary =>
+      'They block recording of this chat';
+
+  @override
+  String get peerBlocksCaptureRecordingBanner =>
+      'This person turned on Block screenshots. iOS can\'t block screenshots, so Night Drop hides this chat while the screen is recorded, mirrored or shared, and tells them about each screenshot you take. A photo of the screen still gets past it.';
+
+  @override
+  String get peerBlocksCapturePartialBanner =>
+      'This person turned on Block screenshots. Night Drop asks macOS to leave this chat out of screen captures while it is open, but recent macOS versions let some recorders and sharing apps capture it anyway, so it\'s up to you to respect that: don\'t capture this chat.';
 
   @override
   String get blockCaptureOn => 'Screenshots are blocked.';

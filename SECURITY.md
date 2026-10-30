@@ -121,7 +121,9 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   server-backup password, or the fixed-salt recovery handle becomes brute-forceable by the relay.
 - **Blocking and reporting captures is cooperative, and no notice proves nothing.** *(Known limit,
   by design.)* From 0.2, **Block screenshots** is on by default on Android (`FLAG_SECURE`):
-  screenshots and screen recordings of Night Drop come out black. A contact's block also applies in
+  screenshots and screen recordings of Night Drop come out black; on Windows the window is left out
+  of every capture (`WDA_EXCLUDEFROMCAPTURE`); on iOS it is hidden while recorded or mirrored, and on
+  macOS it only asks to be left out. Linux cannot block at all. A contact's block also applies in
   their chat on your phone, and the chat says so; you can still allow screenshots in one chat (to
   keep evidence of abuse, for instance), and the contact is told. With blocking off, a capture is
   reported — locally and to the peer over an authenticated control frame (`Frame::Screenshot`):
