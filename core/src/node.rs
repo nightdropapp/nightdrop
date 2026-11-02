@@ -1600,6 +1600,8 @@ impl Node {
 
     /// Build a node from a restored identity (used by `storage::` on app restart).
     pub fn with_identity(identity: LocalIdentity, transport: Box<dyn Transport>) -> Self {
+        // Every core builds a node, so this covers the non-Tor transports too.
+        crate::diag::install_panic_hook();
         Self {
             identity,
             transport: Arc::from(transport),

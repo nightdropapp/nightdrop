@@ -333,6 +333,8 @@ impl TorTransport {
         client_auth_dir: Option<&str>,
         onion_key: Option<[u8; 64]>,
     ) -> Result<Self> {
+        // First, so a panic anywhere in Tor's start-up still leaves an `nd-panic` line in logcat.
+        crate::diag::install_panic_hook();
         // rustls 0.23 needs a process-default crypto provider before any TLS config is
         // built; install ring once (ignore the error if another call already did).
         let _ = rustls::crypto::ring::default_provider().install_default();

@@ -11,7 +11,8 @@
 //! `devlog!`, not here.
 //!
 //! Even so they are **off by default** and must be turned on explicitly for a debugging build
-//! ([`set_enabled`], wired to `NIGHTDROP_DIAG` in the app). A normal release is silent.
+//! ([`set_enabled`], wired to `NIGHTDROP_DIAG` in the app). A normal release is silent, except
+//! for one location-only line per Rust panic ([`install_panic_hook`]).
 
 use std::collections::HashMap;
 use std::io::Write as _;
@@ -280,6 +281,58 @@ fn event_shape(line: &str) -> String {
     out.chars().take(120).collect()
 }
 
+/// Record every Rust panic as one `nd-panic` line, **in every build**. Idempotent.
+///
+/// Without it a release build crashing in the core left nothing to read: Rust's default hook
+/// prints to stderr, which Android discards, so a reporter's logcat showed at most a bare abort.
+/// The line says where (thread, source location) and nothing about who: those are code facts the
+/// binary already contains. The panic *message* can quote an error carrying an address or a key,
+/// so it is added only when diagnostics are on, and then redacted like every `diag` line. Chains
+/// to the previous hook, so desktop stderr output is unchanged.
+pub fn install_panic_hook() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            let payload = info
+                .payload()
+                .downcast_ref::<&str>()
+                .copied()
+                .or_else(|| info.payload().downcast_ref::<String>().map(String::as_str));
+            let line = panic_line(
+                std::thread::current().name(),
+                info.location()
+                    .map(|l| format!("{}:{}:{}", l.file(), l.line(), l.column())),
+                payload,
+                enabled(),
+            );
+            #[cfg(target_os = "android")]
+            android::write_error("nd-panic", &line);
+            append("nd-panic", &line);
+            previous(info);
+        }));
+    });
+}
+
+/// The `nd-panic` line. `message` is included only when `with_message` (diagnostics on).
+fn panic_line(
+    thread: Option<&str>,
+    location: Option<String>,
+    message: Option<&str>,
+    with_message: bool,
+) -> String {
+    let mut line = format!(
+        "panic in thread '{}' at {}",
+        thread.unwrap_or("<unnamed>"),
+        location.as_deref().unwrap_or("<unknown location>")
+    );
+    if with_message {
+        line.push_str(": ");
+        line.push_str(&redact(message.unwrap_or("<non-string payload>")));
+    }
+    line
+}
+
 /// Everything this channel must never print, removed in one place.
 fn redact(s: &str) -> std::borrow::Cow<'_, str> {
     match redact_onions(s) {
@@ -358,6 +411,7 @@ mod android {
     use std::os::raw::{c_char, c_int};
 
     const ANDROID_LOG_INFO: c_int = 4;
+    const ANDROID_LOG_ERROR: c_int = 6;
 
     #[link(name = "log")]
     extern "C" {
@@ -365,13 +419,22 @@ mod android {
     }
 
     pub fn write(tag: &str, line: &str) {
+        write_prio(ANDROID_LOG_INFO, tag, line);
+    }
+
+    /// At error priority, so a crash stands out in a reporter's logcat.
+    pub fn write_error(tag: &str, line: &str) {
+        write_prio(ANDROID_LOG_ERROR, tag, line);
+    }
+
+    fn write_prio(prio: c_int, tag: &str, line: &str) {
         // Interior NULs can't cross into C; drop the line rather than fail a debug aid.
         let (Ok(tag), Ok(text)) = (CString::new(tag), CString::new(line)) else {
             return;
         };
         // SAFETY: both pointers are NUL-terminated and live for the duration of the call.
         unsafe {
-            __android_log_write(ANDROID_LOG_INFO, tag.as_ptr(), text.as_ptr());
+            __android_log_write(prio, tag.as_ptr(), text.as_ptr());
         }
     }
 }
@@ -396,6 +459,54 @@ mod tests {
 
     // `ENABLED` is process-wide; keep the two tests from racing each other.
     static SERIAL: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn a_panic_line_names_the_place_but_not_the_message_unless_diagnostics_are_on() {
+        let msg = "relay abcdefghijklmnopqrstuvwxyz234567abcdefghijklmnopqrstuv.onion unreachable";
+        let quiet = panic_line(Some("tor"), Some("src/x.rs:1:2".into()), Some(msg), false);
+        assert_eq!(quiet, "panic in thread 'tor' at src/x.rs:1:2");
+        let loud = panic_line(Some("tor"), Some("src/x.rs:1:2".into()), Some(msg), true);
+        assert_eq!(
+            loud,
+            "panic in thread 'tor' at src/x.rs:1:2: relay <onion> unreachable"
+        );
+        assert_eq!(
+            panic_line(None, None, None, true),
+            "panic in thread '<unnamed>' at <unknown location>: <non-string payload>"
+        );
+    }
+
+    /// The hook end to end: a panic on another thread lands in the log file, location only.
+    #[test]
+    fn the_panic_hook_records_a_panic_in_a_normal_build() {
+        let _g = SERIAL.lock().unwrap_or_else(|e| e.into_inner());
+        set_enabled(false);
+        let path = std::env::temp_dir().join(format!("nd-panic-test-{}.log", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        set_log_file(Some(path.clone())).unwrap();
+        install_panic_hook();
+        install_panic_hook(); // idempotent: one line per panic, not two
+        let joined = std::thread::Builder::new()
+            .name("panic-test".into())
+            .spawn(|| panic!("secret detail"))
+            .unwrap()
+            .join();
+        set_log_file(None).unwrap();
+        assert!(joined.is_err());
+        let log = std::fs::read_to_string(&path).unwrap();
+        let lines: Vec<_> = log.lines().filter(|l| l.contains("nd-panic")).collect();
+        assert_eq!(lines.len(), 1, "{log}");
+        assert!(
+            lines[0].contains("panic in thread 'panic-test' at "),
+            "{log}"
+        );
+        assert!(lines[0].contains("diag.rs:"), "{log}");
+        assert!(
+            !log.contains("secret detail"),
+            "the message stays out of a normal build"
+        );
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn diagnostics_are_off_until_asked_for() {

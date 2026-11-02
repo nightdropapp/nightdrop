@@ -304,7 +304,12 @@ on a re-pair (new session) exactly like `verified`.
   build also keeps the same lines in a file on the device, because a phone's logcat holds only
   minutes: `/sdcard/Android/data/app.nightdrop/files/nightdrop-diag.log` (UTC timestamps, 8 MB then
   one `.1` backup; `adb pull` works on a release-signed build). A normal build deletes that file at
-  launch, so installing one over a diagnostic build is the purge. arti's own lines (`nd-tor`) are
+  launch, so installing one over a diagnostic build is the purge. One line is written in **every**
+  build: a Rust panic logs `nd-panic` (error priority) with the thread name and source location,
+  which the binary already contains; the panic message, which can quote an error carrying an
+  address, is added only in a diagnostic build and redacted (`diag::install_panic_hook`, from
+  2026-11-02). Rust's default hook prints to stderr, which Android discards, so a crash in the
+  core used to leave a reporter's logcat with nothing but an abort. arti's own lines (`nd-tor`) are
   rate-limited to 100 events per message shape per minute, with a summary line counting the rest:
   on 2026-09-29 a single hspool retry loop logged 28,000 lines in under a minute and rotated a
   whole day's log away.
