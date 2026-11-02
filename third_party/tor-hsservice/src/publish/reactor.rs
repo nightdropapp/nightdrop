@@ -2081,7 +2081,25 @@ fn upload_result_state(
         // and another for the secondary one).
         //
         // If either is missing, we are unreachable for some or all clients.
-        return (State::DegradedUnreachable, err);
+        //
+        // NIGHTDROP PATCH: unless the consensus has no secondary ring at all. A secondary ring
+        // needs its shared random value, and when the directory authorities fail to agree on one
+        // the consensus carries only the current value (seen 2026-10-31 and 2026-11-02). The
+        // current ring always exists (falling back to the disaster SRV), and it is the only ring
+        // clients fetch from, so a descriptor on it is reachable. Calling that unreachable kept
+        // every service started during the gap in "DegradedUnreachable" for the whole gap.
+        if netdir.hs_all_time_periods().len() >= 2 || current_period_res.is_none() {
+            return (State::DegradedUnreachable, err);
+        }
+        let state = match (succeeded_current_tp.as_slice(), failed.is_empty()) {
+            // Nothing uploaded yet.
+            (&[], true) => State::Bootstrapping,
+            // Every upload failed.
+            (&[], false) => State::DegradedUnreachable,
+            // On the ring clients use; degraded, since the secondary period has no ring.
+            (&[_, ..], _) => State::DegradedReachable,
+        };
+        return (state, err);
     }
 
     let state = match (
@@ -2465,5 +2483,50 @@ mod test {
         let (status, err) = upload_result_state(&netdir, &[primary_ctx, secondary_ctx]);
         assert_eq!(status, State::DegradedUnreachable);
         assert!(matches!(err, Some(Problem::DescriptorUpload(_))));
+    }
+
+    /// NIGHTDROP PATCH: a consensus without the shared random value a secondary ring needs has
+    /// only the current ring, so the current period is all there is to publish to (as on the
+    /// live network 2026-11-02, which lacked the previous SRV). The test network has no SRV at
+    /// all, so its one ring uses the disaster SRV; the publisher handles both cases alike.
+    #[test]
+    fn upload_result_status_without_a_secondary_ring() {
+        let netdir = testnet::construct_netdir().unwrap_if_sufficient().unwrap();
+        let all_params = netdir.hs_all_time_periods();
+        assert_eq!(all_params.len(), 1, "no SRV for a secondary ring");
+        let primary_params = &all_params[0];
+        assert_eq!(primary_params.time_period(), netdir.hs_time_period());
+        let failed = || Err(DescUploadRetryError::Bug(internal!("test")));
+
+        // Before any upload: still bootstrapping, not unreachable.
+        let ctx = create_time_period_ctx(primary_params, vec![]);
+        let (status, err) = upload_result_state(&netdir, &[ctx]);
+        assert_eq!(status, State::Bootstrapping);
+        assert!(err.is_none());
+
+        // Uploaded to the ring clients fetch from: reachable, though degraded.
+        let ctx = create_time_period_ctx(primary_params, create_upload_results(Ok(())));
+        let (status, err) = upload_result_state(&netdir, &[ctx]);
+        assert_eq!(status, State::DegradedReachable);
+        assert!(status.is_fully_reachable());
+        assert!(err.is_none());
+
+        // Some uploads failed, some landed: still reachable.
+        let ctx = create_time_period_ctx(
+            primary_params,
+            vec![upload_status_for(1, Ok(())), upload_status_for(2, failed())],
+        );
+        let (status, err) = upload_result_state(&netdir, &[ctx]);
+        assert_eq!(status, State::DegradedReachable);
+        assert!(matches!(err, Some(Problem::DescriptorUpload(_))));
+
+        // Every upload failed: unreachable.
+        let ctx = create_time_period_ctx(primary_params, create_upload_results(failed()));
+        let (status, _) = upload_result_state(&netdir, &[ctx]);
+        assert_eq!(status, State::DegradedUnreachable);
+
+        // No context for the current period at all: unreachable.
+        let (status, _) = upload_result_state(&netdir, &[]);
+        assert_eq!(status, State::DegradedUnreachable);
     }
 }

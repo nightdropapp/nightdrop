@@ -92,9 +92,40 @@ one HSDir's result, not the ring's.
 - `publish/reactor.rs`: test `a_failed_upload_to_one_new_hsdir_keeps_the_ring_reachable`. With the
   old replace it fails (1 result kept instead of 3).
 
+## Fourth fix: a consensus with no secondary ring read as unreachable (2026-11-02)
+
+**Why:** a time period's ring needs that period's shared random value (SRV). When the directory
+authorities fail to agree on one, the consensus carries only the current SRV, so `NetDir` has the
+current ring (with the disaster SRV as its fallback) and no secondary ring. The publisher then has
+one time-period context, and `upload_result_state` answered `DegradedUnreachable` for any fewer
+than two, even with the descriptor on every HSDir of the current ring. That is the ring clients
+fetch from (`hs_dirs_download` uses only `hsdir_rings.current`), so the service was reachable.
+
+Seen live: the consensus lacked `shared-rand-previous-value` from about 2026-11-01 01:00 to 24:00
+UTC and again from 2026-11-02 13:00 UTC (the consensus at 14:00 had only the current value). The
+relay published to one period ("uploaded successfully to 8/8 HSDirs") and its own self-dial
+reached it in 3-6 s every cycle, yet its watchdog (`relay/src/main.rs`, which treats
+`DegradedUnreachable` as dark) restarted it every ~20 minutes: about 70 restarts, each rotating the
+introduction points. On phones started during the gap, `published()` (`core/src/transport/tor.rs`)
+stayed false, so the "Publishing your address to Tor" banner never cleared (S25, 2026-11-02).
+
+**What changed:**
+
+- `publish/reactor.rs`: in `upload_result_state`, when there are fewer than two contexts but the
+  `NetDir` itself has only one ring, judge the current ring alone: nothing uploaded and nothing
+  failed is `Bootstrapping`, any success is `DegradedReachable` (degraded, since the secondary
+  period has no ring), all failed is `DegradedUnreachable`. A missing context while the `NetDir`
+  has two rings is still `DegradedUnreachable`, as upstream.
+- `publish/reactor.rs`: test `upload_result_status_without_a_secondary_ring`. `publish.rs`: the two
+  publish tests (`reupload_after_publishing`, `publish_after_ipt_change_no_errors`) run on a test
+  network with no SRV and asserted `DegradedUnreachable` after a clean publish; they now expect
+  `DegradedReachable`. All three fail with the old logic.
+
+**Upstream:** not reported yet.
+
 Testing this crate needs its dev-dependencies, which the Night Drop workspace does not resolve:
 copy the directory elsewhere, append `[workspace]` to its `Cargo.toml`, and run
-`cargo test --all-features --lib` there (52 pass, 2 ignored, on 2026-10-11).
+`cargo test --all-features --lib` there (53 pass, 2 ignored, on 2026-11-02).
 
-**Remove this directory and the `[patch.crates-io]` entry** once arti ships all three fixes and Night
+**Remove this directory and the `[patch.crates-io]` entry** once arti ships all four fixes and Night
 Drop moves to that arti.

@@ -581,9 +581,10 @@ mod test {
                 // The upload results aren't ready yet.
                 assert_eq!(State::Bootstrapping, status.state());
             } else {
-                // The test network doesn't have an SRV for the previous TP,
-                // so we are "unreachable".
-                assert_eq!(State::DegradedUnreachable, status.state());
+                // The test network doesn't have an SRV for the previous TP, so there is no
+                // secondary ring. NIGHTDROP PATCH: the descriptor is on the current ring, the one
+                // clients fetch from, so we are reachable (degraded), not "unreachable".
+                assert_eq!(State::DegradedReachable, status.state());
             }
             assert!(status.current_problem().is_none());
 
