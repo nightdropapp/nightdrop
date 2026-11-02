@@ -2931,6 +2931,7 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
         // a peer dial and/or relay posts, so a round runs on its own thread, and only one at a
         // time: whatever is queued meanwhile waits for the next round.
         let mut outbox_job: Option<thread::JoinHandle<Vec<crate::node::Finished>>> = None;
+        let mut receipt_retries = crate::node::ReceiptRetries::default();
         while !stop.stopped() {
             // Foreground: pump often for snappy delivery. Backgrounded: poll far less often
             // to cut battery/CPU and avoid chatty background work (the warm Tor stream still
@@ -3057,10 +3058,10 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
             // "message" event is already out, so the notification does not wait on them, and the
             // lock is free. A receipt is a peer dial and, when that fails, a relay post — tens of
             // seconds on a phone in Doze. On this thread rather than a spawned one, so nothing
-            // outlives the poller holding the transport (see the teardown below).
-            for s in receipts {
-                s.execute();
-            }
+            // outlives the poller holding the transport (see the teardown below). One that fails
+            // every route is kept and retried on later ticks (`ReceiptRetries`): it is the only
+            // thing that turns the sender's "Held for delivery" into "Delivered".
+            receipt_retries.run(receipts, std::time::Instant::now());
             if relay_applied {
                 last_relay = Some(std::time::Instant::now());
             }

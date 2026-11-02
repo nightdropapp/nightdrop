@@ -1661,10 +1661,11 @@ impl Node {
 impl Node {
     /// Send one authenticated per-message delivery receipt for each `(peer, message id)`.
     ///
-    /// Best-effort by design: a receipt that cannot be delivered must never fail the receive it
-    /// belongs to — the message *has* arrived, and the only casualty is the sender's badge, which
-    /// stays at "sent". Falls back to the relay like any control frame, so a peer who has gone
-    /// offline still learns their message landed.
+    /// A receipt that cannot be delivered must never fail the receive it belongs to — the message
+    /// *has* arrived. Falls back to the relay like any control frame, so a peer who has gone
+    /// offline still learns their message landed, and when both routes fail the poller keeps it
+    /// and tries again ([`ReceiptRetries`](crate::node::ReceiptRetries)): it is the only thing that
+    /// moves the sender's relay-held message off "Held for delivery".
     ///
     /// The first receipt to each peer goes over a **fresh** connection. Nothing confirms a receipt,
     /// so one written into a kept-open connection whose other end has gone is lost without an error

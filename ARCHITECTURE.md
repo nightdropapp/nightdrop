@@ -1259,6 +1259,13 @@ Operations (idempotent, authenticated only by capability tokens, never identity)
   `queued` for good (a Windows ↔ phone test, 2026-09-30). A fresh dial to a vanished peer fails and
   the receipt goes to the relay. Burn-view receipts (`Frame::Viewed`) do the same. The cost is one
   stream setup per peer per batch, paid after the messages are surfaced, never under the core lock.
+- **A receipt that fails every route is retried** (`node::ReceiptRetries`, in the poller), after
+  1 min and then doubling up to every 15 min, for up to the relay's 24 h. The sender never re-sends
+  a `queued` message, so the receipt is the only thing that settles it: dropped, the message stayed
+  "Held for delivery" and after 24 h read "Not delivered (expired)" although it had arrived (seen
+  2026-11-02, when a phone's Tor client could reach neither the peer nor the relay for minutes).
+  The sealed bytes go again unchanged; a copy that did land the first time fails to decrypt as a
+  replay and is skipped. Kept in memory only, so an app restart loses the pending ones.
 - **Sender gets `Ack`:** nothing. See below.
 
 **Only a named receipt confirms a message (2026-08-02, revised on review).** `sent` used to be

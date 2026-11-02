@@ -1330,6 +1330,102 @@ impl DetachedSend {
     }
 }
 
+/// First wait before a failed receipt is tried again; it doubles per failure up to the max.
+pub(crate) const RECEIPT_RETRY_FIRST: Duration = Duration::from_secs(60);
+const RECEIPT_RETRY_MAX: Duration = Duration::from_secs(15 * 60);
+/// At most this many failed receipts are kept; the oldest goes first.
+const RECEIPT_RETRY_CAP: usize = 256;
+/// At most this many retries per poller tick. Each can take a peer dial plus a relay post, and the
+/// poller runs them inline, so a long backlog must not stall the tick.
+const RECEIPT_RETRIES_PER_TICK: usize = 4;
+
+/// Delivery receipts and acks ([`Node::take_receipt_sends`]) whose every route failed, kept by
+/// the poller for another try.
+///
+/// A receipt is the only thing that confirms a relay-held message: the sender never re-sends it
+/// (`sweep_unconfirmed` runs once), so a lost receipt left it on "Held for delivery" and then, after
+/// [`RELAY_TTL`], on "Not delivered (expired)" although it had arrived. Seen 2026-11-02: a phone's
+/// Tor client could reach neither the peer nor the relay for a few minutes and dropped the receipt
+/// for good. Retried with backoff for up to [`RELAY_TTL`], the point where the sender has given up
+/// anyway. The sealed bytes are re-sent unchanged, so a copy that did land the first time is only
+/// a duplicate the peer cannot decrypt twice and skips. Kept in memory: an app restart loses them.
+#[derive(Default)]
+pub(crate) struct ReceiptRetries {
+    pending: Vec<PendingReceipt>,
+}
+
+struct PendingReceipt {
+    send: DetachedSend,
+    first: Instant,
+    next: Instant,
+    wait: Duration,
+}
+
+impl ReceiptRetries {
+    /// Send this tick's new receipts, keep the ones that fail, then retry the kept ones now due.
+    pub(crate) fn run(&mut self, new: Vec<DetachedSend>, now: Instant) {
+        for send in new {
+            if !send.execute() {
+                self.keep(send, now);
+            }
+        }
+        let before = self.pending.len();
+        self.pending
+            .retain(|p| now.saturating_duration_since(p.first) < RELAY_TTL);
+        if self.pending.len() < before {
+            crate::diag!(
+                "receipt: gave up on {} after {}h of retries",
+                before - self.pending.len(),
+                RELAY_TTL.as_secs() / 3600
+            );
+        }
+        let mut tried = 0;
+        let mut i = 0;
+        while i < self.pending.len() && tried < RECEIPT_RETRIES_PER_TICK {
+            if self.pending[i].next > now {
+                i += 1;
+                continue;
+            }
+            tried += 1;
+            if self.pending[i].send.execute() {
+                let p = self.pending.remove(i);
+                crate::diag!(
+                    "receipt: delivered on a retry, {}s after the first try",
+                    now.saturating_duration_since(p.first).as_secs()
+                );
+            } else {
+                let p = &mut self.pending[i];
+                p.wait = (p.wait * 2).min(RECEIPT_RETRY_MAX);
+                p.next = now + p.wait;
+                i += 1;
+            }
+        }
+    }
+
+    fn keep(&mut self, send: DetachedSend, now: Instant) {
+        if self.pending.len() >= RECEIPT_RETRY_CAP {
+            self.pending.remove(0);
+        }
+        self.pending.push(PendingReceipt {
+            send,
+            first: now,
+            next: now + RECEIPT_RETRY_FIRST,
+            wait: RECEIPT_RETRY_FIRST,
+        });
+        crate::diag!(
+            "receipt: every route failed — kept for a retry in {}s ({} waiting)",
+            RECEIPT_RETRY_FIRST.as_secs(),
+            self.pending.len()
+        );
+    }
+
+    /// How many receipts are waiting for a retry.
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.pending.len()
+    }
+}
+
 /// The relay copies an edit or unsend must recall before it knows which path it takes
 /// ([`Node::begin_edit`]); run without the lock.
 pub(crate) struct RecallPlan {

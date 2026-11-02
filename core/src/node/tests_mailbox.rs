@@ -977,6 +977,123 @@ fn receipt_survives_a_dead_connection(synchronous: bool) {
     assert_eq!(delivery(&alice), "delivered");
 }
 
+/// A transport whose relay posts fail while `relay_down` is set, as when a phone's Tor client can
+/// reach neither its peer nor the relay.
+struct NoRoute {
+    inner: MemoryTransport,
+    relay_down: Arc<AtomicBool>,
+    synchronous: Arc<AtomicBool>,
+}
+
+impl Transport for NoRoute {
+    fn address(&self) -> Address {
+        self.inner.address()
+    }
+    fn send(&self, peer: &str, frame: &[u8]) -> Result<()> {
+        self.inner.send(peer, frame)
+    }
+    fn try_recv(&self) -> Option<(Address, Vec<u8>)> {
+        self.inner.try_recv()
+    }
+    fn is_synchronous(&self) -> bool {
+        self.synchronous.load(Ordering::SeqCst)
+    }
+    fn relay_dialer_isolated(
+        &self,
+        _addr: &str,
+        _group: u64,
+    ) -> Option<crate::relay_client::RelayDialer> {
+        if !self.relay_down.load(Ordering::SeqCst) {
+            return None; // the plain TCP client
+        }
+        Some(Arc::new(|_request: &str| -> Result<String> {
+            anyhow::bail!("relay unreachable")
+        }))
+    }
+}
+
+/// Bob drains Alice's relay-held message, but his receipt fails every route: Alice is gone and his
+/// relay is unreachable. Until 2026-11-02 that receipt was dropped, leaving Alice on "Held for
+/// delivery" and then "Not delivered (expired)" for a message Bob has. It is kept, not retried
+/// early, delivered once a route is back, and given up on after the relay's 24h.
+#[test]
+fn a_receipt_that_fails_every_route_is_retried_until_it_lands() {
+    use crate::node::{ReceiptRetries, RECEIPT_RETRY_FIRST};
+    use std::time::Instant;
+
+    let relay = RelayClient::new(RelayServer::spawn("127.0.0.1:0").unwrap().to_string());
+    let net = MemoryNetwork::new();
+    let relay_down = Arc::new(AtomicBool::new(false));
+    let synchronous = Arc::new(AtomicBool::new(true));
+    let mut alice = Node::new(Box::new(net.endpoint("alice")));
+    let mut bob = Node::new(Box::new(NoRoute {
+        inner: net.endpoint("bob"),
+        relay_down: Arc::clone(&relay_down),
+        synchronous: Arc::clone(&synchronous),
+    }));
+    alice.set_relay(relay.clone());
+    bob.set_relay(relay.clone());
+    let bundle = alice.publish_bundle();
+    bob.connect_with_bundle("alice", &bundle).unwrap();
+    for _ in 0..3 {
+        alice.pump().unwrap();
+        bob.pump().unwrap();
+    }
+    let bob_id = alice.contacts()[0].id.clone();
+    let delivery = |alice: &Node, text: &str| {
+        alice.chats[&bob_id]
+            .history
+            .iter()
+            .rev()
+            .find(|m| m.from_me && m.text == text)
+            .map(|m| m.delivery.clone())
+            .unwrap()
+    };
+    // Bob drains `text` from the relay with no route back to Alice; returns his failed receipts.
+    let receive_without_a_route = |alice: &mut Node, bob: &mut Node, text: &str| {
+        net.reconnect("alice");
+        net.disconnect("bob");
+        alice.send(&bob_id, text).unwrap();
+        assert_ne!(delivery(alice, text), "delivered");
+        net.reconnect("bob");
+        net.disconnect("alice");
+        synchronous.store(false, Ordering::SeqCst);
+        bob.poll_relay().unwrap();
+        relay_down.store(true, Ordering::SeqCst);
+        bob.take_receipt_sends()
+    };
+
+    let mut retries = ReceiptRetries::default();
+    let t0 = Instant::now();
+    let receipts = receive_without_a_route(&mut alice, &mut bob, "held");
+    assert!(!receipts.is_empty());
+    retries.run(receipts, t0);
+    assert!(
+        retries.len() > 0,
+        "a receipt that failed every route is kept"
+    );
+
+    // Not yet due: nothing is tried, so nothing lands even with a route back.
+    net.reconnect("alice");
+    relay_down.store(false, Ordering::SeqCst);
+    retries.run(Vec::new(), t0 + RECEIPT_RETRY_FIRST / 2);
+    alice.pump().unwrap();
+    assert_ne!(delivery(&alice, "held"), "delivered");
+
+    // Due: the retry reaches Alice directly.
+    retries.run(Vec::new(), t0 + RECEIPT_RETRY_FIRST);
+    assert_eq!(retries.len(), 0);
+    alice.pump().unwrap();
+    assert_eq!(delivery(&alice, "held"), "delivered");
+
+    // A receipt with no route for the relay's whole 24h is given up on.
+    let receipts = receive_without_a_route(&mut alice, &mut bob, "lost");
+    retries.run(receipts, t0);
+    assert!(retries.len() > 0);
+    retries.run(Vec::new(), t0 + RELAY_TTL);
+    assert_eq!(retries.len(), 0);
+}
+
 // ---- 0.2: no v1 handle, and where cover traffic goes (§10) ----
 
 /// The 0.1.x v1 handle, rebuilt here only to prove nothing uses it any more.
