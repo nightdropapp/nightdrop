@@ -113,6 +113,9 @@ struct Shared {
     /// probe that ends before connecting (the contact is on another network) records no failure,
     /// and the node probes every poll tick.
     probed: Mutex<HashMap<String, Instant>>,
+    /// Where we last dialled each peer successfully, and when. Only this says an address works:
+    /// their connecting to us does not, since it says nothing of where they listen now.
+    dialed: Mutex<HashMap<String, (SocketAddrV4, Instant)>>,
     budget: InboundBudget,
     connections: AtomicUsize,
     ip_source: IpSource,
@@ -205,6 +208,7 @@ impl<T: Transport> NearbyTransport<T> {
                 failed: Mutex::new(HashMap::new()),
                 probing: Mutex::new(std::collections::HashSet::new()),
                 probed: Mutex::new(HashMap::new()),
+                dialed: Mutex::new(HashMap::new()),
                 budget: InboundBudget::with_limit(INBOUND_BUDGET_BYTES),
                 connections: AtomicUsize::new(0),
                 ip_source,
@@ -332,10 +336,16 @@ impl Shared {
         // ([`RETRY_AFTER`]): a send with no route yet must not hold off the first real attempt.
         let attempt = Self::exchange(addr, &their_token, &our_token);
         match &attempt {
-            Ok(_) => crate::diag!(
-                "nearby: connected to the contact at {}",
-                net_of_ip(*addr.ip())
-            ),
+            Ok(_) => {
+                self.dialed
+                    .lock()
+                    .unwrap()
+                    .insert(peer.to_string(), (addr, Instant::now()));
+                crate::diag!(
+                    "nearby: connected to the contact at {}",
+                    net_of_ip(*addr.ip())
+                )
+            }
             Err(e) => {
                 crate::diag!(
                     "nearby: could not reach the contact at {} ({e}); using Tor, retrying in {}s",
@@ -383,6 +393,15 @@ impl Shared {
                 .unwrap()
                 .insert(peer.to_string(), Instant::now());
         }
+    }
+
+    /// Whether we dialled `peer` at `at` successfully within [`RETRY_AFTER`].
+    fn dialed_recently(&self, peer: &str, at: SocketAddrV4) -> bool {
+        self.dialed
+            .lock()
+            .unwrap()
+            .get(peer)
+            .is_some_and(|(a, t)| *a == at && t.elapsed() < RETRY_AFTER)
     }
 
     fn recently_failed(&self, peer: &str) -> bool {
@@ -554,21 +573,20 @@ impl Shared {
         }
         let mut learned = self.learned.lock().unwrap();
         let current = learned.get(&onion).copied().or(announced);
+        let works = current.is_some_and(|c| self.dialed_recently(&onion, c));
         if current == Some(at) {
             drop(learned);
-            // Where we thought: but if they are not known reachable (we just arrived), check now
-            // rather than at the next once-a-minute probe.
-            if !self.reachable_recently(&onion, RETRY_AFTER) {
+            // Where we thought: but if we have not reached them there lately (we just arrived),
+            // check now rather than at the next once-a-minute probe.
+            if !works {
                 self.probed.lock().unwrap().remove(&onion);
             }
             return;
         }
-        // An address that works stays: a contact on two of our networks sends a beacon from each,
-        // and switching on every one would have us both answer each other's beacons for ever.
-        if current.is_some_and(|c| self.on_our_network(*c.ip()))
-            && self.reachable_recently(&onion, RETRY_AFTER)
-            && !self.recently_failed(&onion)
-        {
+        // An address we dialled successfully in the last minute stays: a contact on two of our
+        // networks sends a beacon from each, and switching on every one would have us both
+        // answer each other's beacons for ever. Their connecting to us proves nothing about it.
+        if works && !self.recently_failed(&onion) {
             return;
         }
         if announced == Some(at) {
@@ -944,6 +962,11 @@ impl<T: Transport> Transport for NearbyTransport<T> {
                 .lock()
                 .unwrap()
                 .retain(|onion, _| routes.contains_key(onion));
+            self.shared
+                .dialed
+                .lock()
+                .unwrap()
+                .retain(|onion, _| routes.contains_key(onion));
             *current = routes;
         }
         let mut listening = self.listening.lock().unwrap();
@@ -1295,6 +1318,46 @@ mod tests {
         assert!(a.shared.probed.lock().unwrap().contains_key("b.onion"));
         a.set_local_addresses(vec![("wlan0".into(), lo)]);
         assert!(!a.shared.probed.lock().unwrap().contains_key("b.onion"));
+    }
+
+    /// Seen on the S23/S25: b restarted (new port), connected to a, and a kept b's old address
+    /// because b's connection counted as "reachable", ignoring b's beacon for 44 s. Only a dial of
+    /// ours to that address keeps it.
+    #[test]
+    fn their_connecting_to_us_does_not_keep_a_stale_address() {
+        let (_net, a, b) = pair();
+        connect(&a, &b);
+        let stale = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_000); // b's port before a restart
+        a.set_nearby(HashMap::from([(
+            "b.onion".into(),
+            NearbyRoute {
+                our_token: token('a'),
+                peer_token: Some(token('b')),
+                peer_at: Some(stale),
+            },
+        )]));
+        a.shared.record("b.onion", true); // as when b connects to us
+        let lo = Ipv4Addr::LOCALHOST;
+        let pb = b.nearby_address().unwrap();
+        a.shared.heard_beacon(
+            &beacon::make(&token('b'), lo, pb.port(), beacon::window_now()),
+            lo,
+        );
+        assert_eq!(
+            a.shared.learned.lock().unwrap().get("b.onion").copied(),
+            Some(pb),
+            "b's beacon wins over the stale address"
+        );
+        // Once we have dialled b there, that address is kept against another beacon.
+        a.shared.dial("b.onion").unwrap();
+        a.shared.heard_beacon(
+            &beacon::make(&token('b'), lo, 40_002, beacon::window_now()),
+            lo,
+        );
+        assert_eq!(
+            a.shared.learned.lock().unwrap().get("b.onion").copied(),
+            Some(pb)
+        );
     }
 
     #[test]

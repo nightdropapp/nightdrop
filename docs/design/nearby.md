@@ -151,8 +151,9 @@ window = unix time / 600 s
   beacon, which must still be 32768 or above.
 * What a beacon finds is held in memory only and used to dial (§5) in place of the announced
   address; the contact's next announcement over Tor replaces it. Finding a contact also resets the
-  back-off, so the next send tries the new address. An address that worked in the last minute is
-  kept: a contact on two of our networks beacons from both, and switching on each would have the
+  back-off, so the next send tries the new address. An address we dialled successfully in the last
+  minute is kept (the contact connecting to us says nothing of where they listen; counting it kept
+  a stale port for 44 s on the S23/S25, 2026-11-09): a contact on two of our networks beacons from both, and switching on each would have the
   two devices answering each other without end.
 * **What it shows.** To anyone else a beacon is 30 random-looking bytes that never repeat (fresh
   nonce), carrying no identity, onion, or token: a listener learns that some device on the network
