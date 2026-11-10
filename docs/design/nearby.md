@@ -114,7 +114,9 @@ keeps its own 16 MiB `InboundBudget`.
 **Probing and back-off.** Each tick, a route not heard from for a minute is probed: the token
 exchange alone, no message, and each route at most once a minute whatever came of it (the local
 side runs every poll tick, and a probe of a contact on another network ends before connecting,
-recording no failure). A contact found by beacon is probed at once. The chat's "connected" state is a success either way in the last two
+recording no failure). A contact found by beacon, a contact's beacon while they are not known
+reachable, or a change of our own networks lets the next probe go at once (and clears the
+back-off). The chat's "connected" state is a success either way in the last two
 minutes. After a local attempt fails, sends skip the local path for a minute — otherwise each would
 wait out the 2 s connect first when the two are apart.
 

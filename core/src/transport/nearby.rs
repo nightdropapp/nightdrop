@@ -555,6 +555,12 @@ impl Shared {
         let mut learned = self.learned.lock().unwrap();
         let current = learned.get(&onion).copied().or(announced);
         if current == Some(at) {
+            drop(learned);
+            // Where we thought: but if they are not known reachable (we just arrived), check now
+            // rather than at the next once-a-minute probe.
+            if !self.reachable_recently(&onion, RETRY_AFTER) {
+                self.probed.lock().unwrap().remove(&onion);
+            }
             return;
         }
         // An address that works stays: a contact on two of our networks sends a beacon from each,
@@ -972,6 +978,10 @@ impl<T: Transport> Transport for NearbyTransport<T> {
         let changed = self.shared.interfaces.lock().unwrap().as_ref() != Some(&interfaces);
         *self.shared.interfaces.lock().unwrap() = Some(interfaces.clone());
         if changed {
+            // A new network: a contact who was elsewhere may be here, so every route may be
+            // probed again at once, and one that failed may be tried again.
+            self.shared.probed.lock().unwrap().clear();
+            self.shared.failed.lock().unwrap().clear();
             let listed: Vec<String> = interfaces
                 .iter()
                 .map(|(name, ip)| {
@@ -1279,6 +1289,11 @@ mod tests {
             &beacon::make(&token('b'), lo, 40_001, beacon::window_now()),
             lo,
         );
+        assert!(!a.shared.probed.lock().unwrap().contains_key("b.onion"));
+        // So does a change of our own networks.
+        a.nearby_probe();
+        assert!(a.shared.probed.lock().unwrap().contains_key("b.onion"));
+        a.set_local_addresses(vec![("wlan0".into(), lo)]);
         assert!(!a.shared.probed.lock().unwrap().contains_key("b.onion"));
     }
 
