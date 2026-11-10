@@ -53,8 +53,11 @@ These define the product. Do not violate them, and flag any change that would:
   chat by both people**, it sends that chat's frames over the local network instead of Tor while
   both are on one network, after a dialog saying what it reveals (each learns the other's local
   address; anyone on the network sees that the devices talk). It may only connect to a private
-  address the contact itself announced end to end, in our own subnet. Do not add another direct
-  path without the same explicit decision.
+  address in our own subnet that the contact itself gave us: announced end to end, or (decided
+  2026-11-09, so phones that change network with no internet still find each other) in a local
+  beacon only that contact can make, keyed from the token it sent us end to end
+  (`docs/design/nearby.md` §5a). Do not add another direct path without the same explicit
+  decision.
 - **Backups are user-owned secrets.** The backup password is randomly generated, shown once, never
   persisted, and zeroized when its window closes. The server-stored backup (opt-in, default 24h /
   max 36h) holds an opaque encrypted blob only and never receives the password; losing it means
@@ -674,8 +677,11 @@ on a re-pair (new session) exactly like `verified`.
   per-chat token on `Frame::Captures`, a local connection opens with a token exchange both ways,
   and only private addresses in our own subnet are dialled or answered. Content stays end-to-end
   encrypted and padded, so a local observer sees only that two devices talk — it is **not
-  anonymized**. **No discovery beacon:** nothing is broadcast; an address is learned only from the
-  contact. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
+  anonymized**. **Beacons (§5a):** while a chat has it on, each device broadcasts on its local
+  networks a beacon only that contact can recognise (keyed from the chat's token, never
+  repeating), so two phones that moved to a network with no internet still find each other; the
+  address a beacon gives is held in memory and replaced by the contact's next announcement. The
+  local connection presents a one-way hello of the token, never the token. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
   (`transport::lan`, `NightdropCore::new_lan`) remains only for the device integration tests.
 - **Metadata protection — fixed-size framing:** every `Frame` is length-prefixed and
   **zero-padded to a fixed size bucket** (`core/src/wire::encode`, `WIRE_VERSION` 2) before it

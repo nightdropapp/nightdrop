@@ -16,9 +16,9 @@
 //! the local network — broadcasting a raw long-term identity key would leak presence + a stable
 //! identity to anyone sniffing the LAN, violating the anonymity invariant (`CLAUDE.md`). Doing
 //! discovery *right* means broadcasting a **rotating token only a paired contact can recognize**
-//! (derived from the pairing secret, Briar-style). That is worthwhile follow-up work; until then we
-//! rely on pairing + address rotation rather than ship a metadata-leaking shortcut. See
-//! `ARCHITECTURE.md` §6.
+//! (derived from a shared secret, Briar-style). Nearby does exactly that (`transport::nearby::beacon`,
+//! `docs/design/nearby.md` §5a); this test-only transport keeps relying on pairing + address
+//! rotation.
 //!
 //! ## Anonymity note
 //! LAN traffic is **not anonymized** — a local observer sees two IPs talking. What they do *not*

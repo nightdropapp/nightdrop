@@ -4,16 +4,23 @@
 //! [`NearbyTransport`] wraps the main transport and keeps its address (the onion). For a peer with
 //! a usable route — both sides on, a private address in our subnet — a send tries the local network
 //! first and falls back to the main transport on any failure. Each local connection opens with a
-//! token exchange (§5): the dialer presents the token the listener gave that chat, the listener
-//! answers with the dialer's, and anything else is closed. The tokens only keep strangers and wrong
-//! hosts out; what is sent is end-to-end encrypted and authenticated like any frame.
+//! token exchange (§5): the dialer presents the [`beacon::hello`] of the token the listener gave
+//! that chat, the listener answers with the dialer's, and anything else is closed. The tokens only
+//! keep strangers and wrong hosts out; what is sent is end-to-end encrypted and authenticated like
+//! any frame.
+//!
+//! The contact's address comes from their announcement over Tor or, when that cannot arrive (no
+//! internet, a new network), from their [`beacon`] on the local network, which only the holder of
+//! their token can make.
 //!
 //! This is the second direct (non-Tor) path `ARCHITECTURE.md` §1a allows, and only for a contact
-//! whose own app told us, end to end, where to reach it.
+//! whose own app told us, end to end or with a beacon only they can make, where to reach it.
+
+pub mod beacon;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpListener, TcpStream, UdpSocket};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -24,8 +31,8 @@ use super::inbound::{read_frame, InboundBudget};
 use super::{AbortHandle, Address, FileFetch, Transport};
 use crate::Result;
 
-/// Opening line of a local connection; followed by a 43-character token and `\n`.
-const PREAMBLE: &[u8] = b"ND-NEARBY/1 ";
+/// Opening line of a local connection; followed by a 43-character [`beacon::hello`] and `\n`.
+const PREAMBLE: &[u8] = b"ND-NEARBY/2 ";
 /// A token: 32 random bytes, base64url without padding.
 pub const TOKEN_CHARS: usize = 43;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -47,14 +54,26 @@ pub const MIN_PORT: u16 = 32768;
 /// Bytes of local frames held for the core at once. Smaller than Tor's: a nearby contact is one
 /// person, not the network.
 const INBOUND_BUDGET_BYTES: usize = 16 * 1024 * 1024;
+/// Beacons go out this often for a minute after listening starts or our networks change, so a
+/// contact who just arrived is found quickly...
+const BEACON_FAST: Duration = Duration::from_secs(5);
+const BEACON_FAST_FOR: Duration = Duration::from_secs(60);
+/// ...and this often after that. A contact who arrives later still finds us at once: their own
+/// beacons start fast, and finding a contact answers with ours straight away.
+const BEACON_SLOW: Duration = Duration::from_secs(30);
+const BEACON_REPORT_EVERY: Duration = Duration::from_secs(60);
 
 /// What the node tells the transport about one chat with Nearby on (ours).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NearbyRoute {
-    /// The token we gave this chat: a connection presenting it is theirs.
+    /// The token we gave this chat: a connection presenting its hello is theirs, and our beacons
+    /// are made with it.
     pub our_token: String,
-    /// Where they listen and the token they gave us, once they turned it on too.
-    pub peer: Option<(SocketAddrV4, String)>,
+    /// The token they gave us, once they turned it on too: we present its hello, and recognise
+    /// their beacons by it.
+    pub peer_token: Option<String>,
+    /// Where they last announced, over Tor, that they listen. A beacon can find them elsewhere.
+    pub peer_at: Option<SocketAddrV4>,
 }
 
 /// Where this device's local address comes from (replaced in tests, which run on loopback).
@@ -62,7 +81,18 @@ type IpSource = fn() -> Option<Ipv4Addr>;
 
 struct Listening {
     port: u16,
+    /// Where we receive beacons, if that port could be bound.
+    #[cfg_attr(not(test), allow(dead_code))]
+    beacon_port: Option<u16>,
     stop: Arc<AtomicBool>,
+}
+
+/// Where beacons go: the local broadcast address on each of our networks, or (tests) one socket.
+#[derive(Clone, Copy)]
+enum BeaconTarget {
+    Broadcast,
+    #[cfg(test)]
+    To(SocketAddrV4),
 }
 
 struct Shared {
@@ -82,6 +112,53 @@ struct Shared {
     interfaces: Mutex<Option<Vec<(String, Ipv4Addr)>>>,
     /// Loopback counts as a local network (tests only).
     allow_loopback: bool,
+    /// Peer onion → where a beacon found them, when that differs from their announcement. Held in
+    /// memory only; their next announcement over Tor replaces it.
+    learned: Mutex<HashMap<String, SocketAddrV4>>,
+    /// Send our beacons now (we just found a contact, who may not have found us).
+    beacon_now: AtomicBool,
+    /// The UDP port we receive beacons on ([`beacon::PORT`]; any free one in tests).
+    beacon_port: u16,
+    beacon_target: Mutex<BeaconTarget>,
+    beacon_stats: Mutex<BeaconStats>,
+}
+
+/// Beacon counts since the last diagnostics report ([`Shared::report_beacons`]).
+struct BeaconStats {
+    since: Instant,
+    sent: u32,
+    /// Failures by reason.
+    failed: std::collections::BTreeMap<String, u32>,
+    /// Beacons from our subnet, and how many of those were a contact's.
+    heard: u32,
+    from_contact: u32,
+    /// Packets on the beacon port that were the wrong size or from outside our subnet.
+    ignored: u32,
+}
+
+impl Default for BeaconStats {
+    fn default() -> Self {
+        Self {
+            since: Instant::now(),
+            sent: 0,
+            failed: Default::default(),
+            heard: 0,
+            from_contact: 0,
+            ignored: 0,
+        }
+    }
+}
+
+/// Where a beacon from `ip` goes: the subnet's own broadcast address, taken as the /24 (what
+/// homes and phone hotspots use), and the limited broadcast. With 255.255.255.255 alone, the
+/// beacons of a phone hosting a hotspot never reached the phone on it (S23 → S25, 2026-11-09);
+/// Android routes the hotspot by its subnet, which the subnet broadcast follows.
+fn broadcast_targets(ip: Ipv4Addr) -> Vec<SocketAddrV4> {
+    let [a, b, c, _] = ip.octets();
+    vec![
+        SocketAddrV4::new(Ipv4Addr::new(a, b, c, 255), beacon::PORT),
+        SocketAddrV4::new(Ipv4Addr::BROADCAST, beacon::PORT),
+    ]
 }
 
 // Generic over the inner transport rather than holding a `Box<dyn Transport>`: the bridge generator
@@ -119,6 +196,11 @@ impl<T: Transport> NearbyTransport<T> {
                 ip_source,
                 interfaces: Mutex::new(None),
                 allow_loopback,
+                learned: Mutex::new(HashMap::new()),
+                beacon_now: AtomicBool::new(false),
+                beacon_port: if allow_loopback { 0 } else { beacon::PORT },
+                beacon_target: Mutex::new(BeaconTarget::Broadcast),
+                beacon_stats: Mutex::new(BeaconStats::default()),
             }),
             listening: Mutex::new(None),
             tx,
@@ -165,7 +247,13 @@ impl<T: Transport> NearbyTransport<T> {
                 }
             }
         });
-        Some(Listening { port, stop })
+        let beacon_port = beacon_receiver(&self.shared, &stop);
+        beacon_sender(&self.shared, port, &stop);
+        Some(Listening {
+            port,
+            beacon_port,
+            stop,
+        })
     }
 
     /// Try the local path to `peer`. `Err` means: use the main transport.
@@ -203,10 +291,15 @@ impl Shared {
         let route = self.routes.lock().unwrap().get(peer).cloned();
         let Some(NearbyRoute {
             our_token,
-            peer: Some((addr, their_token)),
+            peer_token: Some(their_token),
+            peer_at,
         }) = route
         else {
             anyhow::bail!("no nearby route");
+        };
+        let learned = self.learned.lock().unwrap().get(peer).copied();
+        let Some(addr) = learned.or(peer_at) else {
+            anyhow::bail!("no local address for this contact yet");
         };
         if !self.on_our_network(*addr.ip()) {
             crate::diag!(
@@ -222,7 +315,11 @@ impl Shared {
         }
         // Only from here is a connection attempted, and only its failure starts the back-off
         // ([`RETRY_AFTER`]): a send with no route yet must not hold off the first real attempt.
-        let attempt = Self::exchange(addr, &their_token, &our_token);
+        let attempt = Self::exchange(
+            addr,
+            &beacon::hello(&their_token),
+            &beacon::hello(&our_token),
+        );
         match &attempt {
             Ok(_) => crate::diag!(
                 "nearby: connected to the contact at {}",
@@ -240,15 +337,16 @@ impl Shared {
         attempt
     }
 
-    fn exchange(addr: SocketAddrV4, their_token: &str, our_token: &str) -> Result<TcpStream> {
+    /// `their_hello` and `our_hello` are the [`beacon::hello`]s of the two tokens.
+    fn exchange(addr: SocketAddrV4, their_hello: &str, our_hello: &str) -> Result<TcpStream> {
         let mut stream = TcpStream::connect_timeout(&SocketAddr::V4(addr), CONNECT_TIMEOUT)?;
         stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
         stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
-        stream.write_all(&preamble(their_token))?;
+        stream.write_all(&preamble(their_hello))?;
         let mut answer = [0u8; TOKEN_CHARS + 1];
         stream.read_exact(&mut answer)?;
         anyhow::ensure!(
-            tokens_equal(&answer[..TOKEN_CHARS], our_token.as_bytes())
+            tokens_equal(&answer[..TOKEN_CHARS], our_hello.as_bytes())
                 && answer[TOKEN_CHARS] == b'\n',
             "the other end is not this contact"
         );
@@ -329,6 +427,128 @@ impl Shared {
     fn admits_source(&self, from: Ipv4Addr) -> bool {
         self.is_local(from) && self.on_our_network(from)
     }
+
+    /// One beacon per chat with Nearby on, from each of our local networks.
+    fn send_beacons(&self, networks: &[Ipv4Addr], listen_port: u16) {
+        let tokens: Vec<String> = self
+            .routes
+            .lock()
+            .unwrap()
+            .values()
+            .map(|r| r.our_token.clone())
+            .collect();
+        if tokens.is_empty() {
+            return;
+        }
+        let target = *self.beacon_target.lock().unwrap();
+        let window = beacon::window_now();
+        let mut stats = self.beacon_stats.lock().unwrap();
+        for &ip in networks {
+            let socket = match UdpSocket::bind((ip, 0)) {
+                Ok(s) => s,
+                Err(e) => {
+                    *stats
+                        .failed
+                        .entry(format!("bind: {}", e.kind()))
+                        .or_default() += 1;
+                    continue;
+                }
+            };
+            let to = match target {
+                BeaconTarget::Broadcast => {
+                    if let Err(e) = socket.set_broadcast(true) {
+                        *stats
+                            .failed
+                            .entry(format!("broadcast: {}", e.kind()))
+                            .or_default() += 1;
+                        continue;
+                    }
+                    broadcast_targets(ip)
+                }
+                #[cfg(test)]
+                BeaconTarget::To(to) => vec![to],
+            };
+            for token in &tokens {
+                let packet = beacon::make(token, ip, listen_port, window);
+                for to in &to {
+                    match socket.send_to(&packet, to) {
+                        Ok(_) => stats.sent += 1,
+                        Err(e) => {
+                            *stats.failed.entry(format!("send: {e}")).or_default() += 1;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /// Once a minute in a diagnostics build: what the beacons did, so a network that drops them
+    /// shows up.
+    fn report_beacons(&self, networks: &[Ipv4Addr]) {
+        let mut stats = self.beacon_stats.lock().unwrap();
+        if stats.since.elapsed() < BEACON_REPORT_EVERY {
+            return;
+        }
+        let s = std::mem::take(&mut *stats);
+        let failed: Vec<String> = s.failed.iter().map(|(e, n)| format!("{n}× {e}")).collect();
+        crate::diag!(
+            "nearby: beacons in {}s: sent {} on [{}]{}; heard {} ({} from a contact, {} ignored)",
+            s.since.elapsed().as_secs(),
+            s.sent,
+            networks
+                .iter()
+                .map(|ip| net_of_ip(*ip))
+                .collect::<Vec<_>>()
+                .join(", "),
+            if failed.is_empty() {
+                String::new()
+            } else {
+                format!(", failed {}", failed.join(", "))
+            },
+            s.heard,
+            s.from_contact,
+            s.ignored
+        );
+    }
+
+    /// A beacon from `from`: if it is a contact's, dial them there from now on.
+    fn heard_beacon(&self, packet: &[u8], from: Ipv4Addr) {
+        let window = beacon::window_now();
+        let found = self.routes.lock().unwrap().iter().find_map(|(onion, r)| {
+            let port = beacon::verify(packet, from, r.peer_token.as_deref()?, window)?;
+            Some((onion.clone(), SocketAddrV4::new(from, port), r.peer_at))
+        });
+        {
+            let mut stats = self.beacon_stats.lock().unwrap();
+            stats.heard += 1;
+            stats.from_contact += u32::from(found.is_some());
+        }
+        let Some((onion, at, announced)) = found else {
+            return;
+        };
+        if !valid_port(at.port()) {
+            return;
+        }
+        let mut learned = self.learned.lock().unwrap();
+        let current = learned.get(&onion).copied().or(announced);
+        if current == Some(at) {
+            return;
+        }
+        if announced == Some(at) {
+            learned.remove(&onion);
+        } else {
+            learned.insert(onion.clone(), at);
+        }
+        drop(learned);
+        crate::diag!(
+            "nearby: found a contact on the local network at {} (their beacon)",
+            net_of_ip(from)
+        );
+        // Where they were is no longer where they are: try the new address now.
+        self.reachable.lock().unwrap().remove(&onion);
+        self.failed.lock().unwrap().remove(&onion);
+        self.beacon_now.store(true, Ordering::Release);
+    }
 }
 
 /// Serve one accepted connection: check its token, answer with the dialer's, then read frames.
@@ -351,9 +571,9 @@ fn serve(
     // Every route is compared, so the time taken does not say which token came close.
     let mut found = None;
     for (onion, route) in shared.routes.lock().unwrap().iter() {
-        if tokens_equal(presented, route.our_token.as_bytes()) {
-            if let Some((_, theirs)) = &route.peer {
-                found = Some((onion.clone(), theirs.clone()));
+        if tokens_equal(presented, beacon::hello(&route.our_token).as_bytes()) {
+            if let Some(theirs) = &route.peer_token {
+                found = Some((onion.clone(), beacon::hello(theirs)));
             }
         }
     }
@@ -382,8 +602,83 @@ fn serve(
     Ok(())
 }
 
-fn preamble(token: &str) -> Vec<u8> {
-    [PREAMBLE, token.as_bytes(), b"\n"].concat()
+fn preamble(hello: &str) -> Vec<u8> {
+    [PREAMBLE, hello.as_bytes(), b"\n"].concat()
+}
+
+/// Receive beacons (§5a) while listening: a contact's beacon, from our own subnet, sets where we
+/// dial them. Returns the UDP port, or `None` if it could not be bound (then we can still be
+/// found, by our own beacons, but cannot find).
+fn beacon_receiver(shared: &Arc<Shared>, stop: &Arc<AtomicBool>) -> Option<u16> {
+    let socket = match bind_beacon_socket(shared.beacon_port) {
+        Ok(s) => s,
+        Err(e) => {
+            crate::diag!("nearby: cannot receive beacons ({e}); a contact who moved network is found only over Tor");
+            return None;
+        }
+    };
+    let port = socket.local_addr().ok()?.port();
+    let (shared, halt) = (Arc::clone(shared), Arc::clone(stop));
+    thread::spawn(move || {
+        let mut buf = [0u8; beacon::LEN + 1];
+        while !halt.load(Ordering::Relaxed) {
+            let Ok((n, SocketAddr::V4(from))) = socket.recv_from(&mut buf) else {
+                continue; // the read timeout, or IPv6
+            };
+            if n == beacon::LEN && shared.admits_source(*from.ip()) {
+                shared.heard_beacon(&buf[..n], *from.ip());
+            } else {
+                shared.beacon_stats.lock().unwrap().ignored += 1;
+            }
+        }
+    });
+    Some(port)
+}
+
+/// The beacon socket. Shared with any other Night Drop on this device (a second install, a
+/// second account on a desktop): each gets every broadcast.
+fn bind_beacon_socket(port: u16) -> std::io::Result<UdpSocket> {
+    use socket2::{Domain, Protocol, Socket, Type};
+    let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+    socket.set_reuse_address(true)?;
+    socket.bind(&SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).into())?;
+    let socket: UdpSocket = socket.into();
+    socket.set_read_timeout(Some(ACCEPT_POLL))?;
+    Ok(socket)
+}
+
+/// Send our beacons while listening: fast for a minute after we start or our networks change,
+/// slowly after that, and at once when we have just found a contact.
+fn beacon_sender(shared: &Arc<Shared>, listen_port: u16, stop: &Arc<AtomicBool>) {
+    let (shared, halt) = (Arc::clone(shared), Arc::clone(stop));
+    thread::spawn(move || {
+        let mut networks = Vec::new();
+        let mut fast_until = Instant::now() + BEACON_FAST_FOR;
+        let mut next = Instant::now();
+        while !halt.load(Ordering::Relaxed) {
+            let now = Instant::now();
+            let ours = shared.local_ips();
+            if ours != networks {
+                networks = ours;
+                fast_until = now + BEACON_FAST_FOR;
+                next = now;
+            }
+            if shared.beacon_now.swap(false, Ordering::AcqRel) {
+                next = now;
+            }
+            shared.report_beacons(&networks);
+            if now >= next {
+                shared.send_beacons(&networks, listen_port);
+                next = now
+                    + if now < fast_until {
+                        BEACON_FAST
+                    } else {
+                        BEACON_SLOW
+                    };
+            }
+            thread::sleep(ACCEPT_POLL);
+        }
+    });
 }
 
 /// A local address as the diagnostics may show it: its network, never the host (`192.168.4.*`,
@@ -572,7 +867,19 @@ impl<T: Transport> Transport for NearbyTransport<T> {
 
     fn set_nearby(&self, routes: HashMap<String, NearbyRoute>) {
         let listen = !routes.is_empty();
-        *self.shared.routes.lock().unwrap() = routes;
+        {
+            let mut current = self.shared.routes.lock().unwrap();
+            // A newer announcement from the contact replaces what a beacon found.
+            self.shared.learned.lock().unwrap().retain(|onion, _| {
+                match (current.get(onion), routes.get(onion)) {
+                    (Some(old), Some(new)) => {
+                        old.peer_at == new.peer_at && old.peer_token == new.peer_token
+                    }
+                    _ => false,
+                }
+            });
+            *current = routes;
+        }
         let mut listening = self.listening.lock().unwrap();
         match (listen, listening.is_some()) {
             (true, false) => *listening = self.start_listening(),
@@ -629,7 +936,11 @@ impl<T: Transport> Transport for NearbyTransport<T> {
             .lock()
             .unwrap()
             .iter()
-            .filter(|(_, r)| r.peer.is_some())
+            .filter(|(onion, r)| {
+                r.peer_token.is_some()
+                    && (r.peer_at.is_some()
+                        || self.shared.learned.lock().unwrap().contains_key(*onion))
+            })
             .map(|(onion, _)| onion.clone())
             .filter(|onion| {
                 !self.shared.reachable_recently(onion, RETRY_AFTER)
@@ -699,14 +1010,16 @@ mod tests {
             "b.onion".into(),
             NearbyRoute {
                 our_token: ta.clone(),
-                peer: None,
+                peer_token: None,
+                peer_at: None,
             },
         )]));
         b.set_nearby(HashMap::from([(
             "a.onion".into(),
             NearbyRoute {
                 our_token: tb.clone(),
-                peer: None,
+                peer_token: None,
+                peer_at: None,
             },
         )]));
         let (pa, pb) = (a.nearby_address().unwrap(), b.nearby_address().unwrap());
@@ -714,14 +1027,16 @@ mod tests {
             "b.onion".into(),
             NearbyRoute {
                 our_token: ta.clone(),
-                peer: Some((pb, tb.clone())),
+                peer_token: Some(tb.clone()),
+                peer_at: Some(pb),
             },
         )]));
         b.set_nearby(HashMap::from([(
             "a.onion".into(),
             NearbyRoute {
                 our_token: tb,
-                peer: Some((pa, ta)),
+                peer_token: Some(ta),
+                peer_at: Some(pa),
             },
         )]));
     }
@@ -734,6 +1049,90 @@ mod tests {
         a.send("b.onion", b"hello nearby").unwrap();
         assert_eq!(recv(&b).as_deref(), Some(&b"hello nearby"[..]));
         assert!(a.nearby_reachable("b.onion") && b.nearby_reachable("a.onion"));
+    }
+
+    /// Only tokens known, no address (they moved network with no internet): a's beacon tells b
+    /// where a is, and b's frame then goes over the local network with the main transport down.
+    #[test]
+    fn a_beacon_finds_a_contact_whose_address_we_never_heard() {
+        let (net, a, b) = pair();
+        let (ta, tb) = (token('a'), token('b'));
+        let route = |ours: &str, theirs: &str| NearbyRoute {
+            our_token: ours.into(),
+            peer_token: Some(theirs.into()),
+            peer_at: None,
+        };
+        b.set_nearby(HashMap::from([("a.onion".into(), route(&tb, &ta))]));
+        let b_beacons = b
+            .listening
+            .lock()
+            .unwrap()
+            .as_ref()
+            .unwrap()
+            .beacon_port
+            .unwrap();
+        *a.shared.beacon_target.lock().unwrap() =
+            BeaconTarget::To(SocketAddrV4::new(Ipv4Addr::LOCALHOST, b_beacons));
+        net.disconnect("a.onion");
+        assert!(
+            b.send("a.onion", b"x").is_err(),
+            "no address yet, main path down"
+        );
+        b.shared.failed.lock().unwrap().clear();
+        a.set_nearby(HashMap::from([("b.onion".into(), route(&ta, &tb))]));
+        for _ in 0..100 {
+            if b.shared.learned.lock().unwrap().contains_key("a.onion") {
+                break;
+            }
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert_eq!(
+            b.shared.learned.lock().unwrap().get("a.onion").copied(),
+            a.nearby_address(),
+            "b learned where a listens"
+        );
+        b.send("a.onion", b"found you").unwrap();
+        assert_eq!(recv(&a).as_deref(), Some(&b"found you"[..]));
+        // a's next announcement over Tor replaces what the beacon said.
+        let elsewhere = SocketAddrV4::new(Ipv4Addr::LOCALHOST, 40_000);
+        b.set_nearby(HashMap::from([(
+            "a.onion".into(),
+            NearbyRoute {
+                peer_at: Some(elsewhere),
+                ..route(&tb, &ta)
+            },
+        )]));
+        assert!(b.shared.learned.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_beacon_made_with_another_token_or_from_another_address_is_ignored() {
+        let (_net, _a, b) = pair();
+        b.set_nearby(HashMap::from([(
+            "a.onion".into(),
+            NearbyRoute {
+                our_token: token('b'),
+                peer_token: Some(token('a')),
+                peer_at: None,
+            },
+        )]));
+        let lo = Ipv4Addr::LOCALHOST;
+        let w = beacon::window_now();
+        b.shared
+            .heard_beacon(&beacon::make(&token('z'), lo, 40_001, w), lo);
+        b.shared.heard_beacon(
+            &beacon::make(&token('a'), Ipv4Addr::new(127, 0, 0, 2), 40_001, w),
+            lo,
+        );
+        b.shared
+            .heard_beacon(&beacon::make(&token('a'), lo, 9100, w), lo);
+        assert!(b.shared.learned.lock().unwrap().is_empty());
+        b.shared
+            .heard_beacon(&beacon::make(&token('a'), lo, 40_001, w), lo);
+        assert_eq!(
+            b.shared.learned.lock().unwrap().get("a.onion").copied(),
+            Some(SocketAddrV4::new(lo, 40_001))
+        );
     }
 
     #[test]
@@ -758,7 +1157,8 @@ mod tests {
             "b.onion".into(),
             NearbyRoute {
                 our_token: token('a'),
-                peer: Some((pb, token('z'))),
+                peer_token: Some(token('z')),
+                peer_at: Some(pb),
             },
         )]));
         net.disconnect("b.onion");
@@ -781,7 +1181,8 @@ mod tests {
             "b.onion".into(),
             NearbyRoute {
                 our_token: token('q'),
-                peer: Some((pb, token('b'))),
+                peer_token: Some(token('b')),
+                peer_at: Some(pb),
             },
         )]));
         net.disconnect("b.onion");

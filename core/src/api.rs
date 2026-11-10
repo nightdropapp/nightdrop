@@ -755,6 +755,8 @@ impl Inner {
             }
         }
         let mut messages_arrived = !affected.is_empty();
+        // Nearby's local side (listen, beacons, probes): every tick, not behind the relay round.
+        self.me.nearby_local();
         // Burn timers are short (10s and up), so they cannot wait for the relay cadence. Cheap
         // enough to run every tick; `sweep_time` still runs it again as the slower backstop.
         let burned = self.me.sweep_burns();

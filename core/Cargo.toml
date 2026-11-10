@@ -28,6 +28,7 @@ serde_json = "1"    # wire & at-rest encoding
 chacha20poly1305 = "0.10" # at-rest AEAD for the local store (storage/)
 argon2 = "0.5"      # password-based key derivation for encrypted backups (§7)
 sha2 = "0.10"       # unlinkable relay mailbox handles + relay envelope keys (§6/§11.2)
+socket2 = "0.6"    # nearby beacons: a UDP socket shared by every Night Drop on the device (SO_REUSEADDR)
 ml-kem = { version = "0.3", features = ["getrandom"] } # ML-KEM-768 (FIPS 203): hybrid PQ pairing (§4.1)
 hkdf = "0.12"       # HKDF-SHA256 hybrid-secret combiner for the PQ pairing key (§4.1)
 ed25519-dalek = { version = "2", features = ["rand_core"] } # verify + sign the operator relay directory (§3.1)

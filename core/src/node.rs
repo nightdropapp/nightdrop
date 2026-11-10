@@ -770,9 +770,11 @@ struct Chat {
     nearby_token: Option<String>,
     nearby_seq: u64,
     told_nearby_seq: u64,
-    /// Their side, as they last announced it: on, and where they listen with their token.
+    /// Their side, as they last announced it: on, their token, and where they listen (if they
+    /// had a local network then).
     peer_nearby_on: bool,
-    peer_nearby: Option<(std::net::SocketAddrV4, String)>,
+    peer_nearby_token: Option<String>,
+    peer_nearby_at: Option<std::net::SocketAddrV4>,
     peer_nearby_seq: u64,
     /// Pairing passes in waiting (`optional-relay.md` §5). Joiner: our own client secret for the
     /// inviter's onion, installed in place of their QR pass once their `RelaySet` proves they
@@ -907,7 +909,8 @@ impl Chat {
             nearby_seq: 0,
             told_nearby_seq: 0,
             peer_nearby_on: false,
-            peer_nearby: None,
+            peer_nearby_token: None,
+            peer_nearby_at: None,
             peer_nearby_seq: 0,
             own_key_pending: None,
             peer_key_pending: None,
@@ -3579,7 +3582,7 @@ impl Node {
                 dto.nearby = c.nearby_token.is_some();
                 dto.peer_nearby = c.peer_nearby_on;
                 dto.nearby_connected = dto.nearby
-                    && c.peer_nearby.is_some()
+                    && c.peer_nearby_token.is_some()
                     && self.transport.nearby_reachable(&c.peer_address);
                 dto.server_storage_available =
                     !self.relays.is_empty() && c.relay_set.as_ref().is_some_and(|s| !s.is_empty());

@@ -13,7 +13,8 @@ use crate::transport::nearby::{is_private, valid_port, valid_token, NearbyRoute}
 pub(super) struct PeerNearby {
     pub seq: u64,
     pub on: bool,
-    pub at: Option<(SocketAddrV4, String)>,
+    pub token: Option<String>,
+    pub at: Option<SocketAddrV4>,
 }
 
 /// Parse the body after [`MARK_NEARBY_PREFIX`]. `None` for anything malformed, or an address that
@@ -26,11 +27,21 @@ pub(super) fn parse_body(body: &[u8]) -> Option<PeerNearby> {
         [_, "0"] => Some(PeerNearby {
             seq,
             on: false,
+            token: None,
             at: None,
         }),
         [_, "1"] => Some(PeerNearby {
             seq,
             on: true,
+            token: None,
+            at: None,
+        }),
+        // On, with no local network at the time: the token alone, so their beacon can find us
+        // when we meet on one with no internet.
+        [_, "1", token] => valid_token(token).then(|| PeerNearby {
+            seq,
+            on: true,
+            token: Some(token.to_string()),
             at: None,
         }),
         [_, "1", ip, port, token] => {
@@ -42,7 +53,8 @@ pub(super) fn parse_body(body: &[u8]) -> Option<PeerNearby> {
             (local && valid_token(token)).then(|| PeerNearby {
                 seq,
                 on: true,
-                at: Some((SocketAddrV4::new(ip, port), token.to_string())),
+                token: Some(token.to_string()),
+                at: Some(SocketAddrV4::new(ip, port)),
             })
         }
         _ => None,
@@ -90,9 +102,18 @@ impl Node {
         true
     }
 
-    /// Run every tick: hand the transport the current routes (which starts or stops listening),
-    /// notice a new local address, and announce wherever the contact has not confirmed ours.
+    /// Everything: [`nearby_local`](Self::nearby_local), then announce wherever the contact has not
+    /// confirmed ours. Runs on the relay cadence.
     pub fn nearby_tick(&mut self) {
+        self.nearby_local();
+        self.nearby_announce();
+    }
+
+    /// The local part, cheap and needing no Tor, run on every poll tick: hand the transport the
+    /// current routes (which starts or stops listening and beacons), probe, and notice a new local
+    /// address. On the relay cadence alone it waited for the first relay round, which with no
+    /// internet takes a minute to time out, so a freshly opened app found nobody for that long.
+    pub fn nearby_local(&mut self) {
         self.push_nearby_routes();
         self.transport.nearby_probe();
         let address = self.transport.nearby_address();
@@ -113,6 +134,9 @@ impl Node {
             self.nearby_announced.clear();
             self.dirty = true;
         }
+    }
+
+    fn nearby_announce(&mut self) {
         let now = crate::api::now_secs();
         let due: Vec<String> = self
             .chats
@@ -142,7 +166,8 @@ impl Node {
                     c.peer_address.clone(),
                     NearbyRoute {
                         our_token,
-                        peer: c.peer_nearby.clone(),
+                        peer_token: c.peer_nearby_token.clone(),
+                        peer_at: c.peer_nearby_at,
                     },
                 ))
             })
@@ -154,7 +179,7 @@ impl Node {
         let chat = self.chats.get(contact_id)?;
         let body = match (&chat.nearby_token, self.nearby_address) {
             (None, _) => format!("{}:0", chat.nearby_seq),
-            (Some(_), None) => format!("{}:1", chat.nearby_seq),
+            (Some(token), None) => format!("{}:1:{token}", chat.nearby_seq),
             (Some(token), Some(at)) => {
                 format!("{}:1:{}:{}:{token}", chat.nearby_seq, at.ip(), at.port())
             }
@@ -170,8 +195,8 @@ impl Node {
         crate::diag!(
             "nearby: telling a contact: {}",
             match body.split(':').count() {
-                2 if body.ends_with(":0") => "off",
-                2 => "on, but no local network right now",
+                2 => "off",
+                3 => "on, but no local network right now",
                 _ => "on, listening",
             }
         );
@@ -207,7 +232,9 @@ impl Node {
             return false;
         }
         chat.peer_nearby_seq = peer.seq;
-        let changed = chat.peer_nearby_on != peer.on || chat.peer_nearby != peer.at;
+        let changed = chat.peer_nearby_on != peer.on
+            || chat.peer_nearby_token != peer.token
+            || chat.peer_nearby_at != peer.at;
         // A change costs a save and a route update here: counted, like the other control frames.
         if !changed || !within_allowance(chat, 0) {
             return false;
@@ -224,14 +251,15 @@ impl Node {
             match (&peer.on, &peer.at) {
                 (false, _) => "off".to_string(),
                 (true, None) => "on, but has no local network right now".to_string(),
-                (true, Some((at, _))) => format!(
+                (true, Some(at)) => format!(
                     "on, listening on {}",
                     crate::transport::nearby::network_of(*at.ip())
                 ),
             }
         );
         chat.peer_nearby_on = peer.on;
-        chat.peer_nearby = peer.at;
+        chat.peer_nearby_token = peer.token;
+        chat.peer_nearby_at = peer.at;
         self.dirty = true;
         self.push_nearby_routes();
         true
@@ -261,6 +289,7 @@ mod tests {
             Some(PeerNearby {
                 seq: 7,
                 on: false,
+                token: None,
                 at: None
             })
         );
@@ -269,20 +298,31 @@ mod tests {
             Some(PeerNearby {
                 seq: 8,
                 on: true,
+                token: None,
                 at: None
             })
         );
-        let on = format!("9:1:192.168.1.20:40000:{}", token());
         assert_eq!(
-            parse_body(on.as_bytes()).unwrap().at,
-            Some(("192.168.1.20:40000".parse().unwrap(), token()))
+            parse_body(format!("8:1:{}", token()).as_bytes()),
+            Some(PeerNearby {
+                seq: 8,
+                on: true,
+                token: Some(token()),
+                at: None
+            }),
+            "on, no local network, but their token"
         );
+        let on = format!("9:1:192.168.1.20:40000:{}", token());
+        let parsed = parse_body(on.as_bytes()).unwrap();
+        assert_eq!(parsed.at, Some("192.168.1.20:40000".parse().unwrap()));
+        assert_eq!(parsed.token, Some(token()));
         // A public address, port 0, a bad token, junk: all refused.
         for bad in [
             format!("9:1:8.8.8.8:40000:{}", token()),
             format!("9:1:192.168.1.20:0:{}", token()),
             format!("9:1:192.168.1.20:9100:{}", token()),
             "9:1:192.168.1.20:40000:short".to_string(),
+            "9:1:short".to_string(),
             "9:2".to_string(),
             "x:0".to_string(),
             format!("9:1:192.168.1.20:40000:{}:extra", token()),

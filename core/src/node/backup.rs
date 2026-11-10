@@ -84,8 +84,8 @@ impl Node {
                     nearby_seq: chat.nearby_seq,
                     told_nearby_seq: chat.told_nearby_seq,
                     peer_nearby_on: chat.peer_nearby_on,
-                    peer_nearby_at: chat.peer_nearby.as_ref().map(|(at, _)| at.to_string()),
-                    peer_nearby_token: chat.peer_nearby.as_ref().map(|(_, t)| t.clone()),
+                    peer_nearby_at: chat.peer_nearby_at.map(|at| at.to_string()),
+                    peer_nearby_token: chat.peer_nearby_token.clone(),
                     peer_nearby_seq: chat.peer_nearby_seq,
                     own_key_pending: chat.own_key_pending.as_ref().map(super::encode_secret),
                     peer_wire_old: chat.peer_wire_old,
@@ -871,18 +871,20 @@ fn chat_from_persisted(
         told_nearby_seq: chat.told_nearby_seq,
         peer_nearby_on: chat.peer_nearby_on,
         // Checked as on receipt: a stored address is still only ever a private one.
-        peer_nearby: match (&chat.peer_nearby_at, &chat.peer_nearby_token) {
-            (Some(at), Some(token)) => at
-                .parse::<std::net::SocketAddrV4>()
-                .ok()
-                .filter(|a| {
-                    crate::transport::nearby::is_private(*a.ip())
-                        && crate::transport::nearby::valid_port(a.port())
-                })
-                .filter(|_| crate::transport::nearby::valid_token(token))
-                .map(|a| (a, token.clone())),
-            _ => None,
-        },
+        peer_nearby_token: chat
+            .peer_nearby_token
+            .clone()
+            .filter(|t| crate::transport::nearby::valid_token(t)),
+        peer_nearby_at: chat
+            .peer_nearby_token
+            .as_deref()
+            .filter(|t| crate::transport::nearby::valid_token(t))
+            .and(chat.peer_nearby_at.as_deref())
+            .and_then(|at| at.parse::<std::net::SocketAddrV4>().ok())
+            .filter(|a| {
+                crate::transport::nearby::is_private(*a.ip())
+                    && crate::transport::nearby::valid_port(a.port())
+            }),
         peer_nearby_seq: chat.peer_nearby_seq,
         own_key_pending: chat
             .own_key_pending

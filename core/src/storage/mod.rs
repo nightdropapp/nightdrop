@@ -114,7 +114,7 @@ pub struct PersistedChat {
     #[serde(default)]
     pub peer_block_seq: u64,
     /// Nearby (`docs/design/nearby.md` §7): our token while it is on, the sequences, and the
-    /// peer's side (`"ipv4:port"` and token while they listen).
+    /// peer's side (their token, and `"ipv4:port"` while they listen).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub nearby_token: Option<String>,
     #[serde(default)]
