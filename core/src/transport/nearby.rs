@@ -64,6 +64,9 @@ const BEACON_BURST: Duration = Duration::from_secs(120);
 /// At most this many beacons are checked a second; the rest are dropped unread, so a flood of
 /// junk on the beacon port costs a bounded amount of work.
 const MAX_BEACONS_PER_SEC: u32 = 50;
+/// How often the beacon threads wake outside a burst (to notice a new network, an answer due, or
+/// the stop): a phone in the background need not wake five times a second for them.
+const BEACON_IDLE_POLL: Duration = Duration::from_secs(1);
 const BEACON_REPORT_EVERY: Duration = Duration::from_secs(60);
 
 /// What the node tells the transport about one chat with Nearby on (ours).
@@ -106,6 +109,10 @@ struct Shared {
     failed: Mutex<HashMap<String, Instant>>,
     /// Peers with a probe running.
     probing: Mutex<std::collections::HashSet<String>>,
+    /// When each peer was last probed: at most once per [`RETRY_AFTER`], whatever came of it. A
+    /// probe that ends before connecting (the contact is on another network) records no failure,
+    /// and the node probes every poll tick.
+    probed: Mutex<HashMap<String, Instant>>,
     budget: InboundBudget,
     connections: AtomicUsize,
     ip_source: IpSource,
@@ -170,6 +177,9 @@ pub struct NearbyTransport<T> {
     inner: T,
     shared: Arc<Shared>,
     listening: Mutex<Option<Listening>>,
+    /// When starting to listen last failed: tried again only after [`RETRY_AFTER`], since the node
+    /// hands over its routes every poll tick.
+    listen_failed: Mutex<Option<Instant>>,
     tx: Sender<(Address, Vec<u8>)>,
     rx: Mutex<Receiver<(Address, Vec<u8>)>>,
 }
@@ -194,6 +204,7 @@ impl<T: Transport> NearbyTransport<T> {
                 reachable: Mutex::new(HashMap::new()),
                 failed: Mutex::new(HashMap::new()),
                 probing: Mutex::new(std::collections::HashSet::new()),
+                probed: Mutex::new(HashMap::new()),
                 budget: InboundBudget::with_limit(INBOUND_BUDGET_BYTES),
                 connections: AtomicUsize::new(0),
                 ip_source,
@@ -206,6 +217,7 @@ impl<T: Transport> NearbyTransport<T> {
                 beacon_stats: Mutex::new(BeaconStats::default()),
             }),
             listening: Mutex::new(None),
+            listen_failed: Mutex::new(None),
             tx,
             rx: Mutex::new(rx),
         }
@@ -566,6 +578,7 @@ impl Shared {
         // Where they were is no longer where they are: try the new address now.
         self.reachable.lock().unwrap().remove(&onion);
         self.failed.lock().unwrap().remove(&onion);
+        self.probed.lock().unwrap().remove(&onion);
         self.beacon_now.store(true, Ordering::Release);
     }
 }
@@ -681,7 +694,7 @@ fn bind_beacon_socket(port: u16) -> std::io::Result<UdpSocket> {
     socket.set_reuse_address(true)?;
     socket.bind(&SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port)).into())?;
     let socket: UdpSocket = socket.into();
-    socket.set_read_timeout(Some(ACCEPT_POLL))?;
+    socket.set_read_timeout(Some(BEACON_IDLE_POLL))?;
     Ok(socket)
 }
 
@@ -709,7 +722,11 @@ fn beacon_sender(shared: &Arc<Shared>, listen_port: u16, stop: &Arc<AtomicBool>)
                 shared.send_beacons(&networks, listen_port);
                 last = Some(now);
             }
-            thread::sleep(ACCEPT_POLL);
+            thread::sleep(if now < burst_until {
+                ACCEPT_POLL
+            } else {
+                BEACON_IDLE_POLL
+            });
         }
     });
 }
@@ -916,11 +933,22 @@ impl<T: Transport> Transport for NearbyTransport<T> {
                     _ => false,
                 }
             });
+            self.shared
+                .probed
+                .lock()
+                .unwrap()
+                .retain(|onion, _| routes.contains_key(onion));
             *current = routes;
         }
         let mut listening = self.listening.lock().unwrap();
         match (listen, listening.is_some()) {
-            (true, false) => *listening = self.start_listening(),
+            (true, false) => {
+                let mut failed = self.listen_failed.lock().unwrap();
+                if failed.is_none_or(|t| t.elapsed() >= RETRY_AFTER) {
+                    *listening = self.start_listening();
+                    *failed = listening.is_none().then(Instant::now);
+                }
+            }
             (false, true) => {
                 if let Some(l) = listening.take() {
                     l.stop.store(true, Ordering::Relaxed);
@@ -983,12 +1011,24 @@ impl<T: Transport> Transport for NearbyTransport<T> {
             .filter(|onion| {
                 !self.shared.reachable_recently(onion, RETRY_AFTER)
                     && !self.shared.recently_failed(onion)
+                    && self
+                        .shared
+                        .probed
+                        .lock()
+                        .unwrap()
+                        .get(onion)
+                        .is_none_or(|t| t.elapsed() >= RETRY_AFTER)
             })
             .collect();
         for onion in due {
             if !self.shared.probing.lock().unwrap().insert(onion.clone()) {
                 continue;
             }
+            self.shared
+                .probed
+                .lock()
+                .unwrap()
+                .insert(onion.clone(), Instant::now());
             let shared = Arc::clone(&self.shared);
             thread::spawn(move || {
                 // `dial` records a failed attempt itself.
@@ -1207,6 +1247,39 @@ mod tests {
             read_line::<{ beacon::PROOF_CHARS + 1 }>(&mut again).is_err(),
             "closed without an answer"
         );
+    }
+
+    /// A contact on another network is probed once a minute, not on every poll tick: that probe
+    /// ends before connecting and records no failure.
+    #[test]
+    fn a_contact_on_another_network_is_not_probed_every_tick() {
+        let (_net, a, _b) = pair();
+        a.set_nearby(HashMap::from([(
+            "b.onion".into(),
+            NearbyRoute {
+                our_token: token('a'),
+                peer_token: Some(token('b')),
+                peer_at: Some("192.168.77.5:40000".parse().unwrap()),
+            },
+        )]));
+        a.nearby_probe();
+        let first = a.shared.probed.lock().unwrap()["b.onion"];
+        thread::sleep(Duration::from_millis(50));
+        for _ in 0..5 {
+            a.nearby_probe();
+        }
+        assert_eq!(
+            a.shared.probed.lock().unwrap()["b.onion"],
+            first,
+            "not probed again within the minute"
+        );
+        // Their beacon from a new place lets the next probe go at once.
+        let lo = Ipv4Addr::LOCALHOST;
+        a.shared.heard_beacon(
+            &beacon::make(&token('b'), lo, 40_001, beacon::window_now()),
+            lo,
+        );
+        assert!(!a.shared.probed.lock().unwrap().contains_key("b.onion"));
     }
 
     #[test]
