@@ -1092,6 +1092,17 @@ fn a_receipt_that_fails_every_route_is_retried_until_it_lands() {
     assert!(retries.len() > 0);
     retries.run(Vec::new(), t0 + RELAY_TTL);
     assert_eq!(retries.len(), 0);
+
+    // Several due while every route is still down: one is tried, and the rest wait for a later
+    // tick, so the poller is not held up by one failing dial after another.
+    relay_down.store(false, Ordering::SeqCst);
+    let mut receipts = receive_without_a_route(&mut alice, &mut bob, "one");
+    relay_down.store(false, Ordering::SeqCst);
+    receipts.extend(receive_without_a_route(&mut alice, &mut bob, "two"));
+    retries.run(receipts, t0);
+    assert!(retries.len() >= 2);
+    retries.run(Vec::new(), t0 + RECEIPT_RETRY_FIRST);
+    assert_eq!(retries.tried_last(), 1, "stopped at the first failure");
 }
 
 // ---- 0.2: no v1 handle, and where cover traffic goes (§10) ----

@@ -7,8 +7,8 @@
 //! from the address and port it names. To anyone else it is 30 random-looking bytes that never
 //! repeat. A beacon replayed from another address does not verify.
 //!
-//! The key is not the token itself: the token's own derivative, [`hello`], opens every local
-//! connection in the clear, and anyone who saw that must not be able to forge a beacon.
+//! The same token also keys the challenge-response that opens a local connection ([`proof`]); a
+//! different HKDF salt keeps the two keys apart, and the token itself never crosses the network.
 
 use std::net::Ipv4Addr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -28,15 +28,42 @@ const TAG: usize = 16;
 /// The tag covers the window it was made in; one window either side is accepted for clock skew.
 const WINDOW_SECS: u64 = 600;
 
-const HELLO_SALT: &[u8] = b"nightdrop/nearby/hello/v1";
+const PROOF_SALT: &[u8] = b"nightdrop/nearby/proof/v1";
 const BEACON_SALT: &[u8] = b"nightdrop/nearby/beacon/v1";
 
-/// What a local connection presents instead of the token itself (43 base64url characters): a
-/// one-way derivative, so the bytes seen on the network do not give away the beacon key.
-pub fn hello(token: &str) -> String {
+/// A handshake nonce as sent: 16 random bytes, base64url without padding.
+pub const NONCE_CHARS: usize = 22;
+/// A handshake proof as sent: 32 bytes, base64url without padding.
+pub const PROOF_CHARS: usize = 43;
+
+/// Which side of a local connection a [`proof`] is from, so one side's answer can never be
+/// replayed as the other's.
+#[derive(Clone, Copy)]
+pub enum Role {
+    Dialer,
+    Listener,
+}
+
+/// A fresh handshake nonce ([`NONCE_CHARS`] characters).
+pub fn fresh_nonce() -> String {
+    let mut bytes = [0u8; 16];
+    rand::Rng::fill(&mut rand::thread_rng(), &mut bytes);
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
+/// Proof of holding `token` for this one connection (§5): keyed from the token, over the role and
+/// both sides' nonces. A fresh listener nonce each time, so a recorded proof is worth nothing.
+pub fn proof(token: &str, role: Role, dialer_nonce: &[u8], listener_nonce: &[u8]) -> String {
+    let mut info = Vec::with_capacity(1 + dialer_nonce.len() + listener_nonce.len());
+    info.push(match role {
+        Role::Dialer => b'D',
+        Role::Listener => b'L',
+    });
+    info.extend_from_slice(dialer_nonce);
+    info.extend_from_slice(listener_nonce);
     let mut out = [0u8; 32];
-    Hkdf::<Sha256>::new(Some(HELLO_SALT), token.as_bytes())
-        .expand(b"", &mut out)
+    Hkdf::<Sha256>::new(Some(PROOF_SALT), token.as_bytes())
+        .expand(&info, &mut out)
         .expect("32 bytes is a valid HKDF-SHA256 output length");
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(out)
 }
@@ -140,11 +167,21 @@ mod tests {
     }
 
     #[test]
-    fn the_hello_is_a_token_sized_one_way_value() {
-        let h = hello(&token('a'));
-        assert_eq!(h.len(), super::super::TOKEN_CHARS);
-        assert!(super::super::valid_token(&h));
-        assert_ne!(h, token('a'));
-        assert_ne!(h, hello(&token('b')));
+    fn a_proof_is_bound_to_its_token_role_and_both_nonces() {
+        let (d, l) = (fresh_nonce(), fresh_nonce());
+        assert_eq!(d.len(), NONCE_CHARS);
+        assert_ne!(d, l);
+        let p = |t: char, r, d: &str, l: &str| proof(&token(t), r, d.as_bytes(), l.as_bytes());
+        let mine = p('a', Role::Dialer, &d, &l);
+        assert_eq!(mine.len(), PROOF_CHARS);
+        assert_eq!(mine, p('a', Role::Dialer, &d, &l));
+        assert_ne!(mine, p('b', Role::Dialer, &d, &l), "another token");
+        assert_ne!(mine, p('a', Role::Listener, &d, &l), "the other side's");
+        assert_ne!(
+            mine,
+            p('a', Role::Dialer, &d, &fresh_nonce()),
+            "another connection"
+        );
+        assert_ne!(mine, p('a', Role::Dialer, &fresh_nonce(), &l));
     }
 }

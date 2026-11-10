@@ -58,8 +58,8 @@ nightdrop/ctl/nearby/v1:<seq>:1                        — on, no token (develop
 * `seq`: the sender's increasing sequence (milliseconds), as for the capture block; an older or
   equal one is ignored.
 * `token`: 32 random bytes, base64url, **per chat**, drawn when the chat turns Nearby on and
-  redrawn every time it does. Only its derivatives are ever used on the local network: its
-  `hello` lets a connection in (§5), and its beacon key makes our beacons (§5a). It is sent even
+  redrawn every time it does. It never crosses the local network: keys derived from it prove a
+  connection is the contact's (§5) and make our beacons (§5a). It is sent even
   with no local network, so the contact can recognise our beacon when we meet on one with no
   internet.
 * Re-announced when our local address changes (checked each tick).
@@ -78,23 +78,31 @@ The dialer connects to `ipv4:port` (connect timeout 2 s) only when **our** chat 
 contact's announcement is on, and our own local address is in the same subnet (/24 for 192.168,
 /16 for 172.16/12 and 169.254, /8 for 10). Then:
 
-1. dialer → listener: `ND-NEARBY/2 ` + `hello(listener's token)` (the token the listener
-   announced), where `hello(t) = HKDF-SHA256(salt "nightdrop/nearby/hello/v1", ikm t)`, 32 bytes,
-   base64url (43 characters, like a token).
-2. listener: if it is not the hello of a token it issued to a chat with Nearby on, close. Else
-   reply with `hello(dialer's token)` (the token the dialer announced to it).
-3. dialer: if the reply is not the hello of its own token for that chat, close and fall back to
-   Tor.
+A challenge-response on the chat's two tokens, with
+`proof(t, role, Nd, Nl) = HKDF-SHA256(salt "nightdrop/nearby/proof/v1", ikm t, info role|Nd|Nl)`,
+32 bytes, base64url (43 characters); nonces are 16 random bytes, base64url (22 characters):
 
-The hello, not the token, crosses the network: anyone on it can read the opening line, and the
-token is also the beacon key's root (§5a), which a reader must not be able to derive.
-4. Frames flow as on any transport: length-prefixed, padded, end-to-end encrypted.
+1. dialer → listener: `ND-NEARBY/3 ` + `Nd` + `\n`.
+2. listener → dialer: a fresh `Nl` + `\n`.
+3. dialer → listener: `proof(listener's token, "D", Nd, Nl)` + `\n` (the token the listener
+   announced).
+4. listener: if it matches no token it issued to a chat with Nearby on (each checked, constant
+   time), close. Else reply `proof(dialer's token, "L", Nd, Nl)` + `\n` (the token the dialer
+   announced to it).
+5. dialer: if the reply is not that proof of its own token, close and fall back to Tor.
+6. Frames flow as on any transport: length-prefixed, padded, end-to-end encrypted.
 
-The hellos filter strangers and wrong hosts (another device holding the same private IP on a
-different network); they are not the security. Content, sender and integrity are the Double
-Ratchet's, as over Tor. An active attacker on the same network who records the tokens can replay
-them to waste connections or drop traffic, never read or forge a message; a dropped message falls
-back to the relay when its receipt does not arrive (30 s), as today.
+Nothing a listener on the network sees is reusable: the listener's nonce is new each connection, so
+a recorded proof does not open another one, and the tokens never cross the network (they also
+root the beacon key, §5a). Until 2026-11-09 (never shipped) the opening line was a fixed
+per-chat value: anyone who saw one connection could replay it to push frames at the listener or
+hold its 16 connections, and its sameness linked a chat's connections over time.
+
+The exchange filters strangers and wrong hosts (another device holding the same private IP on a
+different network); it is not the security. Content, sender and integrity are the Double
+Ratchet's, as over Tor. An active attacker on the same network can still relay a connection
+between the two or drop traffic, never read or forge a message; a dropped message falls back to
+the relay when its receipt does not arrive (30 s), as today.
 
 The listener runs only while at least one chat has Nearby on, binds an ephemeral
 port on all interfaces, answers only private addresses in our subnet (16 connections at most), and
@@ -123,24 +131,29 @@ window = unix time / 600 s
 * Sent to port 41873 at the network's own broadcast address (taken as the /24) and at
   `255.255.255.255`, from a socket bound to each usable interface's address. The limited broadcast
   alone never reached a phone on another phone's hotspot (S23 → S25, 2026-11-09); the subnet one
-  follows Android's route for the hotspot. Sent every 5 s for a minute after listening starts or
-  our networks change, then every 30 s, and at once after we find a contact (who may not have found us yet). One per
-  chat with Nearby on.
+  follows Android's route for the hotspot. One per chat with Nearby on, every 5 s for **two
+  minutes** after listening starts or our networks change, **then none**; and once (at most every
+  5 s) after we find a contact, who may not have found us. A device staying on a network does not
+  keep telling it a Night Drop is there: a contact who arrives later starts their own burst, and
+  our answer follows within a second.
 * Received on UDP 41873 (shared with any other Night Drop on the device, `SO_REUSEADDR`), only from
-  a private address in our subnet. A beacon is checked against the token of each chat whose
+  a private address in our subnet, at most 50 checked a second (the rest dropped unread). A beacon is checked against the token of each chat whose
   contact has Nearby on, for the window before, the current one and the next (clock skew), in
   constant time. A match names where that contact listens: the sending address and the port in the
   beacon, which must still be 32768 or above.
 * What a beacon finds is held in memory only and used to dial (§5) in place of the announced
   address; the contact's next announcement over Tor replaces it. Finding a contact also resets the
-  back-off, so the next send tries the new address.
+  back-off, so the next send tries the new address. An address that worked in the last minute is
+  kept: a contact on two of our networks beacons from both, and switching on each would have the
+  two devices answering each other without end.
 * **What it shows.** To anyone else a beacon is 30 random-looking bytes that never repeat (fresh
   nonce), carrying no identity, onion, or token: a listener learns that some device on the network
-  runs Night Drop with Nearby on, and its port. It cannot tell which chat, or link beacons across
+  runs Night Drop with Nearby on, and its port, during the two minutes after it joins (and when it
+  answers a contact). It cannot tell which chat, or link beacons across
   networks or across turning Nearby off and on (a fresh token each time). Within one network the
   device's address and port already link its traffic.
-* **What it does not allow.** Forging one needs the contact's token, which only crosses the
-  network as its hello (one-way). A recorded beacon replayed from another address does not verify
+* **What it does not allow.** Forging one needs the contact's token, which never crosses the
+  network. A recorded beacon replayed from another address does not verify
   (the address is in the tag); replayed from the same address within the window it says nothing
   new. A beacon only chooses where we dial: the connection still has to pass §5's exchange, and
   everything on it is end-to-end encrypted.

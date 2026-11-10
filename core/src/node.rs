@@ -1355,6 +1355,9 @@ const RECEIPT_RETRIES_PER_TICK: usize = 4;
 #[derive(Default)]
 pub(crate) struct ReceiptRetries {
     pending: Vec<PendingReceipt>,
+    /// How many retries the last [`run`](Self::run) made.
+    #[cfg(test)]
+    tried_last: usize,
 }
 
 struct PendingReceipt {
@@ -1365,7 +1368,8 @@ struct PendingReceipt {
 }
 
 impl ReceiptRetries {
-    /// Send this tick's new receipts, keep the ones that fail, then retry the kept ones now due.
+    /// Send this tick's new receipts, keep the ones that fail, then retry the kept ones now due: up
+    /// to [`RECEIPT_RETRIES_PER_TICK`], and none after the first that fails again.
     pub(crate) fn run(&mut self, new: Vec<DetachedSend>, now: Instant) {
         for send in new {
             if !send.execute() {
@@ -1384,12 +1388,20 @@ impl ReceiptRetries {
         }
         let mut tried = 0;
         let mut i = 0;
+        #[cfg(test)]
+        {
+            self.tried_last = 0;
+        }
         while i < self.pending.len() && tried < RECEIPT_RETRIES_PER_TICK {
             if self.pending[i].next > now {
                 i += 1;
                 continue;
             }
             tried += 1;
+            #[cfg(test)]
+            {
+                self.tried_last = tried;
+            }
             if self.pending[i].send.execute() {
                 let p = self.pending.remove(i);
                 crate::diag!(
@@ -1400,7 +1412,10 @@ impl ReceiptRetries {
                 let p = &mut self.pending[i];
                 p.wait = (p.wait * 2).min(RECEIPT_RETRY_MAX);
                 p.next = now + p.wait;
-                i += 1;
+                // Each failure waited out the dial and relay timeouts on the poller's own thread;
+                // the next would most likely fail the same way, so the rest wait for a later tick
+                // rather than hold up inbound mail for minutes.
+                break;
             }
         }
     }
@@ -1426,6 +1441,11 @@ impl ReceiptRetries {
     #[cfg(test)]
     pub(crate) fn len(&self) -> usize {
         self.pending.len()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn tried_last(&self) -> usize {
+        self.tried_last
     }
 }
 

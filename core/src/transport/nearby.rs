@@ -4,10 +4,11 @@
 //! [`NearbyTransport`] wraps the main transport and keeps its address (the onion). For a peer with
 //! a usable route — both sides on, a private address in our subnet — a send tries the local network
 //! first and falls back to the main transport on any failure. Each local connection opens with a
-//! token exchange (§5): the dialer presents the [`beacon::hello`] of the token the listener gave
-//! that chat, the listener answers with the dialer's, and anything else is closed. The tokens only
-//! keep strangers and wrong hosts out; what is sent is end-to-end encrypted and authenticated like
-//! any frame.
+//! challenge-response on the chat's two tokens (§5, [`beacon::proof`]): each side proves it holds
+//! the token the other gave that chat, over both sides' fresh nonces, so nothing seen on the network
+//! can be replayed and the tokens never cross it. Anything else is closed. The tokens only keep
+//! strangers and wrong hosts out; what is sent is end-to-end encrypted and authenticated like any
+//! frame.
 //!
 //! The contact's address comes from their announcement over Tor or, when that cannot arrive (no
 //! internet, a new network), from their [`beacon`] on the local network, which only the holder of
@@ -31,8 +32,8 @@ use super::inbound::{read_frame, InboundBudget};
 use super::{AbortHandle, Address, FileFetch, Transport};
 use crate::Result;
 
-/// Opening line of a local connection; followed by a 43-character [`beacon::hello`] and `\n`.
-const PREAMBLE: &[u8] = b"ND-NEARBY/2 ";
+/// Opening line of a local connection; followed by the dialer's nonce and `\n` (§5).
+const PREAMBLE: &[u8] = b"ND-NEARBY/3 ";
 /// A token: 32 random bytes, base64url without padding.
 pub const TOKEN_CHARS: usize = 43;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
@@ -54,22 +55,24 @@ pub const MIN_PORT: u16 = 32768;
 /// Bytes of local frames held for the core at once. Smaller than Tor's: a nearby contact is one
 /// person, not the network.
 const INBOUND_BUDGET_BYTES: usize = 16 * 1024 * 1024;
-/// Beacons go out this often for a minute after listening starts or our networks change, so a
-/// contact who just arrived is found quickly...
-const BEACON_FAST: Duration = Duration::from_secs(5);
-const BEACON_FAST_FOR: Duration = Duration::from_secs(60);
-/// ...and this often after that. A contact who arrives later still finds us at once: their own
-/// beacons start fast, and finding a contact answers with ours straight away.
-const BEACON_SLOW: Duration = Duration::from_secs(30);
+/// Beacons go out this often, for [`BEACON_BURST`] after listening starts or our networks change,
+/// and then stop: a device left on a network does not keep telling it that a Night Drop with Nearby
+/// on is there. A contact who arrives later is still found at once: their own burst starts on
+/// arrival, and finding a contact answers with ours straight away.
+const BEACON_EVERY: Duration = Duration::from_secs(5);
+const BEACON_BURST: Duration = Duration::from_secs(120);
+/// At most this many beacons are checked a second; the rest are dropped unread, so a flood of
+/// junk on the beacon port costs a bounded amount of work.
+const MAX_BEACONS_PER_SEC: u32 = 50;
 const BEACON_REPORT_EVERY: Duration = Duration::from_secs(60);
 
 /// What the node tells the transport about one chat with Nearby on (ours).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NearbyRoute {
-    /// The token we gave this chat: a connection presenting its hello is theirs, and our beacons
-    /// are made with it.
+    /// The token we gave this chat: a connection that proves it holds it is theirs, and our
+    /// beacons are made with it.
     pub our_token: String,
-    /// The token they gave us, once they turned it on too: we present its hello, and recognise
+    /// The token they gave us, once they turned it on too: we prove we hold it, and recognise
     /// their beacons by it.
     pub peer_token: Option<String>,
     /// Where they last announced, over Tor, that they listen. A beacon can find them elsewhere.
@@ -315,11 +318,7 @@ impl Shared {
         }
         // Only from here is a connection attempted, and only its failure starts the back-off
         // ([`RETRY_AFTER`]): a send with no route yet must not hold off the first real attempt.
-        let attempt = Self::exchange(
-            addr,
-            &beacon::hello(&their_token),
-            &beacon::hello(&our_token),
-        );
+        let attempt = Self::exchange(addr, &their_token, &our_token);
         match &attempt {
             Ok(_) => crate::diag!(
                 "nearby: connected to the contact at {}",
@@ -337,17 +336,23 @@ impl Shared {
         attempt
     }
 
-    /// `their_hello` and `our_hello` are the [`beacon::hello`]s of the two tokens.
-    fn exchange(addr: SocketAddrV4, their_hello: &str, our_hello: &str) -> Result<TcpStream> {
+    /// The dialer's side of §5: send our nonce, read theirs, prove we hold `their_token`, and
+    /// check they prove they hold `our_token`.
+    fn exchange(addr: SocketAddrV4, their_token: &str, our_token: &str) -> Result<TcpStream> {
+        use beacon::{proof, Role, NONCE_CHARS, PROOF_CHARS};
         let mut stream = TcpStream::connect_timeout(&SocketAddr::V4(addr), CONNECT_TIMEOUT)?;
         stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
         stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
-        stream.write_all(&preamble(their_hello))?;
-        let mut answer = [0u8; TOKEN_CHARS + 1];
-        stream.read_exact(&mut answer)?;
+        let ours = beacon::fresh_nonce();
+        stream.write_all(&[PREAMBLE, ours.as_bytes(), b"\n"].concat())?;
+        let line = read_line::<{ NONCE_CHARS + 1 }>(&mut stream)?;
+        let theirs = &line[..NONCE_CHARS];
+        let mine = proof(their_token, Role::Dialer, ours.as_bytes(), theirs);
+        stream.write_all(&[mine.as_bytes(), b"\n"].concat())?;
+        let answer = read_line::<{ PROOF_CHARS + 1 }>(&mut stream)?;
+        let want = proof(our_token, Role::Listener, ours.as_bytes(), theirs);
         anyhow::ensure!(
-            tokens_equal(&answer[..TOKEN_CHARS], our_hello.as_bytes())
-                && answer[TOKEN_CHARS] == b'\n',
+            bytes_equal(&answer[..PROOF_CHARS], want.as_bytes()),
             "the other end is not this contact"
         );
         Ok(stream)
@@ -490,6 +495,9 @@ impl Shared {
             return;
         }
         let s = std::mem::take(&mut *stats);
+        if s.sent == 0 && s.heard == 0 && s.ignored == 0 && s.failed.is_empty() {
+            return; // quiet between bursts: nothing to say
+        }
         let failed: Vec<String> = s.failed.iter().map(|(e, n)| format!("{n}× {e}")).collect();
         crate::diag!(
             "nearby: beacons in {}s: sent {} on [{}]{}; heard {} ({} from a contact, {} ignored)",
@@ -534,6 +542,14 @@ impl Shared {
         if current == Some(at) {
             return;
         }
+        // An address that works stays: a contact on two of our networks sends a beacon from each,
+        // and switching on every one would have us both answer each other's beacons for ever.
+        if current.is_some_and(|c| self.on_our_network(*c.ip()))
+            && self.reachable_recently(&onion, RETRY_AFTER)
+            && !self.recently_failed(&onion)
+        {
+            return;
+        }
         if announced == Some(at) {
             learned.remove(&onion);
         } else {
@@ -561,30 +577,37 @@ fn serve(
     stream.set_nonblocking(false)?;
     stream.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
     stream.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
-    let mut hello = [0u8; PREAMBLE.len() + TOKEN_CHARS + 1];
-    stream.read_exact(&mut hello)?;
-    anyhow::ensure!(
-        hello.starts_with(PREAMBLE) && hello[hello.len() - 1] == b'\n',
-        "not a nearby peer"
-    );
-    let presented = &hello[PREAMBLE.len()..PREAMBLE.len() + TOKEN_CHARS];
-    // Every route is compared, so the time taken does not say which token came close.
+    use beacon::{proof, Role, NONCE_CHARS, PROOF_CHARS};
+    let opening = read_line::<{ PREAMBLE.len() + NONCE_CHARS + 1 }>(&mut stream)?;
+    anyhow::ensure!(opening.starts_with(PREAMBLE), "not a nearby peer");
+    let dialer_nonce = &opening[PREAMBLE.len()..PREAMBLE.len() + NONCE_CHARS];
+    let ours = beacon::fresh_nonce();
+    stream.write_all(&[ours.as_bytes(), b"\n"].concat())?;
+    let line = read_line::<{ PROOF_CHARS + 1 }>(&mut stream)?;
+    let presented = &line[..PROOF_CHARS];
+    // Every route is checked, so the time taken does not say which one came close.
     let mut found = None;
     for (onion, route) in shared.routes.lock().unwrap().iter() {
-        if tokens_equal(presented, beacon::hello(&route.our_token).as_bytes()) {
+        let want = proof(
+            &route.our_token,
+            Role::Dialer,
+            dialer_nonce,
+            ours.as_bytes(),
+        );
+        if bytes_equal(presented, want.as_bytes()) {
             if let Some(theirs) = &route.peer_token {
-                found = Some((onion.clone(), beacon::hello(theirs)));
+                found = Some((onion.clone(), theirs.clone()));
             }
         }
     }
     let (onion, theirs) = found.ok_or_else(|| {
         anyhow::anyhow!(
-            "unknown token (not a contact with Nearby on, or they have not told us yet)"
+            "unknown proof (not a contact with Nearby on, or they have not told us yet)"
         )
     })?;
     crate::diag!("nearby: a contact connected locally");
-    stream.write_all(theirs.as_bytes())?;
-    stream.write_all(b"\n")?;
+    let answer = proof(&theirs, Role::Listener, dialer_nonce, ours.as_bytes());
+    stream.write_all(&[answer.as_bytes(), b"\n"].concat())?;
     stream.flush()?;
     shared.record(&onion, true);
     stream.set_read_timeout(Some(READ_IDLE))?;
@@ -602,8 +625,12 @@ fn serve(
     Ok(())
 }
 
-fn preamble(hello: &str) -> Vec<u8> {
-    [PREAMBLE, hello.as_bytes(), b"\n"].concat()
+/// Read exactly `N` bytes ending in `\n` (one handshake line). The caller drops the `\n`.
+fn read_line<const N: usize>(stream: &mut TcpStream) -> Result<[u8; N]> {
+    let mut buf = [0u8; N];
+    stream.read_exact(&mut buf)?;
+    anyhow::ensure!(buf[N - 1] == b'\n', "malformed handshake line");
+    Ok(buf)
 }
 
 /// Receive beacons (§5a) while listening: a contact's beacon, from our own subnet, sets where we
@@ -621,11 +648,19 @@ fn beacon_receiver(shared: &Arc<Shared>, stop: &Arc<AtomicBool>) -> Option<u16> 
     let (shared, halt) = (Arc::clone(shared), Arc::clone(stop));
     thread::spawn(move || {
         let mut buf = [0u8; beacon::LEN + 1];
+        let (mut second, mut checked) = (Instant::now(), 0u32);
         while !halt.load(Ordering::Relaxed) {
             let Ok((n, SocketAddr::V4(from))) = socket.recv_from(&mut buf) else {
                 continue; // the read timeout, or IPv6
             };
-            if n == beacon::LEN && shared.admits_source(*from.ip()) {
+            if second.elapsed() >= Duration::from_secs(1) {
+                (second, checked) = (Instant::now(), 0);
+            }
+            checked += 1;
+            if n == beacon::LEN
+                && checked <= MAX_BEACONS_PER_SEC
+                && shared.admits_source(*from.ip())
+            {
                 shared.heard_beacon(&buf[..n], *from.ip());
             } else {
                 shared.beacon_stats.lock().unwrap().ignored += 1;
@@ -647,34 +682,29 @@ fn bind_beacon_socket(port: u16) -> std::io::Result<UdpSocket> {
     Ok(socket)
 }
 
-/// Send our beacons while listening: fast for a minute after we start or our networks change,
-/// slowly after that, and at once when we have just found a contact.
+/// Send our beacons while listening: every [`BEACON_EVERY`] for [`BEACON_BURST`] after we start or
+/// our networks change, then nothing; and once, no more often than every [`BEACON_EVERY`], when we
+/// have just found a contact (who may not have found us).
 fn beacon_sender(shared: &Arc<Shared>, listen_port: u16, stop: &Arc<AtomicBool>) {
     let (shared, halt) = (Arc::clone(shared), Arc::clone(stop));
     thread::spawn(move || {
         let mut networks = Vec::new();
-        let mut fast_until = Instant::now() + BEACON_FAST_FOR;
-        let mut next = Instant::now();
+        let mut burst_until = Instant::now() + BEACON_BURST;
+        let mut last: Option<Instant> = None;
         while !halt.load(Ordering::Relaxed) {
             let now = Instant::now();
             let ours = shared.local_ips();
             if ours != networks {
                 networks = ours;
-                fast_until = now + BEACON_FAST_FOR;
-                next = now;
-            }
-            if shared.beacon_now.swap(false, Ordering::AcqRel) {
-                next = now;
+                burst_until = now + BEACON_BURST;
+                last = None;
             }
             shared.report_beacons(&networks);
-            if now >= next {
+            let rested = last.is_none_or(|t| now.duration_since(t) >= BEACON_EVERY);
+            let answer = rested && shared.beacon_now.swap(false, Ordering::AcqRel);
+            if rested && (now < burst_until || answer) {
                 shared.send_beacons(&networks, listen_port);
-                next = now
-                    + if now < fast_until {
-                        BEACON_FAST
-                    } else {
-                        BEACON_SLOW
-                    };
+                last = Some(now);
             }
             thread::sleep(ACCEPT_POLL);
         }
@@ -706,11 +736,9 @@ fn net_of(addr: &SocketAddr) -> String {
     }
 }
 
-/// Constant-time equality for two tokens of the expected length.
-fn tokens_equal(a: &[u8], b: &[u8]) -> bool {
-    a.len() == TOKEN_CHARS
-        && b.len() == TOKEN_CHARS
-        && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+/// Constant-time equality for two byte strings of the same length.
+fn bytes_equal(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
 /// RFC 1918 and link-local: the only addresses a nearby announcement may name (§4). A public one
@@ -741,11 +769,18 @@ pub fn valid_port(port: u16) -> bool {
 /// range is not a network anyone nearby shares), VPNs, or virtual bridges.
 pub fn interface_rank(name: &str) -> Option<u8> {
     let n = name.to_ascii_lowercase();
-    const NEVER: [&str; 14] = [
-        "lo", "rmnet", "ccmni", "v4-", "tun", "tap", "ppp", "wg", "utun", "dummy", "docker",
-        "veth", "virbr", "vboxnet",
+    // Mobile data first (Qualcomm rmnet, MediaTek ccmni/ccinet, Unisoc seth, Exynos pdp/rmnet,
+    // laptop modems wwan/wwp*, Windows "Cellular", Android's 464xlat v4-/clat), then VPNs and
+    // virtual bridges.
+    const NEVER: [&str; 21] = [
+        "lo", "rmnet", "ccmni", "ccinet", "seth", "pdp", "wwan", "wwp", "cellular", "clat", "v4-",
+        "tun", "tap", "ppp", "wg", "utun", "ipsec", "dummy", "docker", "veth", "virbr",
     ];
-    if NEVER.iter().any(|p| n.starts_with(p)) || n.starts_with("br-") || n.starts_with("podman") {
+    if NEVER.iter().any(|p| n.starts_with(p))
+        || ["br-", "podman", "vboxnet"]
+            .iter()
+            .any(|p| n.starts_with(p))
+    {
         return None;
     }
     const WIFI: [&str; 7] = ["wlan", "swlan", "ap", "softap", "wl", "wi-fi", "wifi"];
@@ -1135,6 +1170,42 @@ mod tests {
         );
     }
 
+    /// Someone on the network who recorded a whole handshake cannot replay it: the listener's
+    /// nonce is new each time, so the recorded proof no longer matches and nothing gets in.
+    #[test]
+    fn a_recorded_handshake_cannot_be_replayed() {
+        use beacon::{proof, Role, NONCE_CHARS};
+        let (_net, a, b) = pair();
+        connect(&a, &b);
+        let pb = b.nearby_address().unwrap();
+        let open = |nonce: &str| {
+            let mut s = TcpStream::connect(SocketAddr::V4(pb)).unwrap();
+            s.set_read_timeout(Some(HANDSHAKE_TIMEOUT)).unwrap();
+            s.write_all(&[PREAMBLE, nonce.as_bytes(), b"\n"].concat())
+                .unwrap();
+            let line = read_line::<{ NONCE_CHARS + 1 }>(&mut s).unwrap();
+            (s, line[..NONCE_CHARS].to_vec())
+        };
+        // A genuine handshake (a holds b's token), recorded.
+        let nonce = beacon::fresh_nonce();
+        let (mut first, theirs) = open(&nonce);
+        let recorded = proof(&token('b'), Role::Dialer, nonce.as_bytes(), &theirs);
+        first
+            .write_all(&[recorded.as_bytes(), b"\n"].concat())
+            .unwrap();
+        assert!(read_line::<{ beacon::PROOF_CHARS + 1 }>(&mut first).is_ok());
+        // Replayed: same opening, same proof, but b chose a new nonce.
+        let (mut again, fresh) = open(&nonce);
+        assert_ne!(theirs, fresh);
+        again
+            .write_all(&[recorded.as_bytes(), b"\n"].concat())
+            .unwrap();
+        assert!(
+            read_line::<{ beacon::PROOF_CHARS + 1 }>(&mut again).is_err(),
+            "closed without an answer"
+        );
+    }
+
     #[test]
     fn without_a_route_the_main_transport_carries_it() {
         let (_net, a, b) = pair();
@@ -1313,6 +1384,13 @@ mod tests {
             "br-1a2b",
             "podman1",
             "veth9",
+            "wwan0",
+            "wwp0s20f0u2",
+            "seth_lte0",
+            "ccinet0",
+            "pdp_ip0",
+            "vboxnet0",
+            "Cellular",
         ] {
             assert_eq!(interface_rank(never), None, "{never}");
         }
@@ -1329,9 +1407,9 @@ mod tests {
 
     #[test]
     fn tokens_are_compared_whole() {
-        assert!(tokens_equal(token('a').as_bytes(), token('a').as_bytes()));
-        assert!(!tokens_equal(token('a').as_bytes(), token('b').as_bytes()));
-        assert!(!tokens_equal(b"short", b"short"));
+        assert!(bytes_equal(token('a').as_bytes(), token('a').as_bytes()));
+        assert!(!bytes_equal(token('a').as_bytes(), token('b').as_bytes()));
+        assert!(!bytes_equal(b"short", b"shorter"));
         assert!(valid_token(&token('a')) && !valid_token("a b") && !valid_token(&token('+')));
     }
 }

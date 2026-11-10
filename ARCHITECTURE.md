@@ -680,8 +680,9 @@ on a re-pair (new session) exactly like `verified`.
   anonymized**. **Beacons (§5a):** while a chat has it on, each device broadcasts on its local
   networks a beacon only that contact can recognise (keyed from the chat's token, never
   repeating), so two phones that moved to a network with no internet still find each other; the
-  address a beacon gives is held in memory and replaced by the contact's next announcement. The
-  local connection presents a one-way hello of the token, never the token. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
+  address a beacon gives is held in memory and replaced by the contact's next announcement;
+  beacons go out only for two minutes after joining a network. The local connection opens with a
+  challenge-response on the two tokens, so nothing on the wire can be replayed. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
   (`transport::lan`, `NightdropCore::new_lan`) remains only for the device integration tests.
 - **Metadata protection — fixed-size framing:** every `Frame` is length-prefixed and
   **zero-padded to a fixed size bucket** (`core/src/wire::encode`, `WIRE_VERSION` 2) before it
@@ -1271,7 +1272,9 @@ Operations (idempotent, authenticated only by capability tokens, never identity)
   "Held for delivery" and after 24 h read "Not delivered (expired)" although it had arrived (seen
   2026-11-02, when a phone's Tor client could reach neither the peer nor the relay for minutes).
   The sealed bytes go again unchanged; a copy that did land the first time fails to decrypt as a
-  replay and is skipped. Kept in memory only, so an app restart loses the pending ones.
+  replay and is skipped. Kept in memory only, so an app restart loses the pending ones. At most
+  four retries a tick, and none after the first that fails again: each failure waits out the dial
+  and relay timeouts on the poller's thread, so a run of them would hold up inbound mail.
 - **Sender gets `Ack`:** nothing. See below.
 
 **Only a named receipt confirms a message (2026-08-02, revised on review).** `sent` used to be
