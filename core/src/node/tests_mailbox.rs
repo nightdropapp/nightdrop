@@ -1067,7 +1067,10 @@ fn a_receipt_that_fails_every_route_is_retried_until_it_lands() {
     let t0 = Instant::now();
     let receipts = receive_without_a_route(&mut alice, &mut bob, "held");
     assert!(!receipts.is_empty());
-    retries.run(receipts, t0);
+    // One at a time, so each is tried (and fails) rather than kept untried behind the first.
+    for r in receipts {
+        retries.run(vec![r], t0);
+    }
     assert!(
         retries.len() > 0,
         "a receipt that failed every route is kept"
@@ -1099,8 +1102,14 @@ fn a_receipt_that_fails_every_route_is_retried_until_it_lands() {
     let mut receipts = receive_without_a_route(&mut alice, &mut bob, "one");
     relay_down.store(false, Ordering::SeqCst);
     receipts.extend(receive_without_a_route(&mut alice, &mut bob, "two"));
+    assert!(receipts.len() >= 2);
     retries.run(receipts, t0);
     assert!(retries.len() >= 2);
+    assert_eq!(
+        retries.tried_last(),
+        1,
+        "the new ones stop at the first failure too"
+    );
     retries.run(Vec::new(), t0 + RECEIPT_RETRY_FIRST);
     assert_eq!(retries.tried_last(), 1, "stopped at the first failure");
 

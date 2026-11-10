@@ -1273,8 +1273,9 @@ Operations (idempotent, authenticated only by capability tokens, never identity)
   2026-11-02, when a phone's Tor client could reach neither the peer nor the relay for minutes).
   The sealed bytes go again unchanged; a copy that did land the first time fails to decrypt as a
   replay and is skipped. Kept in memory only, so an app restart loses the pending ones. At most
-  four retries a tick, and none after the first that fails again: each failure waits out the dial
-  and relay timeouts on the poller's thread, so a run of them would hold up inbound mail. One for
+  four retries a tick, and nothing more that tick after one fails, new receipts included (those are
+  kept untried and due at once): each failure waits out the dial and relay timeouts on the poller's
+  thread, so a run of them would hold up inbound mail. One for
   a chat the user deleted is dropped: retrying would tell that person, for up to a day, that the
   app is online.
 - **Sender gets `Ack`:** nothing. See below.

@@ -1355,7 +1355,7 @@ const RECEIPT_RETRIES_PER_TICK: usize = 4;
 #[derive(Default)]
 pub(crate) struct ReceiptRetries {
     pending: Vec<PendingReceipt>,
-    /// How many retries the last [`run`](Self::run) made.
+    /// How many sends (new and retried) the last [`run`](Self::run) attempted.
     #[cfg(test)]
     tried_last: usize,
 }
@@ -1371,8 +1371,19 @@ impl ReceiptRetries {
     /// Send this tick's new receipts, keep the ones that fail, then retry the kept ones now due: up
     /// to [`RECEIPT_RETRIES_PER_TICK`], and none after the first that fails again.
     pub(crate) fn run(&mut self, new: Vec<DetachedSend>, now: Instant) {
+        // A receipt fails only when the peer and every relay did, so after one the rest would most
+        // likely wait out the same timeouts on this thread: they are kept untried instead, due at
+        // once, and go out a few a tick through the retries below.
+        let mut failing = false;
+        let mut attempts = 0;
         for send in new {
+            if failing {
+                self.keep_due(send, now);
+                continue;
+            }
+            attempts += 1;
             if !send.execute() {
+                failing = true;
                 self.keep(send, now);
             }
         }
@@ -1386,12 +1397,17 @@ impl ReceiptRetries {
                 RELAY_TTL.as_secs() / 3600
             );
         }
-        let mut tried = 0;
-        let mut i = 0;
         #[cfg(test)]
         {
-            self.tried_last = 0;
+            self.tried_last = attempts;
         }
+        let _ = attempts;
+        // One failure is enough for this tick.
+        if failing {
+            return;
+        }
+        let mut tried = 0;
+        let mut i = 0;
         while i < self.pending.len() && tried < RECEIPT_RETRIES_PER_TICK {
             if self.pending[i].next > now {
                 i += 1;
@@ -1400,7 +1416,7 @@ impl ReceiptRetries {
             tried += 1;
             #[cfg(test)]
             {
-                self.tried_last = tried;
+                self.tried_last = attempts + tried;
             }
             if self.pending[i].send.execute() {
                 let p = self.pending.remove(i);
@@ -1434,20 +1450,29 @@ impl ReceiptRetries {
     }
 
     fn keep(&mut self, send: DetachedSend, now: Instant) {
+        self.push(send, now, now + RECEIPT_RETRY_FIRST);
+        crate::diag!(
+            "receipt: every route failed — kept for a retry in {}s ({} waiting)",
+            RECEIPT_RETRY_FIRST.as_secs(),
+            self.pending.len()
+        );
+    }
+
+    /// Kept without a try (an earlier one this tick just failed): due at once.
+    fn keep_due(&mut self, send: DetachedSend, now: Instant) {
+        self.push(send, now, now);
+    }
+
+    fn push(&mut self, send: DetachedSend, now: Instant, next: Instant) {
         if self.pending.len() >= RECEIPT_RETRY_CAP {
             self.pending.remove(0);
         }
         self.pending.push(PendingReceipt {
             send,
             first: now,
-            next: now + RECEIPT_RETRY_FIRST,
+            next,
             wait: RECEIPT_RETRY_FIRST,
         });
-        crate::diag!(
-            "receipt: every route failed — kept for a retry in {}s ({} waiting)",
-            RECEIPT_RETRY_FIRST.as_secs(),
-            self.pending.len()
-        );
     }
 
     /// How many receipts are waiting for a retry.
