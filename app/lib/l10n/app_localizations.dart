@@ -1387,7 +1387,7 @@ abstract class AppLocalizations {
   /// Dialog body explaining what the local-network path reveals.
   ///
   /// In en, this message translates to:
-  /// **'When you are both on the same Wi-Fi, messages go straight between your devices instead of through Tor: faster, and it works without the internet.\n\nIt is not anonymous. Your contact learns your device\'s address on that network, and anyone on the network can see that your two devices are talking (never what you say). Messages stay end-to-end encrypted.\n\nIt is used only once they turn it on too. Turn it off at any time from this menu.'**
+  /// **'When you are both on the same Wi-Fi, messages go straight between your devices instead of through Tor: faster, and it works without the internet.\n\nIt is not anonymous. Your contact learns your device\'s address on that network, and anyone on the network can see that your two devices are talking (never what you say). For two minutes after joining a network, your device also sends a short signal there so your contact can find it without the internet: only your contact can tell it is you, but others can tell that a Night Drop with this setting on is present. Messages stay end-to-end encrypted.\n\nIt is used only once they turn it on too. Turn it off at any time from this menu.'**
   String get nearbyBody;
 
   /// Dialog button that turns the local-network path on.
@@ -1405,7 +1405,7 @@ abstract class AppLocalizations {
   /// Full text behind nearbyAskedSummary.
   ///
   /// In en, this message translates to:
-  /// **'This person turned on \"Also connect on the same Wi-Fi\" for this chat. If you turn it on too, messages go straight between your devices whenever you share a network. Your contact would learn your device\'s address on that network, and anyone on it could see that your devices are talking. It stays off unless you turn it on from the chat menu.'**
+  /// **'This person turned on \"Also connect on the same Wi-Fi\" for this chat. If you turn it on too, messages go straight between your devices whenever you share a network. Your contact would learn your device\'s address on that network, and anyone on it could see that your devices are talking, and, for two minutes after you join a network, that a Night Drop with this setting on is present. It stays off unless you turn it on from the chat menu.'**
   String get nearbyAskedBanner;
 
   /// One line: we turned the local-network path on; the contact has not.

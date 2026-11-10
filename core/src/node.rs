@@ -1420,6 +1420,19 @@ impl ReceiptRetries {
         }
     }
 
+    /// Drop the receipts for contacts no longer in `live` (the chat was deleted): retrying would
+    /// keep telling someone the user removed that this app is online, for up to a day.
+    pub(crate) fn only_for(&mut self, live: &std::collections::HashSet<String>) {
+        let before = self.pending.len();
+        self.pending.retain(|p| live.contains(&p.send.recipient_ik));
+        if self.pending.len() < before {
+            crate::diag!(
+                "receipt: dropped {} waiting for a deleted chat",
+                before - self.pending.len()
+            );
+        }
+    }
+
     fn keep(&mut self, send: DetachedSend, now: Instant) {
         if self.pending.len() >= RECEIPT_RETRY_CAP {
             self.pending.remove(0);

@@ -433,13 +433,16 @@ impl Shared {
         self.is_local(from) && self.on_our_network(from)
     }
 
-    /// One beacon per chat with Nearby on, from each of our local networks.
+    /// One beacon per chat where both have Nearby on, from each of our local networks. A chat whose
+    /// contact has not turned it on gets none: nobody could use it, and it would only add to what
+    /// the network sees.
     fn send_beacons(&self, networks: &[Ipv4Addr], listen_port: u16) {
         let tokens: Vec<String> = self
             .routes
             .lock()
             .unwrap()
             .values()
+            .filter(|r| r.peer_token.is_some())
             .map(|r| r.our_token.clone())
             .collect();
         if tokens.is_empty() {

@@ -1737,6 +1737,15 @@ impl Node {
         std::mem::take(&mut self.receipt_sends)
     }
 
+    /// The contacts whose chat is still open, for [`ReceiptRetries::only_for`](super::ReceiptRetries::only_for).
+    pub(crate) fn open_contact_ids(&self) -> std::collections::HashSet<String> {
+        self.chats
+            .iter()
+            .filter(|(_, c)| !c.closed)
+            .map(|(id, _)| id.clone())
+            .collect()
+    }
+
     /// Give this contact a nickname of your own. **Never sent** — unlike `set_my_name`, nothing
     /// goes on the wire: only you know that this identity key is the person you met, and the peer
     /// cannot supply that knowledge. Empty clears it, falling back to their chosen name plus their

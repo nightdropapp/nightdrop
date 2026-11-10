@@ -31,7 +31,10 @@ and that you are near each other. So it is off by default and turned on per chat
 Chat menu: **"Also connect on the same Wi-Fi"**, behind a dialog that says what it reveals:
 "Your contact learns your device's address on the local network, and anyone on that network can see
 that your two devices are talking (not what you say). Messages stay end-to-end encrypted. Both of
-you need to turn this on." Turning it off is immediate and needs no confirmation.
+you need to turn this on." Since the beacons (§5a) it also says that for two minutes after joining
+a network the device sends a signal there that only the contact can tell is theirs, but that shows
+others a Night Drop with this setting on is present (`nearbyBody` in `app_en.arb`). Turning it off
+is immediate and needs no confirmation.
 
 Per chat, the banner shows one of:
 
@@ -131,7 +134,8 @@ window = unix time / 600 s
 * Sent to port 41873 at the network's own broadcast address (taken as the /24) and at
   `255.255.255.255`, from a socket bound to each usable interface's address. The limited broadcast
   alone never reached a phone on another phone's hotspot (S23 → S25, 2026-11-09); the subnet one
-  follows Android's route for the hotspot. One per chat with Nearby on, every 5 s for **two
+  follows Android's route for the hotspot. One per chat where both have Nearby on (nobody could
+  use one for a chat whose contact has it off), every 5 s for **two
   minutes** after listening starts or our networks change, **then none**; and once (at most every
   5 s) after we find a contact, who may not have found us. A device staying on a network does not
   keep telling it a Night Drop is there: a contact who arrives later starts their own burst, and

@@ -228,6 +228,12 @@ impl Node {
             return false;
         };
         chat.mark_alive();
+        // Not from a request we have not accepted, nor a chat we deleted: neither may add to the
+        // history or hold a route. Left unrecorded, so the same announcement counts once they are
+        // accepted (they announce again on approval).
+        if chat.closed || !chat.authorized {
+            return false;
+        }
         if peer.seq <= chat.peer_nearby_seq {
             return false;
         }

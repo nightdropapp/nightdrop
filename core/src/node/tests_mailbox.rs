@@ -1103,6 +1103,15 @@ fn a_receipt_that_fails_every_route_is_retried_until_it_lands() {
     assert!(retries.len() >= 2);
     retries.run(Vec::new(), t0 + RECEIPT_RETRY_FIRST);
     assert_eq!(retries.tried_last(), 1, "stopped at the first failure");
+
+    // Bob deletes the chat: nothing more is sent to Alice on its behalf.
+    let mut open = bob.open_contact_ids();
+    assert!(!open.is_empty());
+    retries.only_for(&open);
+    assert!(retries.len() >= 2, "still a contact");
+    open.clear();
+    retries.only_for(&open);
+    assert_eq!(retries.len(), 0);
 }
 
 // ---- 0.2: no v1 handle, and where cover traffic goes (§10) ----

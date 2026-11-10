@@ -3047,14 +3047,14 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
             // Recover from poisoning, and run the apply inside `catch_unwind` (§1.5.3): a panic in
             // one tick (e.g. a malformed frame) must not kill the background poller for good — and,
             // because the unwind is caught before the guard drops, it also can't *poison* the mutex.
-            let receipts = {
+            let (receipts, open_chats) = {
                 let mut g = inner.lock().unwrap_or_else(|e| e.into_inner());
                 let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
                     let _ = g.apply_tick(relay_applied, harvest.take(), sent.take());
                     // Flush any debounced background write whose window has elapsed (§1.5.4).
                     g.maybe_flush();
                 }));
-                g.me.take_receipt_sends()
+                (g.me.take_receipt_sends(), g.me.open_contact_ids())
             };
             // Delivery receipts and relay acks for what that tick received, sent only now: the
             // "message" event is already out, so the notification does not wait on them, and the
@@ -3063,6 +3063,7 @@ fn spawn_poller(inner: Arc<Mutex<Inner>>, stop: Arc<StopSignal>) {
             // outlives the poller holding the transport (see the teardown below). One that fails
             // every route is kept and retried on later ticks (`ReceiptRetries`): it is the only
             // thing that turns the sender's "Held for delivery" into "Delivered".
+            receipt_retries.only_for(&open_chats);
             receipt_retries.run(receipts, std::time::Instant::now());
             if relay_applied {
                 last_relay = Some(std::time::Instant::now());

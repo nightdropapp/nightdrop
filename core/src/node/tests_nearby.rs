@@ -141,3 +141,26 @@ fn a_public_address_in_an_announcement_is_refused() {
     assert!(!bob.receive_nearby(&alice_key, body.as_bytes()));
     assert!(!bob.contacts()[0].peer_nearby);
 }
+
+#[test]
+fn a_request_not_yet_accepted_or_a_deleted_chat_cannot_announce() {
+    let (_net, alice, mut bob, alice_id, _bob_id) = paired();
+    let alice_key = alice.identity_key();
+    let token = "A".repeat(crate::transport::nearby::TOKEN_CHARS);
+    let body = format!("{}:1:{token}", u64::MAX / 2);
+    for (closed, authorized) in [(false, false), (true, true)] {
+        let chat = bob.chats.get_mut(&alice_id).unwrap();
+        chat.closed = closed;
+        chat.authorized = authorized;
+        let before = chat.history.len();
+        assert!(!bob.receive_nearby(&alice_key, body.as_bytes()));
+        let chat = &bob.chats[&alice_id];
+        assert!(!chat.peer_nearby_on && chat.peer_nearby_token.is_none());
+        assert_eq!(chat.history.len(), before, "no note in the history");
+    }
+    // Accepted and open: the same announcement now counts.
+    let chat = bob.chats.get_mut(&alice_id).unwrap();
+    (chat.closed, chat.authorized) = (false, true);
+    assert!(bob.receive_nearby(&alice_key, body.as_bytes()));
+    assert!(bob.chats[&alice_id].peer_nearby_on);
+}

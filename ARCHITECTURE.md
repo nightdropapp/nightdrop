@@ -1274,7 +1274,9 @@ Operations (idempotent, authenticated only by capability tokens, never identity)
   The sealed bytes go again unchanged; a copy that did land the first time fails to decrypt as a
   replay and is skipped. Kept in memory only, so an app restart loses the pending ones. At most
   four retries a tick, and none after the first that fails again: each failure waits out the dial
-  and relay timeouts on the poller's thread, so a run of them would hold up inbound mail.
+  and relay timeouts on the poller's thread, so a run of them would hold up inbound mail. One for
+  a chat the user deleted is dropped: retrying would tell that person, for up to a day, that the
+  app is online.
 - **Sender gets `Ack`:** nothing. See below.
 
 **Only a named receipt confirms a message (2026-08-02, revised on review).** `sent` used to be
