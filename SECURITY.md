@@ -141,11 +141,16 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   from 0.2.2, off by default.)* A chat where both people turn it on sends its frames straight
   between the devices whenever they share a local network. Each learns the other's local address,
   and anyone on that network (its owner, a café's router, another guest) can see that the two
-  devices talk and how much — never what, since frames stay end-to-end encrypted and padded. The
-  per-chat tokens that open a local connection travel in clear on that network, so someone there
-  can replay them to waste connections or drop traffic; a dropped message falls back to Tor and the
-  relay. The app connects only to a private address the contact announced, in its own subnet.
-  Design: `docs/design/nearby.md`.
+  devices talk and how much — never what, since frames stay end-to-end encrypted and padded. A
+  local connection opens with a challenge-response on per-chat tokens that never cross the
+  network, so nothing seen there can be replayed; someone there can still hold connections open or
+  drop traffic, and a dropped message falls back to Tor and the relay. **Beacons:** for two minutes
+  after joining a network (or starting), the device broadcasts there a signal per chat, so the
+  contact finds it without the internet. Others learn only that a Night Drop with Nearby on is
+  present. **The contact, though, can recognise it wherever they listen:** any device of theirs, or
+  one they hand the chat's token to, on a network you join learns that you joined it. Turn Nearby
+  on only with someone you would trust with that. The app connects only to a private address in its
+  own subnet that the contact gave it, end to end or by beacon. Design: `docs/design/nearby.md`.
 - **What a relay can still link about your mailboxes.** *(Known limit.)* Through 0.1.25 offline
   mail went to a handle that was a static hash of the recipient's identity key, so a relay (or
   whoever seizes one) could tell that deposits from different senders, on different days, were for

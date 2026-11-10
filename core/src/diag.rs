@@ -83,7 +83,31 @@ fn open_append(path: &std::path::Path) -> std::io::Result<std::fs::File> {
 /// force-stop or crash is often the very thing being investigated, and a buffer would lose the
 /// lines leading up to it. Best-effort — a full disk must not break the app it is observing.
 fn append(tag: &str, line: &str) {
-    let mut guard = LOG_FILE.lock().unwrap_or_else(|e| e.into_inner());
+    append_with(
+        LOG_FILE.lock().unwrap_or_else(|e| e.into_inner()),
+        tag,
+        line,
+    );
+}
+
+/// [`append`] from the panic hook: waits at most 50 ms for the file, then skips it (logcat still
+/// has the line). The panic may have come from this very thread while it held the lock, and
+/// waiting for ever would hang it instead of letting it unwind.
+fn append_from_panic(tag: &str, line: &str) {
+    for _ in 0..50 {
+        match LOG_FILE.try_lock() {
+            Ok(guard) => return append_with(guard, tag, line),
+            Err(std::sync::TryLockError::Poisoned(e)) => {
+                return append_with(e.into_inner(), tag, line)
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {
+                std::thread::sleep(std::time::Duration::from_millis(1))
+            }
+        }
+    }
+}
+
+fn append_with(mut guard: std::sync::MutexGuard<'_, Option<LogFile>>, tag: &str, line: &str) {
     let Some(log) = guard.as_mut() else {
         return;
     };
@@ -308,7 +332,7 @@ pub fn install_panic_hook() {
             );
             #[cfg(target_os = "android")]
             android::write_error("nd-panic", &line);
-            append("nd-panic", &line);
+            append_from_panic("nd-panic", &line);
             previous(info);
         }));
     });

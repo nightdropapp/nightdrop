@@ -32,8 +32,8 @@ Chat menu: **"Also connect on the same Wi-Fi"**, behind a dialog that says what 
 "Your contact learns your device's address on the local network, and anyone on that network can see
 that your two devices are talking (not what you say). Messages stay end-to-end encrypted. Both of
 you need to turn this on." Since the beacons (§5a) it also says that for two minutes after joining
-a network the device sends a signal there that only the contact can tell is theirs, but that shows
-others a Night Drop with this setting on is present (`nearbyBody` in `app_en.arb`). Turning it off
+a network the device sends a signal there that only the contact can tell is theirs (on any network
+where they have a device), and that shows others a Night Drop with this setting on is present (`nearbyBody` in `app_en.arb`). Turning it off
 is immediate and needs no confirmation.
 
 Per chat, the banner shows one of:
@@ -156,6 +156,11 @@ window = unix time / 600 s
   answers a contact). It cannot tell which chat, or link beacons across
   networks or across turning Nearby off and on (a fresh token each time). Within one network the
   device's address and port already link its traffic.
+* **What the contact can do with it.** The contact holds the token, so a device of theirs (or one
+  they give the token to) left on any network recognises our beacon there: they learn when we join
+  that network, not only when we are in the same room. Inherent in a beacon only they can
+  recognise; bounded by the two-minute bursts and by turning Nearby off (a new token next time).
+  `SECURITY.md` says so.
 * **What it does not allow.** Forging one needs the contact's token, which never crosses the
   network. A recorded beacon replayed from another address does not verify
   (the address is in the tag); replayed from the same address within the window it says nothing
