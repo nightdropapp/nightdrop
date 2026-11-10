@@ -3998,8 +3998,6 @@ dependencies = [
 [[package]]
 name = "rdrand"
 version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "84448986e59427c795b929d8dbe12d176275c7d0887ee48098c35b7206f51bae"
 dependencies = [
  "libc",
  "rand_core 0.10.1",

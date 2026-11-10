@@ -19,7 +19,7 @@ Anything here that cost a session to learn says so. Those notes are the point of
   to Dart via flutter_rust_bridge; the FFI surface is `core/src/api.rs`.
 - `relay/` — untrusted store-and-forward server binary (opaque encrypted blobs only).
 - `webtunnel/`, `moat/` — the in-process WebTunnel client and the "Get bridges" client.
-- `third_party/` — vendored, patched crates (`tor-hsservice`, `saturating-time`); each carries a
+- `third_party/` — vendored, patched crates (`tor-hsservice`, `saturating-time`, `rdrand`); each carries a
   `NIGHTDROP-PATCH.md`.
 - `app/rust_builder/` — vendored cargokit plugin that compiles `core/` and bundles
   `libnightdrop` into every platform build. **Vendored third-party code — do not
