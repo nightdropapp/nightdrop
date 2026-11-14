@@ -1145,9 +1145,21 @@ fn read_line_capped<R: BufRead>(reader: &mut R, max: usize) -> std::io::Result<O
             if chunk.is_empty() {
                 (0usize, true) // EOF
             } else if let Some(i) = chunk.iter().position(|&b| b == b'\n') {
+                if buf.len().saturating_add(i) > max {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "line too long",
+                    ));
+                }
                 buf.extend_from_slice(&chunk[..i]); // exclude the '\n'
                 (i + 1, true)
             } else {
+                if buf.len().saturating_add(chunk.len()) > max {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "line too long",
+                    ));
+                }
                 buf.extend_from_slice(chunk);
                 (chunk.len(), false)
             }
@@ -1158,12 +1170,6 @@ fn read_line_capped<R: BufRead>(reader: &mut R, max: usize) -> std::io::Result<O
                 return Ok(None);
             }
             return Ok(Some(String::from_utf8_lossy(&buf).into_owned()));
-        }
-        if buf.len() > max {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "line too long",
-            ));
         }
     }
 }

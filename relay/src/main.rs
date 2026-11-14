@@ -760,12 +760,24 @@ where
             if chunk.is_empty() {
                 (0usize, true)
             } else if let Some(i) = chunk.iter().position(|&b| b == b'\n') {
+                if buf.len().saturating_add(i) > max {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "line too long",
+                    ));
+                }
                 if !budget.grow(i) {
                     return Err(busy());
                 }
                 buf.extend_from_slice(&chunk[..i]);
                 (i + 1, true)
             } else {
+                if buf.len().saturating_add(chunk.len()) > max {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::InvalidData,
+                        "line too long",
+                    ));
+                }
                 if !budget.grow(chunk.len()) {
                     return Err(busy());
                 }
@@ -779,12 +791,6 @@ where
                 return Ok(None);
             }
             return Ok(Some(String::from_utf8_lossy(&buf).into_owned()));
-        }
-        if buf.len() > max {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "line too long",
-            ));
         }
     }
 }
@@ -1270,6 +1276,39 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(e.kind(), std::io::ErrorKind::TimedOut);
+        });
+    }
+
+    #[test]
+    fn request_line_cap_includes_bytes_before_a_newline() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+            .unwrap();
+        rt.block_on(async {
+            let mut terminated = drip(vec![b"1234\n"], 0);
+            let e = read_line_paced(
+                &mut terminated,
+                3,
+                Duration::from_secs(1),
+                Duration::from_secs(1),
+                0,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
+
+            let mut unterminated = drip(vec![b"1234"], 0);
+            let e = read_line_paced(
+                &mut unterminated,
+                3,
+                Duration::from_secs(1),
+                Duration::from_secs(1),
+                0,
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(e.kind(), std::io::ErrorKind::InvalidData);
         });
     }
 
