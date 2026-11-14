@@ -1,5 +1,14 @@
 # Patched copy of saturating-time 0.5.0
 
+> **Unused since arti 0.48 (0.2.2, 2026-11-14).** arti 0.48 requires saturating-time 0.6.0, so this
+> 0.5.0 patch no longer applies (cargo warns "patch ... was not used in the crate graph"). 0.6.0
+> contains the fix itself: `find_limit` treats a step that makes no progress like `None`
+> (`Some(st) if st != res`), and `saturating_add` uses `unwrap_or_else(max_value)`. Checked by
+> reading the 0.6.0 source and on Windows 11 (the VM): `SystemTime::max_value()` and a saturating
+> add past the end return in 6 µs with 0.6.0, while the same program with 0.5.0 hung until killed
+> after 20 s. Still to do before removing this directory and its `[patch.crates-io]` entry: a
+> Windows bridge test of 0.2.2 (the condition below).
+
 Upstream: <https://crates.io/crates/saturating-time> (now maintained inside arti), MIT OR Apache-2.0.
 Used through `[patch.crates-io]` in the workspace `Cargo.toml`.
 

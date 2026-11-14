@@ -1,5 +1,6 @@
 # cargo-audit configuration. Advisories reviewed and accepted, with rationale — run `cargo audit`
-# from the repo root. Re-review on every dependency bump.
+# from the repo root. Re-review on every dependency bump. All four re-checked for arti 0.48
+# (2026-11-14): `cargo audit` with nothing ignored finds exactly these four, and each reason holds.
 [advisories]
 ignore = [
   # RUSTSEC-2023-0071 — RSA "Marvin Attack": a timing side-channel in RSA PKCS#1 v1.5 decryption.
