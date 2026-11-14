@@ -284,6 +284,12 @@ pub trait Transport: Send + Sync {
         false
     }
 
+    /// Whether this contact's authenticated beacon has been heard during the current local
+    /// discovery session. Transports without Nearby do not discover local contacts.
+    fn nearby_discovered(&self, _peer: &str) -> bool {
+        false
+    }
+
     /// Check, in the background, the nearby routes not heard from lately (the token exchange only,
     /// no message), so the chat can say whether the local path works before anything is sent.
     fn nearby_probe(&self) {}

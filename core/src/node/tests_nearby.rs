@@ -88,6 +88,13 @@ fn turning_it_off_tells_them_and_stops_the_local_path() {
     bob.set_nearby(&alice_id, false);
     alice.pump().unwrap();
     assert!(!alice.contacts()[0].peer_nearby, "Alice was told");
+    assert!(
+        alice
+            .messages(&bob_id)
+            .last()
+            .is_some_and(|m| m.system && m.text.contains("They turned off")),
+        "and her history says so, after his earlier request"
+    );
     net.disconnect("bob");
     let _ = alice.send(&bob_id, "after off");
     assert!(

@@ -1,18 +1,19 @@
-//! Nearby (`docs/design/nearby.md`): the main transport (Tor) plus a same-Wi-Fi path for the chats
-//! where both people turned "Also connect on the same Wi-Fi" on.
+//! Nearby (`docs/design/nearby.md`): the main transport (Tor) plus a same-Wi-Fi path for a chat
+//! when both people have turned "Also connect on the same Wi-Fi" on.
 //!
 //! [`NearbyTransport`] wraps the main transport and keeps its address (the onion). For a peer with
-//! a usable route — both sides on, a private address in our subnet — a send tries the local network
+//! a usable route — a private address in our subnet, learned from a beacon or announcement — a send tries the local network
 //! first and falls back to the main transport on any failure. Each local connection opens with a
-//! challenge-response on the chat's two tokens (§5, [`beacon::proof`]): each side proves it holds
-//! the token the other gave that chat, over both sides' fresh nonces, so nothing seen on the network
-//! can be replayed and the tokens never cross it. Anything else is closed. The tokens only keep
-//! strangers and wrong hosts out; what is sent is end-to-end encrypted and authenticated like any
-//! frame.
+//! challenge-response on a per-chat key (§5, [`beacon::proof`]): each side proves it holds the
+//! discovery key or legacy token over both sides' fresh nonces, so nothing seen on the network can
+//! be replayed and no key crosses it. Anything else is closed. The keys only keep strangers and
+//! wrong hosts out; what is sent is end-to-end encrypted and authenticated like any frame.
 //!
 //! The contact's address comes from their announcement over Tor or, when that cannot arrive (no
 //! internet, a new network), from their [`beacon`] on the local network, which only the holder of
-//! their token can make.
+//! the pair's discovery key or their legacy token can make. A looped-back broadcast from our own
+//! interface and our own listening port is ignored: the shared discovery key authenticates both
+//! directions, so it would otherwise authenticate our own packet as the contact.
 //!
 //! This is the second direct (non-Tor) path `ARCHITECTURE.md` §1a allows, and only for a contact
 //! whose own app told us, end to end or with a beacon only they can make, where to reach it.
@@ -72,14 +73,28 @@ const BEACON_REPORT_EVERY: Duration = Duration::from_secs(60);
 /// What the node tells the transport about one chat with Nearby on (ours).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NearbyRoute {
-    /// The token we gave this chat: a connection that proves it holds it is theirs, and our
-    /// beacons are made with it.
+    /// Our per-toggle token, used for legacy beacon and connection proofs after it is exchanged.
     pub our_token: String,
-    /// The token they gave us, once they turned it on too: we prove we hold it, and recognise
-    /// their beacons by it.
+    /// Their per-toggle token, once they turned it on and the announcement reached us.
     pub peer_token: Option<String>,
+    /// A stable secret known to both ends from the encrypted pairing seed, so a peer can be found
+    /// locally before its Nearby-on announcement gets through Tor.
+    pub discovery_key: Option<String>,
     /// Where they last announced, over Tor, that they listen. A beacon can find them elsewhere.
     pub peer_at: Option<SocketAddrV4>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum BeaconKey {
+    Legacy,
+    Discovery,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LearnedAddress {
+    at: SocketAddrV4,
+    key: BeaconKey,
+    seen_at: Instant,
 }
 
 /// Where this device's local address comes from (replaced in tests, which run on loopback).
@@ -87,18 +102,13 @@ type IpSource = fn() -> Option<Ipv4Addr>;
 
 struct Listening {
     port: u16,
-    /// Where we receive beacons, if that port could be bound.
-    #[cfg_attr(not(test), allow(dead_code))]
-    beacon_port: Option<u16>,
     stop: Arc<AtomicBool>,
 }
 
-/// Where beacons go: the local broadcast address on each of our networks, or (tests) one socket.
+/// Where beacons go: the local broadcast address on each of our networks.
 #[derive(Clone, Copy)]
 enum BeaconTarget {
     Broadcast,
-    #[cfg(test)]
-    To(SocketAddrV4),
 }
 
 struct Shared {
@@ -127,7 +137,7 @@ struct Shared {
     allow_loopback: bool,
     /// Peer onion → where a beacon found them, when that differs from their announcement. Held in
     /// memory only; their next announcement over Tor replaces it.
-    learned: Mutex<HashMap<String, SocketAddrV4>>,
+    learned: Mutex<HashMap<String, LearnedAddress>>,
     /// Send our beacons now (we just found a contact, who may not have found us).
     beacon_now: AtomicBool,
     /// The UDP port we receive beacons on ([`beacon::PORT`]; any free one in tests).
@@ -266,13 +276,9 @@ impl<T: Transport> NearbyTransport<T> {
                 }
             }
         });
-        let beacon_port = beacon_receiver(&self.shared, &stop);
+        let _beacon_port = beacon_receiver(&self.shared, &stop, port);
         beacon_sender(&self.shared, port, &stop);
-        Some(Listening {
-            port,
-            beacon_port,
-            stop,
-        })
+        Some(Listening { port, stop })
     }
 
     /// Try the local path to `peer`. `Err` means: use the main transport.
@@ -308,16 +314,11 @@ impl Shared {
     /// Open a local connection to `peer` and run the token exchange (§5).
     fn dial(&self, peer: &str) -> Result<TcpStream> {
         let route = self.routes.lock().unwrap().get(peer).cloned();
-        let Some(NearbyRoute {
-            our_token,
-            peer_token: Some(their_token),
-            peer_at,
-        }) = route
-        else {
+        let Some(route) = route else {
             anyhow::bail!("no nearby route");
         };
         let learned = self.learned.lock().unwrap().get(peer).copied();
-        let Some(addr) = learned.or(peer_at) else {
+        let Some(addr) = learned.map(|l| l.at).or(route.peer_at) else {
             anyhow::bail!("no local address for this contact yet");
         };
         if !self.on_our_network(*addr.ip()) {
@@ -334,7 +335,29 @@ impl Shared {
         }
         // Only from here is a connection attempted, and only its failure starts the back-off
         // ([`RETRY_AFTER`]): a send with no route yet must not hold off the first real attempt.
-        let attempt = Self::exchange(addr, &their_token, &our_token);
+        let keys = match learned.map(|l| l.key) {
+            Some(BeaconKey::Discovery) => route
+                .discovery_key
+                .as_deref()
+                .map(|key| (key, key))
+                .or_else(|| {
+                    route
+                        .peer_token
+                        .as_deref()
+                        .map(|peer| (peer, route.our_token.as_str()))
+                }),
+            Some(BeaconKey::Legacy) => route
+                .peer_token
+                .as_deref()
+                .map(|peer| (peer, route.our_token.as_str())),
+            None => route
+                .peer_token
+                .as_deref()
+                .map(|peer| (peer, route.our_token.as_str()))
+                .or_else(|| route.discovery_key.as_deref().map(|key| (key, key))),
+        }
+        .ok_or_else(|| anyhow::anyhow!("no shared Nearby key"))?;
+        let attempt = Self::exchange(addr, keys.0, keys.1);
         match &attempt {
             Ok(_) => {
                 self.dialed
@@ -464,19 +487,28 @@ impl Shared {
         self.is_local(from) && self.on_our_network(from)
     }
 
-    /// One beacon per chat where both have Nearby on, from each of our local networks. A chat whose
-    /// contact has not turned it on gets none: nobody could use it, and it would only add to what
-    /// the network sees.
+    /// Discovery beacons go out as soon as our side turns Nearby on. The per-chat discovery key
+    /// lets the contact recognize us before their Nearby-on announcement reaches us over Tor.
+    /// Keep the legacy beacon too when we know the peer's old per-toggle token, for mixed-version
+    /// pairs whose peer has not learned the discovery-key protocol yet.
     fn send_beacons(&self, networks: &[Ipv4Addr], listen_port: u16) {
-        let tokens: Vec<String> = self
+        let keys: Vec<(String, BeaconKey)> = self
             .routes
             .lock()
             .unwrap()
             .values()
-            .filter(|r| r.peer_token.is_some())
-            .map(|r| r.our_token.clone())
+            .flat_map(|r| {
+                let mut keys = Vec::with_capacity(2);
+                if let Some(key) = &r.discovery_key {
+                    keys.push((key.clone(), BeaconKey::Discovery));
+                }
+                if r.peer_token.is_some() {
+                    keys.push((r.our_token.clone(), BeaconKey::Legacy));
+                }
+                keys
+            })
             .collect();
-        if tokens.is_empty() {
+        if keys.is_empty() {
             return;
         }
         let target = *self.beacon_target.lock().unwrap();
@@ -504,11 +536,13 @@ impl Shared {
                     }
                     broadcast_targets(ip)
                 }
-                #[cfg(test)]
-                BeaconTarget::To(to) => vec![to],
             };
-            for token in &tokens {
-                let packet = beacon::make(token, ip, listen_port, window);
+            for (key, kind) in &keys {
+                let packet = if *kind == BeaconKey::Discovery {
+                    beacon::make_discovery(key, ip, listen_port, window)
+                } else {
+                    beacon::make(key, ip, listen_port, window)
+                };
                 for to in &to {
                     match socket.send_to(&packet, to) {
                         Ok(_) => stats.sent += 1,
@@ -554,27 +588,60 @@ impl Shared {
     }
 
     /// A beacon from `from`: if it is a contact's, dial them there from now on.
-    fn heard_beacon(&self, packet: &[u8], from: Ipv4Addr) {
+    fn heard_beacon(&self, packet: &[u8], from: Ipv4Addr, our_listen_port: u16) {
         let window = beacon::window_now();
         let found = self.routes.lock().unwrap().iter().find_map(|(onion, r)| {
+            if let Some(port) = r
+                .discovery_key
+                .as_deref()
+                .and_then(|key| beacon::verify_discovery(packet, from, key, window))
+            {
+                return Some((
+                    onion.clone(),
+                    LearnedAddress {
+                        at: SocketAddrV4::new(from, port),
+                        key: BeaconKey::Discovery,
+                        seen_at: Instant::now(),
+                    },
+                    r.peer_at,
+                ));
+            }
             let port = beacon::verify(packet, from, r.peer_token.as_deref()?, window)?;
-            Some((onion.clone(), SocketAddrV4::new(from, port), r.peer_at))
+            Some((
+                onion.clone(),
+                LearnedAddress {
+                    at: SocketAddrV4::new(from, port),
+                    key: BeaconKey::Legacy,
+                    seen_at: Instant::now(),
+                },
+                r.peer_at,
+            ))
         });
         {
             let mut stats = self.beacon_stats.lock().unwrap();
             stats.heard += 1;
             stats.from_contact += u32::from(found.is_some());
         }
-        let Some((onion, at, announced)) = found else {
+        let Some((onion, learned_at, announced)) = found else {
             return;
         };
+        let at = learned_at.at;
+        // NDB2 uses a symmetric key shared by both ends, so an OS loopback can authenticate our
+        // own broadcast against the contact's route. Match both the source interface and our TCP
+        // port: another Night Drop process on this host has a different listening port and remains
+        // discoverable (useful for multi-account desktop installs and tests).
+        if at.port() == our_listen_port && self.local_ips().contains(&from) {
+            self.beacon_stats.lock().unwrap().ignored += 1;
+            return;
+        }
         if !valid_port(at.port()) {
             return;
         }
         let mut learned = self.learned.lock().unwrap();
-        let current = learned.get(&onion).copied().or(announced);
+        let current = learned.get(&onion).map(|l| l.at).or(announced);
         let works = current.is_some_and(|c| self.dialed_recently(&onion, c));
         if current == Some(at) {
+            learned.insert(onion.clone(), learned_at);
             drop(learned);
             // Where we thought: but if we have not reached them there lately (we just arrived),
             // check now rather than at the next once-a-minute probe.
@@ -589,10 +656,10 @@ impl Shared {
         if works && !self.recently_failed(&onion) {
             return;
         }
-        if announced == Some(at) {
+        if announced == Some(at) && learned_at.key == BeaconKey::Legacy {
             learned.remove(&onion);
         } else {
-            learned.insert(onion.clone(), at);
+            learned.insert(onion.clone(), learned_at);
         }
         drop(learned);
         crate::diag!(
@@ -607,7 +674,7 @@ impl Shared {
     }
 }
 
-/// Serve one accepted connection: check its token, answer with the dialer's, then read frames.
+/// Serve one accepted connection: check its per-chat legacy token or discovery key, then read frames.
 fn serve(
     mut stream: TcpStream,
     shared: &Shared,
@@ -626,8 +693,14 @@ fn serve(
     let line = read_line::<{ PROOF_CHARS + 1 }>(&mut stream)?;
     let presented = &line[..PROOF_CHARS];
     // Every route is checked, so the time taken does not say which one came close.
-    let mut found = None;
+    let mut found: Option<(String, String)> = None;
     for (onion, route) in shared.routes.lock().unwrap().iter() {
+        if let Some(key) = route.discovery_key.as_deref() {
+            let want = proof(key, Role::Dialer, dialer_nonce, ours.as_bytes());
+            if bytes_equal(presented, want.as_bytes()) {
+                found = Some((onion.clone(), key.to_string()));
+            }
+        }
         let want = proof(
             &route.our_token,
             Role::Dialer,
@@ -635,18 +708,20 @@ fn serve(
             ours.as_bytes(),
         );
         if bytes_equal(presented, want.as_bytes()) {
-            if let Some(theirs) = &route.peer_token {
-                found = Some((onion.clone(), theirs.clone()));
+            if let Some(peer_token) = route.peer_token.as_ref() {
+                // The dialer proves the token we announced; answer with the dialer's token that
+                // they announced to us. Unlike the shared discovery key, legacy tokens differ.
+                found = Some((onion.clone(), peer_token.clone()));
             }
         }
     }
-    let (onion, theirs) = found.ok_or_else(|| {
+    let (onion, proof_key) = found.ok_or_else(|| {
         anyhow::anyhow!(
             "unknown proof (not a contact with Nearby on, or they have not told us yet)"
         )
     })?;
     crate::diag!("nearby: a contact connected locally");
-    let answer = proof(&theirs, Role::Listener, dialer_nonce, ours.as_bytes());
+    let answer = proof(&proof_key, Role::Listener, dialer_nonce, ours.as_bytes());
     stream.write_all(&[answer.as_bytes(), b"\n"].concat())?;
     stream.flush()?;
     shared.record(&onion, true);
@@ -676,7 +751,11 @@ fn read_line<const N: usize>(stream: &mut TcpStream) -> Result<[u8; N]> {
 /// Receive beacons (§5a) while listening: a contact's beacon, from our own subnet, sets where we
 /// dial them. Returns the UDP port, or `None` if it could not be bound (then we can still be
 /// found, by our own beacons, but cannot find).
-fn beacon_receiver(shared: &Arc<Shared>, stop: &Arc<AtomicBool>) -> Option<u16> {
+fn beacon_receiver(
+    shared: &Arc<Shared>,
+    stop: &Arc<AtomicBool>,
+    our_listen_port: u16,
+) -> Option<u16> {
     let socket = match bind_beacon_socket(shared.beacon_port) {
         Ok(s) => s,
         Err(e) => {
@@ -701,7 +780,7 @@ fn beacon_receiver(shared: &Arc<Shared>, stop: &Arc<AtomicBool>) -> Option<u16> 
                 && checked <= MAX_BEACONS_PER_SEC
                 && shared.admits_source(*from.ip())
             {
-                shared.heard_beacon(&buf[..n], *from.ip());
+                shared.heard_beacon(&buf[..n], *from.ip(), our_listen_port);
             } else {
                 shared.beacon_stats.lock().unwrap().ignored += 1;
             }
@@ -952,7 +1031,9 @@ impl<T: Transport> Transport for NearbyTransport<T> {
             self.shared.learned.lock().unwrap().retain(|onion, _| {
                 match (current.get(onion), routes.get(onion)) {
                     (Some(old), Some(new)) => {
-                        old.peer_at == new.peer_at && old.peer_token == new.peer_token
+                        old.peer_at == new.peer_at
+                            && old.peer_token == new.peer_token
+                            && old.discovery_key == new.discovery_key
                     }
                     _ => false,
                 }
@@ -997,6 +1078,15 @@ impl<T: Transport> Transport for NearbyTransport<T> {
         self.shared.reachable_recently(peer, REACHABLE_FOR)
     }
 
+    fn nearby_discovered(&self, peer: &str) -> bool {
+        self.shared
+            .learned
+            .lock()
+            .unwrap()
+            .get(peer)
+            .is_some_and(|l| l.seen_at.elapsed() < BEACON_BURST)
+    }
+
     fn set_local_addresses(&self, interfaces: Vec<(String, Ipv4Addr)>) {
         let changed = self.shared.interfaces.lock().unwrap().as_ref() != Some(&interfaces);
         *self.shared.interfaces.lock().unwrap() = Some(interfaces.clone());
@@ -1036,7 +1126,7 @@ impl<T: Transport> Transport for NearbyTransport<T> {
             .unwrap()
             .iter()
             .filter(|(onion, r)| {
-                r.peer_token.is_some()
+                (r.peer_token.is_some() || r.discovery_key.is_some())
                     && (r.peer_at.is_some()
                         || self.shared.learned.lock().unwrap().contains_key(*onion))
             })
@@ -1122,6 +1212,7 @@ mod tests {
             NearbyRoute {
                 our_token: ta.clone(),
                 peer_token: None,
+                discovery_key: None,
                 peer_at: None,
             },
         )]));
@@ -1130,6 +1221,7 @@ mod tests {
             NearbyRoute {
                 our_token: tb.clone(),
                 peer_token: None,
+                discovery_key: None,
                 peer_at: None,
             },
         )]));
@@ -1139,6 +1231,7 @@ mod tests {
             NearbyRoute {
                 our_token: ta.clone(),
                 peer_token: Some(tb.clone()),
+                discovery_key: None,
                 peer_at: Some(pb),
             },
         )]));
@@ -1147,6 +1240,7 @@ mod tests {
             NearbyRoute {
                 our_token: tb,
                 peer_token: Some(ta),
+                discovery_key: None,
                 peer_at: Some(pa),
             },
         )]));
@@ -1171,19 +1265,10 @@ mod tests {
         let route = |ours: &str, theirs: &str| NearbyRoute {
             our_token: ours.into(),
             peer_token: Some(theirs.into()),
+            discovery_key: None,
             peer_at: None,
         };
         b.set_nearby(HashMap::from([("a.onion".into(), route(&tb, &ta))]));
-        let b_beacons = b
-            .listening
-            .lock()
-            .unwrap()
-            .as_ref()
-            .unwrap()
-            .beacon_port
-            .unwrap();
-        *a.shared.beacon_target.lock().unwrap() =
-            BeaconTarget::To(SocketAddrV4::new(Ipv4Addr::LOCALHOST, b_beacons));
         net.disconnect("a.onion");
         assert!(
             b.send("a.onion", b"x").is_err(),
@@ -1191,6 +1276,12 @@ mod tests {
         );
         b.shared.failed.lock().unwrap().clear();
         a.set_nearby(HashMap::from([("b.onion".into(), route(&ta, &tb))]));
+        let a_at = a.nearby_address().unwrap();
+        b.shared.heard_beacon(
+            &beacon::make(&ta, *a_at.ip(), a_at.port(), beacon::window_now()),
+            *a_at.ip(),
+            u16::MAX,
+        );
         for _ in 0..100 {
             if b.shared.learned.lock().unwrap().contains_key("a.onion") {
                 break;
@@ -1198,7 +1289,12 @@ mod tests {
             thread::sleep(Duration::from_millis(20));
         }
         assert_eq!(
-            b.shared.learned.lock().unwrap().get("a.onion").copied(),
+            b.shared
+                .learned
+                .lock()
+                .unwrap()
+                .get("a.onion")
+                .map(|l| l.at),
             a.nearby_address(),
             "b learned where a listens"
         );
@@ -1224,25 +1320,98 @@ mod tests {
             NearbyRoute {
                 our_token: token('b'),
                 peer_token: Some(token('a')),
+                discovery_key: None,
                 peer_at: None,
             },
         )]));
         let lo = Ipv4Addr::LOCALHOST;
         let w = beacon::window_now();
         b.shared
-            .heard_beacon(&beacon::make(&token('z'), lo, 40_001, w), lo);
+            .heard_beacon(&beacon::make(&token('z'), lo, 40_001, w), lo, u16::MAX);
         b.shared.heard_beacon(
             &beacon::make(&token('a'), Ipv4Addr::new(127, 0, 0, 2), 40_001, w),
             lo,
+            u16::MAX,
         );
         b.shared
-            .heard_beacon(&beacon::make(&token('a'), lo, 9100, w), lo);
+            .heard_beacon(&beacon::make(&token('a'), lo, 9100, w), lo, u16::MAX);
         assert!(b.shared.learned.lock().unwrap().is_empty());
         b.shared
-            .heard_beacon(&beacon::make(&token('a'), lo, 40_001, w), lo);
+            .heard_beacon(&beacon::make(&token('a'), lo, 40_001, w), lo, u16::MAX);
         assert_eq!(
-            b.shared.learned.lock().unwrap().get("a.onion").copied(),
+            b.shared
+                .learned
+                .lock()
+                .unwrap()
+                .get("a.onion")
+                .map(|l| l.at),
             Some(SocketAddrV4::new(lo, 40_001))
+        );
+    }
+
+    /// A shared pairing key is enough to find and authenticate a peer before either Nearby
+    /// announcement (and therefore either legacy token) has arrived over Tor.
+    #[test]
+    fn discovery_beacon_connects_without_peer_tokens_or_internet() {
+        let (net, a, b) = pair();
+        let key = token('k');
+        let route = || NearbyRoute {
+            our_token: token('x'),
+            peer_token: None,
+            discovery_key: Some(key.clone()),
+            peer_at: None,
+        };
+        a.set_nearby(HashMap::from([("b.onion".into(), route())]));
+        b.set_nearby(HashMap::from([("a.onion".into(), route())]));
+        let a_at = a.nearby_address().unwrap();
+        b.shared.heard_beacon(
+            &beacon::make_discovery(&key, *a_at.ip(), a_at.port(), beacon::window_now()),
+            *a_at.ip(),
+            u16::MAX,
+        );
+        net.disconnect("a.onion");
+        b.send("a.onion", b"offline discovery").unwrap();
+        assert_eq!(recv(&a).as_deref(), Some(&b"offline discovery"[..]));
+        assert!(b.nearby_reachable("a.onion"));
+    }
+
+    #[test]
+    fn a_looped_back_discovery_beacon_is_not_mistaken_for_the_peer() {
+        let (_net, a, _b) = pair();
+        let key = token('k');
+        a.set_nearby(HashMap::from([(
+            "b.onion".into(),
+            NearbyRoute {
+                our_token: token('x'),
+                peer_token: None,
+                discovery_key: Some(key.clone()),
+                peer_at: None,
+            },
+        )]));
+        let own_ip = a.shared.local_ip().unwrap();
+        let own_port = 40_000;
+        let packet = beacon::make_discovery(&key, own_ip, own_port, beacon::window_now());
+
+        a.shared.heard_beacon(&packet, own_ip, own_port);
+
+        assert!(a.shared.learned.lock().unwrap().is_empty());
+        assert_eq!(a.shared.beacon_stats.lock().unwrap().ignored, 1);
+
+        // A distinct Night Drop listener on this same host has a different TCP port and is not
+        // mistaken for our own looped-back packet.
+        a.shared.heard_beacon(
+            &beacon::make_discovery(&key, own_ip, 40_001, beacon::window_now()),
+            own_ip,
+            own_port,
+        );
+        assert_eq!(
+            a.shared
+                .learned
+                .lock()
+                .unwrap()
+                .get("b.onion")
+                .map(|l| l.at.port()),
+            Some(40_001)
         );
     }
 
@@ -1292,6 +1461,7 @@ mod tests {
             NearbyRoute {
                 our_token: token('a'),
                 peer_token: Some(token('b')),
+                discovery_key: None,
                 peer_at: Some("192.168.77.5:40000".parse().unwrap()),
             },
         )]));
@@ -1311,6 +1481,7 @@ mod tests {
         a.shared.heard_beacon(
             &beacon::make(&token('b'), lo, 40_001, beacon::window_now()),
             lo,
+            u16::MAX,
         );
         assert!(!a.shared.probed.lock().unwrap().contains_key("b.onion"));
         // So does a change of our own networks.
@@ -1333,6 +1504,7 @@ mod tests {
             NearbyRoute {
                 our_token: token('a'),
                 peer_token: Some(token('b')),
+                discovery_key: None,
                 peer_at: Some(stale),
             },
         )]));
@@ -1342,9 +1514,15 @@ mod tests {
         a.shared.heard_beacon(
             &beacon::make(&token('b'), lo, pb.port(), beacon::window_now()),
             lo,
+            u16::MAX,
         );
         assert_eq!(
-            a.shared.learned.lock().unwrap().get("b.onion").copied(),
+            a.shared
+                .learned
+                .lock()
+                .unwrap()
+                .get("b.onion")
+                .map(|l| l.at),
             Some(pb),
             "b's beacon wins over the stale address"
         );
@@ -1353,9 +1531,15 @@ mod tests {
         a.shared.heard_beacon(
             &beacon::make(&token('b'), lo, 40_002, beacon::window_now()),
             lo,
+            u16::MAX,
         );
         assert_eq!(
-            a.shared.learned.lock().unwrap().get("b.onion").copied(),
+            a.shared
+                .learned
+                .lock()
+                .unwrap()
+                .get("b.onion")
+                .map(|l| l.at),
             Some(pb)
         );
     }
@@ -1383,6 +1567,7 @@ mod tests {
             NearbyRoute {
                 our_token: token('a'),
                 peer_token: Some(token('z')),
+                discovery_key: None,
                 peer_at: Some(pb),
             },
         )]));
@@ -1407,6 +1592,7 @@ mod tests {
             NearbyRoute {
                 our_token: token('q'),
                 peer_token: Some(token('b')),
+                discovery_key: None,
                 peer_at: Some(pb),
             },
         )]));

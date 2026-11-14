@@ -55,7 +55,8 @@ These define the product. Do not violate them, and flag any change that would:
   address; anyone on the network sees that the devices talk). It may only connect to a private
   address in our own subnet that the contact itself gave us: announced end to end, or (decided
   2026-11-09, so phones that change network with no internet still find each other) in a local
-  beacon only that contact can make, keyed from the token it sent us end to end
+  beacon keyed from the pair secret shared in the encrypted pairing Hello; older beacons use the
+  per-toggle token announced end to end
   (`docs/design/nearby.md` §5a). Do not add another direct path without the same explicit
   decision.
 - **Backups are user-owned secrets.** The backup password is randomly generated, shown once, never
@@ -674,15 +675,17 @@ on a re-pair (new session) exactly like `verified`.
   opt-in on both sides (§1a's second exception), a chat's frames go device to device over the local
   network when both are on one, with Tor behind every send. `NearbyTransport` wraps the Tor
   transport and keeps the onion as the address; each side announces its local `ip:port` and a
-  per-chat token on `Frame::Captures`, a local connection opens with a token exchange both ways,
+  per-chat token on `Frame::Captures`, a local connection opens with a proof using the pair secret
+  or legacy tokens both ways,
   and only private addresses in our own subnet are dialled or answered. Content stays end-to-end
   encrypted and padded, so a local observer sees only that two devices talk — it is **not
   anonymized**. **Beacons (§5a):** while a chat has it on, each device broadcasts on its local
-  networks a beacon only that contact can recognise (keyed from the chat's token, never
-  repeating), so two phones that moved to a network with no internet still find each other; the
+  networks a beacon only that contact can recognise (keyed from the shared pair secret, never
+  repeating), so two phones can find each other even when Nearby is first enabled offline; the
   address a beacon gives is held in memory and replaced by the contact's next announcement;
-  beacons go out only for two minutes after joining a network. The local connection opens with a
-  challenge-response on the two tokens, so nothing on the wire can be replayed. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
+  beacons go out for two minutes after Nearby starts or the device joins a network. Listening is
+  active only while at least one local chat has Nearby enabled. The local connection opens with a
+  challenge-response on the pair key, so nothing on the wire can be replayed. Bluetooth is designed (`docs/design/nearby.md` §10), not built. The older LAN-only core
   (`transport::lan`, `NightdropCore::new_lan`) remains only for the device integration tests.
 - **Metadata protection — fixed-size framing:** every `Frame` is length-prefixed and
   **zero-padded to a fixed size bucket** (`core/src/wire::encode`, `WIRE_VERSION` 2) before it
@@ -1421,6 +1424,12 @@ mail queues on the relay until we restore within its 24h window.
 - App **alive** (foreground or backgrounded-but-running): background `peek` finds queued → local
   notification.
 - App **killed**: no notification until reopened; **fetch-on-open** then delivers the queue.
+- **Cadence follows visibility, notifications follow focus** (`app.dart`). On screen, focused
+  (`resumed`) or not (`inactive`: a desktop window behind another app, Android's notification
+  shade), the relay is checked every 15 s; hidden or paused, every 5 minutes. A new message raises
+  a notification whenever the app is not focused. `inactive` used to count as background, so a
+  desktop window in plain view checked every 5 minutes and a contact's change took that long to
+  show (2026-11-14, a Nearby "off" seen 5½ minutes late).
 - Deferred option (not v1): an **Android foreground service** keeps the `peek` alive in the
   background **without** any push provider (peek is over Tor) — reliable background notifications
   at the cost of a persistent notification. iOS cannot, by design.

@@ -143,6 +143,25 @@ pub(super) fn pair_secret(a_ik: &str, b_ik: &str, own: &[u8; 32], peer: &[u8; 32
     out
 }
 
+/// A separate, stable per-chat key for Nearby discovery. New chats receive the mailbox seed
+/// inside the authenticated pairing Hello; older 0.2 chats use the same confirmed contribution
+/// agreement. Domain separation keeps beacon and local-connection proofs distinct from mailbox
+/// handles, even though both start from this pair secret.
+pub(super) fn nearby_discovery_key(a_ik: &str, b_ik: &str, pair: &MailboxPair) -> Option<[u8; 32]> {
+    use sha2::Sha256;
+
+    let peer = pair.peer.as_ref()?;
+    if !pair.peer_confirmed {
+        return None;
+    }
+    let root = pair_secret(a_ik, b_ik, &pair.own, peer);
+    let hk = hkdf::Hkdf::<Sha256>::new(Some(b"nightdrop/nearby/discovery/v1"), &root);
+    let mut out = [0u8; 32];
+    hk.expand(b"beacon-and-local-proof", &mut out)
+        .expect("32 bytes is a valid HKDF-SHA256 output length");
+    Some(out)
+}
+
 /// What a peer sends to prove it holds `secret`. One-way, so it reveals nothing about it.
 pub(super) fn confirm_hash(secret: &[u8; 32]) -> [u8; 32] {
     use sha2::{Digest, Sha256};
@@ -643,6 +662,31 @@ mod tests {
             pair_secret("alice", "carol", &a, &b),
             "bound to the pair's identity keys"
         );
+    }
+
+    #[test]
+    fn nearby_key_is_pair_bound_and_requires_a_confirmed_shared_secret() {
+        let a = MailboxPair {
+            own: [1; 32],
+            peer: Some([2; 32]),
+            peer_confirmed: true,
+            confirm_sent: true,
+            announced_at: None,
+        };
+        let b = MailboxPair {
+            own: [2; 32],
+            peer: Some([1; 32]),
+            peer_confirmed: true,
+            confirm_sent: true,
+            announced_at: None,
+        };
+        let ka = nearby_discovery_key("alice", "bob", &a).unwrap();
+        assert_eq!(ka, nearby_discovery_key("bob", "alice", &b).unwrap());
+        assert_ne!(ka, nearby_discovery_key("alice", "carol", &a).unwrap());
+
+        let mut unconfirmed = a;
+        unconfirmed.peer_confirmed = false;
+        assert!(nearby_discovery_key("alice", "bob", &unconfirmed).is_none());
     }
 
     #[test]

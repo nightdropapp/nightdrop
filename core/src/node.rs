@@ -3638,9 +3638,10 @@ impl Node {
                 .to_string();
                 dto.peer_outdated = c.outdated();
                 dto.nearby = c.nearby_token.is_some();
-                dto.peer_nearby = c.peer_nearby_on;
+                let discovered = self.transport.nearby_discovered(&c.peer_address);
+                dto.peer_nearby = c.peer_nearby_on || discovered;
                 dto.nearby_connected = dto.nearby
-                    && c.peer_nearby_token.is_some()
+                    && dto.peer_nearby
                     && self.transport.nearby_reachable(&c.peer_address);
                 dto.server_storage_available =
                     !self.relays.is_empty() && c.relay_set.as_ref().is_some_and(|s| !s.is_empty());

@@ -156,6 +156,7 @@ impl Node {
     }
 
     fn push_nearby_routes(&self) {
+        let me = self.identity_key();
         let routes: HashMap<String, NearbyRoute> = self
             .chats
             .values()
@@ -167,6 +168,13 @@ impl Node {
                     NearbyRoute {
                         our_token,
                         peer_token: c.peer_nearby_token.clone(),
+                        discovery_key: c
+                            .mailbox
+                            .as_ref()
+                            .and_then(|pair| {
+                                super::mailbox::nearby_discovery_key(&me, &c.contact.id, pair)
+                            })
+                            .map(|key| super::encode_secret(&key)),
                         peer_at: c.peer_nearby_at,
                     },
                 ))
@@ -250,6 +258,12 @@ impl Node {
                 "📶 They'd like to also connect on the same Wi-Fi. Turn it on in this chat's menu \
                  if you agree."
                     .to_string(),
+            ));
+        }
+        // Said in the history too, so their earlier request is not left there as the last word.
+        if !peer.on && chat.peer_nearby_on {
+            chat.history.push(ChatMessage::system(
+                "📶 They turned off \"Also connect on the same Wi-Fi\".".to_string(),
             ));
         }
         crate::diag!(

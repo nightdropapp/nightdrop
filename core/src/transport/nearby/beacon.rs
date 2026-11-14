@@ -1,14 +1,16 @@
 //! Finding a contact on the local network without the internet (`docs/design/nearby.md` §5a).
 //!
-//! While a chat has Nearby on, each device broadcasts a small UDP beacon on each of its local
-//! networks: a random nonce, the port it listens on, and a tag over both, over the sending address
-//! and over the current ten-minute window. The tag's key is derived from the chat's token, which
-//! the contact received end to end, so only that contact can recognise a beacon, and only as coming
-//! from the address and port it names. To anyone else it is 30 random-looking bytes that never
-//! repeat. A beacon replayed from another address does not verify.
+//! While a chat has Nearby on locally, each device broadcasts a small UDP beacon on each of its
+//! local networks: a random nonce, the port it listens on, and a tag over both, over the sending
+//! address and over the current ten-minute window. New beacons use a per-chat discovery key derived
+//! from the pair secret shared at pairing, so the contact can recognize one before an online
+//! Nearby-on announcement. Legacy beacons use the per-toggle token once it has been exchanged.
+//! To anyone else either format is 30 random-looking bytes that never repeat. A beacon replayed
+//! from another address does not verify.
 //!
-//! The same token also keys the challenge-response that opens a local connection ([`proof`]); a
-//! different HKDF salt keeps the two keys apart, and the token itself never crosses the network.
+//! The selected per-chat key also keys the challenge-response that opens a local connection
+//! ([`proof`]); a different HKDF salt keeps the beacon tag and connection proof apart, and neither
+//! key ever crosses the network.
 
 use std::net::Ipv4Addr;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -23,6 +25,7 @@ pub const PORT: u16 = 41_873;
 /// Bytes in a beacon: magic, nonce, port, tag.
 pub const LEN: usize = 4 + NONCE + 2 + TAG;
 const MAGIC: &[u8; 4] = b"NDB1";
+const DISCOVERY_MAGIC: &[u8; 4] = b"NDB2";
 const NONCE: usize = 8;
 const TAG: usize = 16;
 /// The tag covers the window it was made in; one window either side is accepted for clock skew.
@@ -30,6 +33,7 @@ const WINDOW_SECS: u64 = 600;
 
 const PROOF_SALT: &[u8] = b"nightdrop/nearby/proof/v1";
 const BEACON_SALT: &[u8] = b"nightdrop/nearby/beacon/v1";
+const DISCOVERY_BEACON_SALT: &[u8] = b"nightdrop/nearby/beacon/v2";
 
 /// A handshake nonce as sent: 16 random bytes, base64url without padding.
 pub const NONCE_CHARS: usize = 22;
@@ -68,14 +72,14 @@ pub fn proof(token: &str, role: Role, dialer_nonce: &[u8], listener_nonce: &[u8]
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(out)
 }
 
-fn tag(token: &str, window: u64, ip: Ipv4Addr, port: u16, nonce: &[u8]) -> [u8; TAG] {
+fn tag(token: &str, salt: &[u8], window: u64, ip: Ipv4Addr, port: u16, nonce: &[u8]) -> [u8; TAG] {
     let mut info = Vec::with_capacity(8 + 4 + 2 + NONCE);
     info.extend_from_slice(&window.to_be_bytes());
     info.extend_from_slice(&ip.octets());
     info.extend_from_slice(&port.to_be_bytes());
     info.extend_from_slice(nonce);
     let mut out = [0u8; TAG];
-    Hkdf::<Sha256>::new(Some(BEACON_SALT), token.as_bytes())
+    Hkdf::<Sha256>::new(Some(salt), token.as_bytes())
         .expand(&info, &mut out)
         .expect("16 bytes is a valid HKDF-SHA256 output length");
     out
@@ -90,19 +94,66 @@ pub fn window_now() -> u64 {
 
 /// A beacon saying: the holder of `token` listens at `ip:port`.
 pub fn make(token: &str, ip: Ipv4Addr, port: u16, window: u64) -> [u8; LEN] {
+    make_with(MAGIC, BEACON_SALT, token, ip, port, window)
+}
+
+/// A beacon keyed by the pair's stable Nearby discovery key, usable before the peer's Nearby-on
+/// announcement arrives over Tor.
+pub fn make_discovery(key: &str, ip: Ipv4Addr, port: u16, window: u64) -> [u8; LEN] {
+    make_with(
+        DISCOVERY_MAGIC,
+        DISCOVERY_BEACON_SALT,
+        key,
+        ip,
+        port,
+        window,
+    )
+}
+
+fn make_with(
+    magic: &[u8; 4],
+    salt: &[u8],
+    token: &str,
+    ip: Ipv4Addr,
+    port: u16,
+    window: u64,
+) -> [u8; LEN] {
     let mut nonce = [0u8; NONCE];
     rand::Rng::fill(&mut rand::thread_rng(), &mut nonce);
     let mut out = [0u8; LEN];
-    out[..4].copy_from_slice(MAGIC);
+    out[..4].copy_from_slice(magic);
     out[4..4 + NONCE].copy_from_slice(&nonce);
     out[4 + NONCE..6 + NONCE].copy_from_slice(&port.to_be_bytes());
-    out[6 + NONCE..].copy_from_slice(&tag(token, window, ip, port, &nonce));
+    out[6 + NONCE..].copy_from_slice(&tag(token, salt, window, ip, port, &nonce));
     out
 }
 
 /// The port a beacon names, if it is from the holder of `token` and was sent from `from`.
 pub fn verify(packet: &[u8], from: Ipv4Addr, token: &str, window: u64) -> Option<u16> {
-    if packet.len() != LEN || &packet[..4] != MAGIC {
+    verify_with(packet, MAGIC, BEACON_SALT, from, token, window)
+}
+
+/// Verify a beacon keyed by the stable pair discovery key.
+pub fn verify_discovery(packet: &[u8], from: Ipv4Addr, key: &str, window: u64) -> Option<u16> {
+    verify_with(
+        packet,
+        DISCOVERY_MAGIC,
+        DISCOVERY_BEACON_SALT,
+        from,
+        key,
+        window,
+    )
+}
+
+fn verify_with(
+    packet: &[u8],
+    magic: &[u8; 4],
+    salt: &[u8],
+    from: Ipv4Addr,
+    token: &str,
+    window: u64,
+) -> Option<u16> {
+    if packet.len() != LEN || &packet[..4] != magic {
         return None;
     }
     let nonce = &packet[4..4 + NONCE];
@@ -111,7 +162,7 @@ pub fn verify(packet: &[u8], from: Ipv4Addr, token: &str, window: u64) -> Option
     // Every window is checked, so the time taken does not say which one came close.
     let mut ok = false;
     for w in [window.saturating_sub(1), window, window + 1] {
-        let want = tag(token, w, from, port, nonce);
+        let want = tag(token, salt, w, from, port, nonce);
         ok |= want.iter().zip(got).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0;
     }
     ok.then_some(port)

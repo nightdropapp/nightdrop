@@ -142,15 +142,18 @@ vulnerability under the device-theft threat model, but each is worth an auditor'
   between the devices whenever they share a local network. Each learns the other's local address,
   and anyone on that network (its owner, a café's router, another guest) can see that the two
   devices talk and how much — never what, since frames stay end-to-end encrypted and padded. A
-  local connection opens with a challenge-response on per-chat tokens that never cross the
-  network, so nothing seen there can be replayed; someone there can still hold connections open or
+  local connection opens with a challenge-response on the pair secret or legacy per-chat tokens
+  that never cross the network, so nothing seen there can be replayed; someone there can still hold connections open or
   drop traffic, and a dropped message falls back to Tor and the relay. **Beacons:** for two minutes
-  after joining a network (or starting), the device broadcasts there a signal per chat, so the
+  after Nearby starts or joining a network, the device broadcasts there a signal per chat, so the
   contact finds it without the internet. Others learn only that a Night Drop with Nearby on is
   present. **The contact, though, can recognise it wherever they listen:** any device of theirs, or
-  one they hand the chat's token to, on a network you join learns that you joined it. Turn Nearby
+  one they hand the chat's discovery key to, on a network you join learns that you joined it. Turn Nearby
   on only with someone you would trust with that. The app connects only to a private address in its
-  own subnet that the contact gave it, end to end or by beacon. Design: `docs/design/nearby.md`.
+  own subnet that the contact gave it, end to end or by beacon. Using a personal hotspot with only
+  the two devices can limit exposure to other local-network users compared with shared, public or
+  home Wi-Fi, but the hotspot owner can still observe local traffic and Nearby is still not
+  anonymous. Design: `docs/design/nearby.md`.
 - **What a relay can still link about your mailboxes.** *(Known limit.)* Through 0.1.25 offline
   mail went to a handle that was a static hash of the recipient's identity key, so a relay (or
   whoever seizes one) could tell that deposits from different senders, on different days, were for
