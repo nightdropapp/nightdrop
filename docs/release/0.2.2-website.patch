@@ -1,0 +1,19 @@
+diff --git a/website/index.html b/website/index.html
+index 16783e6..b2e4713 100644
+--- a/website/index.html
++++ b/website/index.html
+@@ -117,6 +117,14 @@
+         0.1 is told, and your messages to them wait until they do.
+       </p>
+       <div class="grid">
++        <article class="card">
++          <h3>📶 Nearby: straight across the room <span class="pill">0.2.2</span></h3>
++          <p>Turn on <strong>Also connect on the same Wi-Fi</strong> in a chat, and once your
++             contact does too, messages and photos go straight between your devices whenever you
++             share a network &mdash; even a phone's hotspot with no internet at all. Still
++             end-to-end encrypted, but not anonymous on that network: see
++             <a href="limits.html">the limits</a> before you turn it on.</p>
++        </article>
+         <article class="card">
+           <h3>🛰️ The relay is optional <span class="pill">0.2</span></h3>
+           <p>Keep the Night Drop relay, add up to four of your own, remove ours, or use
