@@ -28,7 +28,7 @@ class MockNightdropCore extends NightdropCore {
   Future<void> start() async {} // no persistence in the mock
 
   @override
-  void setLifecycle(bool foreground) {}
+  void setLifecycle(bool foreground, {bool? visible}) {}
 
   @override
   Future<bool> onionReady() async => true;

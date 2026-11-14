@@ -74,8 +74,12 @@ class _RootState extends State<_Root> with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final foreground = state == AppLifecycleState.resumed;
+    // `inactive` is still on screen: a desktop window behind another app, or on Android the
+    // notification shade or a dialog. Treating it as background slowed relay checks to every 5
+    // minutes while the window stayed in plain view, so a contact's change took that long to show.
+    final visible = foreground || state == AppLifecycleState.inactive;
     final core = NightdropScope.of(context);
-    core.setLifecycle(foreground);
+    core.setLifecycle(foreground, visible: visible);
     // Opt-in Android foreground service (#13): keep the process alive in the background so the
     // poller's Tor `peek` keeps delivering notifications; stop it when back in the foreground.
     BackgroundDelivery.onLifecycle(

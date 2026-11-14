@@ -34,6 +34,7 @@ class RustNightdropCore extends NightdropCore {
   // raise a notification. Counts are baselined after the first load so existing history
   // doesn't fire alerts.
   bool _foreground = true;
+  bool? _visible;
   bool _countsReady = false;
   int _knownReceived = 0;
   int _knownRequests = 0;
@@ -408,6 +409,7 @@ class RustNightdropCore extends NightdropCore {
     _events = null;
     final core = _core;
     _core = null;
+    _visible = null;
     if (core == null) return;
     try {
       await core.shutdown();
@@ -548,9 +550,15 @@ class RustNightdropCore extends NightdropCore {
   }
 
   @override
-  void setLifecycle(bool foreground) {
+  void setLifecycle(bool foreground, {bool? visible}) {
     _foreground = foreground;
-    _core?.setBackground(background: !foreground);
+    final shown = visible ?? foreground;
+    // Only on a change: each return to view also asks the core for an immediate relay check, and
+    // a desktop window gains and loses focus far more often than it is hidden.
+    final core = _core;
+    if (core == null || shown == _visible) return;
+    _visible = shown;
+    core.setBackground(background: !shown);
   }
 
   @override
@@ -1511,6 +1519,7 @@ class RustNightdropCore extends NightdropCore {
       rust.unsubscribe();
     } catch (_) {}
     _core = null;
+    _visible = null;
     _identity = null;
     _contacts = const [];
     _requests = const [];

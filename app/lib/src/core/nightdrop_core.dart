@@ -96,9 +96,11 @@ abstract class NightdropCore extends ChangeNotifier {
   /// Dismiss that notice for this version.
   Future<void> dismissProtocolBreakNotice() async {}
 
-  /// Tell the core whether the app is foreground or background. Backgrounded, the core polls
-  /// far less often (battery/data), and new messages raise a local notification.
-  void setLifecycle(bool foreground);
+  /// Tell the core where the app stands. [foreground]: it has focus; otherwise new messages raise
+  /// a local notification. [visible]: it is on screen, focused or not (defaults to [foreground]);
+  /// otherwise the core polls far less often (battery/data). A desktop window behind another one
+  /// is visible but not focused: it keeps the fast cadence and still notifies.
+  void setLifecycle(bool foreground, {bool? visible});
 
   /// Whether this device's address is published/reachable yet. On Tor it's false for the
   /// ~1–3 min after launch while the onion descriptor (re)publishes; until then peers can't
