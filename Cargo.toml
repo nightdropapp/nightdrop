@@ -4,7 +4,7 @@
 resolver = "2"
 members = ["core", "relay", "webtunnel", "moat"]
 # Patched dependencies, built through [patch.crates-io] below, not workspace members.
-exclude = ["third_party/rdrand", "third_party/saturating-time", "third_party/tor-hsservice"]
+exclude = ["third_party/rdrand", "third_party/saturating-time", "third_party/tor-hsservice", "third_party/tor-dirmgr"]
 
 [workspace.package]
 edition = "2021"
@@ -21,9 +21,12 @@ overflow-checks = true
 # See third_party/saturating-time/NIGHTDROP-PATCH.md.
 # rdrand 0.9.0 reads ID_AA64ISAR0_EL1 directly on Android, which kills the app with SIGILL on
 # kernels before 4.11 (issue #22). See third_party/rdrand/NIGHTDROP-PATCH.md.
-# tor-hsservice: descriptor reupload timers pile up, so a long-running client reuploads ever more
-# often. See third_party/tor-hsservice/NIGHTDROP-PATCH.md; remove once arti ships the fix.
+# tor-hsservice: publisher fixes and no-plaintext rejected-descriptor storage. See
+# third_party/tor-hsservice/NIGHTDROP-PATCH.md; remove once arti ships these changes.
+# tor-dirmgr: Arti 0.48's rusqlite upper bound blocks the SQLite advisory fix. The next Arti
+# development change widens it; this source patch applies that bound to the released 0.48 crate.
 [patch.crates-io]
 saturating-time = { path = "third_party/saturating-time" }
 rdrand = { path = "third_party/rdrand" }
-tor-hsservice = { path = "third_party/tor-hsservice" }
+tor-hsservice = { path = "third_party/tor-hsservice/tor-hsservice-0.48.0" }
+tor-dirmgr = { path = "third_party/tor-dirmgr/tor-dirmgr-0.48.0" }

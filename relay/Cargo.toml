@@ -19,22 +19,22 @@ anyhow = "1"
 # identity; ARCHITECTURE.md §11.2) and accepts rendezvous streams. Same arti stack/versions
 # as the core's Tor transport so the workspace reuses the compiled dependency tree. rustls
 # (pure-Rust TLS) so no system OpenSSL is needed.
-arti-client = { version = "0.47", default-features = false, features = [
+arti-client = { version = "0.48", default-features = false, features = [
     "tokio", "rustls", "onion-service-client", "onion-service-service",
     # Restricted discovery: gate the relay's onion to authorized clients only (private relays, §3.2).
     "restricted-discovery",
 ] }
-tor-rtcompat = { version = "0.47", features = ["tokio", "rustls"] }
+tor-rtcompat = { version = "0.48", features = ["tokio", "rustls"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
-tor-hsservice = "0.47"
-tor-cell = "0.47"
+tor-hsservice = "0.48"
+tor-cell = "0.48"
 # CfgPath for the restricted-discovery authorized-clients directory (private relays, §3.2).
-tor-config-path = "0.47"
+tor-config-path = "0.48"
 safelog = "0.10"
 tokio = { version = "1", features = ["rt-multi-thread", "sync", "io-util", "time"] }
 futures = "0.3"
 # arti's dir cache pulls rusqlite; bundle SQLite from source (no system libsqlite3 needed).
-libsqlite3-sys = { version = "0.38", features = ["bundled"] }
+libsqlite3-sys = { version = "0.39", features = ["bundled"] }
 
 # Dev-only live dashboard (TUI) over the relay flow (NIGHTDROP_RELAY_TUI=1). ratatui re-exports
 # crossterm for terminal handling.

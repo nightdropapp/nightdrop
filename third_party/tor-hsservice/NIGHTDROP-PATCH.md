@@ -1,4 +1,7 @@
-# Patched copy of tor-hsservice 0.47.0
+# Night Drop patches to tor-hsservice 0.48.0
+
+The active fork is `tor-hsservice-0.48.0/`, based on the published Arti crate. The old 0.47.0
+fork remains here for history; the workspace now uses the 0.48.0 fork.
 
 Upstream: <https://crates.io/crates/tor-hsservice> (part of arti), MIT OR Apache-2.0
 (`LICENSE-MIT`, `LICENSE-APACHE`, from the arti repository). Used through `[patch.crates-io]` in
@@ -121,11 +124,22 @@ stayed false, so the "Publishing your address to Tor" banner never cleared (S25,
   network with no SRV and asserted `DegradedUnreachable` after a clean publish; they now expect
   `DegradedReachable`. All three fail with the old logic.
 
+## Keep rejected descriptors out of persistent state
+
+Arti's publisher writes a descriptor rejected with HTTP 400 to the service state directory for
+debugging. Night Drop removes that write: descriptors contain onion-service metadata and should
+not be left as plaintext persistent files. Upload failure reporting remains in place.
+
+The 0.48 fork carries this behavior together with the four publisher fixes above. See the source
+changes under `tor-hsservice-0.48.0/src/`.
+
 **Upstream:** not reported yet.
 
-Testing this crate needs its dev-dependencies, which the Night Drop workspace does not resolve:
-copy the directory elsewhere, append `[workspace]` to its `Cargo.toml`, and run
-`cargo test --all-features --lib` there (53 pass, 2 ignored, on 2026-11-02).
+The 0.48 fork includes regression tests for the publisher changes. Testing it needs its
+dev-dependencies, which the Night Drop workspace does not resolve: copy `tor-hsservice-0.48.0/`
+elsewhere, append `[workspace]` to its `Cargo.toml`, and run `cargo test --all-features --lib`
+there (54 pass, 2 ignored, on 2026-11-14). The four fixes were checked against the 0.47 fork's
+diff the same day: all present, reworded.
 
-**Remove this directory and the `[patch.crates-io]` entry** once arti ships all four fixes and Night
-Drop moves to that arti.
+**Remove the 0.48 fork and `[patch.crates-io]` entry** once a released arti version includes all
+four publisher fixes and Night Drop's no-plaintext-descriptor behavior.
