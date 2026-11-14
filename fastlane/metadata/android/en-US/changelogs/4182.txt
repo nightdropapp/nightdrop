@@ -1,0 +1,1 @@
+Night Drop 0.2.2 adds Nearby direct messaging on the same local network, including personal hotspots when there is no internet connection. Messages and photos remain end-to-end encrypted. It also fixes a crash at startup on some phones with older Android system software, and includes security and reliability fixes.
