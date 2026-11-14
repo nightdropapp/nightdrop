@@ -10,9 +10,9 @@ RepoType: git
 Repo: https://github.com/nightdropapp/nightdrop.git
 
 Builds:
-  - versionName: 0.2.1
-    versionCode: 4171
-    commit: abac7e450c628fa3645989aa9060e091628dbc95
+  - versionName: 0.2.2
+    versionCode: 4181
+    commit: 360c47b8f9c10528a9be8775924b4c5ad98186c3
     subdir: app
     sudo:
       - apt-get update
@@ -65,9 +65,9 @@ Builds:
       - mv $repo app.nightdrop
     ndk: r28c
 
-  - versionName: 0.2.1
-    versionCode: 4172
-    commit: abac7e450c628fa3645989aa9060e091628dbc95
+  - versionName: 0.2.2
+    versionCode: 4182
+    commit: 360c47b8f9c10528a9be8775924b4c5ad98186c3
     subdir: app
     sudo:
       - apt-get update
@@ -120,9 +120,9 @@ Builds:
       - mv $repo app.nightdrop
     ndk: r28c
 
-  - versionName: 0.2.1
-    versionCode: 4173
-    commit: abac7e450c628fa3645989aa9060e091628dbc95
+  - versionName: 0.2.2
+    versionCode: 4183
+    commit: 360c47b8f9c10528a9be8775924b4c5ad98186c3
     subdir: app
     sudo:
       - apt-get update
@@ -223,5 +223,5 @@ VercodeOperation:
   - '%c * 10 + 2'
   - '%c * 10 + 3'
 UpdateCheckData: app/pubspec.yaml|version:\s.+\+(\d+)|.|version:\s(.+)\+
-CurrentVersion: 0.2.1
-CurrentVersionCode: 4173
+CurrentVersion: 0.2.2
+CurrentVersionCode: 4183
