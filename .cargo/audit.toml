@@ -1,6 +1,7 @@
 # cargo-audit configuration. Advisories reviewed and accepted, with rationale — run `cargo audit`
-# from the repo root. Re-review on every dependency bump. All four re-checked for arti 0.48
-# (2026-11-14): `cargo audit` with nothing ignored finds exactly these four, and each reason holds.
+# from the repo root. Re-review on every dependency bump. The first four re-checked for arti 0.48
+# (2026-11-14): `cargo audit` with nothing ignored found exactly those four, and each reason held.
+# CI runs `cargo audit --deny warnings`, so an "unmaintained" notice fails it like a vulnerability.
 [advisories]
 ignore = [
   # RUSTSEC-2023-0071 — RSA "Marvin Attack": a timing side-channel in RSA PKCS#1 v1.5 decryption.
@@ -24,4 +25,16 @@ ignore = [
   # it. The fix (>=0.7.6) is semver-incompatible with elliptic-curve 0.13. Reviewed 2026-10-27.
   # Re-check whenever arti is bumped.
   "RUSTSEC-2026-0387",
+  # RUSTSEC-2026-0543 — chrono is unmaintained (not a vulnerability). It is in Cargo.lock only as an
+  # optional dependency of serde_with (via arti's tor-* crates) whose `chrono` feature is off:
+  # `cargo tree -i chrono@0.4.45 --workspace --all-features --target all -e all` prints nothing, so
+  # no Night Drop binary contains it. Reviewed 2026-11-17 (advisory published that day).
+  "RUSTSEC-2026-0543",
+  # RUSTSEC-2026-0542 — humantime is unmaintained (not a vulnerability; no fixed version exists). It
+  # IS compiled in: arti-client, tor-dirmgr, tor-guardmgr and other arti 0.48 crates use it for
+  # durations in arti's config, its own state files (guard records) and error text ("Retrying in
+  # 5m"). Night Drop builds arti's config in code and never loads a config file; the one user text
+  # that reaches arti, a bridge line, goes through a parser that does not use humantime. Replacing
+  # it is arti's call. Reviewed 2026-11-17 (advisory published that day). Re-check whenever arti is bumped.
+  "RUSTSEC-2026-0542",
 ]
