@@ -124,4 +124,18 @@ A virt-manager/libvirt Windows 11 guest works. Two things that look like app bug
   without a surface. Relaunch with the display awake, or turn display sleep off in the guest
   (`powercfg /change monitor-timeout-ac 0`).
 - **A GUI started over SSH is invisible**: it runs in the non-interactive session. Start it through a
-  scheduled task with an interactive principal instead.
+  scheduled task with an interactive principal instead. That needs someone logged in at the
+  console, so the guest needs auto-login (`AutoAdminLogon` plus the LSA `DefaultPassword` secret,
+  as Sysinternals Autologon sets it). With nobody logged in, or from a task with an S4U principal,
+  the app cannot start at all: Flutter logs "Failed to create platform view rendering surface" and
+  exits 0xC0000409.
+- **The app is missing from in-guest screenshots**: the window is excluded from screen capture
+  (as on Android), so a GDI grab inside the guest shows the desktop behind it. Take screenshots
+  from the host instead (`virsh screenshot`), which the guest cannot exclude anything from.
+- **Helper consoles cover the app**: with Windows Terminal as the default console,
+  `powershell -WindowStyle Hidden` still opens a visible window. Set the classic console as the
+  default (`HKCU\Console\%%Startup`, `DelegationConsole`/`DelegationTerminal` =
+  `{B23D10C0-E52E-411E-9D5B-C09FDF709C7D}`).
+- **Resetting the account's password loses the identity**: the store key is in Credential Manager
+  (DPAPI), so after a reset (not a change) the app shows "Couldn't open your saved session". Set up
+  a new test identity; the old data stays aside.
