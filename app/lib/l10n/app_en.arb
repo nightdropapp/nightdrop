@@ -357,6 +357,10 @@
   "@loadErrorBody": {
     "description": "Body text of the load-failure recovery screen."
   },
+  "loadErrorBodyWindows": "Night Drop found data saved on this device but couldn’t open it. Usually Tor simply hasn’t connected yet — tap Try again. If it keeps failing, Windows can no longer unlock the key that protects this data: this happens when the Windows account’s password was reset (not changed), or when the data was copied from another PC or account. In that case only a backup can bring it back. Your existing data is preserved and won’t be overwritten automatically.",
+  "@loadErrorBodyWindows": {
+    "description": "Windows wording for the same screen. Windows keeps the key in Credential Manager (DPAPI), which is lost on a password reset or a copy to another PC/account; there is no keyring to unlock."
+  },
   "loadErrorBodyMobile": "Night Drop found data saved on this device but couldn’t open it. Usually Tor simply hasn’t connected yet — tap Try again. If it keeps failing, the key that unlocks this data is no longer on the device, which can happen after clearing the app’s storage or moving to a new phone; in that case only a backup can bring it back. Your existing data is preserved and won’t be overwritten automatically.",
   "@loadErrorBodyMobile": {
     "description": "Android/iOS wording for the same screen. No mention of desktop keyrings; the phone equivalent is not something the user can unlock by hand."

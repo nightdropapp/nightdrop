@@ -235,7 +235,13 @@ class _LoadErrorScreen extends StatelessWidget {
                 // Keyring, which is meaningless on a phone and sends the user hunting for
                 // something that doesn't exist there. The mobile equivalent isn't a thing they
                 // can unlock by hand, so the wording points at the causes they can actually act on.
-                _isMobile ? l10n.loadErrorBodyMobile : l10n.loadErrorBody,
+                // Windows has no keyring to unlock either: the key is in Credential Manager, lost
+                // on a password reset or a copy to another PC (seen 2026-11-17 in the test VM).
+                _isMobile
+                    ? l10n.loadErrorBodyMobile
+                    : Platform.isWindows
+                    ? l10n.loadErrorBodyWindows
+                    : l10n.loadErrorBody,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 24),

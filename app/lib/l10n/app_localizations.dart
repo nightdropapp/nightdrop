@@ -538,6 +538,12 @@ abstract class AppLocalizations {
   /// **'Night Drop found data saved on this device but couldn’t open it. Two common, fixable causes: Tor hasn’t connected yet, or your system keyring/wallet (e.g. KDE Wallet or GNOME Keyring) is locked — unlock it, then tap Try again. Your existing data is preserved and won’t be overwritten automatically.'**
   String get loadErrorBody;
 
+  /// Windows wording for the same screen. Windows keeps the key in Credential Manager (DPAPI), which is lost on a password reset or a copy to another PC/account; there is no keyring to unlock.
+  ///
+  /// In en, this message translates to:
+  /// **'Night Drop found data saved on this device but couldn’t open it. Usually Tor simply hasn’t connected yet — tap Try again. If it keeps failing, Windows can no longer unlock the key that protects this data: this happens when the Windows account’s password was reset (not changed), or when the data was copied from another PC or account. In that case only a backup can bring it back. Your existing data is preserved and won’t be overwritten automatically.'**
+  String get loadErrorBodyWindows;
+
   /// Android/iOS wording for the same screen. No mention of desktop keyrings; the phone equivalent is not something the user can unlock by hand.
   ///
   /// In en, this message translates to:
