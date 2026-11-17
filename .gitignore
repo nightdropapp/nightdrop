@@ -20,6 +20,16 @@
 **/*.rs.bk
 # Cargo.lock IS committed (this is an application + relay binary + FFI cdylib): pinning the exact
 # dependency versions is what makes the F-Droid / release builds reproducible.
+# Building or testing a vendored crate on its own (cd third_party/<crate> && cargo test) leaves a
+# target/ and a top-level Cargo.lock there; neither belongs in git. The Cargo.lock files that ship
+# inside the published crate sources (third_party/tor-*/tor-*-0.48.0/) are one level deeper and stay.
+/third_party/*/target/
+/third_party/*/*/target/
+/third_party/*/Cargo.lock
+
+# AppImage update files. scripts/build-appimage.sh writes the one to ship beside the AppImage and
+# deletes the copy appimagetool drops in the current directory; this catches any that slip through.
+/*.AppImage.zsync
 
 # Flutter / Dart
 app/.dart_tool/
@@ -59,10 +69,6 @@ notes/
 # Python bytecode from the fdroid helper scripts
 __pycache__/
 *.pyc
-
-# bash script for testing purposes
-scripts/watch-relay-queue.sh
-scripts/deploy-website.sh
 
 # Project todo lists
 TODO.*
