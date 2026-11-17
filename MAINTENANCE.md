@@ -763,9 +763,11 @@ and `nightdrop_relay::streams` at `info` one per stream — per-client timing in
 journal, which §1a's "no logs" rules out. Use `error` as the default and enable only the service's
 own modules: `RUST_LOG=error,tor_hsservice::publish=debug,tor_hsservice::ipt_mgr=debug,tor_hsservice::ipt_establish=debug,tor_guardmgr=info,tor_dirmgr=info,tor_circmgr::hspool=warn`.
 Both go in a dated drop-in (`~/.config/systemd/user/nightdrop-relay.service.d/diagnostics.conf`),
-never the unit. **Active since 2026-10-13, to remove by 2026-10-27**: it is there to explain three
-~15-minute spells the live relay was unreachable on 2026-10-12/13 while a test relay on the same host
-was not.
+never the unit. **Last used 2026-10-13 to 2026-11-17**, to explain three ~15-minute spells the live
+relay was unreachable on 2026-10-12/13 while a test relay on the same host was not. They did not
+recur: in those five weeks the self-dial never stayed dark long enough (900 s) to trigger a restart
+(longest 627 s; failures were scattered timeouts and "Onion Service not found", up to ~16 a day),
+and every restart was a host reboot. Removed with the arti 0.48 redeploy; nothing is enabled now.
 
 ---
 
