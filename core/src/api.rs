@@ -2673,6 +2673,22 @@ fn onion_key_for_start(
 /// Best-effort: the keys are superseded either way, so a failure to remove is logged, not fatal.
 #[cfg_attr(not(feature = "tor"), allow(dead_code))]
 fn drop_superseded_keystore(state_dir: &str, have_sealed_key: bool, restoring: bool) {
+    if !restoring {
+        // The previous identity's authorized clients (one file per contact) would make the new
+        // onion restricted to THEIR keys: everyone else, including the new identity's first
+        // contact, could not even fetch its descriptor. A new identity starts as a public onion.
+        // Public keys only, and a restore of that identity re-learns them from its contacts.
+        let auth = std::path::Path::new(state_dir).join("client-auth");
+        if auth.exists() {
+            match std::fs::remove_dir_all(&auth) {
+                Ok(()) => crate::diag!(
+                    "keys: removed the previous identity's authorized clients before creating a \
+                     new one"
+                ),
+                Err(e) => crate::diag!("keys: could not remove the old client-auth ({e})"),
+            }
+        }
+    }
     if restoring && !have_sealed_key {
         return; // the migration / post-restore run: arti must read the identity from disk
     }
@@ -3981,6 +3997,39 @@ mod tests {
 
         // Nothing there at all: no panic, no error.
         drop_superseded_keystore(path, false, false);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Regression (2026-11-17, Windows 11 VM): "Set up a new identity" over an unreadable store left
+    /// the previous identity's `client-auth/` behind, and the new onion launched with "restricted
+    /// discovery ON (4 authorized client(s))" — its predecessor's contacts. A restricted onion
+    /// refuses everyone else, so a Direct-only first contact by QR could not reach it. A new
+    /// identity starts with none; a restore keeps them (same identity, same contacts).
+    #[test]
+    fn a_new_identity_does_not_inherit_the_previous_ones_authorized_clients() {
+        let dir = std::env::temp_dir().join(format!("nd-clientauth-{}", rand::random::<u64>()));
+        let auth = dir.join("client-auth");
+        let plant = || {
+            std::fs::create_dir_all(&auth).unwrap();
+            std::fs::write(auth.join("old-contact.auth"), b"descriptor:x25519:AAAA").unwrap();
+        };
+        let path = dir.to_str().unwrap();
+
+        plant();
+        drop_superseded_keystore(path, false, true);
+        drop_superseded_keystore(path, true, true);
+        assert_eq!(
+            crate::transport::client_auth::authorized_count(&auth),
+            1,
+            "a restore is the same identity: its contacts stay authorized"
+        );
+
+        drop_superseded_keystore(path, false, false);
+        assert_eq!(
+            crate::transport::client_auth::authorized_count(&auth),
+            0,
+            "a new identity must start as a public onion, not restricted to someone else's contacts"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -143,6 +143,14 @@ is off disk, and what remains is only "a hidden service runs here".
 It was only ever public client keys, but one file per contact is still a contact count, and it had
 no reason to outlive the identity.
 
+**Closed 2026-11-17:** creating a new identity *without* a logout ("Set up a new identity" on the
+load-error screen sets the old state file and sealed key aside rather than wiping) still kept
+`client-auth/`, so the new onion launched restricted to the previous identity's contacts — found on
+Windows after a password reset made the store key unreadable. Nobody else could fetch its
+descriptor, so a Direct-only first contact by QR could not reach it. `drop_superseded_keystore`
+now removes `client-auth/` whenever an identity is created rather than restored; test
+`a_new_identity_does_not_inherit_the_previous_ones_authorized_clients`.
+
 ## 8. The cleanup half, as implemented
 
 Independent of the ephemeral keystore, and worth having regardless — the keys had no removal path at
