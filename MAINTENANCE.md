@@ -19,7 +19,7 @@ Anything here that cost a session to learn says so. Those notes are the point of
   to Dart via flutter_rust_bridge; the FFI surface is `core/src/api.rs`.
 - `relay/` — untrusted store-and-forward server binary (opaque encrypted blobs only).
 - `webtunnel/`, `moat/` — the in-process WebTunnel client and the "Get bridges" client.
-- `third_party/` — vendored, patched crates (`tor-hsservice`, `saturating-time`, `rdrand`); each carries a
+- `third_party/` — vendored, patched crates (`tor-hsservice`, `tor-dirmgr`, `rdrand`); each carries a
   `NIGHTDROP-PATCH.md`.
 - `app/rust_builder/` — vendored cargokit plugin that compiles `core/` and bundles
   `libnightdrop` into every platform build. **Vendored third-party code — do not
@@ -160,7 +160,9 @@ TLS, which the app does not use today, since all its traffic goes through the co
 - **Vendored patches (`third_party/`) are dropped only on evidence.** Before removing one because
   "upstream fixed it", read the upstream release's *source*. A patch note claimed
   `saturating-time` 0.5.0 contained the Windows fix; the patch was dropped on that word, and the
-  first Windows bridge test hung exactly as before. 0.5.0 does not contain it.
+  first Windows bridge test hung exactly as before. 0.5.0 does not contain it. (0.6.0, which arti
+  0.48 uses, does: read in its source and shown by a Windows bridge test, so the patch was removed
+  on 2026-11-17.)
 - Re-run the dependency audit in `DEPENDENCIES.md` on any bump that adds or changes a crate.
 
 ---

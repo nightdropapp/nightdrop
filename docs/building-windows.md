@@ -105,11 +105,12 @@ reinstall (same identity restored), and an in-place upgrade.
 
 - **No background delivery.** Android keeps a foreground service running; Windows has no equivalent
   wired up, so messages arrive while the app is open and wait on the relay (24 h) otherwise.
-- **Tor over bridges needs a patched dependency.** `saturating-time` loops forever on Windows'
-  100 ns clock, which hung every bridge bootstrap at one core, 100% CPU (arti#2726). The tree
-  carries a fix in `third_party/saturating-time/` (on 0.5.0; see its `NIGHTDROP-PATCH.md`). Do not
-  drop it on a release note's word: 0.5.0 was said to contain the fix and does not — read the
-  upstream source first.
+- **Tor over bridges hung on Windows before arti 0.48** (Night Drop 0.2.2). `saturating-time` 0.5.0
+  loops forever on Windows' 100 ns clock, which hung every bridge bootstrap at one core, 100% CPU
+  (arti#2726); the tree carried a patch for it until 0.6.0, which arti 0.48 uses, fixed it upstream.
+  Checked 2026-11-17 on Windows 11: `core/examples/webtunnel_bootstrap.rs` built from v0.2.2
+  bootstrapped through two fresh WebTunnel bridges in 4-5 s and opened a stream. If an arti bump
+  ever brings back a saturating-time without the `find_limit` progress check, the hang returns.
 - **Bridge bootstraps can take longer than the app's 120 s limit** on slow volunteer bridges. This
   is not Windows-specific: the same bridges measured 9–88 s on Linux and 10–73 s on Windows.
 - **Not reproducible or code-signed yet**, unlike the Android APKs (which F-Droid rebuilds and
