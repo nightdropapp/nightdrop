@@ -1,0 +1,1 @@
+Night Drop 0.2.3 fixes two issues. A new identity set up on a device that still held an old one kept that identity's contact permissions, which blocked direct connections from new contacts; with "Direct only", a first contact could not reach you at all. On Windows, the message shown when saved data cannot be opened now names the real causes there.
